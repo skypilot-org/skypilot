@@ -25,6 +25,8 @@ each other.
 """
 import collections
 import concurrent.futures
+import contextlib
+import datetime
 import fnmatch
 import io
 import json
@@ -68,6 +70,8 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -88,6 +92,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -101,6 +106,7 @@ from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes.client import sdk as volumes_sdk
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
 
@@ -130,12 +136,8 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
-_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = list(
+    managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
     'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
@@ -158,8 +160,8 @@ T = TypeVar('T')
 def _get_ws_proxy_command() -> str:
     """Returns the ws-proxy command string.
 
-    Defaults to the Python websocket_proxy.py script. Plugins can
-    replace this function to prefer a native binary.
+    Defaults to the Python websocket_proxy.py script. Plugins may
+    replace this function.
     """
     escaped_executable_path = shlex.quote(sys.executable)
     escaped_websocket_proxy_path = shlex.quote(
@@ -254,6 +256,7 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    output_stream: Optional[io.TextIOBase] = None,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -263,6 +266,9 @@ def _get_cluster_records_and_set_ssh_config(
         all_users: Whether to query clusters from all users.
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
+        output_stream: Where to write the request's streamed server-side logs.
+            If None, they go to the console. Callers printing machine-readable
+            output pass a sink to keep stdout parseable.
     """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
@@ -273,7 +279,8 @@ def _get_cluster_records_and_set_ssh_config(
                             all_users=all_users,
                             _include_credentials=True,
                             _summary_response=not verbose)
-    cluster_records = sdk.stream_and_get(request_id)
+    cluster_records = sdk.stream_and_get(request_id,
+                                         output_stream=output_stream)
     # Cache the ws-proxy command (constant across clusters).
     ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
@@ -345,10 +352,6 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
                 f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
-                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
-                'visit: '
-                f'{server_common.get_server_url()}/api/stream?'
-                f'request_id={short_request_id}'
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
                 'the request, run: '
                 f'{ux_utils.BOLD}sky api cancel {short_request_id}'
@@ -362,13 +365,48 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
             f'{ux_utils.BOLD}sky api logs {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n'
-            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{server_common.get_server_url()}/api/stream?'
-            f'request_id={short_request_id}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
+            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
             'the request, run: '
             f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
+
+
+_JOB_IDS_OUTPUT_KEY = 'job_ids_output'
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr() -> Generator[typing.TextIO, None, None]:
+    """Send everything written to stdout to stderr until the block exits.
+
+    The stdout file descriptor is redirected too, because logging handlers
+    hold the original sys.stdout object. Yields a stream to the original
+    stdout.
+    """
+    streams = [s for s in (sys.stdout, sys.__stdout__) if s is not None]
+    for stream in streams:
+        stream.flush()
+    saved_stdout_fd = os.dup(1)
+    original_stdout = os.fdopen(os.dup(saved_stdout_fd), 'w')
+    try:
+        os.dup2(2, 1)
+        with contextlib.redirect_stdout(sys.stderr):
+            yield original_stdout
+    finally:
+        for stream in streams:
+            stream.flush()
+        original_stdout.close()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
+
+
+def _route_stdout_for_output(ctx: click.Context, param: click.Parameter,
+                             value: Optional[str]) -> Optional[str]:
+    """Eager --output callback: send stdout to stderr before the other
+    options' callbacks run, keeping a stream to the original stdout."""
+    del param  # Unused.
+    if value is not None:
+        ctx.meta[_JOB_IDS_OUTPUT_KEY] = ctx.with_resource(_stdout_to_stderr())
+    return value
 
 
 def _merge_cli_and_file_vars(
@@ -459,6 +497,26 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     """
     del ctx, param  # Unused.
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
+
+
+_VALID_HOOK_EVENTS = ('stop', 'preemption', 'down')
+
+
+def _validate_hook_event(ctx: click.Context, param: click.Parameter,
+                         value: Optional[str]) -> Optional[str]:
+    """Pass-through validator for ``sky logs --hook [event]``.
+
+    Accepts any string. The user-facing form ``sky logs --hook
+    <cluster>`` (no event) lets the cluster name slip into this
+    callback as the option value, because Click greedily consumes the
+    next token as the option value. We can't reject those tokens at
+    callback time because positional parsing happens later and
+    ``ctx.args`` is already empty here. Instead, the real validation
+    + auto-select swap lives in :func:`logs` so it can see both fields
+    together.
+    """
+    del ctx, param  # unused; kept for compatibility with click's signature
+    return value
 
 
 def _get_click_major_version():
@@ -666,6 +724,7 @@ def _parse_override_params(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -738,6 +797,17 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if priority is not None:
+        priority = priority.strip()
+        # `--priority` accepts either an integer (priority) or a string
+        # (priority class). Clear both first so that a resource never carries
+        # both at once, then set whichever one applies ('none' clears both).
+        override_params.update({'priority': None, 'priority_class': None})
+        if priority.lower() != 'none' and priority != '':
+            try:
+                override_params['priority'] = int(priority)
+            except ValueError:
+                override_params['priority_class'] = priority
     if config_override:
         override_params['_cluster_config_overrides'] = config_override
     return override_params
@@ -936,6 +1006,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     secret: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
@@ -990,6 +1061,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              network_tier=network_tier,
                                              local_disk=local_disk,
                                              ports=ports,
+                                             priority=priority,
                                              config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
@@ -1001,14 +1073,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
         # Check if this is a JobGroup YAML
         if dag_utils.is_job_group_yaml(entrypoint):
-            click.secho('Detected JobGroup YAML', fg='cyan')
+            click.secho('Detected Job Group YAML', fg='cyan')
             dag = dag_utils.load_job_group_from_yaml(entrypoint,
                                                      env_overrides=env,
                                                      secrets_overrides=secret)
             if override_params:
                 click.secho(
                     f'WARNING: override params {override_params} are ignored '
-                    'for JobGroup YAML.',
+                    'for Job Group YAML.',
                     fg='yellow')
             for task in dag.tasks:
                 task.update_workdir(workdir, git_url, git_ref)
@@ -1197,7 +1269,8 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1264,10 +1337,27 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option(
+    '--resize',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Resize an existing cluster to --num-nodes. Supports both '
+          'scale-up (adding workers) and scale-down (removing workers). '
+          'Scale-down requires no running jobs. '
+          'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to launch into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1297,6 +1387,7 @@ def launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str, ...],
+    priority: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
@@ -1305,6 +1396,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
     fast: bool,
+    resize: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1317,8 +1409,24 @@ def launch(
 
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
+
+    With ``--resize``, scale an existing cluster up or down to ``--num-nodes``.
+    Scale-up adds new workers while preserving existing nodes. Scale-down
+    requires no running jobs and re-provisions workers to the new count.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Resize an existing cluster to 4 nodes.
+      sky launch -c my-cluster --resize --num-nodes 4
+      \b
+      # Resize using a YAML that specifies num_nodes.
+      sky launch -c my-cluster --resize cluster.yaml
+
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
     # submitted, while the synchronous way of `sky launch` does. We should
@@ -1331,6 +1439,9 @@ def launch(
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     _warn_if_name_looks_like_file_path(
         cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
+    if resize and cluster is None:
+        raise click.UsageError(
+            '--resize requires -c/--cluster to specify an existing cluster.')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1360,6 +1471,7 @@ def launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -1408,6 +1520,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        resize=resize,
         _need_confirmation=not yes,
         # Ask the server to bundle SSH credentials with the launch
         # response so we can write the SSH config without a separate
@@ -1679,7 +1792,7 @@ def _handle_jobs_queue_request(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
-    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
+    # TODO: remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
@@ -1943,11 +2056,17 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 def _show_enabled_infra(
-        active_workspace: str, show_workspace: bool,
+        active_workspace: Optional[str], show_workspace: bool,
         enabled_clouds_request_id: server_common.RequestId[List[str]]):
-    """Show the enabled infrastructure."""
+    """Show the enabled infrastructure.
+
+    ``active_workspace`` is the workspace label to annotate the title
+    with. Callers that didn't set a workspace client-side should
+    pre-resolve via ``sdk.get_user_workspace()`` and pass that value
+    here, so this function stays a pure renderer.
+    """
     workspace_str = ''
-    if show_workspace:
+    if show_workspace and active_workspace is not None:
         workspace_str = f' (workspace: {active_workspace!r})'
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
@@ -2161,16 +2280,38 @@ def status(verbose: bool,
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         return sdk.workspaces()
 
-    active_workspace = skypilot_config.get_active_workspace()
+    if skypilot_config.is_active_workspace_set():
+        active_workspace = skypilot_config.get_active_workspace()
+    else:
+        active_workspace = None
 
     def submit_enabled_clouds():
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
+
+    def fetch_resolved_workspace() -> Optional[str]:
+        # Only needed when the client did not set active_workspace —
+        # otherwise the resolver picks whatever the user chose and the
+        # display path uses `active_workspace` directly. Failure here is
+        # non-fatal: we just skip the `(workspace: ...)` annotation
+        # rather than break the whole status output.
+        try:
+            return sdk.get_user_workspace().get('workspace')
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     managed_jobs_queue_request_id = None
     queue_result_version = cli_utils.QueueResultVersion.V1
     service_status_request_id = None
     workspace_request_id = None
     pool_status_request_id = None
+    resolved_workspace: Optional[str] = None
+
+    # `--ip` and `--endpoints` short-circuit to `_show_endpoint` and skip
+    # the main status table. Any request whose only consumer is that
+    # table (workspace for the Enabled-Infra title)
+    # is wasted work in those modes — gate on this
+    # single flag instead of repeating `not (ip or show_endpoints)`.
+    needs_status_table = not (ip or show_endpoints)
 
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -2180,9 +2321,14 @@ def status(verbose: bool,
             services_request_future = executor.submit(submit_services)
         if show_pools:
             pools_request_future = executor.submit(submit_pools)
-        if not (ip or show_endpoints):
+        if needs_status_table:
             workspace_request_future = executor.submit(submit_workspace)
         enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
+        if needs_status_table and active_workspace is None:
+            resolved_workspace_future = executor.submit(
+                fetch_resolved_workspace)
+        else:
+            resolved_workspace_future = None
 
         # Get the request IDs
         if show_managed_jobs:
@@ -2192,9 +2338,11 @@ def status(verbose: bool,
             service_status_request_id = services_request_future.result()
         if show_pools:
             pool_status_request_id = pools_request_future.result()
-        if not (ip or show_endpoints):
+        if needs_status_table:
             workspace_request_id = workspace_request_future.result()
         enabled_clouds_request_id = enabled_clouds_request_future.result()
+        if resolved_workspace_future is not None:
+            resolved_workspace = resolved_workspace_future.result()
 
     managed_jobs_queue_request_id = (server_common.RequestId()
                                      if not managed_jobs_queue_request_id else
@@ -2207,10 +2355,20 @@ def status(verbose: bool,
                               pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters,
+        refresh_mode,
+        all_users,
+        verbose,
+        # Keep stdout parseable. The status request's server-side logs are
+        # streamed back here, and a cluster name matching nothing logs a line
+        # exactly when a caller is most likely to be scripting against a name
+        # it is unsure of. Ahead of the JSON that is a line a parser cannot
+        # read, so send the stream to a sink, as `sky check -o json` does.
+        output_stream=io.StringIO() if json_output else None)
 
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+    if json_output:
         click.echo(
             json.dumps([
                 r.model_dump(mode='json', exclude={'handle', 'credentials'})
@@ -2240,7 +2398,12 @@ def status(verbose: bool,
     else:
         all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
     show_workspace = len(all_workspaces) > 1
-    _show_enabled_infra(active_workspace, show_workspace,
+    # Annotate with the client-set workspace if any; otherwise fall back
+    # to whatever the server resolver said the next request would land
+    # on. `_show_enabled_infra` is a pure renderer and only takes the
+    # final label.
+    display_workspace = active_workspace or resolved_workspace
+    _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
@@ -2408,8 +2571,12 @@ def status_kubernetes(verbose: bool):
               type=int,
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
+def cost_report(
+        all: bool,  # pylint: disable=redefined-builtin
+        days: int,
+        output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2453,6 +2620,23 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 controllers[controller_name] = cluster_record
         else:
             normal_cluster_records.append(cluster_record)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        all_records = list(normal_cluster_records)
+        for cluster_record in controllers.values():
+            all_records.append(cluster_record)
+        json_records = []
+        for record in all_records:
+            r = dict(record)
+            if r.get('resources') is not None:
+                r['resources'] = r['resources'].to_yaml_config(
+                    redact_secrets=True)
+            record_status = r.get('status')
+            r['status'] = (record_status.value
+                           if record_status is not None else 'TERMINATED')
+            json_records.append(r)
+        click.echo(json.dumps(json_records, indent=2))
+        return
 
     total_cost = status_utils.get_total_cost_of_displayed_records(
         normal_cluster_records, all)
@@ -2564,10 +2748,24 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--hook',
+              'hook_event',
+              callback=_validate_hook_event,
+              default=None,
+              is_flag=False,
+              flag_value='',
+              help='Stream a per-event lifecycle-hook log from the cluster. '
+              'Omit the event name to auto-select whichever log exists.')
+# TODO(zpoint): drop the --autostop deprecation alias after v0.15.0.
+# Replacement: --hook stop.
 @click.option('--autostop',
+              'autostop_alias',
               is_flag=True,
               default=False,
-              help='Stream the autostop hook logs from the cluster.')
+              hidden=True,
+              help='[DEPRECATED] Alias for `--hook stop`. The autostop '
+              'event was renamed to `stop` in the lifecycle-hooks '
+              'framework.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2596,17 +2794,19 @@ def queue(clusters: List[str],
           '[default: --follow]'))
 @_TAIL_OPTION
 @click.argument('cluster',
-                required=True,
+                required=False,
+                default=None,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
-    cluster: str,
+    cluster: Optional[str],
     job_ids: Tuple[str, ...],
     provision: bool,
-    autostop: bool,  # pylint: disable=redefined-outer-name
+    hook_event: Optional[str],
+    autostop_alias: bool,
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2637,9 +2837,44 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
 
-    5. If ``--autostop`` is specified, stream the autostop hook logs from the
-    cluster. This shows the output of the autostop hook script.
+    5. If ``--hook [event]`` is specified, stream the per-event
+    lifecycle-hook log. Omit the event name to auto-select whichever
+    log exists.
     """
+    # TODO(zpoint): drop the --autostop alias after v0.15.0 (see the
+    # decorator above). Until then: rewrite to --hook stop and emit a
+    # one-line stderr deprecation warning so master-era scripts keep
+    # working through the grace window.
+    if autostop_alias:
+        if hook_event is not None:
+            raise click.UsageError(
+                '--autostop is a deprecated alias for --hook stop and '
+                'cannot be combined with --hook.')
+        click.echo(hooks_deprecation.AUTOSTOP_LOGS_CLI, err=True, nl=False)
+        hook_event = 'stop'
+
+    # Smart-parse the no-event form `sky logs --hook <cluster>` (omit
+    # the event name to auto-select whichever hook log exists on the
+    # cluster). Click greedily consumes the next token after --hook as
+    # the option value, so the cluster name lands in `hook_event`.
+    # When the value isn't a valid event name and we have no
+    # positional CLUSTER, treat it as the cluster name and route to
+    # auto-select (event='').
+    if (hook_event is not None and hook_event != '' and
+            hook_event not in _VALID_HOOK_EVENTS):
+        if cluster is None:
+            cluster = hook_event
+            hook_event = ''
+        else:
+            valid = ', '.join(repr(v) for v in _VALID_HOOK_EVENTS)
+            raise click.UsageError(
+                f'Invalid value for --hook: {hook_event!r} is not one of '
+                f'{valid}.')
+    if cluster is None:
+        raise click.UsageError('Missing argument \'CLUSTER\'.')
+    # Sentinel `''` means --hook was passed without an event argument.
+    hook_auto_select = (hook_event == '')
+
     if worker is not None:
         if not provision:
             raise click.UsageError(
@@ -2647,19 +2882,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
-    if provision and autostop:
+    if provision and (hook_event is not None):
         raise click.UsageError(
-            '--provision and --autostop cannot be used together.')
+            '--provision and --hook cannot be used together.')
 
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
 
-    if autostop and (sync_down or status or job_ids or worker is not None):
-        raise click.UsageError(
-            '--autostop cannot be combined with job log options '
-            '(--sync-down/--status/--worker/job IDs).')
+    if hook_event is not None and (sync_down or status or job_ids or
+                                   worker is not None):
+        raise click.UsageError('--hook cannot be combined with job log options '
+                               '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(
@@ -2682,12 +2917,12 @@ def logs(
                                     follow=follow,
                                     tail=tail or 0))
 
-    if autostop:
-        # Same as provision — autostop hook output is small.
+    if hook_event is not None:
         sys.exit(
-            sdk.tail_autostop_logs(cluster_name=cluster,
-                                   follow=follow,
-                                   tail=tail or 0))
+            sdk.tail_hook_logs(cluster_name=cluster,
+                               event=None if hook_auto_select else hook_event,
+                               follow=follow,
+                               tail=tail or 0))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2870,8 +3105,7 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(
-                cluster, expect_exact_match=False)
+            controller = controller_utils.Controllers.from_prefix(cluster)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(
@@ -3878,8 +4112,10 @@ def check(infra_list: Tuple[str],
         api_server_url = server_common.get_server_url()
         click.echo()
         click.echo(
-            click.style(f'Using SkyPilot API server: {api_server_url}',
-                        fg='green'))
+            click.style(
+                'Using SkyPilot API server: '
+                f'{server_common.redact_url_password(api_server_url)}',
+                fg='green'))
 
 
 @cli.command()
@@ -4157,9 +4393,13 @@ def _show_gpus_impl(
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                node_taints = getattr(node_info, 'taints', None) or []
-                node_is_tainted = len(node_taints) > 0
-                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                node_taints = getattr(node_info, 'taints', None)
+                # Only un-tolerated taints count toward the "not ready" GPU
+                # tally. Taints matched by `kubernetes.pod_config.spec
+                # .tolerations` arrive with `tolerated=True` and don't make
+                # the node unschedulable for the user's workloads.
+                if (not node_is_ready or node_is_cordoned or
+                        kubernetes_utils.has_untolerated_taint(node_taints)):
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -4398,22 +4638,28 @@ def _show_gpus_impl(
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
                 if node_is_cordoned:
                     status_info.append('Cordoned')
-                # Add taint info grouped by effect
-                taints = getattr(node_info, 'taints', None)
-                if taints:
+                # Add taint info grouped by effect. Only un-tolerated taints
+                # count toward node status — taints matched by the user's
+                # configured `kubernetes.pod_config.spec.tolerations` arrive
+                # with `tolerated=True` and don't make the node unhealthy.
+                untolerated_taints = [
+                    t for t in (getattr(node_info, 'taints', None) or [])
+                    if not t.get('tolerated', False)
+                ]
+                if untolerated_taints:
                     # Group taints by effect: 'NoSchedule Taint [key1, key2],
                     # NoExecute Taint [key3]'
                     taints_by_effect: Dict[str, List[str]] = {}
-                    for taint in taints:
+                    for taint in untolerated_taints:
                         effect = taint['effect']
                         key = taint['key']
                         if effect not in taints_by_effect:
                             taints_by_effect[effect] = []
                         taints_by_effect[effect].append(key)
-                    taints_strs = []
-                    for effect, keys in taints_by_effect.items():
-                        taints_strs.append(
-                            f'{effect} Taint [{", ".join(keys)}]')
+                    taints_strs = [
+                        f'{effect} Taint [{", ".join(keys)}]'
+                        for effect, keys in taints_by_effect.items()
+                    ]
                     if taints_strs:
                         status_info.append(', '.join(taints_strs))
 
@@ -5423,6 +5669,11 @@ def _build_volume_override_config(
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
 @click.option('--verbose',
               '-v',
               default=False,
@@ -5437,11 +5688,79 @@ def _build_volume_override_config(
               help='Refresh volume state from cloud APIs before listing. '
               'Without this flag, cached data is returned which is updated '
               'periodically by the background daemon.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool, refresh: bool):
-    """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls(refresh=refresh)
-    all_volumes = sdk.stream_and_get(request_id)
+def volumes_ls(names: List[str],
+               verbose: bool,
+               refresh: bool,
+               output_format: str = 'table'):
+    """List volumes managed by SkyPilot.
+
+    Pass one or more volume names to show only those. Combined with --refresh,
+    only the named volumes are re-probed, which is much cheaper than refreshing
+    every volume when you are waiting on one you just created. Names are exact;
+    unlike sky volumes delete, this does not take glob patterns.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Show every volume.
+        sky volumes ls
+        \b
+        # Show one volume, re-probing just that one.
+        sky volumes ls my-vol -r
+        \b
+        # Read a volume's status from a script.
+        sky volumes ls my-vol -o json
+    """
+    request_id = volumes_sdk.ls(refresh=refresh, names=names)
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
+    if json_output:
+        # Keep stdout parseable. A request's server-side logs are streamed back
+        # here, and volume_refresh logs a line exactly when a volume's status
+        # changes -- the NOT_READY -> READY tick a poller is waiting for. Ahead
+        # of the JSON that is the one iteration a parser cannot read, so send
+        # the stream to a sink, as `sky check -o json` does.
+        all_volumes = sdk.stream_and_get(request_id,
+                                         output_stream=io.StringIO())
+    else:
+        all_volumes = sdk.stream_and_get(request_id)
+    if names:
+        # Filter here as well as on the server. An API server older than this
+        # change ignores the names and returns every volume; narrowing again
+        # keeps the output correct against those servers, which is what lets
+        # the names be sent without an API version gate. Against a current
+        # server the response is already narrowed and this is a no-op.
+        requested = set(names)
+        all_volumes = [
+            volume for volume in all_volumes if volume.name in requested
+        ]
+        if not json_output:
+            # Report what matched nothing, rather than showing an empty table
+            # and letting a typo read as "the volume is gone" -- the message a
+            # not-ready volume points here with makes that an easy mistake.
+            # Not on the json path, where an empty array already says it and a
+            # stray line would break parsing.
+            missing = sorted(requested - {v.name for v in all_volumes})
+            if len(missing) == 1:
+                # Worded as `sky volumes delete` words it.
+                click.echo(f'Volume {missing[0]} not found.')
+            elif missing:
+                # One line rather than one per name: here a miss is the whole
+                # answer for that name, so a list reads better than a stack.
+                click.echo(f'Volumes not found: {", ".join(missing)}.')
+            if not all_volumes:
+                # Nothing left to tabulate. The empty table renders as "No
+                # existing volumes.", which is a claim about the whole table --
+                # and a filtered listing never looked at the whole table.
+                return
+    if json_output:
+        click.echo(
+            json.dumps(
+                [volume.model_dump(mode='json') for volume in all_volumes],
+                indent=2))
+        return
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
     click.echo(volume_table)
@@ -5537,6 +5856,18 @@ def jobs():
     pass
 
 
+def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
+    """Parse ``--depends-on`` (comma-separated managed job IDs)."""
+    if value is None:
+        return None
+    ids = [part.strip() for part in value.split(',') if part.strip()]
+    if not ids or not all(part.isdigit() and int(part) > 0 for part in ids):
+        raise click.UsageError(
+            f'--depends-on must be comma-separated managed job IDs. Got: '
+            f'{value!r}.')
+    return [int(part) for part in ids]
+
+
 @jobs.command('launch', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=True)
 @click.argument('entrypoint',
@@ -5546,7 +5877,8 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -5575,10 +5907,50 @@ def jobs():
               type=int,
               required=False,
               help='Number of jobs to submit.')
+@click.option('--job-group',
+              default=None,
+              type=str,
+              required=False,
+              help=('Attach to an existing job group, by job id or unique '
+                    'running job name. The job is shown under it and '
+                    'cancelled with it. Defaults to the surrounding job '
+                    'group when launched from inside one.'))
+@click.option('--no-job-group',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Launch a top-level job even when running inside a job '
+                    'group (do not attach to it).'))
+@click.option('--depends-on',
+              default=None,
+              type=str,
+              required=False,
+              help=('Comma-separated managed job IDs to wait for. The job '
+                    'starts once all of them succeed, and is cancelled if any '
+                    'of them ends otherwise. The launch fails if one of them '
+                    'has already ended without succeeding.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to submit the managed job into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
+@click.option('--output',
+              '-o',
+              'output_format',
+              type=click.Choice(['id', 'json'], case_sensitive=False),
+              default=None,
+              is_eager=True,
+              callback=_route_stdout_for_output,
+              help=('Print only the submitted job IDs, for scripts: `id` '
+                    'prints one per line, `json` prints {"job_ids": [...]}. '
+                    'Everything else goes to stderr. Implies --detach-run.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -5608,6 +5980,7 @@ def jobs_launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str],
+    priority: Optional[str],
     detach_run: bool,
     yes: bool,
     pool: Optional[str],  # pylint: disable=redefined-outer-name
@@ -5616,6 +5989,10 @@ def jobs_launch(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
+    job_group: Optional[str] = None,
+    no_job_group: bool = False,
+    depends_on: Optional[str] = None,
+    output_format: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -5630,12 +6007,21 @@ def jobs_launch(
       sky jobs launch task.yaml
 
       sky jobs launch 'echo hello!'
+
+      # Start after managed jobs 12 and 13 succeed.
+      sky jobs launch --depends-on 12,13 task.yaml
+
+      # Print only the job ID, e.g. to pass it to another command.
+      JOB_ID=$(sky jobs launch -y -o id task.yaml)
     """
-    if pool is None and num_jobs is not None:
-        raise click.UsageError('Cannot specify --num-jobs without --pool.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
+    depends_on_ids = _parse_depends_on(depends_on)
+    if output_format is not None and async_call:
+        raise click.UsageError(
+            '--output cannot be used with --async, which returns before the '
+            'job IDs exist.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -5667,6 +6053,7 @@ def jobs_launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         job_recovery=job_recovery,
         config_override=config_override,
         git_url=git_url,
@@ -5710,6 +6097,11 @@ def jobs_launch(
                 f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
         print_setup_fm_warning = False
+    elif num_jobs is not None and num_jobs > 1:
+        click.secho(
+            f'Submitting {colorama.Fore.CYAN}{num_jobs}'
+            f'{colorama.Style.RESET_ALL} managed jobs. Each job will be '
+            'launched on its own cluster.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -5717,10 +6109,21 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
+    if job_group is not None and no_job_group:
+        raise click.UsageError(
+            '--job-group and --no-job-group are mutually exclusive.')
+    job_group_arg: Union[int, str, None, Any] = managed_jobs.AUTO_JOB_GROUP
+    if no_job_group:
+        job_group_arg = None
+    elif job_group is not None:
+        job_group_arg = int(job_group) if job_group.isdigit() else job_group
+
     request_id = managed_jobs.launch(dag,
                                      name,
                                      pool,
                                      num_jobs,
+                                     job_group=job_group_arg,
+                                     depends_on=depends_on_ids,
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
@@ -5730,6 +6133,13 @@ def jobs_launch(
 
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
+    if output_format is not None:
+        output = click.get_current_context().meta[_JOB_IDS_OUTPUT_KEY]
+        if output_format == 'json':
+            output.write(json.dumps({'job_ids': job_ids}) + '\n')
+        else:
+            output.write(''.join(f'{job_id}\n' for job_id in job_ids))
+        return
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
@@ -5753,19 +6163,34 @@ def jobs_launch(
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
         # Sort job ids to ensure consistent ordering.
-        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'pool',
-                'operator': ':',
-                'value': pool,
-            })
+            if pool is not None:
+                query = urllib.parse.urlencode({
+                    'property': 'pool',
+                    'operator': ':',
+                    'value': pool,
+                })
+                starting_page = f'jobs?{query}'
+                show_jobs_label = 'Show all jobs in the pool:'
+            else:
+                starting_page = 'jobs'
+                show_jobs_label = 'Show all jobs:'
             dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=f'jobs?{query}')
-            dashboard_hint = (
-                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
-                f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                server_common.get_server_url(), starting_page=starting_page)
+            dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
+                              f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                              f'{ux_utils.RESET_BOLD}')
+        if pool is not None:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'{ux_utils.RESET_BOLD}')
+        else:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all these jobs:'
+                f'\t{ux_utils.BOLD}sky jobs cancel <job-ids>'
                 f'{ux_utils.RESET_BOLD}')
         click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                     f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -5777,9 +6202,66 @@ def jobs_launch(
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
                     f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
-                    f'{ux_utils.RESET_BOLD}')
+                    f'{cancel_hint}')
+
+
+# Value the ``-s``/``--status`` option takes when given with no argument. It is
+# a deprecated alias for ``--skip-finished`` (see jobs_queue).
+# TODO(kevin): remove in 0.15.0, after which a bare ``-s`` is invalid and ``-s``
+# is solely the short flag for ``--status``.
+_SKIP_FINISHED_SENTINEL = '__skip_finished__'
+
+
+class StatusList(click.Choice):
+    """Comma-separated, case-insensitive choices.
+
+    Returns a list so a single ``--status FAILED,FAILED_SETUP`` and a repeated
+    ``--status FAILED --status FAILED_SETUP`` are both accepted; with
+    ``multiple=True`` the option then yields a tuple of lists to flatten.
+    """
+
+    def convert(self, value, param, ctx):
+        # A bare ``-s`` yields the sentinel; pass it through unvalidated so the
+        # handler can treat it as --skip-finished.
+        if value == _SKIP_FINISHED_SENTINEL:
+            return [value]
+        return [
+            super(StatusList, self).convert(v.strip(), param, ctx)
+            for v in value.split(',')
+            if v.strip()
+        ]
+
+
+# Accepted absolute date/time formats for --after / --before. ISO date and
+# date-time (space or 'T' separator) first; US m-d-Y for familiarity. Naive
+# values are interpreted in the local timezone.
+_SUBMITTED_AT_DATETIME_FORMATS = (
+    '%Y-%m-%d',
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%d %H:%M',
+    '%Y-%m-%dT%H:%M:%S',
+    '%Y-%m-%dT%H:%M',
+    '%m-%d-%Y',
+    '%m-%d-%Y %H:%M:%S',
+)
+
+
+def _parse_datetime_to_epoch(value: str) -> float:
+    """Parses an absolute date/time string into an epoch timestamp (seconds).
+
+    Naive datetimes are interpreted in the local timezone.
+
+    Raises:
+        ValueError: if the value matches none of the accepted formats.
+    """
+    for fmt in _SUBMITTED_AT_DATETIME_FORMATS:
+        try:
+            return datetime.datetime.strptime(value,
+                                              fmt).astimezone().timestamp()
+        except ValueError:
+            continue
+    raise ValueError(f'Invalid date/time {value!r}. Use e.g. "2026-01-13", '
+                     '"2026-01-13 15:30:00", or "2026-01-13T15:30:00".')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -5802,11 +6284,59 @@ def jobs_launch(
     help='Query the latest statuses, restarting the jobs controller if stopped.'
 )
 @click.option('--skip-finished',
-              '-s',
               default=False,
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option('-s',
+              '--status',
+              'statuses',
+              is_flag=False,
+              flag_value=_SKIP_FINISHED_SENTINEL,
+              multiple=True,
+              type=StatusList([s.value for s in ManagedJobStatus],
+                              case_sensitive=False),
+              required=False,
+              help='Filter by status, comma-separated '
+              '(e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a '
+              'deprecated alias for --skip-finished.')
+@click.option(
+    '--since',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted within this time window, relative to now '
+          '(e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. '
+          'Mutually exclusive with --after.'))
+@click.option(
+    '--after',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or after this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive '
+          'with --since.'))
+@click.option(
+    '--before',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or before this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00").'))
+@click.option(
+    '--infra',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'Show only jobs running on this infrastructure. '
+        'Format: cloud, cloud/region, cloud/region/zone, '
+        'k8s/context-name, or ssh/node-pool-name. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+        # TODO(zhwu): we have to use `\*` to make sure the docs build
+        # not complaining about the `*`, but this will cause `--help`
+        # to show `\*` instead of `*`.
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -5815,6 +6345,11 @@ def jobs_launch(
 def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
+               statuses: Tuple[List[str], ...],
+               since: Optional[str],
+               after: Optional[str],
+               before: Optional[str],
+               infra: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -5830,7 +6365,9 @@ def jobs_queue(verbose: bool,
 
     - ``RUNNING``: Job is running.
 
-    - ``RECOVERING``: The cluster of the job is recovering from a preemption.
+    - ``RECOVERING``: The job is recovering — from a cluster preemption or
+      failure, or from a controller-side issue (the controller restarted or
+      hit an unexpected internal error and is restarting job management).
 
     - ``SUCCEEDED``: Job succeeded.
 
@@ -5875,7 +6412,75 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
+    (Tip) To filter by status, use ``-s``/``--status`` (comma-separated):
+
+    .. code-block:: bash
+
+      sky jobs queue -s FAILED,FAILED_SETUP
+
+    (Tip) To show only active (pending/running) jobs, use ``--skip-finished``:
+
+    .. code-block:: bash
+
+      sky jobs queue --skip-finished
+
+    (Tip) To show only jobs submitted in the last 7 days, use ``--since``:
+
+    .. code-block:: bash
+
+      sky jobs queue --since 7d
+
+    (Tip) To filter by an absolute submission window, use ``--after`` and/or
+    ``--before``:
+
+    .. code-block:: bash
+
+      sky jobs queue --after 2026-01-01 --before 2026-01-31
+
+    (Tip) To show only jobs on one infrastructure, use ``--infra``:
+
+    .. code-block:: bash
+
+      sky jobs queue --infra k8s/my-context
+
     """
+    status_filter = [status for group in statuses for status in group]
+    # TODO(kevin): remove in 0.15.0, along with _SKIP_FINISHED_SENTINEL and the
+    # flag_value on -s/--status.
+    if _SKIP_FINISHED_SENTINEL in status_filter:
+        click.secho(
+            'Warning: `-s` without a value is a deprecated alias for '
+            '`--skip-finished` and will be removed in 0.15.0. Use '
+            '`--skip-finished`, or pass a status (e.g. `-s RUNNING`).',
+            fg='yellow',
+            err=True)
+        skip_finished = True
+        status_filter = [
+            s for s in status_filter if s != _SKIP_FINISHED_SENTINEL
+        ]
+    status_filter = status_filter or None
+    if since is not None and after is not None:
+        raise click.UsageError(
+            '--since and --after are mutually exclusive: --since is a relative '
+            'window from now, --after is an absolute lower bound.')
+    submitted_after = None
+    if since is not None:
+        try:
+            since_seconds = resources_utils.parse_time_seconds(since)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--since') from e
+        submitted_after = time.time() - since_seconds
+    elif after is not None:
+        try:
+            submitted_after = _parse_datetime_to_epoch(after)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--after') from e
+    submitted_before = None
+    if before is not None:
+        try:
+            submitted_before = _parse_datetime_to_epoch(before)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--before') from e
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
@@ -5890,11 +6495,16 @@ def jobs_queue(verbose: bool,
         # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
         # in parallel
         def get_managed_jobs_queue():
-            return cli_utils.get_managed_job_queue(refresh=refresh,
-                                                   skip_finished=skip_finished,
-                                                   all_users=all_users,
-                                                   limit=max_num_jobs_to_show,
-                                                   fields=fields)
+            return cli_utils.get_managed_job_queue(
+                refresh=refresh,
+                skip_finished=skip_finished,
+                all_users=all_users,
+                limit=max_num_jobs_to_show,
+                fields=fields,
+                statuses=status_filter,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before,
+                infra_match=infra)
 
         def get_pool_status():
             try:
@@ -5960,6 +6570,14 @@ def jobs_queue(verbose: bool,
               type=str,
               help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--task',
+              'task',
+              default=None,
+              type=str,
+              required=False,
+              help=('Cancel one dynamic task of the job (a job launched from '
+                    'inside it), by the index shown in `sky jobs queue` or '
+                    'by name. A declared task cannot be cancelled alone.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
@@ -5969,7 +6587,8 @@ def jobs_queue(verbose: bool,
 def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
-    job_ids: Tuple[int],
+    job_ids: Tuple[int, ...],
+    task: Optional[str],
     graceful: bool,
     graceful_timeout: Optional[int],
     all: bool,
@@ -5993,8 +6612,19 @@ def jobs_cancel(
       \b
       # Cancel all managed jobs in pool 'my-pool'
       $ sky jobs cancel -p my-pool
+      \b
+      # Cancel only task 2 of job group 39 (a job launched from inside it)
+      $ sky jobs cancel 39 --task 2
     """
     job_id_str = ','.join(map(str, job_ids))
+    task_arg: Optional[Union[str, int]] = None
+    if task is not None:
+        if len(job_ids) != 1 or name is not None or pool is not None or (
+                all or all_users):
+            raise click.UsageError(
+                '--task takes exactly one JOB_ID and no --name, --pool, '
+                '--all or --all-users.')
+        task_arg = int(task) if task.isdigit() else task
     if sum([
             bool(job_ids), name is not None, pool is not None, all or all_users
     ]) != 1:
@@ -6013,6 +6643,8 @@ def jobs_cancel(
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else f'{name!r}' if name is not None else
                             f'managed jobs in pool {pool!r}')
+        if task_arg is not None:
+            job_identity_str = f'task {task_arg} of managed job {job_id_str}'
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
@@ -6028,6 +6660,7 @@ def jobs_cancel(
                             pool=pool,
                             graceful=graceful,
                             graceful_timeout=graceful_timeout,
+                            task=task_arg,
                             all=all,
                             all_users=all_users))
 
@@ -6075,7 +6708,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
-    as task IDs. If not specified, logs for all tasks are shown.
+    as task IDs. If not specified, logs for all tasks are shown. A job
+    launched from inside a job group (a dynamic task) is addressed like the
+    group's declared tasks, by the index shown in `sky jobs queue` or by name.
 
 
     Examples:
@@ -6091,6 +6726,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     \b
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
+
+    \b
+    # View logs for the job launched from inside job group 39 shown as task 2
+    sky jobs logs 39 2
     """
     # tail == -1: user didn't pass --tail. With --sync-down that
     # means "fetch the whole file" (preserves pre-default-flip
@@ -7441,14 +8080,23 @@ def local():
     help='Starting port range for the local kind cluster. Needs to be a '
     'multiple of 100. If not given, a random range will be used. '
     'Used without ip list.')
+@click.option(
+    '--num-nodes',
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    required=False,
+    help='Number of nodes in the local kind cluster. A value greater than 1 '
+    'adds worker nodes, useful for testing multi-node scheduling locally. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
-             async_call: bool):
+             num_nodes: int, async_call: bool):
     """Creates a local cluster."""
-    request_id = sdk.local_up(gpus, name, port_start)
+    request_id = sdk.local_up(gpus, name, port_start, num_nodes)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -7481,14 +8129,16 @@ def api():
               help=('Deploy the SkyPilot API server. When set to True, '
                     'SkyPilot API server will use all resources on the host '
                     'machine assuming the machine is dedicated to SkyPilot API '
-                    'server; host will also be set to 0.0.0.0 to allow remote '
-                    'access.'))
+                    'server; host will also be set to a wildcard address '
+                    '(0.0.0.0, or :: when an IPv6 --host is given) '
+                    'to allow remote access.'))
 @click.option('--host',
               default='127.0.0.1',
               type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
               required=False,
-              help=('The host to deploy the SkyPilot API server. To allow '
-                    'remote access, set this to 0.0.0.0'))
+              help=('The host to bind the SkyPilot API server to. To allow '
+                    'remote access, set this to 0.0.0.0; use :: for IPv6 '
+                    'dual-stack.'))
 @click.option('--foreground',
               is_flag=True,
               default=False,
@@ -7503,16 +8153,29 @@ def api():
               default=False,
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
+@click.option('--port',
+              default=None,
+              type=int,
+              required=False,
+              help=('The port to bind the SkyPilot API server to. Defaults '
+                    'to the SKYPILOT_API_SERVER_LOCAL_PORT environment '
+                    'variable, or 46580. Other client commands only find a '
+                    'server on a non-default port if the same environment '
+                    'variable is exported.'))
 @usage_lib.entrypoint
 def api_start(deploy: bool, host: str, foreground: bool,
-              enable_basic_auth: bool):
+              enable_basic_auth: bool, port: Optional[int]):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
                   host=host,
                   foreground=foreground,
-                  enable_basic_auth=enable_basic_auth)
+                  enable_basic_auth=enable_basic_auth,
+                  port=port)
     api_server_url = server_common.get_server_url(host)
-    api_server_info = server_common.get_api_server_status(api_server_url)
+    # Dial via a reachable loopback URL: wildcard bind hosts (0.0.0.0 / ::) are
+    # not valid connect targets on all platforms.
+    api_server_info = server_common.get_api_server_status(
+        server_common.get_local_server_dial_url(host))
     server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
@@ -7732,9 +8395,15 @@ def api_status(request_id_prefixes: Optional[List[str]],
     '-t',
     required=False,
     help='Service account token for authentication (starts with ``sky_``).')
+@click.option('--no-browser',
+              is_flag=True,
+              default=False,
+              help='Do not attempt to open a browser locally; print the '
+              'auth URL and wait for the user to open it manually. Useful '
+              'on headless machines (SSH sessions, containers, etc.).')
 @usage_lib.entrypoint
 def api_login(endpoint: Optional[str], relogin: bool,
-              service_account_token: Optional[str]):
+              service_account_token: Optional[str], no_browser: bool):
     """Logs into a SkyPilot API server.
 
     If your remote API server has enabled OAuth2 authentication, you can use
@@ -7753,11 +8422,17 @@ def api_login(endpoint: Optional[str], relogin: bool,
       # OAuth2 browser login
       sky api login -e https://api.example.com
       \b
+      # OAuth2 login without opening a browser locally (e.g. over SSH)
+      sky api login -e https://api.example.com --no-browser
+      \b
       # Service account token login
       sky api login -e https://api.example.com --token sky_abc123...
 
     """
-    sdk.api_login(endpoint, relogin, service_account_token)
+    sdk.api_login(endpoint,
+                  relogin,
+                  service_account_token,
+                  no_browser=no_browser)
 
 
 @api.command('logout', cls=_DocumentedCodeCommand)
@@ -7788,7 +8463,10 @@ def api_info(output_format: str):
                        'server: sky api start')
         else:
             click.echo(
-                f'Could not connect to SkyPilot API server at {url}\n'
+                'Could not connect to SkyPilot API server at '
+                f'{server_common.redact_url_password(url)}\n'
+                # The hint below is meant to be copy-pasted, so it keeps the
+                # real URL -- redacting it would hand the user a broken command.
                 f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
                 f'sky api login --relogin -e {url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
@@ -7837,7 +8515,8 @@ def api_info(output_format: str):
             location = f'Endpoint set via {config_path}'
     else:
         location = 'Endpoint set to default local API server.'
-    click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
+    click.echo(f'Using SkyPilot API server and dashboard: '
+               f'{server_common.redact_url_password(url)}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
@@ -7845,6 +8524,116 @@ def api_info(output_format: str):
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
     # Show upgrade hint if available
     server_common.check_and_print_upgrade_hint(api_server_info, url)
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def workspace():
+    """Per-user workspace commands."""
+    pass
+
+
+@workspace.command('use', cls=_DocumentedCodeCommand)
+@click.argument('name', required=False, type=str)
+@click.option('--clear',
+              is_flag=True,
+              default=False,
+              help='Clear the saved preferred workspace.')
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def workspace_use(name: Optional[str], clear: bool):
+    """Sets (or clears with --clear) your default workspace on the server.
+
+    This default is picked up by ``sky launch`` / ``sky jobs launch`` when
+    no explicit ``active_workspace`` is in effect. Anything that DOES set
+    ``active_workspace`` still wins — including a per-command
+    ``--workspace`` / ``-w`` flag, ``--config active_workspace=X``,
+    project ``./.sky.yaml``, user ``~/.sky/config.yaml``, or a server-
+    side ``active_workspace`` pinned by an admin.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Set team-a as your default.
+      sky workspace use team-a
+      \b
+      # Clear the default.
+      sky workspace use --clear
+    """
+    if clear and name:
+        raise click.UsageError('Cannot pass both --clear and a workspace name.')
+    if not clear and not name:
+        raise click.UsageError(
+            'Specify a workspace name, or pass --clear to remove your '
+            'current default.')
+    target = None if clear else name
+    sdk.set_preferred_workspace(target)
+    if clear:
+        click.secho('Cleared preferred workspace.', fg='green')
+    else:
+        click.secho(f'Set preferred workspace to {target!r}.', fg='green')
+
+
+@workspace.command('info', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('-o',
+              '--output',
+              'output_format',
+              type=click.Choice(flags.OUTPUT_FORMAT_CHOICES,
+                                case_sensitive=False),
+              default=flags.OUTPUT_FORMAT_TABLE,
+              help='Output format (default: table). Use "json" for a '
+              'machine-readable shape.')
+@usage_lib.entrypoint
+def workspace_info(output_format: str):
+    """Shows the workspace your next request lands in by default, plus
+    your saved preferred and the workspaces you can access.
+
+    A one-off ``--workspace <name>`` flag on the next command still wins;
+    this view reflects what happens when no such override is passed.
+    """
+    info = sdk.get_user_workspace()
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(info, indent=2))
+        return
+
+    workspace_str = (f'{info["workspace"]!r}'
+                     if info.get('workspace') is not None else '(none)')
+    source_str = info.get('source') or '-'
+    preferred = info.get('preferred')
+    preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
+    # `accessible` is the writable set (where a launch can land);
+    # `read_only` is listed separately.
+    writable = info.get('accessible') or []
+    read_only = info.get('read_only') or []
+    writable_str = ', '.join(
+        repr(w) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(w) for w in read_only)
+    note = info.get('note')
+    lines = [
+        f'Workspace: {workspace_str}',
+        f'{ux_utils.INDENT_SYMBOL}Source: {source_str}',
+    ]
+    if note:
+        lines.append(f'{ux_utils.INDENT_SYMBOL}Note: {note}')
+    lines.append(f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}')
+    if read_only:
+        lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Writable: {writable_str}',
+            f'{ux_utils.INDENT_LAST_SYMBOL}Read-only: {read_only_str}',
+        ])
+    else:
+        lines.append(f'{ux_utils.INDENT_LAST_SYMBOL}Writable: {writable_str}')
+    click.echo('\n'.join(lines))
+
+    # AMBIGUOUS is the only state whose recovery message is multi-line
+    # (5+ lines) — inlining it into `Note:` would break the tree
+    # alignment, so render it as a separate paragraph below. The text
+    # comes from `WorkspaceAmbiguousError.recovery_hint()` so the CLI
+    # and launch-path error message share a single source.
+    if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:
+        click.echo()
+        click.echo(exceptions.WorkspaceAmbiguousError.recovery_hint())
 
 
 @cli.group(cls=_NaturalOrderGroup)

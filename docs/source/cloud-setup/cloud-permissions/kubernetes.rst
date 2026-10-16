@@ -139,6 +139,31 @@ Permissions for ``sky gpus list``
     If this role is not granted to the service account, ``sky gpus list`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
 
 
+Permissions for GPU metrics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` the ``kube-system`` namespace. Service accounts created with ``generate_kubeconfig.sh`` and API servers deployed with the Helm chart already include this permission; if you manage permissions manually, add:
+
+.. code-block:: yaml
+
+    # Required only if the API server federates GPU metrics from this cluster.
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+        name: sky-sa-cluster-role-namespace-reader
+    rules:
+      - apiGroups: [""]
+        resources: ["namespaces"]
+        resourceNames: ["kube-system"]
+        verbs: ["get"]
+
+SkyPilot uses this to detect whether a kubeconfig context points back at the cluster the API server itself runs in (by reading the UID of the ``kube-system`` namespace, the de-facto cluster identity, and comparing it with the UID seen through the in-cluster credentials), which is required to avoid a metrics self-federation loop.
+
+.. tip::
+
+    If this permission is not granted, GPU metrics for remote clusters still work; only a context that points back at the API server's own cluster would be misdetected as remote. The local cluster can always be referenced via the ``in-cluster`` context instead, which does not need this permission.
+
+
 Permissions for object store mounting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -240,6 +265,11 @@ following role and configure SkyPilot to use it via
       - apiGroups: ["apps"]
         resources: ["deployments"]
         verbs: ["get", "list"]
+      # Required for emitting a breadcrumb event when the cluster autodowns
+      # itself, which the API server reads back to record the autostop.
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create"]
 
 To use a custom workload service account, create the service account and role
 above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
@@ -257,6 +287,80 @@ above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
     ``sky`` commands inside the pod), the workload service account will need
     broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
+.. _kubernetes-remote-identity-none:
+
+Running workload pods with no Kubernetes identity
+-------------------------------------------------
+
+To give the pods SkyPilot launches no access to the Kubernetes API, set
+``remote_identity: NONE``:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      remote_identity: NONE
+
+With ``NONE``, SkyPilot mounts no service account token in the pods and grants
+their service account no roles. The pods keep the account name
+``skypilot-service-account``, so ``imagePullSecrets`` set on that account keep
+working.
+
+Under ``NONE``, these do not work:
+
+- Autodown (``sky launch --down``, ``sky autostop --down``). A cluster tears
+  itself down through the Kubernetes API, so SkyPilot refuses autodown at
+  launch. Use ``sky down`` instead. Managed jobs still run: the jobs controller
+  tears their clusters down, and skips the idle autodown it would otherwise set
+  on them as a safeguard.
+- ``kubectl`` or ``sky`` run inside a pod against the cluster's own Kubernetes
+  API. Removing that access is the purpose of ``NONE``.
+
+SkyPilot also refuses a ``pod_config`` that would give the pods a token back:
+``spec.serviceAccountName``, ``spec.serviceAccount``,
+``spec.automountServiceAccountToken: true``, or a projected
+``serviceAccountToken`` volume.
+
+Jobs and serve controllers keep their identity, because they launch clusters.
+The clusters they launch for your jobs and services still get ``NONE``.
+
+Clusters launched before ``NONE`` was set keep their pod spec, and so their
+token. That includes a pod recreated in place when such a cluster is
+relaunched, because the spec comes from the cluster's stored config. To run one
+with no identity, take it down and launch it again.
+
+When the API server's config sets ``NONE`` (globally, in a workspace, or in
+``context_configs``), users cannot loosen it: a request whose client config or
+task sets another ``remote_identity`` is refused. Users can still choose
+``NONE`` for their own tasks when the server does not set it. Set ``NONE`` in
+the API server's config for this guarantee: a ``NONE`` that an admin policy
+writes into a request's config can still be loosened by the task's own
+``config``.
+
+.. note::
+
+    ``NONE`` covers the token Kubernetes mounts for the pod's service account.
+    It does not detect a ``pod_config`` that mounts a service account token
+    Secret as an ordinary ``secret`` volume, and it does not cover pods that
+    other tools create in the namespace. For those, use an admission policy,
+    such as a ValidatingAdmissionPolicy that rejects pods that do not set
+    ``automountServiceAccountToken: false`` or that mount token Secrets.
+
+
+Controller clusters use a separate service account
+--------------------------------------------------
+
+A jobs or serve controller running as its own cluster provisions the clusters it
+launches, so its pod needs cluster-scoped permissions no pod running user code
+should hold. SkyPilot gives those clusters a separate account,
+``skypilot-controller-service-account``, and leaves
+``skypilot-service-account`` to workload pods. Under
+:ref:`consolidation mode <jobs-consolidation-mode>` the controllers
+run inside the API server and no pod holds these permissions at all.
+
+If you set ``remote_identity`` to a service account of your own, SkyPilot
+creates and reconciles nothing — you own that account's permissions for
+controllers and workloads alike.
 
 .. _k8s-sa-example:
 

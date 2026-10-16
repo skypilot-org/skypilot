@@ -1,5 +1,6 @@
 """Unit tests for volume server API."""
 
+import inspect
 from unittest import mock
 
 import fastapi
@@ -86,7 +87,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeDeleteBody)
 
@@ -100,6 +101,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -142,7 +144,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeApplyBody)
 
@@ -156,6 +158,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -196,7 +199,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
 
     def test_volume_apply_success_pvc_none_config(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume and None config."""
@@ -208,6 +211,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -350,6 +354,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True  # Is Kubernetes
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -461,7 +466,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
 
     def test_volume_validate_success(self, monkeypatch):
         """Test volume_validate endpoint with successful validation."""
@@ -557,6 +562,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -572,12 +578,14 @@ class TestVolumeServer:
             mock_state.request_id = 'test-request-id'
             mock_state.auth_user = None
 
-            # Test data for RunPod network volume
+            # Test data for RunPod network volume. The zone carries the
+            # DataCenterId, which RunPod network volumes require.
             apply_body = {
                 'name': 'test-runpod-volume',
                 'volume_type': volume.VolumeType.RUNPOD_NETWORK_VOLUME.value,
                 'cloud': 'runpod',
                 'region': 'us-east',
+                'zone': 'CA-MTL-1',
                 'size': '100',
                 'config': {}
             }
@@ -595,7 +603,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeApplyBody)
 
@@ -637,3 +645,47 @@ class TestVolumeServer:
             assert response.status_code == 400
             assert 'Runpod network volume is only supported on Runpod' in response.json(
             )['detail']
+
+
+class TestVolumeListNamesReachTheRequestBody:
+    """The `names` query parameter has to survive the trip to core.volume_list.
+
+    It is renamed on the way -- `?names=` on the wire, `volume_names` in the
+    body, matched to the core signature only by `to_kwargs()` doing a
+    model_dump. Nothing else exercises that seam: the CLI tests stop at the SDK
+    call and the core tests start at volume_list.
+    """
+
+    @staticmethod
+    def _request_body(monkeypatch, url):
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
+            assert client.get(url).status_code == 200
+        return mock_schedule_async.call_args[1]['request_body']
+
+    def test_repeated_names_arrive_as_a_list(self, monkeypatch):
+        body = self._request_body(monkeypatch, '/volumes?names=a&names=b')
+
+        assert body.volume_names == ['a', 'b']
+
+    def test_no_names_means_every_volume(self, monkeypatch):
+        """None, not [] -- an empty list would mean "no volumes"."""
+        body = self._request_body(monkeypatch, '/volumes')
+
+        assert body.volume_names is None
+
+    def test_the_body_field_matches_the_core_signature(self):
+        """to_kwargs() feeds the body straight into volume_list as kwargs, so a
+        field renamed on either side would only fail at request time."""
+        kwargs = payloads.VolumeListBody(refresh=False,
+                                         volume_names=['a']).to_kwargs()
+        parameters = inspect.signature(server.core.volume_list).parameters
+        assert set(kwargs).issubset(set(parameters))
+        assert kwargs['volume_names'] == ['a']

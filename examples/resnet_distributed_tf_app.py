@@ -75,7 +75,7 @@ def run(cluster: Optional[str] = None, infra: Optional[str] = None):
         train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                          estimated_size_gigabytes=70)
         train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-        train.set_resources(sky.Resources(infra=infra, accelerators='V100'))
+        train.set_resources(sky.Resources(infra=infra, accelerators='T4'))
 
     sky.launch(dag, cluster_name=cluster, retry_until_up=True)
 

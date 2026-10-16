@@ -1,0 +1,22 @@
+# JobGroup with inter_connection: false - no networking machinery is set
+# up, tasks start without waiting for peers.
+---
+name: {{name}}
+execution: parallel
+inter_connection: false
+---
+name: job-a
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job A running without in-group networking"
+  echo "JOB-A-DONE"
+---
+name: job-b
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job B running without in-group networking"
+  echo "JOB-B-DONE"

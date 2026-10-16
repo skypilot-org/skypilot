@@ -165,6 +165,25 @@ Use high-performance networking
 
         See `Together AI with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/together_infiniband.html>`_ for more details.
 
+    .. tab-item:: OCI OKE RoCE
+        :sync: oci-oke-roce-tab
+
+        Oracle OKE clusters on bare-metal GPU shapes (e.g. ``BM.GPU.B200.8``, ``BM.GPU.H100.8``) support RoCEv2 for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable RoCE on OKE clusters provisioned with dedicated RDMA capacity pools.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: B200:8
+            network_tier: best
+
+          num_nodes: 2
+
+        By default SkyPilot uses host networking to reach the RDMA fabric, matching Oracle's bare-metal RDMA setup. If your OKE cluster instead hands out RDMA NICs as SR-IOV virtual functions, set :ref:`kubernetes.rdma.mode: sriov <config-yaml-kubernetes-rdma>` for that context.
+
 
 Using Ray with SkyPilot
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -626,7 +645,7 @@ Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
-* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
+* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://skypilot.ai/blog/large-scale-vector-database>`__
 * `Qwen <https://docs.skypilot.co/en/latest/examples/models/qwen.html>`__
 * PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__

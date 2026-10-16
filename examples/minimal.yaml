@@ -1,6 +1,6 @@
 # A minimal example.
 #
-# Runs a task that simply lists the default conda environments.
+# Runs a task that simply prints a message.
 #
 # Usage:
 #   sky launch -c min minimal.yaml
@@ -15,4 +15,4 @@ setup: |
   echo "running setup"
 
 run: |
-  conda env list
+  echo "hello, SkyPilot!"

@@ -47,7 +47,7 @@ class TestAllCloudsEnabled:
         spec = textwrap.dedent("""\
             resources:
                 cloud: aws
-                instance_type: p3.2xlarge""")
+                instance_type: g4dn.xlarge""")
         cli_runner = cli_testing.CliRunner()
 
         def _capture_mismatch_gpus_spec(file_path, gpus: str):
@@ -66,15 +66,15 @@ class TestAllCloudsEnabled:
             f.write(spec)
             f.flush()
 
-            _capture_mismatch_gpus_spec(f.name, 'T4:1')
+            _capture_mismatch_gpus_spec(f.name, 'A10G:1')
+            _capture_mismatch_gpus_spec(f.name, 'A10G:0.5')
+            _capture_mismatch_gpus_spec(f.name, 'T4:2')
+            _capture_mismatch_gpus_spec(f.name, 't4:2')
             _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
-            _capture_mismatch_gpus_spec(f.name, 'V100:2')
-            _capture_mismatch_gpus_spec(f.name, 'v100:2')
-            _capture_mismatch_gpus_spec(f.name, 'V100:0.5')
 
-            _capture_match_gpus_spec(f.name, 'V100:1')
-            _capture_match_gpus_spec(f.name, 'V100:1')
-            _capture_match_gpus_spec(f.name, 'V100')
+            _capture_match_gpus_spec(f.name, 'T4:1')
+            _capture_match_gpus_spec(f.name, 't4:1')
+            _capture_match_gpus_spec(f.name, 'T4')
 
     def test_k8s_alias(self, enable_all_clouds):
         cli_runner = cli_testing.CliRunner()

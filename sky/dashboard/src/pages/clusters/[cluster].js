@@ -9,6 +9,7 @@ import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
+import { LinkifiedText } from '@/components/elements/LinkifiedText';
 import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
@@ -20,13 +21,8 @@ import {
   streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
-import {
-  RotateCwIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  CheckIcon,
-} from 'lucide-react';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
+import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
@@ -38,8 +34,11 @@ import {
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
   extractLinksFromLogs,
+  LINK_SCOPE_CLUSTER,
   normalizeUrl,
   useCustomUrlPatterns,
+  useScopedLinks,
+  useTemplateLinks,
 } from '@/utils/externalLinks';
 import {
   SSHInstructionsModal,
@@ -47,12 +46,12 @@ import {
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
-import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { isController } from '@/data/utils';
 import { trackClusterAction } from '@/lib/analytics';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
@@ -87,6 +86,15 @@ function ClusterDetails() {
     refreshData,
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
+
+  // Per-workspace writability, so Connect/VSCode are disabled here for a
+  // cluster in a workspace the user can only read — matching the clusters
+  // list, which gates the same actions per row. Missing entry -> treated as
+  // writable (open/default workspace).
+  const { isWorkspaceWritable } = useWorkspacesConfig();
+  const isClusterWorkspaceWritable = isWorkspaceWritable(
+    clusterData?.workspace
+  );
 
   // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
@@ -225,6 +233,7 @@ function ClusterDetails() {
                     status={clusterData.status}
                     onOpenSSHModal={handleConnectClick}
                     onOpenVSCodeModal={handleVSCodeClick}
+                    writable={isClusterWorkspaceWritable}
                   />
                 </div>
               )}
@@ -298,10 +307,6 @@ function ActiveTab({
   telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
-  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [isCommandCopied, setIsCommandCopied] = useState(false);
-
   // Links extracted from provision logs and the latest job's tail logs,
   // matched against built-in plus admin-configured `dashboard.external_links`.
   const [clusterExtractedLinks, setClusterExtractedLinks] = useState({});
@@ -320,53 +325,48 @@ function ActiveTab({
     });
   }, []);
 
-  // Persisted DB-backed links take priority over the live-scanned ones, same
-  // merge semantics the managed-job page uses (sky/dashboard/src/pages/jobs/
-  // [job].js: combinedLinks). DB links currently come from
-  // instance_links.generate_instance_links() at launch time.
-  const combinedClusterLinks = useMemo(() => {
-    const combined = { ...(clusterData?.links || {}) };
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this cluster's metadata.
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: clusterData?.cluster,
+      user: clusterData?.user,
+      workspace: clusterData?.workspace,
+    }),
+    [clusterData?.cluster, clusterData?.user, clusterData?.workspace]
+  );
+  const templateLinks = useTemplateLinks(
+    templateLinkContext,
+    LINK_SCOPE_CLUSTER
+  );
+
+  // Merge order on label collision: template links are the base, persisted
+  // DB-backed links override them, and live-scanned links only fill gaps,
+  // same merge semantics the managed-job page uses (sky/dashboard/src/pages/
+  // jobs/[job].js: combinedLinks). DB links currently come from
+  // instance_links.generate_instance_links() at launch time. The merged map
+  // is scope-filtered so server-computed links honor entry scopes too.
+  const mergedClusterLinks = useMemo(() => {
+    const combined = { ...templateLinks, ...(clusterData?.links || {}) };
     for (const [label, url] of Object.entries(clusterExtractedLinks)) {
       if (!(label in combined)) {
         combined[label] = url;
       }
     }
     return combined;
-  }, [clusterData?.links, clusterExtractedLinks]);
+  }, [templateLinks, clusterData?.links, clusterExtractedLinks]);
+  const combinedClusterLinks = useScopedLinks(
+    mergedClusterLinks,
+    LINK_SCOPE_CLUSTER
+  );
 
-  const toggleYamlExpanded = () => {
-    setIsYamlExpanded(!isYamlExpanded);
-  };
-
-  const copyYamlToClipboard = async () => {
-    try {
-      const yamlContent =
-        clusterData.task_yaml || clusterData.last_creation_yaml;
-      const formattedYaml = formatYaml(yamlContent);
-      await navigator.clipboard.writeText(formattedYaml);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy YAML to clipboard:', err);
-    }
-  };
-
-  const copyCommandToClipboard = async () => {
-    try {
-      const command = clusterData.command || clusterData.last_creation_command;
-      await navigator.clipboard.writeText(command);
-      setIsCommandCopied(true);
-      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
-    } catch (err) {
-      console.error('Failed to copy command to clipboard:', err);
-    }
-  };
-
-  const hasCreationArtifacts =
-    clusterData?.last_creation_command ||
-    clusterData?.last_creation_yaml ||
-    clusterData?.command ||
-    clusterData?.task_yaml;
+  // The YAML the cluster was launched with. Not shown for the controllers,
+  // whose YAML is generated rather than the user's.
+  const clusterName = clusterData?.cluster || clusterData?.name;
+  const creationYaml =
+    clusterName && isController(clusterName)
+      ? null
+      : clusterData?.task_yaml || clusterData?.last_creation_yaml;
 
   // Helper functions for historical clusters
   const formatDuration = (durationSeconds) => {
@@ -476,34 +476,51 @@ function ActiveTab({
                   {isHistoricalCluster ? 'Cloud' : 'Infra'}
                 </div>
                 <div className="text-base mt-1">
-                  {isHistoricalCluster ? (
-                    clusterData.cloud || 'N/A'
-                  ) : clusterData.infra ? (
-                    <NonCapitalizedTooltip
-                      content={clusterData.full_infra || clusterData.infra}
-                      className="text-sm text-muted-foreground"
-                    >
-                      <span>
-                        <Link
-                          href="/infra"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {clusterData.cloud ||
-                            clusterData.infra.split('(')[0].trim()}
-                        </Link>
-                        {clusterData.infra.includes('(') && (
-                          <span>
-                            {' ' +
-                              clusterData.infra.substring(
-                                clusterData.infra.indexOf('(')
-                              )}
-                          </span>
-                        )}
-                      </span>
-                    </NonCapitalizedTooltip>
-                  ) : (
-                    'N/A'
-                  )}
+                  {(() => {
+                    // The default rendering, also handed to the plugin slot
+                    // as `defaultContent` so a plugin that only changes how
+                    // *some* clusters read can return it unchanged for the
+                    // rest. `fallback` keeps the no-plugin case identical.
+                    const infraContent = isHistoricalCluster ? (
+                      clusterData.cloud || 'N/A'
+                    ) : clusterData.infra ? (
+                      <NonCapitalizedTooltip
+                        content={clusterData.full_infra || clusterData.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {clusterData.cloud ||
+                              clusterData.infra.split('(')[0].trim()}
+                          </Link>
+                          {clusterData.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                clusterData.infra.substring(
+                                  clusterData.infra.indexOf('(')
+                                )}
+                            </span>
+                          )}
+                        </span>
+                      </NonCapitalizedTooltip>
+                    ) : (
+                      'N/A'
+                    );
+                    return (
+                      <PluginSlot
+                        name="clusters.detail.infra"
+                        context={{
+                          cluster: clusterData,
+                          isHistorical: isHistoricalCluster,
+                          defaultContent: infraContent,
+                        }}
+                        fallback={infraContent}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
               <div>
@@ -539,7 +556,7 @@ function ActiveTab({
                         content={clusterData.last_event || '-'}
                         className="text-sm text-muted-foreground"
                       >
-                        <span>{clusterData.last_event || '-'}</span>
+                        <LinkifiedText text={clusterData.last_event || '-'} />
                       </NonCapitalizedTooltip>
                     }
                   />
@@ -576,8 +593,9 @@ function ActiveTab({
                 </div>
               )}
 
-              {/* External Links section: persisted DB links (e.g., cloud
-                  instance console URLs from
+              {/* External Links section: admin-configured url templates
+                  resolved against cluster metadata, persisted DB links
+                  (e.g., cloud instance console URLs from
                   instance_links.generate_instance_links() at launch time)
                   plus live regex matches against the admin-configured
                   `dashboard.external_links` allowlist and built-in patterns
@@ -625,107 +643,12 @@ function ActiveTab({
               )}
 
               {/* Created by section - spans both columns */}
-              {hasCreationArtifacts && (
-                <div className="col-span-2">
-                  {(clusterData.command ||
-                    clusterData.last_creation_command) && (
-                    <div className="flex items-center">
-                      <div className="text-gray-600 font-medium text-base">
-                        Entrypoint
-                      </div>
-                      {clusterData.command && (
-                        <Tooltip
-                          content={isCommandCopied ? 'Copied!' : 'Copy command'}
-                          className="text-muted-foreground"
-                        >
-                          <button
-                            onClick={copyCommandToClipboard}
-                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                          >
-                            {isCommandCopied ? (
-                              <CheckIcon className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <CopyIcon className="w-4 h-4" />
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-4 mt-3">
-                    {/* Creation Command */}
-                    {(clusterData.command ||
-                      clusterData.last_creation_command) && (
-                      <div>
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                          <code className="text-sm text-gray-800 font-mono break-all">
-                            {clusterData.command ||
-                              clusterData.last_creation_command}
-                          </code>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Task YAML - Collapsible */}
-                    {(clusterData.task_yaml ||
-                      clusterData.last_creation_yaml) &&
-                      clusterData.task_yaml !== '{}' &&
-                      clusterData.last_creation_yaml !== '{}' &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-jobs-controller-'
-                      ) &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith(
-                        'sky-serve-controller-'
-                      ) && (
-                        <div>
-                          <div className="flex items-center mb-2">
-                            <button
-                              onClick={toggleYamlExpanded}
-                              className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                            >
-                              {isYamlExpanded ? (
-                                <ChevronDownIcon className="w-4 h-4 mr-1" />
-                              ) : (
-                                <ChevronRightIcon className="w-4 h-4 mr-1" />
-                              )}
-                              <span className="text-base">
-                                Show SkyPilot YAML
-                              </span>
-                            </button>
-
-                            <Tooltip
-                              content={isCopied ? 'Copied!' : 'Copy YAML'}
-                              className="text-muted-foreground"
-                            >
-                              <button
-                                onClick={copyYamlToClipboard}
-                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                              >
-                                {isCopied ? (
-                                  <CheckIcon className="w-4 h-4 text-green-600" />
-                                ) : (
-                                  <CopyIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            </Tooltip>
-                          </div>
-
-                          {isYamlExpanded && (
-                            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {formatYaml(
-                                  clusterData.task_yaml ||
-                                    clusterData.last_creation_yaml
-                                )}
-                              </YamlHighlighter>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
+              <EntrypointAndYaml
+                entrypoint={
+                  clusterData.command || clusterData.last_creation_command
+                }
+                taskYaml={creationYaml}
+              />
             </div>
           </div>
         </div>
@@ -843,7 +766,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
   // Scan provision logs against the merged built-in plus admin-configured
   // URL patterns. Matches are reported up to the parent so the Details Card
   // can render a "Links" row.
-  const urlPatterns = useCustomUrlPatterns();
+  const urlPatterns = useCustomUrlPatterns(LINK_SCOPE_CLUSTER);
   const extractedLinksRef = useRef({});
   useEffect(() => {
     if (!displayLines || displayLines.length === 0) return;
@@ -975,7 +898,9 @@ function LatestJobLogLinkScanner({
   workspace,
   onLinksExtracted,
 }) {
-  const urlPatterns = useCustomUrlPatterns();
+  // The scanned matches surface on the cluster detail page, so cluster
+  // scope applies even though the scanned lines are a job's logs.
+  const urlPatterns = useCustomUrlPatterns(LINK_SCOPE_CLUSTER);
   const extractedLinksRef = useRef({});
 
   // Pick the latest job by max numeric id. Job ids are monotonically

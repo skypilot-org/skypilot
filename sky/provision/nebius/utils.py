@@ -6,6 +6,7 @@ import uuid
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.exceptions import ProvisionUnsupportedError
 from sky.provision.nebius import constants as nebius_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -24,7 +25,12 @@ _NEBIUS_PORTS_PER_RULE = 8
 
 # Backoff attempts when deleting an SG that's still attached to terminating
 # VMs. Mirrors AWS's BOTO_DELETE_MAX_ATTEMPTS (sky/provision/aws/instance.py).
-_SG_DELETE_MAX_ATTEMPTS = 6
+# This is only a backstop: `terminate_instances` waits for the cluster's
+# instances to be fully reaped before calling `delete_security_group`, so
+# by the time this retry loop runs the SG should normally be detachable.
+# 8 attempts with the default Backoff (initial 5s, x1.6, cap 25s) gives an
+# effective window of roughly two minutes.
+_SG_DELETE_MAX_ATTEMPTS = 8
 
 
 def retry(func):
@@ -160,6 +166,21 @@ def _get_security_group_obj_by_name(project_id: str, sg_name: str) -> Any:
         return None
 
 
+def _is_already_exists_error(e: Any) -> bool:
+    """True iff the Nebius RequestError is an ALREADY_EXISTS conflict.
+
+    Prefers the structured gRPC status code; falls back to a string match
+    so the check still works if the SDK changes the error shape.
+    """
+    try:
+        status_code = nebius.status_code()
+        if status_code(e.status.code) == status_code.ALREADY_EXISTS:
+            return True
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return 'already_exists' in str(e).lower()
+
+
 def get_or_create_security_group(project_id: str, sg_name: str,
                                  network_id: str) -> str:
     """Returns the SG id, creating the SG (with no rules) if missing.
@@ -180,15 +201,21 @@ def get_or_create_security_group(project_id: str, sg_name: str,
                 ),
                 spec=nebius.vpc().SecurityGroupSpec(network_id=network_id))))
         return op.resource_id
-    except nebius.request_error():
-        # Race: someone created it between our get_by_name and create.
-        # Re-fetch and return.
-        sg = nebius.sync_call(
-            service.get_by_name(nebius.nebius_common().GetByNameRequest(
-                parent_id=project_id,
-                name=sg_name,
-            )))
-        return sg.metadata.id
+    except nebius.request_error() as e:
+        # Only an ALREADY_EXISTS conflict is safe to recover from: another
+        # concurrent bootstrap created the SG between our get_by_name and
+        # create. Any other create failure (bad network, quota, transient
+        # VPC error) must propagate so the real cause is surfaced, instead
+        # of being masked by a misleading NOT_FOUND from the re-fetch below.
+        if not _is_already_exists_error(e):
+            raise
+        # Re-fetch the SG the concurrent creator made. Use the wrapped
+        # lookup (returns None) so we never surface a confusing NOT_FOUND;
+        # if it is somehow already gone, re-raise the original create error.
+        existing = get_security_group_by_name(project_id, sg_name)
+        if existing is None:
+            raise
+        return existing
 
 
 def list_security_rules(sg_id: str) -> List[Any]:
@@ -349,10 +376,11 @@ def delete_security_group(sg_id: str) -> None:
     deleted first) or that is still attached to instances. We:
       1. List + delete all rules in the SG, then poll until the rule list
          is empty (Nebius deletes are async).
-      2. Attempt the SG delete with retry-on-dependency-violation (covers
-         the case where VMs are still terminating after `terminate_instances`
-         returned — mirrors the retry block in
-         `sky.provision.aws.instance.cleanup_ports`).
+      2. Attempt the SG delete with retry-on-dependency-violation. Callers
+         (`terminate_instances`) wait for the cluster's instances to be
+         fully reaped before calling this, so the retry is a backstop for
+         stragglers rather than the primary wait; mirrors the retry block
+         in `sky.provision.aws.instance.cleanup_ports`.
 
     On exhaustion, log + return rather than raise: an orphaned SG is
     preferable to a teardown failure.
@@ -487,6 +515,17 @@ def stop(instance_id: str) -> None:
 
 def start(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(id=instance_id),
+                    timeout=nebius.READ_TIMEOUT))
+    if (instance.spec.check_presence('preemptible') and
+            instance.spec.which_field_in_oneof('pricing_model') is None):
+        raise ProvisionUnsupportedError(
+            f'Nebius VM {instance_id} requires explicit spot pricing opt-in. '
+            'While the VM is stopped, select price-taking spot pricing in '
+            'its Nebius spec, then retry sky start. Do this for every legacy '
+            'preemptible VM in the cluster. SkyPilot does not change pricing '
+            'consent automatically.')
     nebius.sync_call(
         service.start(nebius.compute().StartInstanceRequest(id=instance_id)))
     retry_count = 0
@@ -519,6 +558,7 @@ def launch(cluster_name_on_cloud: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
            disk_tier: str,
+           disk_encrypted: bool = False,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None,
@@ -537,7 +577,7 @@ def launch(cluster_name_on_cloud: str,
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS:
-        if preset == '8gpu-128vcpu-1600gb':
+        if preset.startswith(nebius_constants.INFINIBAND_PRESET_PREFIX):
             fabric = skypilot_config.get_effective_region_config(
                 cloud='nebius',
                 region=region,
@@ -588,10 +628,25 @@ def launch(cluster_name_on_cloud: str,
                 f'Requested {disk_size} GiB, rounding up to '
                 f'{actual_disk_size} GiB.')
 
-    disk_spec = nebius.compute().DiskSpec(
+    compute = nebius.compute()
+    disk_type = _disk_tier_to_disk_type(disk_tier)
+    disk_spec = compute.DiskSpec(
         size_gibibytes=actual_disk_size,
-        type=_disk_tier_to_disk_type(disk_tier),
+        type=disk_type,
     )
+    encryptable_disk_types = (
+        compute.DiskSpec.DiskType.NETWORK_SSD_IO_M3,
+        compute.DiskSpec.DiskType.NETWORK_SSD_NON_REPLICATED,
+    )
+    if disk_encrypted and disk_type in encryptable_disk_types:
+        disk_spec.disk_encryption = compute.DiskEncryption(
+            type=compute.DiskEncryption.DiskEncryptionType.
+            DISK_ENCRYPTION_MANAGED)
+    elif disk_encrypted:
+        logger.warning(
+            f'Disk encryption was requested, but disk type {disk_type.name} '
+            'does not support explicitly configured Nebius-managed '
+            'encryption. Continuing without setting disk encryption.')
     if image_id_or_family.startswith('computeimage-'):
         disk_spec.source_image_id = image_id_or_family
     else:
@@ -649,9 +704,10 @@ def launch(cluster_name_on_cloud: str,
                     recovery_policy=nebius.compute().InstanceRecoveryPolicy.FAIL
                     if use_spot else None,
                     preemptible=nebius.compute().PreemptibleSpec(
-                        priority=1,
                         on_preemption=nebius.compute().PreemptibleSpec.
                         PreemptionPolicy.STOP) if use_spot else None,
+                    follows_spot_price=nebius.compute().FollowsSpotPriceSpec()
+                    if use_spot else None,
                 ))))
         instance_id = ''
         retry_count = 0

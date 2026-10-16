@@ -11,7 +11,7 @@ from sky.workspaces import utils as workspaces_utils
 logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
-# Cannot access workspace CUD operations
+# Cannot access workspace CUD operations.
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
@@ -25,10 +25,19 @@ _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/delete',
     'method': 'POST'
 }, {
+    'path': '/workspaces/batch_add_users',
+    'method': 'POST'
+}, {
+    'path': '/workspaces/batch_remove_users',
+    'method': 'POST'
+}, {
     'path': '/users/delete',
     'method': 'POST'
 }, {
     'path': '/users/create',
+    'method': 'POST'
+}, {
+    'path': '/users/batch_update',
     'method': 'POST'
 }, {
     'path': '/users/import',
@@ -44,20 +53,499 @@ _DEFAULT_USER_BLOCKLIST = [{
     'method': 'GET'
 }]
 
+# Default allowlist for the viewer role. Viewer is allowlist-based: any
+# endpoint NOT on this list is denied for viewers, including any new
+# endpoints added in the future.
+_DEFAULT_VIEWER_ALLOWLIST = [
+    # --- Authentication / session ---
+    {
+        'path': '/users/role',
+        'method': 'GET'
+    },
+    {
+        # Read counterpart of `POST /users/me/workspace`. Returns the
+        # calling user's resolved workspace + preferred + accessible —
+        # all per-user state the viewer is entitled to see.
+        'path': '/users/me/workspace',
+        'method': 'GET'
+    },
+    {
+        'path': '/token',
+        'method': 'GET'
+    },
+    {
+        'path': '/auth/authorize',
+        'method': 'GET'
+    },
+    # --- Cluster reads ---
+    {
+        'path': '/status',
+        'method': 'POST'
+    },
+    {
+        'path': '/endpoints',
+        'method': 'POST'
+    },
+    {
+        'path': '/cost_report',
+        'method': 'POST'
+    },
+    {
+        'path': '/cluster_events',
+        'method': 'POST'
+    },
+    {
+        'path': '/queue',
+        'method': 'POST'
+    },
+    {
+        'path': '/cluster_job_spec',
+        'method': 'POST'
+    },
+    {
+        'path': '/job_status',
+        'method': 'POST'
+    },
+    {
+        'path': '/logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/download_logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/download',
+        'method': 'POST'
+    },
+    {
+        'path': '/provision_logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/hook_logs',
+        'method': 'POST'
+    },
+    # --- Managed jobs reads ---
+    {
+        'path': '/jobs/queue',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/queue/v2',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/wait',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/download_logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_status',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_sync-down-logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/events',
+        'method': 'POST'
+    },
+    # --- SkyServe reads ---
+    {
+        'path': '/serve/status',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/logs',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/sync-down-logs',
+        'method': 'POST'
+    },
+    # --- Workspaces / volumes / recipes reads ---
+    # NOTE: /workspaces/config GET intentionally NOT on allowlist;
+    # it returns the entire admin config including provider tokens.
+    {
+        'path': '/workspaces',
+        'method': 'GET'
+    },
+    {
+        'path': '/volumes',
+        'method': 'GET'
+    },
+    {
+        'path': '/volumes/validate',
+        'method': 'POST'
+    },
+    {
+        'path': '/recipes',
+        'method': 'GET'
+    },
+    {
+        'path': '/recipes/list',
+        'method': 'POST'
+    },
+    {
+        'path': '/recipes/get',
+        'method': 'POST'
+    },
+    # --- SSH node pool reads ---
+    # NOTE: /ssh_node_pools/keys GET NOT on allowlist (key paths).
+    {
+        'path': '/ssh_node_pools',
+        'method': 'GET'
+    },
+    {
+        'path': '/ssh_node_pools/:pool_name/status',
+        'method': 'GET'
+    },
+    # --- Infra info (read-only catalog/state) ---
+    {
+        'path': '/enabled_clouds',
+        'method': 'GET'
+    },
+    {
+        'path': '/enabled_clouds/batch',
+        'method': 'GET'
+    },
+    {
+        'path': '/realtime_kubernetes_gpu_availability',
+        'method': 'POST'
+    },
+    {
+        'path': '/kubernetes_node_info',
+        'method': 'POST'
+    },
+    {
+        'path': '/slurm_gpu_availability',
+        'method': 'POST'
+    },
+    {
+        'path': '/slurm_node_info',
+        'method': 'GET'
+    },
+    {
+        'path': '/slurm_node_info',
+        'method': 'POST'
+    },
+    {
+        'path': '/slurm_cluster_names',
+        'method': 'POST'
+    },
+    {
+        'path': '/status_kubernetes',
+        'method': 'GET'
+    },
+    {
+        'path': '/all_contexts',
+        'method': 'GET'
+    },
+    {
+        'path': '/kubernetes/allowed_nodes',
+        'method': 'GET'
+    },
+    {
+        'path': '/list_accelerators',
+        'method': 'POST'
+    },
+    {
+        'path': '/list_accelerator_counts',
+        'method': 'POST'
+    },
+    {
+        'path': '/validate',
+        'method': 'POST'
+    },
+    {
+        'path': '/optimize',
+        'method': 'POST'
+    },
+    # --- Users / SA tokens (read-only) ---
+    # /users GET returns name/role only (no password hashes, no
+    # secrets); see sky/users/server.py:60.
+    {
+        'path': '/users',
+        'method': 'GET'
+    },
+    # /users/service-account-tokens GET returns metadata only (no JWT
+    # values). POST and sub-paths (delete/update-role/rotate) are
+    # intentionally NOT allowlisted; viewers cannot mint, rotate, or
+    # modify tokens.  `check_service_account_token_permission` adds
+    # defense-in-depth.
+    {
+        'path': '/users/service-account-tokens',
+        'method': 'GET'
+    },
+    # --- Storage reads ---
+    {
+        'path': '/storage/ls',
+        'method': 'GET'
+    },
+    # /upload_v2/blob GET is a pure existence-check (blob_exists);
+    # see sky/server/server.py:1618.
+    {
+        'path': '/upload_v2/blob',
+        'method': 'GET'
+    },
+    # --- Dashboard / static / auth-flow surface ---
+    {
+        'path': '/dashboard/*',
+        'method': 'GET'
+    },
+    # /dashboard_config exposes admin-configured UI settings (e.g.
+    # external_links shown next to logs). The viewer dashboard
+    # rendering reads it on every page load.
+    {
+        'path': '/dashboard_config',
+        'method': 'GET'
+    },
+    {
+        'path': '/api/v1/auth/token',
+        'method': 'GET'
+    },
+    {
+        'path': '/api/plugins',
+        'method': 'GET'
+    },
+]
+
+# Endpoints that need no *write* access to the caller's active workspace but
+# that the viewer allowlist cannot express, because `RBACMiddleware`
+# short-circuits the `/api/` and `/dashboard/` prefixes before any allowlist
+# is consulted — so an entry here would be dead weight for the viewer role.
+# Consumed only by the workspace-access classification (see
+# `sky/server/requests/workspace_access.py`), never by the viewer role.
+_WORKSPACE_READ_EXTRA_ENDPOINTS = [
+    # Cancelling a request touches the request queue, not any workspace.
+    # Requiring write on the active workspace would deny it to a user whose
+    # only accessible workspace is read-only.
+    {
+        'path': '/api/cancel',
+        'method': 'POST'
+    },
+]
+
+# Endpoints that must ALWAYS require write on the caller's active workspace,
+# regardless of the viewer allowlist. These create a resource in the active
+# workspace, so the active-workspace write gate is their
+# real authorization -- misclassifying one as read
+# would let a non-member create into a workspace they cannot write.
+# Consulted by `is_read_only_endpoint` (via `is_always_write_endpoint`) which
+# short-circuits to "write" on a match.
+_ALWAYS_WRITE_ENDPOINTS = [
+    {
+        'path': '/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_apply',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/up',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/update',
+        'method': 'POST'
+    },
+    {
+        'path': '/volumes/apply',
+        'method': 'POST'
+    },
+]
+
+_ALWAYS_WRITE_ENDPOINT_KEYS = frozenset(
+    (rule['path'], rule['method']) for rule in _ALWAYS_WRITE_ENDPOINTS)
+
+
+def is_always_write_endpoint(path: str, method: str) -> bool:
+    """Whether this endpoint must always require active-workspace write.
+
+    Exact (path, method) match against `_ALWAYS_WRITE_ENDPOINTS`. Used as a
+    hard guardrail so a viewer-allowlist entry (operator- or plugin-supplied)
+    can never relax one of these create endpoints to read.
+    """
+    return (path, method) in _ALWAYS_WRITE_ENDPOINT_KEYS
+
 
 # Define roles
 class RoleName(str, enum.Enum):
     ADMIN = 'admin'
     USER = 'user'
+    # Strictly read-only role.  Allowlist-based (see
+    # `_DEFAULT_VIEWER_ALLOWLIST`); not currently used by anything by
+    # default — operators opt in by setting
+    # `rbac.default_role: viewer` or by assigning specific users to
+    # this role.
+    VIEWER = 'viewer'
+
+
+# Roles from most to least privileged. Consulted wherever a decision has to be
+# made about a principal holding more than one role: take the least privileged,
+# never whichever came first -- `get_user_roles` does not order its result
+# deterministically, so the first entry is a coin flip.
+_ROLE_PRECEDENCE = (RoleName.ADMIN.value, RoleName.USER.value,
+                    RoleName.VIEWER.value)
 
 
 def get_supported_roles() -> List[str]:
     return [role_name.value for role_name in RoleName]
 
 
+def least_privileged_role(roles: List[str]) -> str:
+    """The least privileged of `roles`, ignoring names we do not know.
+
+    An unrecognized name must never win: it has no policy attached, which the
+    blocklist reads as allow-everything. With nothing recognizable left, falls
+    back to the most restricted role.
+    """
+    known = [role for role in roles if role in _ROLE_PRECEDENCE]
+    if not known:
+        return _ROLE_PRECEDENCE[-1]
+    return max(known, key=_ROLE_PRECEDENCE.index)
+
+
 def get_default_role() -> str:
-    return skypilot_config.get_nested(('rbac', 'default_role'),
-                                      default_value=RoleName.ADMIN.value)
+    """The role a newly provisioned user is seeded with.
+
+    Lowercased: the schema validates `default_role` with
+    `case_insensitive_enum`, which validates without normalizing, so
+    `default_role: Viewer` is a legal config. Returned as-is it would be seeded
+    as a role name nothing recognizes, and a principal holding an unrecognized
+    role is denied everywhere.
+    """
+    configured = skypilot_config.get_nested(('rbac', 'default_role'),
+                                            default_value=None)
+    # `or` rather than get_nested's default: an explicit `default_role:` with no
+    # value parses as None, and this runs on the login path.
+    return (configured or RoleName.ADMIN.value).lower()
+
+
+def get_viewer_allowlist(
+    plugin_allowlist: Optional[List[Dict[str, str]]] = None
+) -> List[Dict[str, str]]:
+    """Get the viewer role's endpoint allowlist.
+
+    Composed of:
+      1. `_DEFAULT_VIEWER_ALLOWLIST` (this module's constant).
+      2. Any rules under
+         `rbac.roles.viewer.permissions.allowlist` in
+         `~/.sky/config.yaml` (additive — operator-supplied entries
+         augment the default, they do not replace it).
+      3. Plugin-supplied rules from `BasePlugin.viewer_allowlist`.
+
+    Args:
+        plugin_allowlist: Optional list of `{path, method}` records
+            collected from loaded plugins.
+
+    Returns:
+        Combined list of `{path, method}` records.  Each record uses
+        Casbin `keyMatch2` path syntax (e.g. `/users/:name`, `/x/*`).
+    """
+    combined: List[Dict[str, str]] = list(_DEFAULT_VIEWER_ALLOWLIST)
+
+    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
+                                              default_value={})
+    viewer_cfg = config_roles.get(RoleName.VIEWER.value, {}) if isinstance(
+        config_roles, dict) else {}
+    extra = ((viewer_cfg.get('permissions') or {}).get('allowlist') or
+             []) if isinstance(viewer_cfg, dict) else []
+    for rule in extra:
+        if not isinstance(rule, dict):
+            logger.warning(f'Invalid viewer allowlist entry (not a dict): '
+                           f'{rule}')
+            continue
+        if 'path' not in rule or 'method' not in rule:
+            logger.warning(f'Viewer allowlist entry missing path/method: '
+                           f'{rule}')
+            continue
+        entry = {'path': rule['path'], 'method': rule['method']}
+        if entry not in combined:
+            combined.append(entry)
+
+    if plugin_allowlist:
+        for rule in plugin_allowlist:
+            entry = {'path': rule['path'], 'method': rule['method']}
+            if entry not in combined:
+                combined.append(entry)
+
+    return combined
+
+
+def get_read_only_endpoints(
+    plugin_allowlist: Optional[List[Dict[str, str]]] = None
+) -> List[Dict[str, str]]:
+    """Get the endpoints that only read, for workspace-access purposes.
+
+    This is the viewer role's allowlist (OSS defaults + operator config +
+    plugin ``BasePlugin.viewer_allowlist``) plus
+    `_WORKSPACE_READ_EXTRA_ENDPOINTS`. The viewer allowlist is exactly "the
+    endpoints a strictly-read-only role may call", so reusing it avoids
+    maintaining a second read/write classification of the same endpoints —
+    and it is the only declaration that plugins already populate for their
+    own endpoints.
+
+    An endpoint deliberately kept *off* the viewer allowlist is therefore
+    treated as a write here. That errs on the strict side, which is the safe
+    direction for a workspace the caller can only read.
+
+    Args:
+        plugin_allowlist: Optional list of `{path, method}` records
+            collected from loaded plugins.
+
+    Returns:
+        Combined list of `{path, method}` records, Casbin `keyMatch2` syntax.
+    """
+    combined = get_viewer_allowlist(plugin_allowlist=plugin_allowlist)
+    for rule in _WORKSPACE_READ_EXTRA_ENDPOINTS:
+        entry = {'path': rule['path'], 'method': rule['method']}
+        if entry not in combined:
+            combined.append(entry)
+    # Guardrail observability: an always-write endpoint should never be
+    # declared read. `is_read_only_endpoint` already forces these to write at
+    # match time (which also catches wildcard viewer entries), but flag an
+    # exact-match declaration so the operator/plugin author notices. We only
+    # warn here; the runtime short-circuit does the actual enforcement.
+    for entry in combined:
+        if is_always_write_endpoint(entry['path'], entry['method']):
+            logger.warning(
+                f'Viewer allowlist declares {entry["method"]} '
+                f'{entry["path"]} as read-only, but it is an always-write '
+                f'(create) endpoint; it will still require active-workspace '
+                f'write.')
+    return combined
+
+
+def restrict_config_to_admins() -> bool:
+    """Whether GET /workspaces/config is restricted to admins.
+
+    The config payload includes admin-only secrets (e.g. cloud provider
+    tokens), so non-admin reads are blocked by default. Admins can opt out by
+    setting ``rbac.restrict_config_to_admins: false`` (POST is always
+    admin-only regardless).
+    """
+    return bool(
+        skypilot_config.get_nested(('rbac', 'restrict_config_to_admins'),
+                                   default_value=True))
 
 
 def get_role_permissions(
@@ -105,6 +593,21 @@ def get_role_permissions(
                 'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
             }
         }
+
+    # Optionally block config reads for the user role (the payload exposes
+    # admin-only secrets). Off by default; opt in via
+    # rbac.restrict_config_to_admins. Applied here (rather than only to the
+    # default blocklist) so the restriction still holds when an admin has
+    # customized the user role in the config.
+    if restrict_config_to_admins():
+        user_cfg = config_permissions.get('user')
+        if isinstance(user_cfg, dict):
+            permissions = user_cfg.setdefault('permissions', {})
+            if isinstance(permissions, dict):
+                blocklist = permissions.setdefault('blocklist', [])
+                entry = {'path': '/workspaces/config', 'method': 'GET'}
+                if isinstance(blocklist, list) and entry not in blocklist:
+                    blocklist.append(entry)
 
     # Merge plugin rules into the appropriate roles
     if plugin_rules:

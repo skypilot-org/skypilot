@@ -34,13 +34,28 @@ DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
-    """Implementation of the AutostopService gRPC service."""
+    """Implementation of the AutostopService gRPC service.
+
+    Naming note: ``AutostopService`` predates the generalized
+    lifecycle-hooks framework — it is logically a "cluster metadata"
+    service now (autostop config + hooks list). The class name is
+    bound to the proto service name for gRPC framework dispatch, so
+    it stays autostop-named until the proto is renamed via a parallel
+    ``SetHooks`` RPC. See the proto file for the migration plan.
+    """
 
     def SetAutostop(  # type: ignore[return]
             self, request: autostopv1_pb2.SetAutostopRequest,
             context: grpc.ServicerContext
     ) -> autostopv1_pb2.SetAutostopResponse:
-        """Sets autostop configuration for the cluster."""
+        """Sets autostop configuration AND the lifecycle-hooks list.
+
+        Naming wart: the method is named ``SetAutostop`` for wire
+        compat but handles both the autostop config (idle_minutes /
+        wait_for / down) AND the cluster's lifecycle-hooks list
+        (request.hooks / request.clear_hooks). Renaming requires a
+        parallel ``SetHooks`` RPC in a future PR; see the proto file.
+        """
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
@@ -55,6 +70,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 down=request.down,
                 hook=hook,
                 hook_timeout=hook_timeout)
+            # v7+: full hooks list carried inline on the same RPC.
+            # `clear_hooks=True` means "drop any stored hooks" — needed
+            # because proto3 `repeated` has no presence, so an empty
+            # list on the wire is otherwise indistinguishable from
+            # "field omitted". Without this, a re-launch with no
+            # hooks would leave stale stored hooks firing forever.
+            if request.clear_hooks:
+                autostop_lib.set_hooks([])
+            elif request.hooks:
+                autostop_lib.set_hooks(
+                    autostop_lib.hooks_from_protobuf(request.hooks))
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -463,22 +489,31 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
                 job_ids=job_ids,
+                include_tree=(request.include_tree
+                              if request.HasField('include_tree') else False),
                 workspace_match=request.workspace_match
                 if request.HasField('workspace_match') else None,
                 name_match=request.name_match
                 if request.HasField('name_match') else None,
                 pool_match=request.pool_match
                 if request.HasField('pool_match') else None,
+                infra_match=request.infra_match
+                if request.HasField('infra_match') else None,
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
+                submitted_after=request.submitted_after
+                if request.HasField('submitted_after') else None,
+                submitted_before=request.submitted_before
+                if request.HasField('submitted_before') else None,
             )
             jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
             status_counts = job_queue['status_counts']
+            infra_options = job_queue['infra_options']
 
             jobs_info = []
             for job in jobs:
@@ -543,14 +578,27 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
-                    batch_completed_batches=job.get('batch_completed_batches'))
+                    batch_completed_batches=job.get('batch_completed_batches'),
+                    # Parent links (None for top-level jobs)
+                    root_job_id=job.get('root_job_id'),
+                    parent_job_id=job.get('parent_job_id'),
+                    parent_task_id=job.get('parent_task_id'),
+                    dynamic_task_index=job.get('dynamic_task_index'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
                 jobs=jobs_info,
                 total=total,
                 total_no_filter=total_no_filter,
-                status_counts=status_counts)
+                status_counts=status_counts,
+                # Tell the caller the infra filter was honoured. A server that
+                # predates the field leaves it false, which is how the caller
+                # tells an empty result apart from an unfiltered one.
+                infra_match_applied=True,
+                infra_options=infra_options,
+                # Same for include_tree: the caller cannot otherwise tell a
+                # tree answer from a root-only one.
+                include_tree_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))

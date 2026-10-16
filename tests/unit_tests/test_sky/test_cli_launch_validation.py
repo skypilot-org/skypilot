@@ -3,8 +3,13 @@
 These tests cover validation that should fire *before* any server call,
 rejecting obviously-malformed flag values with actionable errors.
 """
+import json
+import sys
+from unittest import mock
+
 from click import testing as cli_testing
 
+from sky import exceptions
 from sky.client.cli import command
 
 
@@ -18,6 +23,76 @@ def test_jobs_launch_num_jobs_must_be_positive():
             ['--pool', 'mypool', '--num-jobs', bad, 'echo', 'hi'])
         assert result.exit_code != 0
         assert '--num-jobs' in result.output
+
+
+def test_jobs_launch_num_jobs_allowed_without_pool():
+    # --num-jobs without --pool should be accepted: it submits N independent
+    # managed jobs, each on its own cluster. The CLI must not reject it with a
+    # usage error; it should reach the launch call with pool=None.
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.managed_jobs, 'launch') as mock_launch, \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait:
+        mock_wait.return_value = ([1, 2], None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--num-jobs', '2', '-y', 'echo', 'hi'])
+    assert 'Cannot specify --num-jobs without --pool' not in result.output
+    assert mock_launch.called
+    # launch(dag, name, pool, num_jobs, ...): pool positional is None,
+    # num_jobs positional is 2.
+    args, kwargs = mock_launch.call_args
+    assert args[2] is None  # pool
+    assert args[3] == 2  # num_jobs
+
+
+def test_jobs_launch_multi_job_output_without_pool_has_no_pool_hints():
+    # A multi-job launch without a pool must not emit pool-specific hints:
+    # no `value=None` dashboard filter, and no `sky jobs cancel --pool None`.
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.managed_jobs, 'launch'), \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait, \
+            mock.patch.object(command.server_common, 'is_api_server_local',
+                              return_value=False), \
+            mock.patch.object(command.server_common, 'get_server_url',
+                              return_value='https://server'), \
+            mock.patch.object(command.server_common, 'get_dashboard_url',
+                              side_effect=lambda url, starting_page:
+                              f'https://server/dashboard/{starting_page}'):
+        mock_wait.return_value = ([1, 2, 3], None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--num-jobs', '3', '-y', 'echo', 'hi'])
+    assert result.exit_code == 0, result.output
+    # No pool-specific output.
+    assert 'property=pool' not in result.output
+    assert 'value=None' not in result.output
+    assert '--pool None' not in result.output
+    assert 'in the pool' not in result.output
+    # Non-pool variants are present instead.
+    assert 'Show all jobs:' in result.output
+
+
+def test_jobs_launch_many_jobs_output_collapses_ids_and_uses_placeholder():
+    # With many jobs, the submitted-IDs line collapses contiguous IDs into a
+    # range, and the cancel hint uses a `<job-ids>` placeholder rather than
+    # dumping every id.
+    runner = cli_testing.CliRunner()
+    job_ids = list(range(2711, 3511))  # 800 contiguous ids, like the report
+    with mock.patch.object(command.managed_jobs, 'launch'), \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait, \
+            mock.patch.object(command.server_common, 'is_api_server_local',
+                              return_value=False), \
+            mock.patch.object(command.server_common, 'get_server_url',
+                              return_value='https://server'), \
+            mock.patch.object(command.server_common, 'get_dashboard_url',
+                              return_value='https://server/dashboard/jobs'):
+        mock_wait.return_value = (job_ids, None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--num-jobs', '800', '-y', 'echo', 'hi'])
+    assert result.exit_code == 0, result.output
+    # Submitted IDs collapse to a single range.
+    assert 'Jobs submitted with IDs: 2711-3510' in result.output
+    # The cancel hint is a placeholder, not the full id list.
+    assert 'sky jobs cancel <job-ids>' in result.output
+    assert '2711 2712 2713' not in result.output
 
 
 def test_env_file_must_exist():
@@ -38,3 +113,90 @@ def test_secret_file_must_exist():
         ['--secret-file', '/no/such/secret/file.env', 'echo', 'hi'])
     assert result.exit_code != 0
     assert '/no/such/secret/file.env' in result.output
+
+
+def _launch_for_output(args, job_ids, capfd, config_log=None):
+    runner = cli_testing.CliRunner(mix_stderr=False)
+
+    def apply_cli_config(values):
+        del values  # Unused.
+        if config_log is not None:
+            sys.__stdout__.write(config_log)
+        return {}
+
+    with mock.patch.object(command.managed_jobs, 'launch'), \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait, \
+            mock.patch.object(command.managed_jobs, 'tail_logs') as tail, \
+            mock.patch.object(command.flags.skypilot_config,
+                              'apply_cli_config',
+                              side_effect=apply_cli_config):
+        mock_wait.return_value = (job_ids, None)
+        result = runner.invoke(command.jobs_launch, args)
+    return result, tail, capfd.readouterr()
+
+
+def test_jobs_launch_output_id_prints_only_the_ids(capfd):
+    result, tail, captured = _launch_for_output(
+        ['-y', '-o', 'id', 'echo', 'hi'], 7, capfd)
+    assert result.exit_code == 0, result.stderr
+    assert captured.out == '7\n'
+    assert result.stdout == ''
+    # Implies --detach-run.
+    tail.assert_not_called()
+    _, _, captured = _launch_for_output(
+        ['-y', '--num-jobs', '2', '-o', 'id', 'echo', 'hi'], [7, 8], capfd)
+    assert captured.out == '7\n8\n'
+
+
+def test_jobs_launch_output_json(capfd):
+    result, _, captured = _launch_for_output(['-y', '-o', 'json', 'echo', 'hi'],
+                                             7, capfd)
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(captured.out) == {'job_ids': [7]}
+
+
+def test_jobs_launch_output_covers_option_callbacks(capfd):
+    """--config is applied in a callback, before the command body runs."""
+    result, _, captured = _launch_for_output([
+        '--config', 'active_workspace=default', '-y', '-o', 'json', 'echo', 'hi'
+    ],
+                                             7,
+                                             capfd,
+                                             config_log='config debug log\n')
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(captured.out) == {'job_ids': [7]}
+    assert 'config debug log' in captured.err
+
+
+def test_jobs_launch_output_rejects_async():
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(command.jobs_launch,
+                           ['-y', '--async', '-o', 'id', 'echo', 'hi'])
+    assert result.exit_code != 0
+    assert '--output cannot be used with --async' in result.output
+
+
+def test_stdout_to_stderr_covers_streams_bound_to_stdout(capfd):
+    """Logging handlers hold the original sys.stdout, not the current one."""
+    with command._stdout_to_stderr() as original:  # pylint: disable=protected-access
+        print('printed')
+        sys.__stdout__.write('held\n')
+        original.write('result\n')
+    print('after')
+    captured = capfd.readouterr()
+    assert captured.out == 'result\nafter\n'
+    assert 'printed' in captured.err and 'held' in captured.err
+
+
+def test_cancel_on_a_malformed_controller_name_shows_the_hint():
+    """The server rejects every controller-prefixed name; the CLI's hint for
+    that rejection must not trip over a suffix that is not a valid hash."""
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.sdk,
+                           'cancel',
+                           side_effect=exceptions.NotSupportedError('no')):
+        result = runner.invoke(command.cancel,
+                               ['sky-jobs-controller-a_b', '-a', '-y'])
+    assert not isinstance(result.exception, AssertionError), result.exception
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 2  # click.UsageError

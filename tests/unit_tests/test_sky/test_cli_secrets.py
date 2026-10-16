@@ -271,12 +271,15 @@ def test_null_secrets_override_with_cli():
         os.unlink(yaml_file)
 
 
-def test_null_secrets_without_cli_override_fails():
-    """Test that null secrets without CLI override fail appropriately."""
+def test_null_secrets_without_cli_override_become_managed_refs():
+    """Null secrets without a CLI override parse into managed secret refs.
+
+    The value is resolved at launch time (CLI ``--secret`` override or a
+    managed secrets provider) instead of failing during parsing.
+    """
     import os
     import tempfile
 
-    import pytest
     import yaml
 
     from sky.client.cli.command import (
@@ -284,8 +287,8 @@ def test_null_secrets_without_cli_override_fails():
 
     # Create YAML with null secrets
     yaml_content = {
-        'name': 'test-null-fail',
-        'run': 'echo "Should fail"',
+        'name': 'test-null-managed-ref',
+        'run': 'echo "resolved at launch"',
         'secrets': {
             'API_KEY': None
         }
@@ -297,11 +300,12 @@ def test_null_secrets_without_cli_override_fails():
         yaml_file = f.name
 
     try:
-        # Should fail without CLI override
-        with pytest.raises(ValueError,
-                           match="Secret variable 'API_KEY' is None"):
-            _make_task_or_dag_from_entrypoint_with_overrides(
-                entrypoint=(yaml_file,), secret=None)
+        task_obj = _make_task_or_dag_from_entrypoint_with_overrides(
+            entrypoint=(yaml_file,), secret=None)
+        assert task_obj.secrets == {}
+        refs = task_obj.managed_secret_refs
+        assert len(refs) == 1
+        assert refs[0].name == 'API_KEY'
     finally:
         os.unlink(yaml_file)
 

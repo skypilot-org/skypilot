@@ -43,9 +43,41 @@ export const BASE_PATH = getBasePath();
 export const TIMEOUT = 10000;
 export const API_URL = '/api/v1';
 export const WS_API_URL = API_URL.replace(/^http/, 'ws');
-// Custom events used to coordinate plugin loading with the layout shell.
-// layout.jsx listens for these to avoid flashing the fallback top bar before
-// a navigation plugin (e.g. sidebar) has had a chance to register.
+
+// The SkyPilot API version this dashboard advertises, sent on every outgoing
+// request via the `X-SkyPilot-API-Version` header so the server can identify
+// the dashboard as a contemporary (non-legacy) client and run the workspace
+// resolver / surface new error types like `WorkspaceAmbiguousError`.
+//
+// This MUST equal sky/server/constants.py:API_VERSION. The dashboard ships
+// with the server, so the two bump together (see the backward-compatibility
+// guideline). It is a build-time hardcode rather than the server's runtime
+// version on purpose: an already-loaded older dashboard kept across a server
+// upgrade then still reports its own build's version, not the new server's, so
+// it can't over-report support for wire formats its code doesn't handle.
+// Enforced by tests/unit_tests/test_api_version_consistency.py.
+export const CLIENT_API_VERSION = '67';
+// Header names expected by the server's APIVersionMiddleware. Mirrors
+// sky/server/constants.py:API_VERSION_HEADER / VERSION_HEADER.
+// The middleware (versions._check_version_compatibility) requires BOTH
+// headers to be present — if either is missing it returns None and
+// does NOT populate the `_remote_api_version` ContextVar, which then
+// leaves prepare_request_async stamping `client_api_version=None` on
+// the body and the worker-side resolver gate treats the request as an
+// old client.
+export const API_VERSION_HEADER = 'X-SkyPilot-API-Version';
+export const VERSION_HEADER = 'X-SkyPilot-Version';
+// Readable-version companion of CLIENT_API_VERSION. Python SDK sends
+// `{sky.__version__};{sky.__commit__}` here; the dashboard does not
+// know its own build version at JS-runtime, so we send a self-
+// identifying placeholder that the server parses but doesn't depend on
+// for correctness (only used to format upgrade-hint messages).
+export const CLIENT_VERSION = 'dashboard;';
+// Custom events used to coordinate plugin loading with the app shell.
+// _app.js waits for EVENT_PLUGINS_LOADED before building the tree, so that
+// slots plugins register into are already populated on first render.
+// EVENT_NAVIGATION_READY is dispatched by a navigation plugin once it has
+// registered; it is kept for plugins that want to observe that point.
 export const EVENT_NAVIGATION_READY = 'skydashboard:navigation-ready';
 export const EVENT_PLUGINS_LOADED = 'skydashboard:plugins-loaded';
 
@@ -90,3 +122,46 @@ export const COMMON_GPUS = [
   'V100',
   'V100-32GB',
 ];
+
+/**
+ * Shared fetch args for the cross-page managed-jobs summary cache entry
+ *
+ * Lives here, in the module with no imports of its own, rather than next to
+ * the fetch it configures: `data/connectors/jobs` sits on an import cycle
+ * (jobs -> plugins/dataEnhancement -> plugins/PluginProvider ->
+ * lib/cache-preloader -> jobs), and a `const` exported from a module that is
+ * re-entered mid-evaluation is in its temporal dead zone for the re-entrant
+ * importer. The functions crossing that cycle are hoisted declarations and so
+ * are unaffected; this value was not.
+ * (the `getManagedJobsForOtherPages` preload key, also read directly by the
+ * infra/users/workspaces pages).
+ *
+ * Every reader and the preloader MUST use this exact object so the cache key
+ * (function name + JSON.stringify(args), see lib/cache.js) stays shared.
+ *
+ * `fields` is the union of what those consumers actually read (plus the
+ * request fields the connector transform derives them from: `infra` and
+ * `resources_str_full` come from cloud/region/cluster_resources*). Without
+ * the trim, this fetch returns every non-finished job with its full inline
+ * YAML — tens of MB at 10k+ pending jobs — and each visit both writes that
+ * blob into the API server's requests DB and reads it back out through a
+ * per-process serialized reader, which is measurably what makes the
+ * dashboard's critical-path /api/get calls (and hence perceived page load)
+ * slow under concurrent use.
+ */
+export const MANAGED_JOBS_SUMMARY_ARGS = Object.freeze({
+  allUsers: true,
+  skipFinished: true,
+  fields: Object.freeze([
+    'job_id',
+    'job_name',
+    'status',
+    'user_hash',
+    'workspace',
+    'cloud',
+    'region',
+    'accelerators',
+    'cluster_resources',
+    'cluster_resources_full',
+  ]),
+});

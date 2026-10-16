@@ -29,6 +29,26 @@ tests:
           path: data["prometheus.yml"]
           pattern: "custom-name-api-service\\.NAMESPACE\\.svc\\.cluster\\.local:9090"
 
+  - it: should NOT render the endpoints-metrics scrape job by default
+    set:
+      prometheus.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["prometheus.yml"]
+          pattern: "/endpoints-metrics"
+
+  - it: should render the endpoints-metrics scrape job when scrapeEndpointMetrics is enabled
+    set:
+      prometheus.enabled: true
+      prometheus.scrapeEndpointMetrics: true
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'skypilot-api-server-endpoints-metrics'"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "/endpoints-metrics"
+
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
 suite: grafana_ingress_annotations_test

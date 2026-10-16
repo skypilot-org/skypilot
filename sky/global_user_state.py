@@ -7,14 +7,17 @@ Concepts:
   interact with a cluster.
 """
 import asyncio
+import contextlib
 import enum
+import functools
 import json
 import os
 import pickle
 import re
 import time
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Set, Tuple,
+                    Union)
 import uuid
 
 import sqlalchemy
@@ -28,16 +31,20 @@ from sqlalchemy.ext import declarative
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import launch_phases
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import retries as db_retries
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -51,9 +58,20 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+# Matches the event retentions above so the launch timeline and the events it
+# sits alongside expire together by default.
+DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS = 30 * 24.0
+# How long an attempt may stay open before it is treated as abandoned. Well
+# past any provision timeout, because a launch can legitimately stay open for
+# hours and must not be swept out from under itself.
+ABANDONED_LAUNCH_ATTEMPT_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
-MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
+# How often the cluster-event retention daemon wakes up. Fixed, and
+# deliberately independent of the retention windows above: events become
+# eligible for deletion continuously, so the interval decides how much
+# work accumulates between passes, not how long events are kept.
+CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
     # sqlite
@@ -79,6 +97,12 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('password', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('type', sqlalchemy.Text, server_default=None),
+    # User-set default workspace; null when unset. Resolution and RBAC
+    # validation are handled in sky/workspaces/; this column is the
+    # persisted value only.
+    sqlalchemy.Column('preferred_workspace',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -117,8 +141,15 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('provision_log_path',
                       sqlalchemy.Text,
                       server_default=None),
+    # Released versions keep their (port, pid) skylet tunnel tuple here and
+    # share the database with this version during a rolling update.
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
+                      server_default=None),
+    # JSON {owner_id: [port, pid]} of the skylet tunnels opened by each API
+    # server host.
+    sqlalchemy.Column('skylet_ssh_tunnels',
+                      sqlalchemy.JSON(none_as_null=True),
                       server_default=None),
     # Infrastructure columns for efficient filtering
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
@@ -163,6 +194,16 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('creation_yaml', sqlalchemy.Text, server_default=None),
+    # Set only while the volume is being resized to a size it does not have
+    # yet; `handle`'s size stays the capacity that exists. See
+    # models.VolumeResizeStatus.
+    sqlalchemy.Column('resize_status', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('resize_target_size',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # What the cloud said about the resize, in its own words. What is shown to
+    # the user is built from this in volume_list, not stored.
+    sqlalchemy.Column('resize_message', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -212,6 +253,13 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Whether the cluster was launched by a controller (managed job or
+    # service). Mirrors the `is_managed` column on the clusters table so that
+    # history queries (e.g. the dashboard's cost report) can filter out
+    # controller-backed clusters even after they are terminated, since at that
+    # point the clusters table row is gone and the join can no longer supply
+    # the flag.
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -233,6 +281,50 @@ class ClusterEventType(enum.Enum):
     # LAUNCHING-state badge tooltip on the dashboard.
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
 
+    # A boundary of a launch that has been passed, carrying how long the phase
+    # it closes took. Kept apart from LAUNCH_PROGRESS above, which is consumed
+    # latest-wins as a managed job's `details` column -- "what is this launch
+    # waiting on *now*". A row saying a wait has ended is by construction not
+    # that, and would sit in that column as a stale answer for the rest of the
+    # launch.
+    LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
+
+
+# Which retention window each event type is swept under.
+#
+# The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
+# so a type with no entry here is never swept and its rows are retained
+# forever. That failure is silent: no error, no red test, just a table that
+# grows. Listing the types here rather than as calls in the daemon lets
+# `test_every_event_type_has_a_retention_window` assert the mapping covers the
+# enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
+# was.
+#
+# Keys are the config option each window is read from; see
+# `cluster_event_retention_daemon`.
+CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
+    'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
+    # Short-lived observability, of no business-record value once the launch is
+    # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
+    # record of a boundary, but only useful for as long as anyone is looking at
+    # that launch.
+    'cluster_debug_event_retention_hours': (
+        ClusterEventType.DEBUG,
+        ClusterEventType.LAUNCH_PROGRESS,
+        ClusterEventType.LAUNCH_MILESTONE,
+    ),
+    'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
+}
+
+# Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
+# to INIT because a status refresh found it in an abnormal state -- e.g. a node
+# terminated/preempted, the ray cluster is unhealthy, or a pod is OOMKilled
+# (see backend_utils._refresh_cluster_status). INIT is overloaded: a cluster is
+# INIT both while it is actively launching and while it is stuck/broken. The
+# dashboard uses this prefix to tell the two apart (actively 'launching' vs
+# 'unhealthy') so it can show the underlying problem instead of a misleading
+# "LAUNCHING". Keep in sync with the event reason written in backend_utils.
+ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
@@ -250,6 +342,125 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # The primary key is (cluster_hash, reason, transitioned_at), but the two
+    # readers that have to survive a cluster's teardown look events up by
+    # `name` instead -- see get_latest_cluster_events and
+    # get_cluster_events_by_name. Without this they scan the whole table.
+    sqlalchemy.Index('ix_cluster_events_name_type', 'name', 'type',
+                     'transitioned_at'),
+)
+
+# One row per provisioning attempt, recording the milestones a launch passes
+# through so launch latency can be broken down after the fact.
+#
+# Why a table rather than in-memory timers: a launch that parks on an external
+# condition raises ExecutionPausedError, which unwinds bulk_provision entirely
+# and resumes as a fresh call in a possibly different executor worker.
+# Milestones held in memory do not survive that.
+#
+# Every segment is a subtraction between two persisted timestamps, so whoever
+# closes a segment can read the opening one back instead of carrying state.
+#
+# attempt_id is minted per real provisioning attempt (one per failover
+# iteration). A pause/resume continues the existing row -- the resources are
+# kept, not torn down, so it is one attempt.
+
+# Attempts the metrics daemon still has to turn into observations: finished,
+# and not yet claimed. Written once and used twice -- as the claim query's
+# WHERE and as its index's predicate -- because PostgreSQL matches a partial
+# index only when the two agree, and two hand-kept copies of a predicate are
+# how they come to disagree.
+UNOBSERVED_ATTEMPT_PREDICATE = ('outcome IS NOT NULL AND '
+                                'metrics_observed_at IS NULL')
+
+launch_attempt_table = sqlalchemy.Table(
+    'launch_attempts',
+    Base.metadata,
+    sqlalchemy.Column('attempt_id', sqlalchemy.Text, primary_key=True),
+    # Not a key: failover reuses the hash (the clusters row is kept), while a
+    # teardown + relaunch mints a new one. Neither per-attempt nor per-job
+    # stable -- see attempt_seq for ordering.
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text),
+    # Display only. A name outlives the cluster it named, so it must never be
+    # used to group attempts or to find a row to resume.
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text),
+    # Recorded so that provisioning code holding only the on-cloud name (the
+    # one stamped on pods) can stamp a milestone without resolving it back.
+    sqlalchemy.Column('cluster_name_on_cloud',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # The request whose execution opened this attempt. This is what makes
+    # resuming exact rather than a guess: a pause re-queues the *same* request,
+    # so an open row under the same request_id is this launch resuming, while a
+    # row left behind by a crashed earlier launch carries a different one and
+    # is never adopted.
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # Monotonic within cluster_name. See open_launch_attempt for why the name
+    # rather than the hash.
+    sqlalchemy.Column('attempt_seq', sqlalchemy.Integer),
+    # Recorded on the row rather than joined from the clusters table, which is
+    # deleted on teardown -- the attempt outlives the cluster it provisioned.
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    # The queue name recorded by record_launch_queue_for_cluster, if any.
+    # NULL otherwise. Used only to label the admission wait.
+    sqlalchemy.Column('queue', sqlalchemy.Text, server_default=None),
+    # Milestones, epoch seconds. Named cloud-agnostically: on Kubernetes
+    # instances_requested is pod creation and instances_ready is all pods
+    # running; on VM clouds they are the create call and the instances being
+    # up. admitted stays NULL unless LaunchMilestone.ADMITTED is stamped.
+    sqlalchemy.Column('provision_start', sqlalchemy.Float),
+    sqlalchemy.Column('instances_requested',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('admitted', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('instances_ready', sqlalchemy.Float, server_default=None),
+    # NULL while in flight. 'succeeded' | 'failed' | 'abandoned', where
+    # abandoned means the writing process died and the startup sweep closed the
+    # row -- only that case counts as a lost metric.
+    sqlalchemy.Column('outcome', sqlalchemy.Text, server_default=None),
+    # Set when the segments of this row have been turned into metric
+    # observations, so a row is never observed twice.
+    sqlalchemy.Column('metrics_observed_at',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # Resume lookup, attempt_seq allocation, the in-flight milestone lookup,
+    # and the per-cluster timeline. cluster_hash is not indexed: a timeline
+    # scoped to one incarnation filters these few rows by hash.
+    sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
+                     'attempt_seq'),
+    # Retention sweep. Without it the sweep full-scans on every tick.
+    sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
+    # The milestone writers hold the on-cloud name (it is what is stamped on
+    # the pods) and look up the in-flight attempt by either name. Without this
+    # that branch of the OR cannot be indexed, so the whole lookup degrades to
+    # a table scan: 21ms against 4us over 200k rows, several times per launch,
+    # growing with the retention window. The extra write cost is ~2us per
+    # insert, and there is one insert per attempt against several lookups.
+    sqlalchemy.Index('ix_launch_attempts_cluster_on_cloud',
+                     'cluster_name_on_cloud'),
+    # The abandoned sweep, which runs once a minute and in the steady state
+    # finds nothing. On provision_start alone it still had to read every row
+    # older than the bound -- in the steady state, nearly the table -- before
+    # discovering that none were open. Leading with outcome makes it a seek
+    # into the few in-flight rows: 120ms against nothing measurable over 200k
+    # rows, once a minute, inside a write transaction that blocks other
+    # writers for its duration.
+    sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
+    # The metrics daemon's claim, also once a minute. Its predicate is
+    # "closed but not yet observed", and `ix_launch_attempts_open` serves only
+    # the first half: leading on `outcome IS NOT NULL` is nearly the whole
+    # table in the steady state, every row of which is then filtered on
+    # metrics_observed_at.
+    #
+    # Partial, and that is the point: rows leave this index as they are
+    # observed, so in the steady state it holds only the last minute's work
+    # rather than the job history. The predicate has to be repeated in the
+    # index for PostgreSQL to match it to the query.
+    sqlalchemy.Index(
+        'ix_launch_attempts_unobserved',
+        'provision_start',
+        postgresql_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),
+        sqlite_where=sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE)),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -291,6 +502,44 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('config_value', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
+)
+
+# The task YAML and entrypoint command of each job submitted to a cluster
+# (`sky launch` / `sky exec`), for showing a job's spec on the dashboard.
+#
+# Kept on the API server rather than in the cluster's skylet job table so that
+# reading one job's spec does not go through the cluster (the skylet's job
+# queue returns every job's row at once), and so that adding it needs no change
+# to the skylet's schema, which older skylet versions write to positionally.
+#
+# Keyed by cluster_hash rather than name: job ids restart at 1 when a cluster
+# with the same name is relaunched after `sky down`. Rows are dropped when the
+# cluster is terminated, and only the last MAX_JOB_SPECS_PER_CLUSTER job ids of
+# a cluster are kept, so a long-lived cluster that runs many `sky exec`s does
+# not grow the table without bound.
+cluster_job_spec_table = sqlalchemy.Table(
+    'cluster_job_specs',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('task_yaml', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
+)
+# A task YAML is typically a few KB, so this is a few MB per cluster at most.
+MAX_JOB_SPECS_PER_CLUSTER = 1000
+
+# Renewable leases for leader election across server processes. Each row is
+# one singleton role: ``holder`` is the current leader's identity, ``epoch`` is
+# a monotonic fencing token bumped on every change of holder, and
+# ``expires_at`` is the server-side deadline by which the holder must renew or
+# be taken over. See ``sky.utils.leader_election.PgLeaseElector``.
+leader_leases_table = sqlalchemy.Table(
+    'leader_leases',
+    Base.metadata,
+    sqlalchemy.Column('lock_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('holder', sqlalchemy.Text),
+    sqlalchemy.Column('epoch', sqlalchemy.BigInteger),
+    sqlalchemy.Column('expires_at', sqlalchemy.DateTime(timezone=True)),
 )
 
 
@@ -364,9 +613,164 @@ def _sqlite_supports_returning() -> bool:
         return (major > 3) or (major == 3 and minor >= 35)
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
+def _supports_returning() -> bool:
+    """Whether this backend can return the rows a statement just changed.
+
+    Not the same question as `_sqlite_supports_returning`, which answers "is
+    this SQLite, and new enough" and so returns False on PostgreSQL -- where
+    RETURNING has existed since 8.2. Asking that one here would send every
+    PostgreSQL deployment, the ones with the tables large enough for this to
+    matter, down the fallback.
+
+    Only SQLite needs asking, and only about its own version: RETURNING there
+    arrived in 3.35, and SQLAlchemy exposes it from 2.0, which
+    `dependencies.py` already requires.
+
+    True for anything else because `SQLAlchemyDialect` models exactly two
+    backends -- not because not-SQLite implies RETURNING. A third would fail
+    loudly here, with a CompileError out of the claim, and would have to be
+    taught the other dialect branches in this module first; this is one of the
+    places to look when adding one.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        return _sqlite_supports_returning()
+    return True
+
+
 _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
+
+# Server-side bounds on the `users` upsert transaction (on SQLite, see
+# `_user_upsert_session`).
+#
+# The upsert runs on the request authentication path for every request, on
+# the API server's bounded auth thread pool, under a client-side deadline
+# (`AUTH_DB_TIMEOUT_SECONDS` in `sky.server.auth.db_lookup`; not imported
+# here because this module is not server-only). That deadline frees the
+# caller but not the thread: a thread that waits on the users row lock, or a
+# session that stops talking inside its open transaction, keeps its thread
+# and its connection for as long as the database allows. One orphaned
+# session holding a single users row then pins every later upsert of that
+# row until the pool is exhausted.
+#
+# The three timeouts are therefore derived from that same deadline, read
+# through `db_utils.get_auth_db_timeout_seconds()` (the one place the
+# configured value is parsed), as these percentages of it. They MUST stay at
+# or below the deadline so the database gives up before (or as) the caller
+# does and the thread is released:
+# - lock_timeout (78 %) < statement_timeout (80 %), so a row-lock wait
+#   reports the distinct "lock not available" error (SQLSTATE 55P03) instead
+#   of a generic statement cancel (57014);
+# - statement_timeout (80 %) bounds each statement itself, with a little
+#   headroom under the deadline for the round trip;
+# - idle_in_transaction_session_timeout (100 %) terminates a session that
+#   goes quiet inside the transaction (the orphan case), which releases the
+#   row lock it holds. The terminated session's own next statement fails:
+#   with SQLSTATE 25P03 if the client reads the FATAL, otherwise as a closed
+#   connection (the FATAL was sent while nobody was reading).
+# At the default 5 s deadline these are 3900 / 4000 / 5000 ms.
+#
+# `SET LOCAL` is transaction-scoped: it applies to this transaction only and
+# resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
+# connection pooler and leaks nothing into later transactions on the same
+# server connection.
+_USER_UPSERT_LOCK_TIMEOUT_PERCENT = 78
+_USER_UPSERT_STATEMENT_TIMEOUT_PERCENT = 80
+_USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT = 100
+
+
+def _user_upsert_timeouts_ms() -> Tuple[int, int, int]:
+    """The users upsert's server-side timeouts, in whole milliseconds.
+
+    Returns ``(lock_timeout, statement_timeout,
+    idle_in_transaction_session_timeout)``, each the corresponding
+    percentage of the configured auth deadline (see the note above).
+    Computed per call: the deadline lookup is one environment read, which is
+    nothing next to the statements it bounds, and it lets tests vary the
+    deadline. The read sees the server's own setting only: the variable is
+    stripped from client request payloads and from the per-request
+    environment overlay (`executor.override_request_env_and_config`) before
+    the request worker calls this.
+
+    Raises:
+        ValueError: if the configured deadline is not a positive number (see
+            `db_utils.get_auth_db_timeout_seconds`), or is so small that the
+            three values would not be distinct, ordered, positive integers.
+            Postgres treats a timeout of ``0`` as *disabled*, so a rounding
+            to zero must never reach the database.
+    """
+    deadline_ms = db_utils.get_auth_db_timeout_seconds() * 1000
+    lock_ms = round(deadline_ms * _USER_UPSERT_LOCK_TIMEOUT_PERCENT / 100)
+    statement_ms = round(deadline_ms * _USER_UPSERT_STATEMENT_TIMEOUT_PERCENT /
+                         100)
+    idle_ms = round(deadline_ms *
+                    _USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT / 100)
+    if not 0 < lock_ms < statement_ms < idle_ms:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS} is too small '
+            f'({deadline_ms} ms) to derive distinct server-side timeouts for '
+            f'the users upsert (got lock_timeout={lock_ms}ms, '
+            f'statement_timeout={statement_ms}ms, '
+            f'idle_in_transaction_session_timeout={idle_ms}ms).')
+    return lock_ms, statement_ms, idle_ms
+
+
+def _bound_user_upsert_transaction(session: orm.Session) -> None:
+    """Issue the `SET LOCAL` timeouts for the users upsert transaction.
+
+    Must run before any other statement in the session: the Session
+    auto-begins its transaction on the first statement, and `SET LOCAL`
+    only takes effect inside that transaction. Issued explicitly through
+    the Session (not from an engine event hook) so a failure here goes
+    through SQLAlchemy's normal error handling and reaches the caller as a
+    regular DB error.
+    """
+    lock_ms, statement_ms, idle_ms = _user_upsert_timeouts_ms()
+    for parameter, value_ms in (
+        ('lock_timeout', lock_ms),
+        ('statement_timeout', statement_ms),
+        ('idle_in_transaction_session_timeout', idle_ms),
+    ):
+        # SET does not accept bind parameters; the values are integers
+        # derived from a validated setting, never user input.
+        session.execute(
+            sqlalchemy.text(f'SET LOCAL {parameter} = \'{value_ms}ms\''))
+
+
+@contextlib.contextmanager
+def _user_upsert_session(
+        engine: sqlalchemy.engine.Engine) -> Iterator[orm.Session]:
+    """A session for the users upsert, bounded as described above.
+
+    SQLite has no `SET LOCAL`. There the lock_timeout value bounds the
+    connection's `PRAGMA busy_timeout` instead. That setting belongs to the
+    pooled connection, so the session runs on a connection checked out here,
+    which gets its previous value back before it returns to the pool.
+    """
+    if engine.dialect.name != db_utils.SQLAlchemyDialect.SQLITE.value:
+        with orm.Session(engine) as session:
+            if (engine.dialect.name ==
+                    db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                # First statements of the transaction; see the constants above.
+                _bound_user_upsert_transaction(session)
+            yield session
+        return
+    lock_ms, _, _ = _user_upsert_timeouts_ms()
+    with engine.connect() as conn:
+        # The raw connection, so the PRAGMA neither begins a transaction nor
+        # depends on the state of a failed one.
+        dbapi_conn = conn.connection.dbapi_connection
+        assert dbapi_conn is not None
+        previous_ms = dbapi_conn.execute('PRAGMA busy_timeout').fetchone()[0]
+        dbapi_conn.execute(f'PRAGMA busy_timeout = {lock_ms}')
+        try:
+            with orm.Session(bind=conn) as session:
+                yield session
+        finally:
+            dbapi_conn.execute(f'PRAGMA busy_timeout = {previous_ms}')
 
 
 @metrics_lib.time_me
@@ -388,7 +792,7 @@ def add_or_update_user(
     created_at = user.created_at
     if created_at is None:
         created_at = int(time.time())
-    with orm.Session(engine) as session:
+    with _user_upsert_session(engine) as session:
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
             existing_user = session.query(user_table).filter(
@@ -418,6 +822,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                 )
             result = session.execute(insert_stmnt)
 
@@ -447,6 +852,7 @@ def add_or_update_user(
                         user_table.c.password,
                         user_table.c.created_at,
                         user_table.c.type,
+                        user_table.c.preferred_workspace,
                     )
 
                 result = session.execute(update_stmnt)
@@ -467,6 +873,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -503,6 +910,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -520,6 +928,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -541,6 +950,7 @@ def get_user(user_id: str) -> Optional[models.User]:
         password=row.password,
         created_at=row.created_at,
         user_type=row.type,
+        preferred_workspace=row.preferred_workspace,
     )
 
 
@@ -557,6 +967,7 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     }
 
@@ -575,6 +986,7 @@ def get_user_by_name(username: str) -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -591,6 +1003,7 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
             name=row.name,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -615,8 +1028,30 @@ def get_all_users() -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
+
+
+@db_retries.retry
+@metrics_lib.time_me
+def set_user_preferred_workspace(user_id: str,
+                                 workspace: Optional[str]) -> bool:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    This is the raw DB write; RBAC validation that the user has access to the
+    target workspace MUST be done by the caller in sky/workspaces/ before
+    invoking this. Returns True if a row was updated, False if the user_id
+    does not exist.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(
+                    preferred_workspace=workspace))
+        session.commit()
+        return result.rowcount > 0
 
 
 @metrics_lib.time_me
@@ -891,6 +1326,7 @@ def add_or_update_cluster(cluster_name: str,
             region=region,
             zone=zone,
             node_names=node_names,
+            is_managed=int(is_managed),
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -913,6 +1349,12 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
+                # Intentionally do not update is_managed here (mirrors the
+                # clusters table above, which only sets it on insert).
+                # add_or_update_cluster is called multiple times during a
+                # managed-job launch and is_managed defaults to False on
+                # subsequent calls; overwriting it would reset the flag to 0
+                # and leak managed-job clusters into the history view.
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -920,6 +1362,7 @@ def add_or_update_cluster(cluster_name: str,
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
@@ -1073,36 +1516,99 @@ def _get_last_or_terminal_cluster_event_multiple(
 
 
 def get_last_cluster_event_of_type_multiple(
-        cluster_hashes: Set[str],
-        event_type: ClusterEventType) -> Dict[str, str]:
-    """Returns the latest event of `event_type` per cluster_hash.
+    cluster_hashes: Set[str],
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
+) -> Dict[str, str]:
+    """Returns the newest event of the given type(s) per cluster_hash.
 
-    Mirrors _get_last_or_terminal_cluster_event_multiple but filters to a
-    single event type (no TERMINAL-priority ordering).
+    ``event_type`` may be a single ClusterEventType or a list; when a list is
+    given, the single most-recent event across all listed types is returned per
+    cluster (ordered by transitioned_at). Mirrors
+    _get_last_or_terminal_cluster_event_multiple but without its TERMINAL-first
+    priority ordering. Clusters with no matching event are omitted.
+    """
+    if not cluster_hashes:
+        return {}
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
+    type_values = [t.value for t in event_types]
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, str] = {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # Chunk the IN clause to stay under SQLite's bind-parameter limit;
+        # see _CLUSTER_IN_QUERY_CHUNK_SIZE. Each chunk is partitioned by
+        # cluster_hash, so ranking per chunk is exact.
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
+
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.reason,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).subquery()
+
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.reason,
+            ).filter(ranked.c.rn == 1).all()
+            result.update({row.cluster_hash: row.reason for row in rows})
+
+    return result
+
+
+def get_last_status_change_times(
+        cluster_hashes: Set[str],
+        ending_status: status_lib.ClusterStatus) -> Dict[str, int]:
+    """Latest STATUS_CHANGE.transitioned_at per cluster for an ending_status.
+
+    Returns a mapping from cluster_hash to the epoch-seconds at which that
+    cluster most recently transitioned into ``ending_status``. Clusters
+    with no matching STATUS_CHANGE row are omitted.
+
+    Chunks the ``cluster_hash IN (...)`` predicate by
+    ``_CLUSTER_IN_QUERY_CHUNK_SIZE`` to stay under SQLite's 999-parameter
+    cap (PostgreSQL has no such cap but the chunking is harmless there).
     """
     if not cluster_hashes:
         return {}
     engine = _db_manager.get_engine()
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, int] = {}
     with orm.Session(engine) as session:
-        row_number = sqlalchemy.func.row_number().over(
-            partition_by=cluster_event_table.c.cluster_hash,
-            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
 
-        ranked = session.query(
-            cluster_event_table.c.cluster_hash,
-            cluster_event_table.c.reason,
-            row_number,
-        ).filter(
-            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type == event_type.value,
-        ).subquery()
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.transitioned_at,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type ==
+                ClusterEventType.STATUS_CHANGE.value,
+                cluster_event_table.c.ending_status == ending_status.value,
+            ).subquery()
 
-        rows = session.query(
-            ranked.c.cluster_hash,
-            ranked.c.reason,
-        ).filter(ranked.c.rn == 1).all()
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.transitioned_at,
+            ).filter(ranked.c.rn == 1).all()
 
-    return {row.cluster_hash: row.reason for row in rows}
+            for row in rows:
+                result[row.cluster_hash] = int(row.transitioned_at)
+    return result
 
 
 def cleanup_cluster_events_with_retention(retention_hours: float,
@@ -1119,8 +1625,50 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
         session.commit()
 
 
+@db_retries.retry
+def cleanup_launch_attempts_with_retention(retention_hours: float) -> int:
+    """Drop finished launch attempts older than the window.
+
+    Only finished ones: an attempt still in flight has a launch waiting on it,
+    and a queue wait can legitimately outlast any sane retention window. Age is
+    measured from when the attempt started, which is also what the index is on.
+
+    Returns the number of rows removed.
+    """
+    cutoff = time.time() - retention_hours * 3600
+    hard_cutoff = time.time() - retention_hours * 2 * 3600
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # Observed attempts go at the window. Unobserved ones are held back:
+        # the daemon deliberately leaves them unclaimed while metrics are off
+        # or their output would be invisible, and deleting them anyway makes
+        # that hold pointless. They are still dropped eventually -- at twice
+        # the window -- so a deployment that never turns metrics on does not
+        # accumulate them forever.
+        #
+        # Written as one range plus a test rather than the OR it reads as. The
+        # hard cutoff is older than the window, so everything past it is
+        # already past the window and the two are equivalent -- but the OR
+        # plans as a multi-index union that walks the older range twice, which
+        # measured 175ms against 120ms over 200k rows. This runs on the API
+        # server's background loop, alongside every other retention sweep, and
+        # a blocking statement there delays all of them.
+        result = session.execute(launch_attempt_table.delete().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_not(None),
+                launch_attempt_table.c.provision_start < cutoff,
+                sqlalchemy.or_(
+                    launch_attempt_table.c.metrics_observed_at.is_not(None),
+                    launch_attempt_table.c.provision_start < hard_cutoff,
+                ),
+            )))
+        session.commit()
+        return result.rowcount
+
+
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
+    await asyncio_utils.sleep_startup_jitter('cluster event retention daemon')
     while True:
         logger.info('Running cluster event retention daemon...')
         # Use the latest config.
@@ -1134,46 +1682,43 @@ async def cluster_event_retention_daemon():
         terminal_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_terminal_event_retention_hours'),
             TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
+        windows = {
+            'cluster_event_retention_hours': retention_hours,
+            'cluster_debug_event_retention_hours': debug_retention_hours,
+            'cluster_terminal_event_retention_hours': terminal_retention_hours,
+        }
         try:
-            if retention_hours >= 0:
-                logger.debug('Cleaning up cluster events with retention '
-                             f'{retention_hours} hours.')
-                cleanup_cluster_events_with_retention(
-                    retention_hours, ClusterEventType.STATUS_CHANGE)
-            if debug_retention_hours >= 0:
-                logger.debug('Cleaning up debug cluster events with retention '
-                             f'{debug_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(debug_retention_hours,
-                                                      ClusterEventType.DEBUG)
-                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
-                # observability info, no business-record value once the launch
-                # is over.
-                cleanup_cluster_events_with_retention(
-                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
-            if terminal_retention_hours >= 0:
-                logger.debug(
-                    'Cleaning up terminal cluster events with retention '
-                    f'{terminal_retention_hours} hours.')
-                cleanup_cluster_events_with_retention(terminal_retention_hours,
-                                                      ClusterEventType.TERMINAL)
+            for option, types in CLUSTER_EVENT_RETENTION_GROUPS.items():
+                hours = windows[option]
+                if hours < 0:
+                    continue
+                logger.debug(f'Cleaning up {option} cluster events with '
+                             f'retention {hours} hours.')
+                for event_type in types:
+                    cleanup_cluster_events_with_retention(hours, event_type)
+            launch_retention_hours = skypilot_config.get_nested(
+                ('api_server', 'launch_attempt_retention_hours'),
+                DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS)
+            if launch_retention_hours >= 0:
+                removed = cleanup_launch_attempts_with_retention(
+                    launch_retention_hours)
+                if removed:
+                    logger.debug(
+                        f'Removed {removed} expired launch attempt(s).')
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running cluster event retention daemon: {e}')
 
-        # Run daemon at most once every hour to avoid too frequent cleanup.
-        sleep_amount = max(
-            min(retention_hours * 3600, debug_retention_hours * 3600),
-            MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
-        await asyncio.sleep(sleep_amount)
+        await asyncio.sleep(CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
 
 
 @typing.overload
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
@@ -1184,7 +1729,7 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[True],
     limit: Optional[int] = ...,
 ) -> List[Dict[str, Union[str, int]]]:
@@ -1195,17 +1740,18 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = ...,
     limit: Optional[int] = ...,
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
     ...
 
 
+@db_retries.retry
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = False,
     limit: Optional[int] = None
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
@@ -1216,11 +1762,11 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of the event.
+        event_type: Event type, or a list of event types to include.
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
-        limit: If specified, returns at most this many events (most recent).
-            If None, returns all events.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types. If None, returns all events.
 
     Returns:
         If include_timestamps is False: List of reason strings.
@@ -1234,20 +1780,27 @@ def get_cluster_events(
     if cluster_hash is None:
         raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
+    type_filter = cluster_event_table.c.type.in_(
+        [et.value for et in event_types])
+
     with orm.Session(engine) as session:
         if limit is not None:
             # To get the most recent N events in ASC order, we use a subquery:
             # 1. Get most recent N events (ORDER BY DESC LIMIT N)
             # 2. Re-order them by ASC
-            subquery = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            subquery = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.desc()).limit(
                         limit).subquery()
             rows = session.query(subquery).order_by(
                 subquery.c.transitioned_at.asc()).all()
         else:
-            rows = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            rows = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.asc()).all()
 
     if include_timestamps:
@@ -1256,6 +1809,116 @@ def get_cluster_events(
             'transitioned_at': row.transitioned_at
         } for row in rows]
     return [row.reason for row in rows]
+
+
+@db_retries.retry
+def get_latest_cluster_events(
+    cluster_names: List[str],
+    event_types: List[ClusterEventType],
+) -> Dict[str, Tuple[str, int]]:
+    """{cluster_name: (reason, transitioned_at)} of the newest matching event.
+
+    Looks up by the persisted ``name`` column (like get_cluster_events_by_name)
+    in a single query, so callers can annotate many clusters without a
+    per-cluster round trip. Clusters with no matching event are omitted; the
+    timestamp lets a caller ignore events left by an earlier attempt on a
+    reused cluster name.
+    """
+    if not cluster_names or not event_types:
+        return {}
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    events: Dict[str, Tuple[str, int]] = {}
+    names_list = list(cluster_names)
+    with orm.Session(engine) as session:
+        # Chunked for the same reason as every other name/hash IN query in
+        # this module: SQLite caps a statement at 999 bound parameters, and a
+        # deployment with that many clusters provisioning at once would
+        # otherwise raise -- which the caller swallows, so *every* cluster
+        # would lose its launch reason rather than the excess.
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            # Latest transitioned_at per cluster in SQL, so the read does not
+            # grow with a cluster's event history.
+            latest = session.query(
+                cluster_event_table.c.name.label('name'),
+                sqlalchemy.func.max(
+                    cluster_event_table.c.transitioned_at).label('latest_at'),
+            ).filter(
+                cluster_event_table.c.name.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).group_by(cluster_event_table.c.name).subquery()
+            rows = session.query(
+                cluster_event_table.c.name,
+                cluster_event_table.c.reason,
+                cluster_event_table.c.transitioned_at,
+            ).join(
+                latest,
+                sqlalchemy.and_(
+                    cluster_event_table.c.name == latest.c.name,
+                    cluster_event_table.c.transitioned_at == latest.c.latest_at,
+                ),
+            ).filter(cluster_event_table.c.type.in_(type_values)).order_by(
+                cluster_event_table.c.transitioned_at.desc(),
+                # transitioned_at is whole seconds and the table has no
+                # insertion order to fall back on, so a second key is what
+                # makes the answer stable instead of whatever the database
+                # happened to return. Which row of a tied pair it prefers is
+                # arbitrary: text ordering is the database's collation, and
+                # the same two rows sort the other way round under a locale
+                # collation than under SQLite's binary one. No caller may
+                # rely on the direction -- writers whose rows must not be
+                # confused for each other must not share a second.
+                cluster_event_table.c.reason.desc(),
+            ).all()
+            for name, reason, transitioned_at in rows:
+                if name not in events and reason:
+                    events[name] = (reason, transitioned_at)
+    return events
+
+
+@db_retries.retry
+def get_cluster_events_by_name(
+    cluster_name: str,
+    event_types: List[ClusterEventType],
+    limit: Optional[int] = None,
+) -> List[Dict[str, Union[str, int]]]:
+    """Returns cluster events looked up by the persisted cluster name.
+
+    Unlike get_cluster_events, this filters on the cluster_events ``name``
+    column directly instead of resolving the name to a hash via the clusters
+    table. This means events remain queryable after the cluster row (and its
+    name->hash mapping) has been removed on teardown, which matters for
+    finished managed jobs whose clusters have already been torn down.
+
+    Args:
+        cluster_name: Name of the cluster.
+        event_types: Event types to include.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types.
+
+    Returns:
+        List of dicts with 'reason' and 'transitioned_at' (unix timestamp)
+        fields, ordered from newest to oldest.
+    """
+    if not event_types:
+        return []
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    with orm.Session(engine) as session:
+        query = session.query(
+            cluster_event_table.c.reason,
+            cluster_event_table.c.transitioned_at,
+        ).filter(cluster_event_table.c.name == cluster_name,
+                 cluster_event_table.c.type.in_(type_values)).order_by(
+                     cluster_event_table.c.transitioned_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+    return [{
+        'reason': row.reason,
+        'transitioned_at': row.transitioned_at,
+    } for row in rows]
 
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
@@ -1309,6 +1972,7 @@ def update_last_use(cluster_name: str):
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
@@ -1338,6 +2002,9 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
+            if cluster_hash is not None:
+                session.query(cluster_job_spec_table).filter_by(
+                    cluster_hash=cluster_hash).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -1357,6 +2024,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
@@ -1370,19 +2038,48 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@db_retries.retry
+@metrics_lib.time_me
+def get_cluster_workspace(cluster_name: str) -> Optional[str]:
+    """Returns the workspace a cluster belongs to, or None if no such cluster.
+
+    Selects only the ``workspace`` column so callers doing a permission check
+    don't pay the cost of unpickling the handle. A stored NULL (clusters that
+    predate the column) is normalized to the default workspace, so a non-None
+    return always means "the cluster exists and lives in this workspace".
+    """
+    engine = _db_manager.get_engine()
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    with orm.Session(engine) as session:
+        row = (session.query(
+            cluster_table.c.workspace).filter_by(name=cluster_name).first())
+    if row is None:
+        return None
+    return row.workspace or constants.SKYPILOT_DEFAULT_WORKSPACE
+
+
 @metrics_lib.time_me
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
+    # Chunk the IN list to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
+    # (default 999 on sqlite < 3.32) and avoid huge IN-clause planning on
+    # PostgreSQL. See _CLUSTER_IN_QUERY_CHUNK_SIZE for the rationale.
+    result: Dict[str, Optional['backends.ResourceHandle']] = {}
+    if not cluster_names:
+        return result
     engine = _db_manager.get_engine()
+    names_list = list(cluster_names)
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name,
-                             cluster_table.c.handle).filter(
-                                 cluster_table.c.name.in_(cluster_names)).all()
-        return {
-            row.name: pickle.loads(row.handle) if row is not None else None
-            for row in rows
-        }
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(cluster_table.c.name,
+                                 cluster_table.c.handle).filter(
+                                     cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                result[row.name] = (pickle.loads(row.handle)
+                                    if row is not None else None)
+    return result
 
 
 @metrics_lib.time_me
@@ -1404,7 +2101,7 @@ def get_cluster_name_to_handle_map(
     return name_to_handle
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_status_from_cluster_name_async(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     """Get the status of a cluster."""
@@ -1458,6 +2155,7 @@ def get_glob_cluster_names(
     return [row.name for row in rows]
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
@@ -1516,12 +2214,33 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from clusters table, if recorded."""
+    return get_cluster_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) from the clusters table.
+
+    The workspace is None if there is no such cluster; a stored NULL is the
+    default workspace.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
     if row is None:
-        return None
-    return getattr(row, 'provision_log_path', None)
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+@metrics_lib.time_me
+def get_all_cluster_provision_log_paths() -> List[str]:
+    """Returns the recorded provision_log_path of every existing cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_table.c.provision_log_path).all()
+    return [row.provision_log_path for row in rows if row.provision_log_path]
 
 
 @metrics_lib.time_me
@@ -1532,6 +2251,26 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     historical rows by name and choose the most recent one based on
     usage_intervals.
     """
+    return get_cluster_history_provision_log_info(cluster_name)[0]
+
+
+@metrics_lib.time_me
+def get_cluster_history_provision_log_info(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Returns (provision_log_path, workspace) of the same history row.
+
+    The row is the one ``get_cluster_history_provision_log_path`` reads. The
+    workspace is None if there is no row; a stored NULL (rows that predate the
+    column) is the default workspace.
+    """
+    row = _get_cluster_history_row(cluster_name)
+    if row is None:
+        return None, None
+    return (getattr(row, 'provision_log_path', None), row.workspace or
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+
+def _get_cluster_history_row(cluster_name: str) -> Optional[Any]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         # Try current cluster first (fast path)
@@ -1540,7 +2279,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             row = session.query(cluster_history_table).filter_by(
                 cluster_hash=cluster_hash).first()
             if row is not None:
-                return getattr(row, 'provision_log_path', None)
+                return row
 
         # Fallback: search history by name and pick the latest by
         # usage_intervals
@@ -1560,9 +2299,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
             except Exception:  # pylint: disable=broad-except
                 return -1
 
-        latest_row = max(rows,
-                         key=lambda r: latest_timestamp(r.usage_intervals))
-        return getattr(latest_row, 'provision_log_path', None)
+        return max(rows, key=lambda r: latest_timestamp(r.usage_intervals))
 
 
 @metrics_lib.time_me
@@ -1607,34 +2344,41 @@ def set_cluster_storage_mounts_metadata(
 
 
 @metrics_lib.time_me
-def get_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str) -> Optional[Tuple[int, int]]:
+def get_cluster_skylet_ssh_tunnel(cluster_name: str,
+                                  owner_id: str) -> Optional[Tuple[int, int]]:
+    """Returns owner_id's (port, pid) skylet tunnel entry for the cluster."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row = session.query(
-            cluster_table.c.skylet_ssh_tunnel_metadata).filter_by(
-                name=cluster_name).first()
-    if row is None or row.skylet_ssh_tunnel_metadata is None:
+        row = session.query(cluster_table.c.skylet_ssh_tunnels).filter_by(
+            name=cluster_name).first()
+    if row is None:
         return None
-    return pickle.loads(row.skylet_ssh_tunnel_metadata)
+    entry = (row.skylet_ssh_tunnels or {}).get(owner_id)
+    if entry is None:
+        return None
+    return tuple(entry)
 
 
 @metrics_lib.time_me
-def set_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str,
-        skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
+def set_cluster_skylet_ssh_tunnel(cluster_name: str, owner_id: str,
+                                  tunnel: Optional[Tuple[int, int]]) -> None:
+    """Sets owner_id's (port, pid) skylet tunnel entry for the cluster, or
+    removes it when tunnel is None. Other owners' entries are kept.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        value = pickle.dumps(
-            skylet_ssh_tunnel_metadata
-        ) if skylet_ssh_tunnel_metadata is not None else None
-        count = session.query(cluster_table).filter_by(
-            name=cluster_name).update(
-                {cluster_table.c.skylet_ssh_tunnel_metadata: value})
+        row = session.query(cluster_table.c.skylet_ssh_tunnels).filter_by(
+            name=cluster_name).with_for_update().first()
+        if row is None:
+            raise ValueError(f'Cluster {cluster_name} not found.')
+        tunnels = dict(row.skylet_ssh_tunnels or {})
+        if tunnel is None:
+            tunnels.pop(owner_id, None)
+        else:
+            tunnels[owner_id] = tunnel
+        session.query(cluster_table).filter_by(name=cluster_name).update(
+            {cluster_table.c.skylet_ssh_tunnels: tunnels or None})
         session.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 @metrics_lib.time_me
@@ -1772,6 +2516,41 @@ def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
     return cluster_hash
 
 
+# The workspace a history record reports: the history row's, else the live
+# cluster's. NULL when neither is set.
+_HISTORY_WORKSPACE = sqlalchemy.func.coalesce(
+    sqlalchemy.func.nullif(cluster_history_table.c.workspace, ''),
+    cluster_table.c.workspace)
+
+
+@db_retries.retry
+@metrics_lib.time_me
+def get_cluster_history_workspace(
+        cluster_hash: Optional[str] = None,
+        cluster_name: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
+    """Returns the cluster's hash and the workspace of its history row.
+
+    Takes exactly one of cluster_hash or cluster_name, as
+    `_resolve_cluster_hash` does. The workspace is the one
+    `iter_clusters_from_history` reports, or None if the cluster or its
+    workspace is not found.
+    """
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        return None, None
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        workspace = session.query(_HISTORY_WORKSPACE).select_from(
+            cluster_history_table.join(
+                cluster_table,
+                cluster_history_table.c.cluster_hash ==
+                cluster_table.c.cluster_hash,
+                isouter=True)).filter(cluster_history_table.c.cluster_hash ==
+                                      cluster_hash).scalar()
+    return cluster_hash, workspace
+
+
 @metrics_lib.time_me
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
@@ -1820,6 +2599,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+@db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def get_cluster_from_name(
@@ -1889,6 +2669,96 @@ def get_cluster_from_name(
         record['user_name'] = user_name
 
     return record
+
+
+# Bound the IN list per query so we stay under SQLite's
+# SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on newer
+# builds) and avoid pathological IN-clause planning on PostgreSQL. 500 is
+# comfortably under both ceilings.
+# Module-level so tests can monkeypatch.
+_CLUSTER_IN_QUERY_CHUNK_SIZE = 500
+
+
+@metrics_lib.time_me
+def get_clusters_from_names(
+    cluster_names: List[str],
+    *,
+    include_user_info: bool = False,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Batched ``get_cluster_from_name`` for many cluster names at once.
+
+    Returns records in the same shape as
+    ``get_cluster_from_name(summary_response=True)``. The verbose
+    ``summary_response=False`` mode is intentionally not exposed here: it
+    would also require batching ``get_terminal_or_last_status_change_event``
+    (another per-row DB call), which is out of scope for the callers that
+    motivated this helper. Use ``get_cluster_from_name`` for those fields.
+
+    Args:
+        cluster_names: List of cluster names to look up.
+        include_user_info: If True, per-row resolve user_hash → user. This
+            re-introduces a per-row DB lookup, so it's off by default.
+
+    Returns:
+        Dict mapping ``cluster_name`` to its record, or to ``None`` for
+        names that don't exist in the cluster table.
+    """
+    result: Dict[str,
+                 Optional[Dict[str,
+                               Any]]] = {name: None for name in cluster_names}
+    if not cluster_names:
+        return result
+    engine = _db_manager.get_engine()
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    with orm.Session(engine) as session:
+        for offset in range(0, len(cluster_names),
+                            _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(*query_fields).filter(
+                cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                record: Dict[str, Any] = {
+                    'name': row.name,
+                    'launched_at': row.launched_at,
+                    'handle': pickle.loads(row.handle),
+                    'last_use': row.last_use,
+                    'status': status_lib.ClusterStatus[row.status],
+                    'autostop': row.autostop,
+                    'to_down': bool(row.to_down),
+                    'owner': _load_owner(row.owner),
+                    'metadata': json.loads(row.metadata),
+                    'cluster_hash': row.cluster_hash,
+                    'cluster_ever_up': bool(row.cluster_ever_up),
+                    'status_updated_at': row.status_updated_at,
+                    'workspace': row.workspace,
+                    'is_managed': bool(row.is_managed),
+                    'config_hash': row.config_hash,
+                }
+                if include_user_info:
+                    user_hash = _get_user_hash_or_current_user(row.user_hash)
+                    user = get_user(user_hash)
+                    record['user_hash'] = user_hash
+                    record['user_name'] = (user.name
+                                           if user is not None else None)
+                result[row.name] = record
+    return result
 
 
 @metrics_lib.time_me
@@ -2005,8 +2875,12 @@ def get_clusters(
         for row in rows
         if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
     }
-    launch_progress_dict = get_last_cluster_event_of_type_multiple(
-        init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+    # Newest launch/status-change event per INIT cluster. Its reason both tells
+    # an actively-launching cluster apart from one stuck in an abnormal state
+    # (see ABNORMAL_STATUS_REASON_PREFIX) and provides the message to display.
+    latest_init_event_dict = get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes,
+        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
 
     # get last cluster event for each row
     if not summary_response:
@@ -2041,14 +2915,22 @@ def get_clusters(
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        # launch_status_reason is populated outside the summary_response
-        # gate so both the list page (summary_response=True) and detail
-        # page (summary_response=False) get the badge tooltip data.
+        # init_kind / init_status_reason are populated outside the
+        # summary_response gate so both the list page (summary_response=True)
+        # and detail page (summary_response=False) get the badge/banner data.
+        # init_kind disambiguates the overloaded INIT state: 'launching'
+        # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
+        # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
         if record['status'] is status_lib.ClusterStatus.INIT:
-            record['launch_status_reason'] = launch_progress_dict.get(
-                row.cluster_hash)
+            latest_reason = latest_init_event_dict.get(row.cluster_hash)
+            record['init_kind'] = (
+                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
+                latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
+                status_lib.INIT_KIND_LAUNCHING)
+            record['init_status_reason'] = latest_reason
         else:
-            record['launch_status_reason'] = None
+            record['init_kind'] = None
+            record['init_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
@@ -2081,8 +2963,41 @@ def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False,
+        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
+
+    See iter_clusters_from_history for the arguments.
+
+    Returns:
+        List of cluster records with history information, most recently
+        launched first.
+    """
+    return list(
+        iter_clusters_from_history(
+            days=days,
+            abbreviate_response=abbreviate_response,
+            cluster_hashes=cluster_hashes,
+            cluster_names=cluster_names,
+            exclude_managed_clusters=exclude_managed_clusters,
+            workspaces_filter=workspaces_filter))
+
+
+def iter_clusters_from_history(
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False,
+        workspaces_filter: Optional[Set[str]] = None
+) -> Iterator[Dict[str, Any]]:
+    """Yield cluster reports from history, most recently launched first.
+
+    All matching rows are fetched, and their usage intervals unpickled, before
+    the first record is yielded. Only a row's launched resources are unpickled
+    when its record is yielded, so a caller that consumes the records as they
+    come never holds the whole history's Resources objects at once.
 
     Args:
         days: If specified, only include historical clusters (those not
@@ -2096,9 +3011,15 @@ def get_clusters_from_history(
               specified, rows matching either are returned (logical OR).
               Note that a single cluster name can map to multiple history
               records when a name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+              controller (managed jobs and services). Rows recorded before the
+              is_managed column existed are treated as not managed.
+        workspaces_filter: If specified, only include clusters whose
+              workspace is in this set. Rows with no recorded workspace are
+              excluded.
 
-    Returns:
-        List of cluster records with history information.
+    Yields:
+        Cluster records with history information.
     """
     engine = _db_manager.get_engine()
 
@@ -2109,34 +3030,39 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    # last_creation_yaml / last_creation_command hold the full task YAML and
+    # launch command for each history row. In aggregate these are by far the
+    # largest columns (a 30-day report can span thousands of clusters), yet
+    # only targeted by-hash / by-name lookups (e.g. a single cluster's detail
+    # view) actually read them. Bulk reports such as `sky cost-report` and the
+    # dashboard history list never use them, so fetch them only for filtered
+    # queries to avoid loading every cluster's YAML into memory.
+    include_creation_yaml = (not abbreviate_response and
+                             (cluster_hashes is not None or
+                              cluster_names is not None))
+
     with orm.Session(engine) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        if abbreviate_response:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
-        else:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
+        # Explicitly select columns from both tables to avoid ambiguity.
+        selected_columns = [
+            cluster_history_table.c.cluster_hash,
+            cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.workspace.label('history_workspace'),
+            cluster_history_table.c.last_activity_time,
+            cluster_history_table.c.launched_at,
+            cluster_history_table.c.node_names,
+            cluster_table.c.status,
+            cluster_table.c.workspace,
+        ]
+        if include_creation_yaml:
+            selected_columns.extend([
                 cluster_history_table.c.last_creation_yaml,
                 cluster_history_table.c.last_creation_command,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+            ])
+        query = session.query(*selected_columns)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
@@ -2165,6 +3091,16 @@ def get_clusters_from_history(
                 cluster_history_table.c.name.in_(cluster_names))
         if identifier_filters:
             query = query.filter(sqlalchemy.or_(*identifier_filters))
+        if exclude_managed_clusters:
+            # Treat NULL (rows predating the is_managed column) as not managed.
+            query = query.filter(
+                sqlalchemy.or_(
+                    cluster_history_table.c.is_managed.is_(None),
+                    cluster_history_table.c.is_managed == int(False)))
+        if workspaces_filter is not None:
+            # Same fallback as the record's 'workspace' below: the history
+            # row's workspace if set, else the live cluster's.
+            query = query.filter(_HISTORY_WORKSPACE.in_(workspaces_filter))
         rows = query.all()
 
     usage_intervals_dict = {}
@@ -2187,8 +3123,8 @@ def get_clusters_from_history(
     last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes)
 
-    records = []
-    for row in rows:
+    # Sort by launch time, descending in recency.
+    for row in sorted(rows, key=lambda row: -(row.launched_at or 0)):
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
@@ -2234,15 +3170,18 @@ def get_clusters_from_history(
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        if not abbreviate_response:
+        if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
+        elif not abbreviate_response:
+            # Preserve the dict schema for non-abbreviated callers: these keys
+            # were always present (possibly None) before we stopped fetching
+            # the heavy columns on bulk paths. The columns were not selected
+            # here, so this is None at zero memory cost.
+            record['last_creation_yaml'] = None
+            record['last_creation_command'] = None
 
-        records.append(record)
-
-    # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
-    return records
+        yield record
 
 
 @metrics_lib.time_me
@@ -2302,22 +3241,43 @@ def set_enabled_clouds(enabled_clouds: List[str],
         session.commit()
 
 
+def _slurm_submit_as_user_enabled() -> bool:
+    slurm_config = skypilot_config.get_nested(('slurm',), default_value={})
+    if slurm_config.get('submit_as_user', False):
+        return True
+    cluster_configs = slurm_config.get('cluster_configs', {})
+    return any(
+        config.get('submit_as_user', False)
+        for config in cluster_configs.values())
+
+
+def _scope_config_key_to_user(key: str) -> str:
+    if not _slurm_submit_as_user_enabled():
+        return key
+    user_id = common_utils.get_current_user().id
+    return f'{key}_{user_id}'
+
+
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
-    return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+    key = (_ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' +
+           cloud_capability.value)
+    return _scope_config_key_to_user(key)
 
 
 _CHECK_RESULTS_KEY_PREFIX = 'check_results_'
 
 
 def _get_check_results_key(workspace: str) -> str:
-    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
+    return _scope_config_key_to_user(f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}')
 
 
 @metrics_lib.time_me
 def get_cached_check_results(
         workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Return the persisted check_results dict for a workspace, or {}.
+    """Return persisted check results for a workspace, or {}.
+
+    With Slurm submit-as-user enabled, results are scoped to the current user.
 
     Shape:
         {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
@@ -2346,6 +3306,8 @@ def set_check_results(
 ) -> None:
     """Persist `results` for `workspace`.
 
+    With Slurm submit-as-user enabled, results are scoped to the current user.
+
     `is_full_workspace_run=True` replaces the entire row (drops clouds /
     contexts not present in `results`).  `False` merges at *context*
     granularity within a cloud: read the existing row, update only the
@@ -2373,7 +3335,7 @@ def set_check_results(
         else:
             # Read-modify-write under the default session isolation. This
             # is NOT race-safe against concurrent scoped writes for
-            # different clouds in the same workspace: SQLAlchemy
+            # different clouds for the same cache scope: SQLAlchemy
             # `orm.Session` does not acquire row locks, and under the
             # default isolation (READ COMMITTED on Postgres, deferred on
             # SQLite) two interleaved RMW cycles can clobber each
@@ -2381,7 +3343,7 @@ def set_check_results(
             # (one scoped run's leaves get overwritten until the next
             # write rewrites the row) and the source-of-truth
             # enabled_clouds_* rows are unaffected, so we accept the
-            # race here rather than serialize through a per-workspace
+            # race here rather than serialize through a per-key
             # advisory lock. If this row ever becomes load-bearing for
             # correctness, switch to `with_for_update()` (postgres) and
             # an explicit BEGIN IMMEDIATE (sqlite).
@@ -2602,36 +3564,145 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
-@metrics_lib.time_me
-def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        if is_ephemeral is None:
-            rows = session.query(volume_table).all()
-        else:
-            rows = session.query(volume_table).filter_by(
-                is_ephemeral=int(is_ephemeral)).all()
-    records = []
-    for row in rows:
+def _volume_record_from_row(row: Any) -> Dict[str, Any]:
+    """Builds a volume record from a volume table row.
+
+    Shared so every accessor returns the same shape: a caller that switches
+    between them must not have to check which keys it now has.
+    """
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+        'last_attached_at': row.last_attached_at,
+        'last_use': row.last_use,
+        'status': status_lib.VolumeStatus[row.status],
+        'is_ephemeral': bool(row.is_ephemeral),
+        'error_message': row.error_message,
         # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'is_ephemeral': bool(row.is_ephemeral),
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        })
+        'usedby_pods': json.loads(row.usedby_pods) if row.usedby_pods else [],
+        'usedby_clusters':
+            (json.loads(row.usedby_clusters) if row.usedby_clusters else []),
+        'creation_yaml': row.creation_yaml,
+        'resize_status': row.resize_status,
+        'resize_target_size': row.resize_target_size,
+        'resize_message': row.resize_message,
+    }
+
+
+def _query_volumes(
+    columns: List[Any],
+    is_ephemeral: Optional[bool],
+    workspaces_filter: Optional[Set[str]],
+    volume_names: Optional[List[str]],
+) -> List[Any]:
+    """Rows of `columns` for the volumes every given filter allows."""
+    engine = _db_manager.get_engine()
+
+    def filtered(session: 'orm.Session') -> Any:
+        query = session.query(*columns)
+        if is_ephemeral is not None:
+            query = query.filter_by(is_ephemeral=int(is_ephemeral))
+        if workspaces_filter is not None:
+            query = query.filter(
+                volume_table.c.workspace.in_(workspaces_filter))
+        return query
+
+    rows: List[Any] = []
+    with orm.Session(engine) as session:
+        if volume_names is None:
+            rows = filtered(session).all()
+        else:
+            # Chunk the IN list for the same reason as
+            # get_volumes_from_names: SQLite caps bound parameters and
+            # PostgreSQL plans huge IN clauses badly.
+            for offset in range(0, len(volume_names),
+                                _CLUSTER_IN_QUERY_CHUNK_SIZE):
+                batch = volume_names[offset:offset +
+                                     _CLUSTER_IN_QUERY_CHUNK_SIZE]
+                rows.extend(
+                    filtered(session).filter(
+                        volume_table.c.name.in_(batch)).all())
+    return rows
+
+
+@metrics_lib.time_me
+def get_volumes(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+    volume_names: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Get volumes from the database.
+
+    Every filter given is applied, so a caller narrowing by name cannot widen
+    what another filter allows -- naming a volume outside `workspaces_filter`
+    still returns nothing.
+
+    Args:
+        is_ephemeral: If specified, only include volumes with this
+            ephemerality.
+        workspaces_filter: If specified, only include volumes whose workspace
+            is in this set. Use workspace names.
+        volume_names: If specified, only include volumes with these names.
+            An empty list therefore matches nothing, while None means "do not
+            filter by name". Names with no row are simply absent.
+    """
+    return [
+        _volume_record_from_row(row) for row in _query_volumes(
+            [volume_table], is_ephemeral, workspaces_filter, volume_names)
+    ]
+
+
+@metrics_lib.time_me
+def get_volume_names(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+    volume_names: Optional[List[str]] = None,
+) -> List[str]:
+    """Names of the volumes every given filter allows.
+
+    Same filters as `get_volumes`, but reads only the name column: building a
+    record unpickles the handle and decodes the usedby fields, which a caller
+    that wants names alone pays for and throws away.
+    """
+    return [
+        row.name for row in _query_volumes([volume_table.c.name], is_ephemeral,
+                                           workspaces_filter, volume_names)
+    ]
+
+
+@metrics_lib.time_me
+def get_volumes_from_names(
+        volume_names: List[str],
+        is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """Batched ``get_volume_by_name`` for many volume names at once.
+
+    Returns records in the same shape as ``get_volumes``. Names with no row
+    are simply absent from the result, so the caller sees the same thing it
+    would from a filtered ``get_volumes``.
+
+    Args:
+        volume_names: Volume names to look up.
+        is_ephemeral: If given, keep only volumes with this ephemerality,
+            matching ``get_volumes``.
+    """
+    if not volume_names:
+        return []
+    engine = _db_manager.get_engine()
+    # Chunk the IN list for the same reason as _CLUSTER_IN_QUERY_CHUNK_SIZE:
+    # SQLite caps bound parameters and PostgreSQL plans huge IN clauses badly.
+    records: List[Dict[str, Any]] = []
+    with orm.Session(engine) as session:
+        for offset in range(0, len(volume_names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = volume_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            query = session.query(volume_table).filter(
+                volume_table.c.name.in_(batch))
+            if is_ephemeral is not None:
+                query = query.filter(
+                    volume_table.c.is_ephemeral == int(is_ephemeral))
+            records.extend(_volume_record_from_row(row) for row in query.all())
     return records
 
 
@@ -2641,24 +3712,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(engine) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
-        # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        return {
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        }
+        return _volume_record_from_row(row)
     return None
 
 
@@ -2669,6 +3723,7 @@ def add_volume(
     status: status_lib.VolumeStatus,
     is_ephemeral: bool = False,
     creation_yaml: Optional[str] = None,
+    error_message: Optional[str] = None,
 ) -> None:
     engine = _db_manager.get_engine()
     volume_launched_at = int(time.time())
@@ -2701,6 +3756,7 @@ def add_volume(
             status=status.value,
             is_ephemeral=int(is_ephemeral),
             creation_yaml=creation_yaml,
+            error_message=error_message,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)
@@ -2734,7 +3790,11 @@ def update_volume_status(name: str,
                          status: status_lib.VolumeStatus,
                          error_message: Optional[str] = None,
                          usedby_pods: Optional[List[str]] = None,
-                         usedby_clusters: Optional[List[str]] = None) -> None:
+                         usedby_clusters: Optional[List[str]] = None,
+                         resize_status: Optional[
+                             models.VolumeResizeStatus] = None,
+                         resize_target_size: Optional[str] = None,
+                         resize_message: Optional[str] = None) -> None:
     """Update volume status and related fields.
 
     Args:
@@ -2743,6 +3803,11 @@ def update_volume_status(name: str,
         error_message: Error message (None clears it).
         usedby_pods: List of pods using the volume (None keeps existing value).
         usedby_clusters: List of clusters using the volume (None keeps it).
+        resize_status: How far a resize of the volume has got (None clears it,
+            which is what a finished resize looks like).
+        resize_target_size: The size that resize is heading for (None clears
+            it).
+        resize_message: What the cloud said about the resize (None clears it).
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -2751,6 +3816,12 @@ def update_volume_status(name: str,
         }
         # Always update error_message (None clears it)
         update_dict[volume_table.c.error_message] = error_message
+        # Same for the resize fields: a resize that finished stops being
+        # reported, and that absence is the signal it is done.
+        update_dict[volume_table.c.resize_status] = (
+            resize_status.value if resize_status is not None else None)
+        update_dict[volume_table.c.resize_target_size] = resize_target_size
+        update_dict[volume_table.c.resize_message] = resize_message
         # Update usedby fields if provided (encode as JSON)
         if usedby_pods is not None:
             update_dict[volume_table.c.usedby_pods] = json.dumps(usedby_pods)
@@ -2806,6 +3877,47 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 
 @metrics_lib.time_me
+def get_or_set_ssh_keys(user_hash: str, ssh_public_key: str,
+                        ssh_private_key: str) -> Tuple[str, str]:
+    """Insert a user's SSH key pair if absent, returning the live pair.
+
+    Returns the pair stored in the database after the call, which is the
+    pre-existing one whenever a row was already there -- callers must use the
+    return value rather than assume the pair they passed won. Unlike
+    `set_ssh_keys` this can never overwrite, so servers racing to bootstrap
+    the same user's key converge on a single pair.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+            insert_func = sqlite.insert
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(ssh_key_table).values(
+            user_hash=user_hash,
+            ssh_public_key=ssh_public_key,
+            ssh_private_key=ssh_private_key)
+        session.execute(
+            insert_stmnt.on_conflict_do_nothing(
+                index_elements=[ssh_key_table.c.user_hash]))
+        session.commit()
+
+        # Read back rather than trusting the generated pair: on conflict the
+        # row keeps whatever the winner wrote, and that is the pair callers
+        # must use.
+        row = session.query(ssh_key_table).filter_by(
+            user_hash=user_hash).first()
+    if row is None:
+        raise RuntimeError(f'SSH keys for user {user_hash!r} are missing '
+                           'right after inserting them; they were '
+                           'concurrently deleted.')
+    return row.ssh_public_key, row.ssh_private_key
+
+
+@metrics_lib.time_me
 def add_service_account_token(token_id: str,
                               token_name: str,
                               token_hash: str,
@@ -2835,6 +3947,21 @@ def add_service_account_token(token_id: str,
             service_account_user_id=service_account_user_id)
         session.execute(insert_stmnt)
         session.commit()
+
+
+@metrics_lib.time_me
+def get_service_account_creator(
+        service_account_user_id: str) -> Optional[models.User]:
+    """Return the creator of a service account, if the creator still exists."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(
+            service_account_token_table.c.creator_user_hash).filter_by(
+                service_account_user_id=service_account_user_id)
+        row = query.distinct().one_or_none()
+    if row is None:
+        return None
+    return get_user(row.creator_user_hash)
 
 
 @metrics_lib.time_me
@@ -2906,18 +4033,41 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
-def update_service_account_token_last_used(token_id: str) -> None:
-    """Update the last_used_at timestamp for a service account token."""
+def update_service_account_token_last_used(token_id: str,
+                                           min_interval_seconds: int = 0
+                                          ) -> None:
+    """Update the last_used_at timestamp for a service account token.
+
+    With ``min_interval_seconds > 0`` the UPDATE is conditional: it only
+    lands when the stored ``last_used_at`` is NULL or older than the
+    interval. The staleness check lives in the WHERE clause (not in the
+    caller) so concurrent callers that all read a stale timestamp cannot
+    herd on the row at an interval boundary: the first transaction to
+    commit refreshes the row, and every other caller's UPDATE re-evaluates
+    against the committed row, matches zero rows, and writes nothing (no
+    redundant WAL/dead-tuple churn).
+    """
     engine = _db_manager.get_engine()
     last_used_at = int(time.time())
 
     with orm.Session(engine) as session:
-        session.query(service_account_token_table).filter_by(
-            token_id=token_id).update(
-                {service_account_token_table.c.last_used_at: last_used_at})
+        query = session.query(service_account_token_table).filter_by(
+            token_id=token_id)
+        if min_interval_seconds > 0:
+            query = query.filter(
+                sqlalchemy.or_(
+                    service_account_token_table.c.last_used_at.is_(None),
+                    service_account_token_table.c.last_used_at <
+                    last_used_at - min_interval_seconds))
+        # synchronize_session=False: the session is scoped to this single
+        # statement, and the conditional criteria above are not evaluatable
+        # in-memory by the default strategy.
+        query.update({service_account_token_table.c.last_used_at: last_used_at},
+                     synchronize_session=False)
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
@@ -2963,6 +4113,7 @@ def rotate_service_account_token(token_id: str,
         raise ValueError(f'Service account token {token_id} not found.')
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
@@ -3143,6 +4294,14 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
+def count_service_account_tokens() -> int:
+    """Number of service account token rows."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return session.query(service_account_token_table).count()
+
+
+@metrics_lib.time_me
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
     engine = _db_manager.get_engine()
@@ -3154,27 +4313,34 @@ def get_system_config(config_key: str) -> Optional[str]:
     return row.config_value
 
 
+def _system_config_insert(engine: sqlalchemy.engine.Engine, config_key: str,
+                          config_value: str, current_time: int):
+    """A dialect-appropriate INSERT for one system_config row.
+
+    The caller adds the ON CONFLICT clause that distinguishes overwriting from
+    insert-if-absent.
+    """
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+    return insert_func(system_config_table).values(config_key=config_key,
+                                                   config_value=config_value,
+                                                   created_at=current_time,
+                                                   updated_at=current_time)
+
+
 @metrics_lib.time_me
 def set_system_config(config_key: str, config_value: str) -> None:
-    """Set a system configuration value."""
+    """Set a system configuration value, overwriting any existing one."""
     engine = _db_manager.get_engine()
     current_time = int(time.time())
 
     with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
-            insert_func = sqlite.insert
-        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
-             ):
-            insert_func = postgresql.insert
-        else:
-            raise ValueError('Unsupported database dialect')
-
-        insert_stmnt = insert_func(system_config_table).values(
-            config_key=config_key,
-            config_value=config_value,
-            created_at=current_time,
-            updated_at=current_time)
-
+        insert_stmnt = _system_config_insert(engine, config_key, config_value,
+                                             current_time)
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
             index_elements=[system_config_table.c.config_key],
             set_={
@@ -3183,6 +4349,39 @@ def set_system_config(config_key: str, config_value: str) -> None:
             })
         session.execute(upsert_stmnt)
         session.commit()
+
+
+@metrics_lib.time_me
+def get_or_set_system_config(config_key: str, config_value: str) -> str:
+    """Read a system configuration value, inserting `config_value` if absent.
+
+    Returns the value that is live in the database after the call, which is
+    the pre-existing one whenever a row was already there -- callers must use
+    the return value rather than assume `config_value` won. Unlike
+    `set_system_config` this can never overwrite, so servers racing to
+    bootstrap the same key converge on a single value. Use it for keys others
+    already depend on, where losing the original is not recoverable.
+    """
+    engine = _db_manager.get_engine()
+    current_time = int(time.time())
+
+    with orm.Session(engine) as session:
+        insert_stmnt = _system_config_insert(engine, config_key, config_value,
+                                             current_time)
+        session.execute(
+            insert_stmnt.on_conflict_do_nothing(
+                index_elements=[system_config_table.c.config_key]))
+        session.commit()
+
+        # Read back rather than trusting `config_value`: on conflict the row
+        # kept whatever the winner wrote, and that is the value callers must
+        # use.
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        raise RuntimeError(f'System config {config_key!r} is missing right '
+                           'after inserting it; it was concurrently deleted.')
+    return row.config_value
 
 
 def get_max_db_connections() -> Optional[int]:
@@ -3196,3 +4395,524 @@ def get_max_db_connections() -> Optional[int]:
         if max_connections is None:
             return None
         return int(max_connections)
+
+
+# --- Launch attempts ---------------------------------------------------------
+#
+# See launch_attempt_table for why these milestones are persisted rather than
+# timed in memory.
+
+
+class LaunchMilestone(enum.Enum):
+    """A boundary in a provisioning attempt, one column of launch_attempts."""
+    # Instances/pods asked for. Closes the provision-setup segment.
+    INSTANCES_REQUESTED = 'instances_requested'
+    # Stamped by a caller when an external gate admits the workload. Never
+    # set otherwise.
+    ADMITTED = 'admitted'
+    # All instances/pods up. Closes the startup segment.
+    INSTANCES_READY = 'instances_ready'
+
+
+class LaunchOutcome(enum.Enum):
+    """Terminal state of a provisioning attempt."""
+    SUCCEEDED = 'succeeded'
+    FAILED = 'failed'
+    # The writing process died without closing the row; set by the startup
+    # sweep. Only this outcome means a metric was actually lost.
+    ABANDONED = 'abandoned'
+
+
+def get_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash of the live cluster with this name, or None if there is none.
+
+    A cluster's hash is minted on first launch and reused while its row lives,
+    so it identifies one incarnation: failover keeps it, `sky down` + relaunch
+    replaces it.
+    """
+    return _get_hash_for_existing_cluster(cluster_name)
+
+
+def _best_effort(func):
+    """Swallow a failure in a write whose caller must not fail because of it.
+
+    For side observations that run on a user-facing path: the caller is doing
+    something else, and this write is a note about it. Returns None when the
+    write fails, so only wrap functions whose callers can read None as "it did
+    not happen" -- not one returning a list a caller iterates.
+
+    What it is for, concretely: the launch-attempt writes run inside the `try`
+    in `bulk_provision` whose `except` tears the cluster down and fails over.
+    A database blip in the two that run after a *successful* provision did not
+    merely lose a measurement -- it raised past the return, landed in that
+    handler, and destroyed a working cluster. `db_retries.retry` does not
+    prevent that; it raises once retries are spent.
+
+    Applied at the definition rather than at each call site on purpose: the
+    guarantee has to hold for the call site somebody adds later.
+
+    Not for background work. A daemon that raises gets logged with a traceback
+    and retried on the next tick, which is strictly better than continuing as
+    though there had been nothing to do.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Ignoring a failure in {func.__name__}, which is '
+                           f'best-effort: {e}. Its caller carries on without '
+                           f'it; what was being recorded is lost.')
+            return None
+
+    return wrapper
+
+
+@_best_effort
+@db_retries.retry
+def get_job_spec_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash to record a job spec under for this cluster, if any.
+
+    None if the cluster does not exist, or if it was launched by a jobs or
+    serve controller (a managed job's cluster or a pool worker): the jobs the
+    controller submits to it are shown on the managed job page from the
+    user's YAML, and nothing reads their spec.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(
+            cluster_table.c.cluster_hash,
+            cluster_table.c.is_managed).filter_by(name=cluster_name).first()
+    if row is None or row.cluster_hash is None or row.is_managed:
+        return None
+    return row.cluster_hash
+
+
+@_best_effort
+@db_retries.retry
+def add_cluster_job_spec(cluster_hash: str, job_id: int,
+                         task_yaml: Optional[str],
+                         entrypoint: Optional[str]) -> None:
+    """Records the task YAML and entrypoint a cluster job was submitted with.
+
+    Drops the cluster's specs older than the last MAX_JOB_SPECS_PER_CLUSTER job
+    ids. Best-effort: it runs on the job submission path and must not fail it.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+            insert_func = sqlite.insert
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        values = {
+            'task_yaml': task_yaml,
+            'entrypoint': entrypoint,
+        }
+        insert_stmnt = insert_func(cluster_job_spec_table).values(
+            cluster_hash=cluster_hash, job_id=job_id, **values)
+        # A job id is only reused within a cluster_hash if the skylet's job
+        # table was lost, in which case the newest submission is the right one.
+        do_update_stmt = insert_stmnt.on_conflict_do_update(index_elements=[
+            cluster_job_spec_table.c.cluster_hash,
+            cluster_job_spec_table.c.job_id
+        ],
+                                                            set_=values)
+        session.execute(do_update_stmt)
+        # Job ids increase within a cluster_hash, so the last N ids are the
+        # newest N jobs. Uses the (cluster_hash, job_id) primary key.
+        session.execute(cluster_job_spec_table.delete().where(
+            sqlalchemy.and_(
+                cluster_job_spec_table.c.cluster_hash == cluster_hash,
+                cluster_job_spec_table.c.job_id <=
+                job_id - MAX_JOB_SPECS_PER_CLUSTER)))
+        session.commit()
+
+
+@db_retries.retry
+def get_cluster_job_spec(cluster_hash: str,
+                         job_id: int) -> Optional[Dict[str, Any]]:
+    """Returns the task YAML and entrypoint of a cluster job, if recorded.
+
+    None for jobs submitted before the spec was recorded (e.g. by an older API
+    server version).
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(cluster_job_spec_table).filter_by(
+            cluster_hash=cluster_hash, job_id=job_id).first()
+    if row is None:
+        return None
+    return {
+        'task_yaml': row.task_yaml,
+        'entrypoint': row.entrypoint,
+    }
+
+
+@_best_effort
+@db_retries.retry
+def open_launch_attempt(
+    cluster_name: str,
+    # Optional because a cluster's row -- and so its hash -- may not exist yet
+    # on a first launch.
+    cluster_hash: Optional[str],
+    request_id: Optional[str],
+    provision_start: float,
+    cluster_name_on_cloud: Optional[str] = None,
+    workspace: Optional[str] = None,
+    # None when the row could not be written -- see `_best_effort`. The caller
+    # carries that through by skipping the milestones instead of failing.
+) -> Optional[str]:
+    """Open a provisioning attempt, or resume the one already in flight.
+
+    Returns the attempt_id to record milestones against.
+
+    A launch that parks on an external condition unwinds its whole provision
+    call and resumes as a fresh one, possibly in another worker process. That
+    resume must continue the *same* attempt: the resources were kept, so the
+    wait it is still serving is one continuous interval. Resuming is keyed on
+    the request, which survives the pause unchanged -- an open row left behind
+    by some earlier, crashed launch of the same cluster carries a different
+    request_id and is therefore never adopted.
+
+    A failover retry is the opposite case: the previous attempt is closed as
+    failed before the next begins, so no open row is found and a new attempt
+    starts even though cluster_hash is unchanged.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if request_id is not None:
+            in_flight = session.execute(
+                sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                    sqlalchemy.and_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.request_id == request_id,
+                        launch_attempt_table.c.outcome.is_(None),
+                    )).order_by(
+                        launch_attempt_table.c.provision_start.desc(),
+                        launch_attempt_table.c.attempt_seq.desc()).limit(
+                            1)).fetchone()
+            if in_flight is not None:
+                return in_flight[0]
+
+        # A new attempt. The sequence is allocated per cluster_name rather
+        # than per cluster_hash because a managed-job recovery tears the
+        # cluster down and mints a *new* hash for what is still the same job:
+        # scoping by hash would restart the sequence there and make the second
+        # attempt look like the first. The name is stable across that, and for
+        # a managed job it encodes the job id, so it is job-scoped in effect.
+        #
+        # The tradeoff is that relaunching a plain cluster under a reused name
+        # continues the sequence instead of restarting at 0. That is cosmetic:
+        # timelines are always scoped by cluster_hash (one incarnation) or by
+        # the job, so ordering stays correct either way.
+        # Read-then-insert, with no unique constraint on
+        # (cluster_name, attempt_seq). Deliberate: a duplicate would need two
+        # provisions of one cluster name to open a row at the same instant,
+        # which the per-cluster launch lock already excludes, and a constraint
+        # here could fail a launch over a measurement. The lookups above order
+        # by provision_start first, so even a tie picks the newer row; the
+        # sequence is a display and tie-break column, not an identifier.
+        last_seq = session.execute(
+            sqlalchemy.select(
+                sqlalchemy.func.max(  # pylint: disable=not-callable
+                    launch_attempt_table.c.attempt_seq)).where(
+                        launch_attempt_table.c.cluster_name ==
+                        cluster_name)).scalar()
+
+        attempt_id = str(uuid.uuid4())
+        session.execute(launch_attempt_table.insert().values(
+            attempt_id=attempt_id,
+            cluster_hash=cluster_hash,
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            request_id=request_id,
+            workspace=workspace,
+            attempt_seq=0 if last_seq is None else last_seq + 1,
+            provision_start=provision_start,
+        ))
+        session.commit()
+    return attempt_id
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_milestone(attempt_id: str, milestone: LaunchMilestone,
+                            timestamp: float) -> None:
+    """Stamp a milestone on an attempt, keeping the earliest value.
+
+    Write-once: a resumed launch re-walks the provisioning path and would
+    otherwise restamp milestones it already passed, which is exactly how the
+    wait before the pause would get erased.
+    """
+    column = launch_attempt_table.c[milestone.value]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+
+
+@db_retries.retry
+def get_launch_attempts_for_cluster(cluster_name: str) -> List[Any]:
+    """Every attempt made for this cluster, oldest first.
+
+    All of them, not just the one that worked: the abandoned tries are what
+    the retry overhead is measured from, and a job that took five tries waited
+    through all of them.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return list(
+            session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.cluster_name ==
+                    cluster_name).order_by(
+                        launch_attempt_table.c.attempt_seq)).all())
+
+
+@db_retries.retry
+def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
+    """Claim finished attempts that have not been turned into metrics yet.
+
+    Claiming is a conditional UPDATE, so an attempt is observed exactly once
+    even when several API server instances sharing the database run this
+    concurrently: only the writer whose UPDATE matched gets the row. That is
+    what lets the observer be a plain background loop -- no global cursor to
+    keep, and no leader election to decide who is allowed to run it.
+
+    Only closed attempts are returned; an in-flight one has segments that have
+    not happened yet.
+    """
+    engine = _db_manager.get_engine()
+    # The claim is one UPDATE. A row-at-a-time loop would instead hold write
+    # locks for its whole length, so a second instance would block for the
+    # length of the batch rather than for one statement. It still comes away
+    # with nothing this tick -- its UPDATE re-checks metrics_observed_at IS
+    # NULL and matches none -- which is the point: the observation happens
+    # exactly once, not once per instance.
+    #
+    # Which rows this call won comes from RETURNING where the backend has it,
+    # so the claim is a single statement. The timestamp is still written, but
+    # it is no longer read back as a token: doing that needed a third query on
+    # an unindexable predicate, which scanned the table every minute.
+    now = time.time()
+    with orm.Session(engine) as session:
+        candidates = sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+            sqlalchemy.and_(
+                # Spelled as the index's own predicate, not restated: a
+                # PostgreSQL partial index is matched to a query only when the
+                # planner can prove the two agree, so an edit to one that
+                # misses the other silently drops back to a scan.
+                sqlalchemy.text(UNOBSERVED_ATTEMPT_PREDICATE),)).order_by(
+                    launch_attempt_table.c.provision_start).limit(limit)
+        claim = launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id.in_(
+                    candidates.scalar_subquery()),
+                launch_attempt_table.c.metrics_observed_at.is_(None),
+            )).values({launch_attempt_table.c.metrics_observed_at: now})
+        if _supports_returning():
+            # One statement: the UPDATE hands back the rows it matched.
+            claimed = session.execute(
+                claim.returning(*launch_attempt_table.c)).all()
+        else:
+            # The fallback reads the rows back by the token. No index can
+            # serve that -- the partial index above covers unobserved rows,
+            # and these have just stopped being unobserved -- so it scans the
+            # table once a minute, growing with the retention window. Kept
+            # only for SQLite older than 3.35, where RETURNING does not exist.
+            session.execute(claim)
+            claimed = session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.metrics_observed_at == now)).all()
+        session.commit()
+    return list(claimed)
+
+
+@db_retries.retry
+def sweep_abandoned_launch_attempts(
+        older_than_hours: float = ABANDONED_LAUNCH_ATTEMPT_HOURS) -> int:
+    """Close attempts left open by a process that died mid-launch.
+
+    Marking them (rather than leaving them open) matters twice over: it keeps a
+    later launch of the same cluster from stamping milestones onto a dead
+    attempt, and it makes a lost measurement countable instead of silently
+    missing.
+
+    Bounded by age rather than sweeping every open row: a server starting up
+    does not mean nothing is provisioning, since launches that were in flight
+    across the restart may still resume, and closing their rows would discard
+    their milestones. The bound is generous because a launch can legitimately
+    stay open for hours; an attempt older than it has outlived any provision
+    timeout.
+
+    Returns the number of attempts closed.
+    """
+    cutoff = time.time() - older_than_hours * 3600
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_(None),
+                launch_attempt_table.c.provision_start < cutoff,
+            )).values({
+                launch_attempt_table.c.outcome: LaunchOutcome.ABANDONED.value
+            }))
+        session.commit()
+        return result.rowcount
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
+    """Record a queue name on the attempt in flight for this cluster.
+
+    Set at most once per attempt, and independently of the ADMITTED
+    milestone, so it can be recorded before admission.
+
+    Same targeting and no-op behaviour as record_launch_milestone_for_cluster.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
+        if row is None:
+            return
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == row[0],
+                launch_attempt_table.c.queue.is_(None),
+            )).values({launch_attempt_table.c.queue: queue}))
+        session.commit()
+
+
+@_best_effort
+@db_retries.retry
+def record_launch_milestone_for_cluster(cluster_name: str,
+                                        milestone: LaunchMilestone,
+                                        timestamp: float) -> None:
+    """Stamp a milestone on whichever attempt is in flight for this cluster.
+
+    Lets provisioning code record a boundary without the attempt id being
+    threaded down through every layer.
+    A cluster has at most one launch running at a time, so the newest open row
+    for the name is that launch: a row left behind by an earlier crashed launch
+    is older, and the live attempt always sorts ahead of it.
+
+    ``cluster_name`` may be either the display name or the on-cloud name, so a
+    caller stamps with whichever it happens to hold (pod labels carry the
+    on-cloud one).
+
+    A no-op when nothing is in flight, so callers never have to guard.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                launch_attempt_table.c.attempt_id,
+                # For the admission event below: the queue it waited in, the
+                # boundary the wait is measured from, and the name to file the
+                # event under -- which is the display name even when this was
+                # called with the on-cloud one.
+                launch_attempt_table.c.queue,
+                launch_attempt_table.c.instances_requested,
+                launch_attempt_table.c.provision_start,
+                launch_attempt_table.c.cluster_name,
+            ).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
+        if row is None:
+            return
+        column = launch_attempt_table.c[milestone.value]
+        result = session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == row[0],
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+        stamped = bool(result.rowcount)
+
+    # Outside the session: add_cluster_event opens its own, and an event
+    # written before the commit above could outlive a rolled-back timestamp.
+    #
+    # Gated on `stamped`, which is what makes this emit-once. The UPDATE is
+    # conditional on the column being NULL, and a launch that parks on an
+    # external condition resumes into the *same* open row -- so the second
+    # call matches nothing, and cannot announce the same admission twice.
+    if stamped and milestone == LaunchMilestone.ADMITTED:
+        _record_admission_event(row, timestamp)
+
+
+def _record_admission_event(attempt: Any, admitted_at: float) -> None:
+    """Note in the cluster's event log that a queued launch was admitted.
+
+    Emitted once, when the ADMITTED milestone is first stamped.
+
+    The duration comes from `launch_phases`, not from subtracting here: the
+    wait is measured from `instances_requested` where the cloud stamps it and
+    from `provision_start` where it does not, and a number computed by hand
+    would disagree with `t_queue_wait` on exactly the clouds that fallback
+    exists for.
+    """
+    waited_from = launch_phases.queue_wait_from(attempt)
+    if waited_from is None or attempt.cluster_name is None:
+        return
+    where = f' by queue {attempt.queue}' if attempt.queue else ''
+    waited = log_utils.readable_time_duration(waited_from,
+                                              admitted_at,
+                                              absolute=True)
+    add_cluster_event(
+        # The attempt's own display name, not the caller's argument: this is
+        # reachable with the on-cloud name (pod labels carry that one), and
+        # the event table is keyed by the display name at both ends -- so
+        # filing it under the caller's name would silently drop the event for
+        # every caller holding the other one.
+        attempt.cluster_name,
+        new_status=None,
+        reason=f'Admitted{where} after waiting {waited}',
+        # Not LAUNCH_PROGRESS: that type is consumed latest-wins as a managed
+        # job's `details` column, answering "what is this launch waiting on
+        # now". This row says a wait has ended, so it would sit there as a
+        # stale answer for the rest of the launch.
+        event_type=ClusterEventType.LAUNCH_MILESTONE,
+        transitioned_at=int(admitted_at),
+    )
+
+
+@_best_effort
+@db_retries.retry
+def close_launch_attempt(attempt_id: str, outcome: LaunchOutcome) -> None:
+    """Mark an attempt terminal. No-op if it is already closed."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                launch_attempt_table.c.outcome.is_(None),
+            )).values({launch_attempt_table.c.outcome: outcome.value}))
+        session.commit()

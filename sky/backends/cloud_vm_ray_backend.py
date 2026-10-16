@@ -43,6 +43,7 @@ from sky.backends import backend_utils
 from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
+from sky.clouds import kubernetes as k8s_cloud
 from sky.clouds.utils import gcp_utils
 from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
@@ -208,43 +209,35 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
-# Hints currently only cover Kubernetes failure modes. Scoped to k8s blocks
-# in _format_provision_failure_blocks to avoid false positives on cloud
-# error messages (e.g., AWS "InsufficientInstanceCapacity").
-_KUBERNETES_FAILURE_HINTS = [
-    (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
-    (['OOMKilled'], 'The container ran out of memory. '
-     'Try requesting more with `memory: <size>` in resources.'),
-    (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
-     'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
-]
-
 
 def _get_kubernetes_hint(reason: str,
                          context: Optional[str] = None) -> Optional[str]:
     """Return a hint for the given Kubernetes failure reason, or None.
 
-    Hints may contain a literal `{dashboard_url}` token, which is replaced
-    with the SkyPilot dashboard infra page URL — scoped to the failing
-    context when one is available. If URL resolution fails for any reason,
-    the token is replaced with a generic fallback so we never raise from
-    failure-rendering code (which would mask the original provision error).
+    Sources the canonical hint table from
+    ``kubernetes_utils.KUBERNETES_FAILURE_HINTS``. Hints may contain a literal
+    `{dashboard_url}` token, which is replaced with the SkyPilot dashboard
+    infra page URL — scoped to the failing context when one is available. If
+    URL resolution fails for any reason, the token is replaced with a generic
+    fallback so we never raise from failure-rendering code (which would mask
+    the original provision error).
+
+    Only called from the Kubernetes branch of
+    ``_format_provision_failure_blocks`` to avoid false positives on other
+    clouds' error messages (e.g., AWS "InsufficientInstanceCapacity").
     """
-    for substrings, hint in _KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
-            if '{dashboard_url}' in hint:
-                try:
-                    starting_page = (f'infra/{context}' if context else 'infra')
-                    dashboard_url = server_common.get_dashboard_url(
-                        server_common.get_server_url(),
-                        starting_page=starting_page)
-                except Exception:  # pylint: disable=broad-except
-                    dashboard_url = 'the SkyPilot dashboard infra page'
-                hint = hint.replace('{dashboard_url}', dashboard_url)
-            return hint
-    return None
+    hint = kubernetes_utils.match_kubernetes_failure_hint(reason)
+    if hint is None:
+        return None
+    if '{dashboard_url}' in hint:
+        try:
+            starting_page = (f'infra/{context}' if context else 'infra')
+            dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=starting_page)
+        except Exception:  # pylint: disable=broad-except
+            dashboard_url = 'the SkyPilot dashboard infra page'
+        hint = hint.replace('{dashboard_url}', dashboard_url)
+    return hint
 
 
 def _format_provision_failure_blocks(
@@ -269,6 +262,14 @@ def _format_provision_failure_blocks(
 
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
+
+# When a provision request cannot get the cluster lock within
+# _CLUSTER_LOCK_TIMEOUT and runs on an API server executor, it is parked as
+# WAITING (releasing the executor worker) until the lock is observed to be
+# acquirable, instead of holding the worker blocked on the lock for the whole
+# duration of the conflicting operation. This gap is the fallback reschedule
+# backoff when waiting on the lock condition fails (e.g. a database glitch).
+_CLUSTER_LOCK_RETRY_GAP_SECONDS = 30
 
 
 def _is_message_too_long(returncode: int,
@@ -1129,6 +1130,7 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud.canonical_name())
             template_spec = (plugin.template_override(
                 task,
+                to_provision,
                 _extra_launch_context=self._extra_launch_context,
                 _is_launched_by_jobs_controller=self.
                 _is_launched_by_jobs_controller,
@@ -1207,6 +1209,13 @@ class RetryingVmProvisioner(object):
                 if zones and len(zones) == 1:
                     launched_resources = launched_resources.copy(
                         zone=zones[0].name)
+                if isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # What the pods actually got, so later autodown checks on
+                    # this cluster do not depend on today's config.
+                    provider = global_user_state.get_cluster_yaml_dict(
+                        cluster_config_file).get('provider', {})
+                    launched_resources.set_remote_identity_none_at_launch(
+                        bool(provider.get('remote_identity_none', False)))
 
                 prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None,
                                                                        None,
@@ -1239,6 +1248,12 @@ class RetryingVmProvisioner(object):
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
 
+                # Capture the task YAML.
+                user_specified_task_config = None
+                if task is not None:
+                    user_specified_task_config = task.to_yaml_config(
+                        use_user_specified_yaml=True)
+
                 # This sets the status to INIT (even for a normal, UP cluster).
                 global_user_state.add_or_update_cluster(
                     cluster_name,
@@ -1247,6 +1262,7 @@ class RetryingVmProvisioner(object):
                     ready=False,
                     is_managed=self._is_managed,
                     provision_log_path=log_abs_path,
+                    task_config=user_specified_task_config,
                 )
 
                 # Add cluster event for actual provisioning start.
@@ -1332,6 +1348,24 @@ class RetryingVmProvisioner(object):
                         # No teardown happens for this error.
                         with ux_utils.print_exception_no_traceback():
                             raise
+                    except exceptions.ExecutionPausedError:
+                        # Pausing to wait on an external condition: keep the
+                        # resources for resume, do not tear down or fail over.
+                        raise
+                    except exceptions.ProvisionUnsupportedError as e:
+                        # The request itself cannot be served here, so the
+                        # remaining zones of this candidate cannot help. Tear
+                        # down what was created and let the caller decide
+                        # whether another candidate might serve it.
+                        last_error_reason = str(e)
+                        CloudVmRayBackend().post_teardown_cleanup(
+                            handle,
+                            terminate=not prev_cluster_ever_up,
+                            remove_from_db=False,
+                            failover=True,
+                        )
+                        with ux_utils.print_exception_no_traceback():
+                            raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
@@ -1353,6 +1387,12 @@ class RetryingVmProvisioner(object):
                             zones, e)
                         continue
                     except Exception as e:  # pylint: disable=broad-except
+                        if isinstance(e, exceptions.InvalidCloudCredentials):
+                            # A permission problem is not a capacity problem:
+                            # without this the failover summary only offers
+                            # "relax the task's resource requirements", which
+                            # no amount of relaxing can fix.
+                            last_error_reason = str(e)
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node..
@@ -1823,6 +1863,16 @@ class RetryingVmProvisioner(object):
                     # requested, so use discard() instead of remove().
                     requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
+                # The jobs controller's autodown is a leak guard, not the
+                # user's ask. A NONE pod cannot delete itself, so the job runs
+                # without the guard (execution skips setting it) rather than
+                # being refused.
+                if (self._is_launched_by_jobs_controller and
+                        isinstance(to_provision.cloud, clouds.Kubernetes) and
+                        clouds.Kubernetes.remote_identity_is_none(
+                            to_provision.region, to_provision)):
+                    requested_features.discard(
+                        clouds.CloudImplementationFeatures.AUTODOWN)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -1858,6 +1908,34 @@ class RetryingVmProvisioner(object):
                     self._blocked_resources,
                     resources_lib.Resources(cloud=to_provision.cloud))
                 failover_history.append(e)
+            except exceptions.ProvisionUnsupportedError as e:
+                # Recorded in the history like any other failover reason, but
+                # deliberately not as a ResourcesUnavailableError: a caller
+                # deciding whether to keep waiting for capacity reads the
+                # history for capacity failures, and this is not one. When it
+                # is the only kind of failure the history holds, "wait for
+                # room" is the wrong answer and the caller can say so.
+                logger.warning(common_utils.format_exception(e))
+                failover_history.append(e)
+                cluster_cannot_fail_over = (
+                    prev_cluster_status is not None and
+                    prev_cluster_status != status_lib.ClusterStatus.INIT)
+                if cluster_cannot_fail_over or launchable_retries_disabled:
+                    # Two cases cannot reach the tail below. An UP or STOPPED
+                    # cluster is never failed over for (see _yield_zones, and
+                    # the INIT-only assertion in that tail) -- but an INIT one
+                    # is, which is why this is not simply "there is an
+                    # existing cluster". And with no registered DAG there is
+                    # nothing to fail over to. The wrapper is what reaches the
+                    # caller; the history it carries is what says this was not
+                    # a capacity failure.
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(e),
+                        no_failover=True,
+                        failover_history=failover_history) from e
+                # Otherwise fall through: the tail blocks this candidate and
+                # records it in resource_exceptions, then re-optimizes over
+                # what remains.
             except exceptions.ResourcesUnavailableError as e:
                 failover_history.append(e)
                 if e.no_failover:
@@ -1882,13 +1960,17 @@ class RetryingVmProvisioner(object):
                 assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
-                # If we reach here, it means that the existing cluster must have
-                # a previous status of INIT, because other statuses (UP,
-                # STOPPED) will not trigger the failover due to `no_failover`
-                # flag; see _yield_zones(). Also, the cluster should have been
-                # terminated by _retry_zones().
-                assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                       ), prev_cluster_status
+                if prev_cluster_status != status_lib.ClusterStatus.INIT:
+                    # An UP or STOPPED cluster is never failed over for (see
+                    # _yield_zones). Errors raised without `no_failover`, e.g.
+                    # invalid credentials or config, are reported as is.
+                    last_error = failover_history[-1]
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(last_error),
+                        no_failover=True,
+                        failover_history=failover_history) from last_error
+                # An INIT cluster should have been terminated by
+                # _retry_zones(), so it can be retried on other resources.
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -2013,8 +2095,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
+        # A handle is created before provisioning runs, so nothing is set up
+        # on the cluster yet; bulk_provision() fills in the real record on
+        # completion. Defaulting to no-Ray keeps teardown of a cluster that
+        # crashed or recovered mid-provisioning from attempting `ray stop` on
+        # a cluster where Ray never started.
         self.provision_runtime_metadata = (
-            provision_common.ProvisionRuntimeMetadata())
+            provision_common.ProvisionRuntimeMetadata(
+                has_ray=False,
+                has_skylet=False,
+                has_job_queue=False,
+                ssh_available=False,
+            ))
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2224,6 +2316,49 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
+    # TODO(kevin): Remove this backcompat migration in v0.15. It exists only
+    # for Slurm container clusters launched before provider.container_image
+    # was persisted; by v0.15 those allocations will have been recreated.
+    def _maybe_backfill_slurm_container_image(self) -> None:
+        """Backfill provider.container_image for pre-upgrade Slurm clusters.
+
+        Slurm container-ness is read from provider.container_image in the
+        cluster record (see provision/slurm/instance.py). Clusters launched
+        before that field existed lack it, which would run their containers
+        on the host. Reconcile the record with the launched resources, which
+        carry the image and are the source of truth used elsewhere (e.g. the
+        SSH proxy in server.py). Idempotent: writes only when the record is
+        missing the value or disagrees with the launched resources, so it is
+        a no-op for clusters launched with the field.
+        """
+        launched_resources = self.launched_resources
+        if (launched_resources is None or
+                not isinstance(launched_resources.cloud, clouds.Slurm)):
+            return
+        container_image = launched_resources.extract_docker_image()
+        if container_image is None:
+            return
+        try:
+            config = global_user_state.get_cluster_yaml_dict(self.cluster_yaml)
+            provider_config = config.get('provider')
+            if provider_config is None:
+                return
+            if provider_config.get('container_image') == container_image:
+                return
+            provider_config['container_image'] = container_image
+            global_user_state.set_cluster_yaml(self.cluster_name,
+                                               yaml_utils.dump_yaml_str(config))
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort migration: a failure here just leaves the record as
+            # it was, so do not fail the operation that needed the runners.
+            logger.warning(
+                'Failed to backfill provider.container_image for Slurm '
+                f'cluster {self.cluster_name!r}: '
+                f'{common_utils.format_exception(e)}')
+            return
+        logger.info('Backfilled provider.container_image for Slurm cluster '
+                    f'{self.cluster_name!r} ({container_image}).')
+
     @context_utils.cancellation_guard
     # we expect different request to be acting on different clusters
     # (= different handles) so we have no real expectation of cache hit
@@ -2237,6 +2372,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
+        # Pre-upgrade Slurm container clusters lack provider.container_image;
+        # reconcile the record from the launched resources before it is read.
+        self._maybe_backfill_slurm_container_image()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
@@ -2364,20 +2502,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
+    # A skylet tunnel is a process on the host that opened it, so each host
+    # (see backend_utils.skylet_tunnel_owner_id) reads, writes and closes
+    # only its own entry in the cluster row.
     def _get_skylet_ssh_tunnel(self) -> Optional[SSHTunnelInfo]:
-        metadata = global_user_state.get_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name)
+        metadata = global_user_state.get_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id())
         if metadata is None:
             return None
         return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
 
     def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
-        global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
-            self.cluster_name,
+        global_user_state.set_cluster_skylet_ssh_tunnel(
+            self.cluster_name, backend_utils.skylet_tunnel_owner_id(),
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def close_skylet_ssh_tunnel(self) -> None:
-        """Terminate the SSH tunnel process and clear its metadata."""
+        """Terminate this host's SSH tunnel process and clear its metadata."""
         tunnel = self._get_skylet_ssh_tunnel()
         if tunnel is None:
             return
@@ -2437,7 +2578,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     logger.debug(f'Acquired exclusive lock for {lock_id} after '
                                  f'{wait_elapsed:.2f}s')
                     try:
-                        tunnel = self._open_and_update_skylet_tunnel()
+                        # Another process may have opened a healthy tunnel
+                        # since our last read, before we acquired the lock.
+                        tunnel = self._get_skylet_ssh_tunnel()
+                        if tunnel is None or not _is_tunnel_healthy(tunnel):
+                            tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                     except Exception as e:  # pylint: disable=broad-except
@@ -2525,7 +2670,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             local_port = random.randint(10000, 65535)
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
-                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+                    head_runner, (local_port, self.skylet_port))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,
                 # connection refused, Kubernetes pods not found,
@@ -2604,6 +2749,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def skylet_port(self) -> int:
+        """The port the head's skylet listens on.
+
+        The default, except on a Kubernetes hostNetwork head, which shares its
+        node's ports with other clusters' heads and so is assigned one.
+        """
+        info = self.cached_cluster_info
+        head = info.get_head_instance() if info is not None else None
+        # getattr: an InstanceInfo pickled before the field existed.
+        return (getattr(head, 'skylet_port', None) or
+                constants.SKYLET_GRPC_PORT)
 
     @property
     def num_ips_per_node(self) -> int:
@@ -3140,6 +3298,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         check_ports: bool = False,
+        skip_num_nodes_check: bool = False,
     ) -> resources_lib.Resources:
         """Check if resources requested by the task fit the cluster.
 
@@ -3147,6 +3306,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster.
         If multiple resources are specified, this checking will pass when
         at least one resource fits the cluster.
+
+        Args:
+            handle: Existing cluster handle.
+            task: Task whose resources are validated.
+            check_ports: If True, also check that requested ports fit.
+            skip_num_nodes_check: If True, only validate hardware (instance
+                type, accelerators, region, zone, etc.) and ignore
+                ``task.num_nodes`` vs ``handle.launched_nodes``. Used during
+                resize, where num_nodes is allowed to differ by design.
+                Error messages still show the original ``task.num_nodes`` so
+                users see their actual request.
 
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
@@ -3169,11 +3339,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
         requested_resource_list = []
+        # For the validation comparison, optionally treat the node count as
+        # matching (resize) while still reporting the user's real num_nodes
+        # in any error message below.
+        fit_num_nodes = (handle.launched_nodes
+                         if skip_num_nodes_check else task.num_nodes)
         for resource in task.resources:
-            if (task.num_nodes <= handle.launched_nodes and
+            if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
-                        requested_num_nodes=task.num_nodes,
+                        requested_num_nodes=fit_num_nodes,
                         check_ports=check_ports)):
                 valid_resource = resource
                 break
@@ -3251,6 +3426,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
@@ -3271,6 +3447,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            exceptions.ExecutionPausedError: when running on an API server
+                executor worker and the cluster lock is held by another
+                operation: the request is parked as WAITING (releasing the
+                worker) and re-enqueued once the lock is observed to be
+                acquirable, instead of blocking on the lock.
             RuntimeError: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
@@ -3291,8 +3472,55 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return self._locked_provision(lock_id, task, to_provision,
                                               dryrun, stream_logs, cluster_name,
                                               retry_until_up,
-                                              skip_unnecessary_provisioning)
-            except locks.LockTimeout:
+                                              skip_unnecessary_provisioning,
+                                              resize)
+            except locks.LockTimeout as e:
+                # When running a server request that the scheduler can park and
+                # resume, release the worker instead of holding it blocked on
+                # the cluster lock: raising ExecutionPausedError marks the
+                # request WAITING and re-enqueues it once the attached
+                # condition observes the lock to be acquirable.
+                #
+                # The request context is the sole gate on purpose: it is
+                # exactly "a scheduler manages this request and can park and
+                # resume it". Launches issued by the jobs controller park too.
+                # The controller always launches through the SDK
+                # (recovery_strategy), so its launches run as scheduler-managed
+                # requests on whichever API server serves them: under
+                # consolidation that is the shared API server, where blocking
+                # on the lock pins one executor worker per contender (e.g.
+                # duplicate launch requests for the same cluster after
+                # controller retries) and starves the worker pool at scale;
+                # on a dedicated controller, it is the controller's local API
+                # server, where parking is equally safe -- the controller
+                # explicitly supports parked launch requests (see
+                # _wait_for_parked_request in recovery_strategy). Only callers
+                # with no request context (no scheduler to hand the pause to)
+                # keep the blocking behavior below.
+                #
+                # Note on expected impact: in a healthy system controller
+                # launches should rarely contend on their own cluster lock at
+                # all -- the controller runs one launch attempt per job and
+                # reattaches to an in-flight or parked request on restart
+                # rather than submitting a duplicate, and a holder whose
+                # process died releases the lock (advisory locks are
+                # session-scoped). Parking here is consistency and defense in
+                # depth: when a bug does produce concurrent launches for one
+                # cluster (observed in practice), the losers release their
+                # workers instead of blocking one worker each for the
+                # duration of the holder's operation.
+                if common_utils.is_in_request_context():
+                    raise exceptions.ExecutionPausedError(
+                        f'Cluster {cluster_name!r} is locked by another '
+                        'operation (e.g. launch, start, stop, autostop or '
+                        'teardown).',
+                        hint=('Waiting for the other operation to finish; '
+                              'will resume once the cluster lock is '
+                              'released. Check concurrent requests: '
+                              f'sky api status -v | grep {cluster_name}'),
+                        retry_wait_seconds=_CLUSTER_LOCK_RETRY_GAP_SECONDS,
+                        continue_condition=locks.LockAcquirableCondition(
+                            lock_id)) from e
                 if not communicated_with_user:
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching - blocked by ' +
@@ -3345,6 +3573,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
             # Reset spinner message to remove any mention of being blocked
@@ -3356,7 +3585,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # cluster, this function will create a to_provision_config
             # with required resources.
             to_provision_config = self._check_existing_cluster(
-                task, to_provision, cluster_name, dryrun)
+                task, to_provision, cluster_name, dryrun, resize)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -3966,7 +4195,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
             if (detach_setup or
-                    backend_utils.is_command_length_over_limit(encoded_script)):
+                    runner.is_command_length_over_limit(encoded_script)):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4091,10 +4320,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
-        def _dump_code_to_file(codegen: str,
-                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
-            runners = handle.get_command_runners()
-            head_runner = runners[0]
+        def _dump_code_to_file(
+                codegen: str,
+                target_dir: str = SKY_REMOTE_APP_DIR,
+                runner: Optional[command_runner.CommandRunner] = None) -> None:
+            # Reuse the caller's runner when it has one: for a high
+            # availability Kubernetes cluster get_command_runners() refreshes
+            # cluster info on every call, and uploading is the common path.
+            head_runner = (runner if runner is not None else
+                           handle.get_command_runners()[0])
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
@@ -4146,6 +4380,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
+                    # `ManagedJobInfo.workspace` is currently not read by
+                    # skylet (see `services.py::QueueJob`). Kept on the
+                    # wire for future consumers.
                     workspace = skypilot_config.get_active_workspace(
                         force_user_workspace=True)
                     entrypoint = common_utils.get_current_command()
@@ -4182,6 +4419,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
+                # Not a runner check: the codegen rides in a gRPC message here,
+                # so neither shell quoting nor a request URL is involved. This
+                # is just a size cap above which uploading is cheaper.
                 if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
@@ -4205,8 +4445,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(job_submit_cmd):
-                _dump_code_to_file(codegen)
+            head_runner = handle.get_command_runners()[0]
+            inlined = not head_runner.is_command_length_over_limit(
+                job_submit_cmd)
+            if not inlined:
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
             # For Slurm, run in background so that SSH returns immediately.
@@ -4217,7 +4460,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_submit_cmd,
                 stream_logs=False,
                 require_outputs=True,
-                run_in_background=is_slurm)
+                run_in_background=is_slurm,
+                head_runner=head_runner)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -4231,21 +4475,37 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to submit job due to command length limit. '
                     'Dumping job to file and running it with SSH. '
                     f'Output: {output}')
-                _dump_code_to_file(codegen)
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
+                # This attempt uploads, so a failure of it is not about size.
+                inlined = False
                 # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
                     stream_logs=False,
                     require_outputs=True,
-                    run_in_background=is_slurm)
+                    run_in_background=is_slurm,
+                    head_runner=head_runner)
 
-            subprocess_utils.handle_returncode(
-                returncode,
-                job_submit_cmd,
-                f'Failed to submit job {job_id}.',
-                stderr=stdout + stderr)
+            failure_reason = f'Failed to submit job {job_id}.'
+            if inlined and isinstance(head_runner,
+                                      command_runner.KubernetesCommandRunner):
+                # The command was small enough to inline, so it went into the
+                # exec request URL. A proxy in front of the Kubernetes API that
+                # caps request size rejects those with little or no explanation,
+                # which is otherwise an unreadable failure.
+                limit = head_runner.max_inline_command_length()
+                failure_reason += (
+                    ' If the Kubernetes API server is behind a proxy that '
+                    'limits request size, lower '
+                    '`kubernetes.max_inline_command_length` (currently '
+                    f'{limit} bytes of request URL) so the driver is uploaded '
+                    'instead of inlined.')
+            subprocess_utils.handle_returncode(returncode,
+                                               job_submit_cmd,
+                                               failure_reason,
+                                               stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
@@ -4479,7 +4739,47 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
+        # After the job is submitted: recording is best-effort and nothing
+        # reads the spec before now, so it must not delay the job's start.
+        self._record_job_spec(handle, job_id, task)
         return job_id
+
+    def _record_job_spec(self, handle: CloudVmRayResourceHandle, job_id: int,
+                         task: task_lib.Task) -> None:
+        """Records the job's task YAML and entrypoint for the dashboard.
+
+        Best-effort: a failure here is logged and does not fail the job, which
+        has already been submitted.
+
+        Skipped for jobs the jobs/serve controllers are involved in, as nothing
+        reads their spec (the managed job and service pages show the user's own
+        YAML) and the rows would only pile up:
+        - jobs on a controller cluster itself (every managed job or service
+          adds one). A plain prefix check: `Controllers.from_name` asserts on,
+          or adopts, a name that is not the current user's controller.
+        - jobs a controller submits to the clusters it launched (a managed
+          job's cluster, recovery relaunches, pool workers), which are recorded
+          as `is_managed`; see `get_job_spec_cluster_hash`.
+        """
+        if handle.cluster_name.startswith(
+            (common.JOB_CONTROLLER_PREFIX, common.SKY_SERVE_CONTROLLER_PREFIX)):
+            return
+        try:
+            cluster_hash = global_user_state.get_job_spec_cluster_hash(
+                handle.cluster_name)
+            if cluster_hash is None:
+                return
+            # The YAML as the user wrote it (secrets redacted), like the
+            # cluster's last_creation_yaml, but with the `--env`, `--secret`
+            # and resource overrides the job actually runs with.
+            task_yaml = yaml_utils.dump_yaml_str(
+                task.to_submitted_yaml_config())
+            entrypoint = common_utils.get_current_command()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to build the spec of job {job_id}: {e}')
+            return
+        global_user_state.add_cluster_job_spec(cluster_hash, job_id, task_yaml,
+                                               entrypoint)
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
@@ -4615,8 +4915,87 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
+        if not stdout:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Treat this as a failure.
+            raise exceptions.CommandFailureException(
+                command=code,
+                failure='produced no output',
+                error_msg='Failed to get job status.',
+                detailed_reason=f'stderr="{stderr}"',
+            )
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
+
+    def get_job_metadata(
+        self,
+        handle: CloudVmRayResourceHandle,
+        job_ids: Optional[List[int]] = None,
+    ) -> Dict[int, dict]:
+        """Best-effort fetch of per-job ``metadata`` from the cluster's skylet.
+
+        Reuses the existing job-queue read, whose payload already carries each
+        job's metadata JSON, over gRPC when available and SSH otherwise, so it
+        also works on non-gRPC clusters. Returns ``{}`` on any failure:
+        metadata-derived links are best-effort and the controller's
+        terminal-state log scan is the guarantee. Older clusters do not populate
+        the harvested-URL metadata, so they simply yield nothing here.
+        """
+        # (job_id, metadata) pairs; metadata is a JSON string (gRPC) or an
+        # already-decoded dict (SSH payload via load_job_queue).
+        raw_metadata: List[Any] = []
+        used_grpc = False
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.GetJobQueueRequest(all_jobs=True)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).get_job_queue(request))
+                raw_metadata = [
+                    (job.job_id, job.metadata) for job in response.jobs
+                ]
+                used_grpc = True
+            except Exception as e:  # pylint: disable=broad-except
+                # Best-effort: any gRPC/channel failure (including a tunnel
+                # RuntimeError raised by get_grpc_channel) should fall back to
+                # the SSH path below rather than propagate.
+                logger.debug('gRPC job metadata fetch failed, falling back to '
+                             f'SSH: {e}')
+        if not used_grpc:
+            code = job_lib.JobLibCodeGen.get_job_queue(None, True)
+            try:
+                returncode, stdout, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    require_outputs=True,
+                    separate_stderr=True,
+                    stream_logs=False)
+                if returncode != 0 or not stdout:
+                    logger.debug('SSH job metadata fetch failed '
+                                 f'(returncode={returncode}): {stderr}')
+                    return {}
+                raw_metadata = [(record['job_id'], record.get('metadata'))
+                                for record in job_lib.load_job_queue(stdout)]
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'SSH job metadata fetch failed: {e}')
+                return {}
+        # Empty set means "all jobs"; a non-empty set filters to those ids.
+        wanted = set(job_ids or [])
+        result: Dict[int, dict] = {}
+        for job_id, metadata in raw_metadata:
+            if wanted and job_id not in wanted:
+                continue
+            if isinstance(metadata, str):
+                if not metadata:
+                    continue
+                try:
+                    metadata = json.loads(metadata)
+                except (ValueError, TypeError):
+                    continue
+            if isinstance(metadata, dict) and metadata:
+                result[job_id] = metadata
+        return result
 
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
@@ -4660,12 +5039,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             logger.info('No jobs cancelled. They may be in terminal states.')
 
-    def sync_down_logs(
-            self,
-            handle: CloudVmRayResourceHandle,
-            job_ids: Optional[List[str]],
-            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+    def sync_down_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       job_ids: Optional[List[str]],
+                       local_dir: str = constants.SKY_LOGS_DIRECTORY,
+                       head_only: bool = False) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
+
+        Args:
+            head_only: if True, rsync only from the head node. The head's
+                ``run.log`` already aggregates every node's task output, so
+                this captures the full log without touching workers -- which
+                may be unreachable (e.g. a node died, triggering recovery).
 
         Returns:
             A dictionary mapping job_id to log path.
@@ -4741,6 +5126,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             local_log_dirs.append(local_log_dir)
 
         runners = handle.get_command_runners()
+        if head_only:
+            # Head's run.log already aggregates all nodes' output; rsyncing
+            # only the head avoids exec-ing into workers that may be gone.
+            runners = runners[:1]
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -4860,14 +5249,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
-    def tail_autostop_logs(self,
-                           handle: CloudVmRayResourceHandle,
-                           follow: bool = True,
-                           tail: int = 0) -> int:
-        """Tail the autostop hook logs.
+    def tail_hook_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       event: Optional[str] = None,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+        """Tail per-event lifecycle-hook logs.
 
         Args:
             handle: The handle to the cluster.
+            event: One of 'stop', 'preemption', 'down'. When ``None``,
+                auto-selects whichever per-event log exists on the head.
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
@@ -4875,21 +5267,57 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             The exit code of the tail command.
         """
-        # Construct tail command for the autostop hook log
-        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
-        tail_cmd_parts = ['tail']
+        legacy_log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        new_log_dir = f'~/{constants.HOOK_LOG_DIR}'
+        tail_flags = []
         if tail > 0:
-            tail_cmd_parts.extend(['-n', str(tail)])
+            tail_flags.extend(['-n', str(tail)])
+        elif not follow:
+            tail_flags.extend(['-n', '+1'])
         if follow:
-            tail_cmd_parts.append('-f')
-        tail_cmd_parts.append(log_path)
+            tail_flags.append('-f')
+        tail_flag_str = ' '.join(tail_flags)
 
-        # Add fallback to show helpful message if file doesn't exist
-        tail_cmd = ' '.join(tail_cmd_parts)
-        error_msg = (f'Autostop hook log file not found at {log_path}. '
-                     f'The autostop hook may not have been executed yet.')
-        cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
-               f'else echo "{error_msg}"; exit 1; fi')
+        if event is None:
+            # Auto-select: pick whichever per-event log exists. Prefer
+            # recency via -t sort (newest first). Fall back to legacy path.
+            # TODO(zpoint): drop the legacy_log_path branch after v0.15.0
+            # (aligned with the autostop.hook removal pinned at v0.15.0
+            # in sky/utils/schemas.py:_AUTOSTOP_SCHEMA). By then, clusters
+            # predating the new ~/.sky/hooks/ layout have aged out via
+            # re-launches.
+            cmd = (f'if ls {new_log_dir}/*.log >/dev/null 2>&1; then '
+                   f'  latest=$(ls -t {new_log_dir}/*.log | head -n1); '
+                   f'  echo "=== $(basename $latest .log) ==="; '
+                   f'  tail {tail_flag_str} "$latest"; '
+                   f'elif [ -f {legacy_log_path} ]; then '
+                   f'  tail {tail_flag_str} {legacy_log_path}; '
+                   f'else '
+                   f'  echo "No hook has fired yet on this cluster."; exit 1; '
+                   f'fi')
+        else:
+            log_path = f'{new_log_dir}/{event}.log'
+            if event == 'stop':
+                # Legacy-path fallback for clusters predating the hooks
+                # framework — master's single autostop_hook.log corresponds
+                # to the new ``stop`` event (idle-timer teardown without
+                # autodown). Autodown clusters had their hook log under
+                # the same legacy path; users who want it via ``--hook down``
+                # should re-launch (the legacy cluster's skylet won't write
+                # to ~/.sky/hooks/down.log anyway).
+                # TODO(zpoint): drop the legacy_log_path branch after
+                # v0.15.0 (aligned with the autostop.hook removal pinned
+                # at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
+                cmd = (
+                    f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                    f'{log_path}; '
+                    f'elif [ -f {legacy_log_path} ]; then tail {tail_flag_str} '
+                    f'{legacy_log_path}; '
+                    f'else echo "No {event} hook log found."; exit 1; fi')
+            else:
+                cmd = (f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                       f'{log_path}; '
+                       f'else echo "No {event} hook log found."; exit 1; fi')
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -5622,7 +6050,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      down: bool = False,
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
-                     hook_timeout: Optional[int] = None) -> None:
+                     hook_timeout: Optional[int] = None,
+                     hooks: Optional[List[Dict[str, Any]]] = None) -> None:
         if not handle.provision_runtime_metadata.has_skylet:
             return
         # The core.autostop() function should have already checked that the
@@ -5669,6 +6098,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
+            # On Kubernetes, cap any preemption-hook timeout to the pod's
+            # terminationGracePeriodSeconds cap so the stored value
+            # matches kubelet's actual SIGKILL boundary. Done before the
+            # gRPC/SSH branch so the SSH codegen fallback path also sees
+            # the capped values (otherwise pre-gRPC skylets on K8s would
+            # store misleading timeouts).
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
             if handle.is_grpc_enabled_with_flag:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
@@ -5681,13 +6118,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.hook = hook
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
-
+                # v7+: send the full hooks list inline on the same RPC.
+                # Three states for the `hooks` arg:
+                #   None  → legacy/no-hook-aware caller; don't touch stored
+                #   []    → caller explicitly clears stored hooks
+                #   [...] → replace stored hooks with this list
+                if hooks is None:
+                    pass  # leave stored hooks alone
+                elif not hooks:
+                    request.clear_hooks = True
+                else:
+                    request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
-                    hook_timeout)
+                    hook_timeout, hooks)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
@@ -5740,7 +6187,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)
-            if returncode == 0:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Don't try to decode this.
+            if returncode == 0 and stdout:
                 is_autostopping = message_utils.decode_payload(stdout)
             else:
                 logger.debug('Failed to check if cluster is autostopping with '
@@ -5769,11 +6219,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
+        head_runner: Optional[command_runner.CommandRunner] = None,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
 
         It will try to fetch the head node IP if it is not cached.
+
+        Pass `head_runner` when the caller already built one: for a high
+        availability Kubernetes cluster `get_command_runners` refreshes cluster
+        info on every call, so letting this build its own would cost a second
+        API round trip.
 
         Args:
             handle: The ResourceHandle to the cluster.
@@ -5809,8 +6265,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners = handle.get_command_runners()
-        head_runner = runners[0]
+        if head_runner is None:
+            head_runner = handle.get_command_runners()[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
@@ -5829,13 +6285,132 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     # --- Utilities ---
 
+    def _handle_resize_pre_provision(
+        self,
+        handle: CloudVmRayResourceHandle,
+        task: task_lib.Task,
+        cluster_name: str,
+        cluster_status: Optional[status_lib.ClusterStatus] = None,
+    ) -> None:
+        """Pre-provision steps for cluster resize.
+
+        For scale-down: checks that no jobs are running, then terminates
+        excess worker nodes so that the subsequent bulk_provision sees the
+        correct (reduced) instance count.
+
+        For scale-up or same-size: no-op (bulk_provision handles it).
+        """
+        current_nodes = handle.launched_nodes
+        requested_nodes = task.num_nodes
+
+        if requested_nodes >= current_nodes:
+            # Scale-up or no-op: nothing to do pre-provision.
+            if requested_nodes > current_nodes:
+                delta = requested_nodes - current_nodes
+                logger.info(f'Resizing cluster {cluster_name!r} from '
+                            f'{current_nodes} to {requested_nodes} node(s) '
+                            f'(+{delta} worker(s)).')
+            else:
+                logger.info(f'Cluster {cluster_name!r} already has '
+                            f'{current_nodes} node(s). Nothing to do.')
+            return
+
+        to_remove = current_nodes - requested_nodes
+        logger.info(f'Resizing cluster {cluster_name!r} from {current_nodes} '
+                    f'to {requested_nodes} node(s) (-{to_remove} worker(s)).')
+
+        # Before terminating workers, make sure no jobs are running. How we
+        # verify depends on the cluster's current status:
+        #   - STOPPED: a stopped cluster has no running jobs by definition, and
+        #     its head node is unreachable via SSH. Skip the SSH-based job-queue
+        #     check and proceed; bulk provisioning will restart the cluster at
+        #     the new size.
+        #   - UP (or unknown/None): SSH to the head node and inspect the job
+        #     queue; abort if any job is in progress.
+        #   - Any other state (e.g. INIT): we cannot determine the job state
+        #     safely, so reject and ask the user to wait.
+        if cluster_status == status_lib.ClusterStatus.STOPPED:
+            logger.info(
+                f'Cluster {cluster_name!r} is STOPPED; skipping the '
+                'running-jobs check (a stopped cluster has no running jobs). '
+                'It will be restarted at the new size.')
+        elif (cluster_status is None or
+              cluster_status == status_lib.ClusterStatus.UP):
+            # Check for running jobs via SSH to the head node.
+            returncode, stdout, stderr = self.run_on_head(
+                handle,
+                job_lib.JobLibCodeGen.get_job_queue(user_hash=None,
+                                                    all_jobs=False),
+                require_outputs=True,
+                stream_logs=False)
+            if returncode != 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(f'Failed to check job queue on cluster '
+                                       f'{cluster_name!r} before scale-down. '
+                                       f'Aborting resize for safety.\n'
+                                       f'stderr: {stderr}')
+            jobs = job_lib.load_job_queue(stdout)
+            in_progress = [
+                j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
+                                                   job_lib.JobStatus.SETTING_UP,
+                                                   job_lib.JobStatus.PENDING)
+            ]
+            if in_progress:
+                job_ids = ', '.join(str(j['job_id']) for j in in_progress)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot scale down: {len(in_progress)} job(s) still '
+                        f'running (IDs: {job_ids}). Cancel them first with: '
+                        f'sky cancel {cluster_name} -a')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot scale down cluster {cluster_name!r}: the cluster '
+                    f'is in status {cluster_status.value!r}. Wait until it is '
+                    f'UP or STOPPED, then retry.')
+
+        # Terminate all worker nodes. Since we verified no jobs are
+        # running, all workers are idle. The subsequent bulk_provision
+        # will recreate only the workers needed for the new count.
+        #
+        # TODO(zhwu): this is not the most efficient approach — we tear down
+        # every worker and bulk_provision re-creates `requested_nodes - 1`
+        # from scratch, even for a small scale-down (e.g. 10 -> 9 still
+        # re-provisions 9 workers). We chose it for simplicity and cloud
+        # agnosticism: the provision-layer API
+        # (`provision_lib.terminate_instances`) only exposes a boolean
+        # `worker_only` flag, not "terminate these N specific instances",
+        # and implementing selective termination would require per-cloud
+        # logic to pick and terminate specific instance IDs/names. A future
+        # optimization would add a `terminate_instances(worker_ids=[...])`
+        # API and only remove the excess workers.
+        launched = handle.launched_resources
+        assert launched is not None and launched.cloud is not None
+        # Convention in this codebase: use str(cloud).lower() to get the
+        # provider name expected by sky.provision (e.g. 'aws', 'gcp').
+        cloud_name = str(launched.cloud).lower()
+        config_from_yaml = global_user_state.get_cluster_yaml_dict(
+            handle.cluster_yaml)
+        # get_cluster_yaml_dict can return None if the local cluster YAML is
+        # missing (e.g., ~/.sky/generated was wiped). Treat as empty config.
+        provider_config = (config_from_yaml or {}).get('provider')
+
+        logger.info(f'Terminating all workers of cluster {cluster_name!r} so '
+                    f'bulk provisioning can recreate {requested_nodes - 1} '
+                    f'worker(s).')
+        provision_lib.terminate_instances(cloud_name,
+                                          handle.cluster_name_on_cloud,
+                                          provider_config,
+                                          worker_only=True)
+
     @timeline.event
     def _check_existing_cluster(
             self,
             task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
             cluster_name: str,
-            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
+            dryrun: bool = False,
+            resize: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -5886,7 +6461,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
-            self.check_resources_fit_cluster(handle, task)
+            if resize:
+                # Resize mode: allow num_nodes to change, but still validate
+                # non-node hardware (instance type, accelerators, region,
+                # zone, ports, etc.) matches the existing cluster to prevent
+                # ending up with a mixed-resource cluster.
+                self.check_resources_fit_cluster(handle,
+                                                 task,
+                                                 skip_num_nodes_check=True)
+                # Then run resize-specific pre-provision logic (e.g. verify
+                # no running jobs and terminate workers for scale-down).
+                self._handle_resize_pre_provision(
+                    handle,
+                    task,
+                    cluster_name,
+                    cluster_status=prev_cluster_status)
+            else:
+                self.check_resources_fit_cluster(handle, task)
 
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
@@ -5935,6 +6526,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
 
+            # Re-launch with changed config.hooks: propagate the new list
+            # onto to_provision so the next SetAutostop RPC carries the
+            # up-to-date scripts / timeouts.
+            if one_task_resource.hooks != to_provision.hooks:
+                # On Kubernetes the pod's terminationGracePeriodSeconds is
+                # fixed at pod-creation time. Warn if the new hooks would
+                # need more grace than the existing pod has.
+                grace_warning = (
+                    k8s_cloud.warn_if_preemption_grace_change_requires_relaunch(
+                        to_provision.cloud, to_provision.hooks,
+                        one_task_resource.hooks))
+                if grace_warning is not None:
+                    logger.warning(grace_warning)
+                to_provision = to_provision.copy(hooks=one_task_resource.hooks)
+
+            # An in-process caller's account (execution.launch) also applies to
+            # a cluster launched before it passed one.
+            if one_task_resource.kubernetes_identity is not None:
+                to_provision = to_provision.copy()
+                to_provision.set_kubernetes_identity(
+                    one_task_resource.kubernetes_identity)
+
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:
                 assert (resource.cluster_config_overrides ==
@@ -5978,6 +6591,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if task.volume_mounts:
                 # Get existing cluster's volume mounts from cluster yaml
                 existing_volume_names = set()
+                existing_slurm_host_mounts = set()
                 try:
                     if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
@@ -6026,6 +6640,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.Slurm):
+                            for vol_mount in node_config.get(
+                                    'volume_mounts', []):
+                                config = vol_mount.get('volume_config',
+                                                       {}).get('config', {})
+                                host_path = config.get('host_path')
+                                mount_path = vol_mount.get('path')
+                                if host_path and mount_path:
+                                    existing_slurm_host_mounts.add(
+                                        (host_path, mount_path,
+                                         config.get('mode')))
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6036,10 +6661,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 new_ephemeral_volumes = []
                 new_persistent_volumes = []
                 for volume_mount in task.volume_mounts:
+                    config = volume_mount.volume_config.config
                     # Compare using volume_name for user-facing name
                     if volume_mount.is_ephemeral:
                         if volume_mount.path not in existing_volume_names:
                             new_ephemeral_volumes.append(volume_mount.path)
+                    elif (isinstance(to_provision.cloud, clouds.Slurm) and
+                          config.get('host_path')):
+                        identity = (config['host_path'], volume_mount.path,
+                                    config.get('mode'))
+                        if identity not in existing_slurm_host_mounts:
+                            new_persistent_volumes.append(volume_mount.path)
                     elif (volume_mount.volume_name not in existing_volume_names
                           and volume_mount.volume_config.name_on_cloud
                           not in existing_volume_names):
@@ -6069,14 +6701,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
+            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
-                handle.launched_nodes,
+                num_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
                 prev_config_hash=prev_config_hash)
+        if resize:
+            logger.warning(
+                f'Cluster {cluster_name!r} does not exist. '
+                'Ignoring --resize and proceeding with a normal launch.')
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
@@ -6324,7 +6961,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 read_only = bool(storage_obj.mount_config and
                                  storage_obj.mount_config.read_only)
-                mount_cmd = store.mount_command(dst, read_only=read_only)
+                if isinstance(store, storage_lib.HuggingFaceStore):
+                    # getattr guards against MountConfig instances serialized
+                    # before hf_mount_args existed (and against a None config).
+                    hf_mount_args = getattr(storage_obj.mount_config,
+                                            'hf_mount_args', None)
+                    mount_cmd = store.mount_command(dst,
+                                                    read_only=read_only,
+                                                    hf_mount_args=hf_mount_args)
+                else:
+                    mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
@@ -6514,13 +7160,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             return task_codegen.RayCodeGen()
 
+    @staticmethod
+    def _get_task_demands_dict(handle: CloudVmRayResourceHandle,
+                               task: task_lib.Task) -> Dict[str, float]:
+        """Returns task demands for the handle's execution backend."""
+        resources_dict = backend_utils.get_task_demands_dict(task)
+        if (not isinstance(handle.launched_resources.cloud, clouds.Slurm) or
+                task.is_controller_task()):
+            return resources_dict
+
+        resources = task.best_resources
+        if resources is None:
+            assert len(task.resources) == 1, task.resources
+            resources = next(iter(task.resources))
+        requested_cpus = resources.cpus
+        if requested_cpus is None:
+            requested_cpus = handle.launched_resources.cpus
+        if requested_cpus is not None:
+            resources_dict['CPU'] = float(requested_cpus.rstrip('+'))
+        return resources_dict
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
-
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -6538,13 +7203,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            1,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(1,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
 
@@ -6564,7 +7229,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(remote_log_dir, 'tasks')
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -6584,13 +7249,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            num_actual_nodes,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(num_actual_nodes,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

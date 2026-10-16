@@ -101,7 +101,7 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         cluster_yaml=_generate_tmp_yaml(tmp_path, 'cluster1.yaml'),
         launched_nodes=2,
         launched_resources=sky.Resources(infra='aws/us-east-1',
-                                         instance_type='p3.2xlarge'),
+                                         instance_type='g4dn.xlarge'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster1',

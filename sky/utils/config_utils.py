@@ -2,7 +2,9 @@
 import copy
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -15,8 +17,6 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # - If the value is None, the list is replaced atomically (e.g., args, command)
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/
 #      #podspec-v1-core
-# NOTE: field imagePullSecrets are not included deliberately for backward
-# compatibility
 _PATCH_MERGE_KEYS = {
     'containers': 'name',
     'initContainers': 'name',
@@ -29,9 +29,17 @@ _PATCH_MERGE_KEYS = {
     'topologySpreadConstraints': 'topologyKey',
     'ports': 'containerPort',
     'volumeDevices': 'devicePath',
+    # Container-level DRA resource claim refs (Container.resources.claims),
+    # keyed by 'name' per the Kubernetes listMapKey.
+    'claims': 'name',
     # Atomic list fields - replaced entirely, not merged item-by-item
     'args': None,
     'command': None,
+    # Kubernetes patch-merges imagePullSecrets by 'name', but these items are
+    # credentials: unioning an admin-provided secret with a task's own would
+    # keep pulling with a credential the task meant to drop. Replace instead,
+    # which also lets an empty list clear inherited secrets.
+    'imagePullSecrets': None,
 }
 
 
@@ -94,6 +102,110 @@ class Config(Dict[str, Any]):
         if config is None:
             return cls()
         return cls(**config)
+
+
+# What a redacted secret is replaced with. Matches
+# provision.common.ProvisionConfig.get_redacted_config().
+REDACTED_VALUE = '<redacted>'
+
+# Config paths whose *value* is a credential, and so must never reach a log
+# line or an error message. Only values are hidden -- the key stays, so a dump
+# still shows that the field was set.
+#
+# A path component of '*' matches every key of a mapping and every element of a
+# sequence. It is needed because `resources` accepts `any_of`/`ordered` lists,
+# each element of which can carry its own docker login.
+#
+# Deliberately excluded: fields naming a credential rather than holding one --
+# logs.{aws,gcp}.credentials_file and workspaces.*.nebius.credentials_file_path
+# are filesystem paths, and hiding them costs debuggability while revealing
+# nothing.
+SENSITIVE_CONFIG_PATHS: List[Tuple[str, ...]] = [
+    # A connection URI, so it embeds the database password.
+    (
+        'db',),
+    # A bearer token for the API server: whoever reads it holds the roles of
+    # the service account it was minted for.
+    ('api_server', 'service_account_token'),
+]
+for _controller in ('jobs', 'serve'):
+    for _resources_path in (('resources',), ('resources', 'any_of', '*'),
+                            ('resources', 'ordered', '*')):
+        SENSITIVE_CONFIG_PATHS.append((_controller, 'controller') +
+                                      _resources_path +
+                                      ('_docker_login_config', 'password'))
+del _controller, _resources_path
+
+
+def register_sensitive_config_paths(paths: List[Tuple[str, ...]]) -> None:
+    """Registers additional config paths whose values must not be logged.
+
+    For config keys added outside this schema -- see
+    schemas.register_plugin_property() and its siblings, and
+    skypilot_config.register_task_overrideable_config_key(). A path registered
+    here is redacted by redact_sensitive_values() like any built-in one, so a
+    plugin that adds a credential-bearing key can keep it out of logs without
+    editing this list. Mirrors provision.common.register_sensitive_fields().
+    """
+    SENSITIVE_CONFIG_PATHS.extend(paths)
+
+
+def _redact_path(node: Any, path: Tuple[str, ...]) -> None:
+    """Replaces `node`'s value at `path` with REDACTED_VALUE, in place.
+
+    Missing intermediate keys are not an error: the paths describe every field
+    that *could* hold a secret, and a given config sets few of them.
+    """
+    if not path:
+        return
+    key, rest = path[0], path[1:]
+    if key == '*':
+        children: Any
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, (list, tuple)):
+            children = node
+        else:
+            return
+        for child in children:
+            _redact_path(child, rest)
+        return
+    if not isinstance(node, dict) or key not in node:
+        return
+    if not rest:
+        # Leave an unset field unset, so redaction cannot be mistaken for a
+        # value that was actually configured.
+        if node[key] is not None:
+            node[key] = REDACTED_VALUE
+        return
+    _redact_path(node[key], rest)
+
+
+def redact_sensitive_values(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Returns a copy of `config` safe to log, secret values replaced.
+
+    Use this for every dump of a SkyPilot config into a log line or an error
+    message. The input is not modified, so the live config keeps the values it
+    needs.
+    """
+    if not config:
+        return {}
+    redacted = copy.deepcopy(dict(config))
+    for path in SENSITIVE_CONFIG_PATHS:
+        _redact_path(redacted, path)
+    return redacted
+
+
+def dump_redacted_yaml(config: Optional[Dict[str, Any]]) -> str:
+    """Serializes a config for a log line or an error message.
+
+    Never call yaml_utils.dump_yaml_str() on a config for that purpose: a
+    config can carry credentials (see SENSITIVE_CONFIG_PATHS), and a debug dump
+    is the one place they escape into somewhere durable and widely readable.
+    Use this instead, wherever the destination is a log or a message rather
+    than storage.
+    """
+    return yaml_utils.dump_yaml_str(redact_sensitive_values(config))
 
 
 def _check_allowed_and_disallowed_override_keys(
@@ -202,6 +314,43 @@ def _get_nested(configs: Optional[Dict[str, Any]],
     return curr
 
 
+def _validate_mergeable_types(key: Any, base_value: Any,
+                              override_value: Any) -> None:
+    """Rejects an override whose shape cannot be merged into the base value.
+
+    Nested `pod_config` content is not type-checked by the config schema, so a
+    dict/list/scalar mismatch is user input rather than a bug. Without this the
+    merge below would raise a bare AssertionError or TypeError, or silently
+    replace a whole dict/list with a scalar (which the post-merge pod
+    validation does not reliably catch either).
+
+    Only checked where the merge actually reads the base value: an override
+    that replaces the base outright works whatever shape the base has.
+    """
+    if override_value is None:
+        # An explicit null replaces the value; Kubernetes reads a null field as
+        # absent, so this is how a config clears an inherited subtree.
+        return
+    if isinstance(override_value, dict):
+        # Always merged key by key, so the base has to be a dict to recurse
+        # into. The atomic exemption below deliberately does not apply here:
+        # _PATCH_MERGE_KEYS is only consulted for list overrides, so a dict
+        # override recurses even for an atomic field.
+        mergeable = isinstance(base_value, dict)
+    elif isinstance(override_value, list):
+        # Atomic list fields replace the base wholesale; the rest are merged by
+        # patch merge key or appended, both of which read the base list.
+        atomic = key in _PATCH_MERGE_KEYS and _PATCH_MERGE_KEYS[key] is None
+        mergeable = atomic or isinstance(base_value, list)
+    else:
+        mergeable = not isinstance(base_value, (dict, list))
+    if not mergeable:
+        raise exceptions.InvalidSkyPilotConfigError(
+            f'Cannot override config field {key!r} of type '
+            f'{type(base_value).__name__} with a value of type '
+            f'{type(override_value).__name__}: {override_value!r}.')
+
+
 def merge_k8s_configs(
         base_config: Dict[Any, Any],
         override_config: Dict[Any, Any],
@@ -227,24 +376,16 @@ def merge_k8s_configs(
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
+        if key in base_config:
+            _validate_mergeable_types(key, base_config[key], value)
         if isinstance(value, dict) and key in base_config:
             merge_k8s_configs(base_config[key], value,
                               next_allowed_override_keys,
                               next_disallowed_override_keys)
         elif isinstance(value, list) and key in base_config:
-            assert isinstance(base_config[key], list), \
-                f'Expected {key} to be a list, found {base_config[key]}'
-            if key == 'imagePullSecrets':
-                # For imagePullSecrets, merge the first item from override
-                # into the first item in base (legacy behavior).
-                assert len(value) == 1, \
-                    f'Expected only one imagePullSecret, found {value}'
-                merge_k8s_configs(base_config[key][0], value[0],
-                                  next_allowed_override_keys,
-                                  next_disallowed_override_keys)
             # For list fields with patch strategy "merge", we merge the list
             # by the patch merge key.
-            elif key in _PATCH_MERGE_KEYS:
+            if key in _PATCH_MERGE_KEYS:
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
                 if patch_merge_key is None:
                     # Atomic list field (e.g., args, command) - replace entirely

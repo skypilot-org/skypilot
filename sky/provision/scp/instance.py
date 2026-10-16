@@ -223,7 +223,7 @@ def _worker(cluster_name_on_cloud: str):
 
 
 def _suffix(name: str, n: int = 5):
-    return hashlib.sha1(name.encode()).hexdigest()[:n]
+    return hashlib.sha1(name.encode(), usedforsecurity=False).hexdigest()[:n]
 
 
 def _get_instance_id(instance_name, cluster_name_on_cloud):

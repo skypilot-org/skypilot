@@ -56,6 +56,12 @@ metadata:
     skypilot.co/component: oauth2-proxy-redis
 spec:
   type: ClusterIP
+  {{- if and .Values.apiService.host (contains ":" .Values.apiService.host) }}
+  # An IPv6 bind host (e.g. "::") requires a dual-stack service so IPv6 clients
+  # can reach it. PreferDualStack falls back to single-stack on clusters that
+  # do not support dual-stack.
+  ipFamilyPolicy: PreferDualStack
+  {{- end }}
   ports:
   - port: 6379
     targetPort: 6379

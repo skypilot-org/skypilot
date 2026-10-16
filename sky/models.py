@@ -37,6 +37,10 @@ class User:
     password: Optional[str] = None
     created_at: Optional[int] = None
     user_type: Optional[str] = None
+    # The user's preferred default workspace, if one has been set.
+    # Resolution and RBAC validation live in sky/workspaces/; this field is
+    # just the persisted value. None means "no preference set".
+    preferred_workspace: Optional[str] = None
 
     def __init__(
         self,
@@ -45,15 +49,22 @@ class User:
         password: Optional[str] = None,
         created_at: Optional[int] = None,
         user_type: Optional[str] = None,
+        preferred_workspace: Optional[str] = None,
     ):
         self.id = id.strip().lower()
         self.name = name
         self.password = password
         self.created_at = created_at
         self.user_type = user_type
+        self.preferred_workspace = preferred_workspace
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name, 'user_type': self.user_type}
+        return {
+            'id': self.id,
+            'name': self.name,
+            'user_type': self.user_type,
+            'preferred_workspace': self.preferred_workspace,
+        }
 
     @classmethod
     def get_current_user(cls) -> 'User':
@@ -95,7 +106,9 @@ class KubernetesNodeInfo:
     # Whether the node is cordoned (spec.unschedulable is true)
     is_cordoned: bool = False
     # List of taints on the node, each taint is a dict with 'key', 'value',
-    # 'effect'
+    # 'effect', and optionally 'tolerated' (a bool indicating whether the
+    # taint is matched by an entry in the configured
+    # `kubernetes.pod_config.spec.tolerations`).
     taints: Optional[List[Dict[str, Any]]] = None
 
 
@@ -125,6 +138,60 @@ class KubernetesNodesInfo:
             },
             hint=data['hint'],
         )
+
+
+class VolumeResizeStatus(enum.Enum):
+    """Where a resize has got to, in terms of what stands between it and done.
+
+    Deliberately not the cloud's own vocabulary, which is both wordier and
+    version-specific: Kubernetes alone names these differently on its
+    conditions and on `allocatedResourceStatuses`, and another cloud would name
+    them differently again.
+
+    What the user should *do* is not part of the state: for the middle one it
+    depends on whether anything is using the volume, which the state itself
+    cannot say. See `volume.resize_display_message`.
+    """
+    # The storage backend is working on it; waiting is all that is needed.
+    IN_PROGRESS = 'in_progress'
+    # The new capacity is allocated, but the filesystem is grown by the node
+    # that mounts the volume, so the volume keeps its old size until that
+    # happens. For a volume in use it usually happens on its own, without
+    # restarting anything; for one nothing is using, it waits indefinitely.
+    PENDING_ON_NODE = 'pending_on_node'
+    # The resize stopped short. The recorded size is still the real one.
+    #
+    # Only clusters that report a failed resize can produce this: where they
+    # do not, a resize that can never succeed keeps reporting IN_PROGRESS.
+    FAILED = 'failed'
+
+
+@dataclasses.dataclass
+class ObservedVolumeState:
+    """The fields of a volume that the cloud owns, as the cloud reports them.
+
+    ``VolumeConfig`` doubles as the request SkyPilot made and the state the
+    cloud is in, and only the request is known when the volume is created --
+    storage can be expanded, and a provisioner can round a request up. This
+    carries what a later look at the cloud found, so the recorded config can be
+    brought back in line with it.
+
+    A field left None means the cloud reported nothing for it, which must never
+    be read as "the recorded value is gone".
+    """
+    # The capacity the volume actually has, in the same units as
+    # ``VolumeConfig.size``.
+    size: Optional[str] = None
+    storage_class_name: Optional[str] = None
+    # Set while the volume is being resized to a size it does not have yet.
+    # `size` stays the capacity that exists, so without these two a volume
+    # whose expansion is in flight -- or stuck waiting on something the user
+    # has to do -- looks indistinguishable from one that was never resized.
+    resize_status: Optional[VolumeResizeStatus] = None
+    resize_target_size: Optional[str] = None
+    # How the cloud explains the state, in its own words. None when it offers
+    # none, which is the usual case for everything but Kubernetes conditions.
+    resize_message: Optional[str] = None
 
 
 class VolumeConfig(pydantic.BaseModel):

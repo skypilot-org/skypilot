@@ -14,8 +14,10 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import execution
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
@@ -24,9 +26,11 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
+from sky.serve import runner as serve_runner
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.server import common as server_common
 from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -140,8 +144,18 @@ def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Spins up a service or a pool."""
+    """Spins up a service or a pool.
+
+    Args:
+        task: The task to serve.
+        service_name: Name of the service or pool.
+        pool: Whether this is a pool.
+        file_mounts_blob_id: The blob the client uploaded the task's workdir
+            and file mounts into, if any. The task's local sources point
+            inside it.
+    """
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
@@ -168,6 +182,8 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(dag.tasks[0])
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -185,10 +201,12 @@ def up(
             storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
         force_disable_cloud_bucket = skypilot_config.get_nested(
             ('serve', 'force_disable_cloud_bucket'), False)
+        local_to_controller_file_mounts: Dict[str, str] = {}
+        # Set when the task keeps sources inside the client's upload blob.
+        controller_file_mounts_blob_id: Optional[str] = None
         if storage_clouds and not force_disable_cloud_bucket:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, task_type='serve')
-            local_to_controller_file_mounts = {}
         else:
             # Fall back to two-hop file_mount uploading when no cloud storage
             if task.storage_mounts:
@@ -196,8 +214,28 @@ def up(
                     'Cloud-based file_mounts are specified, but no cloud '
                     'storage is available. Please specify local '
                     'file_mounts only.')
-            local_to_controller_file_mounts = (
-                controller_utils.translate_local_file_mounts_to_two_hop(task))
+            if serve_utils.is_consolidation_mode(pool):
+                # The controller and replicas share the API server, so there
+                # is no cluster hop: keep the sources as resolved from the
+                # client's upload. Skip the two-hop, which would otherwise
+                # stage the sources under ~/.sky/tmp/controller -- outside
+                # the caller's roots, so the server would reject them.
+                # Mirrors the managed jobs path in jobs/server/core.py.
+                local_to_controller_file_mounts = {}
+                # The resolved sources may only exist on this API server
+                # replica: a blob backend can extract to a host-local cache,
+                # and the controller can run, or be recovered, on another
+                # replica. Hand the blob id to the controller, which passes
+                # it with every replica launch so the API server re-extracts
+                # the blob on whichever replica handles that launch.
+                if (file_mounts_blob_id is not None and
+                        server_common.local_file_mounts_required(
+                            task.to_yaml_config())):
+                    controller_file_mounts_blob_id = file_mounts_blob_id
+            else:
+                local_to_controller_file_mounts = (
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -241,6 +279,13 @@ def up(
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
             'entrypoint': shlex.quote(common_utils.get_current_command()),
+            # The controller may be shared among users, so the creator's user
+            # hash has to be passed in explicitly rather than read from the
+            # controller's own environment.
+            'user_hash': shlex.quote(common_utils.get_current_user().id),
+            'file_mounts_blob_id':
+                (shlex.quote(controller_file_mounts_blob_id)
+                 if controller_file_mounts_blob_id is not None else None),
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -323,6 +368,10 @@ def up(
             self_pod_ip_dbg = os.environ.get('POD_IP', '<unset>')
             logger.debug(f'Serve up() run_on_head: spawning controller '
                          f'subprocess locally on {self_pod_ip_dbg}')
+            # LocalProcessCommandRunner (used for consolidation-mode spawns)
+            # supplies a clean server env to the subprocess so per-request
+            # env pollution doesn't leak into the long-lived serve
+            # controller. See LocalProcessCommandRunner.run for details.
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
@@ -549,6 +598,8 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
+    clouds.Kubernetes.check_request_keeps_server_none()
+    clouds.Kubernetes.check_task_keeps_server_none(task)
     if pool:
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
@@ -695,6 +746,7 @@ def apply(
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Applies the config to the service or pool."""
     with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
@@ -740,7 +792,7 @@ def apply(
                 return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
-        up(task, service_name, pool)
+        up(task, service_name, pool, file_mounts_blob_id=file_mounts_blob_id)
 
 
 def down(
@@ -810,6 +862,82 @@ def down(
     logger.info(stdout)
 
 
+class _DefaultServiceStatusRunner:
+    """Default implementation — gRPC with codegen + run_on_head fallback.
+
+    Registered lazily by ``sky.serve.runner.current()``. Plugins override
+    by calling ``sky.serve.runner.register()`` with their own
+    implementation.
+    """
+
+    def get_service_status(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        service_names: Optional[List[str]],
+        pool: bool,
+    ) -> List[Dict[str, Any]]:
+        noun = 'pool' if pool else 'service'
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        service_records: List[Dict[str, Any]] = []
+        if not use_legacy:
+            try:
+                service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                    handle, service_names, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+
+            code = serve_utils.ServeCodeGen.get_service_status(service_names,
+                                                               pool=pool)
+            returncode, serve_status_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   f'Failed to fetch {noun}s',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+
+            service_records = serve_utils.load_service_status(
+                serve_status_payload)
+
+        return service_records
+
+
+def _resolve_user_names(service_records: List[Dict[str, Any]]) -> None:
+    """Fills in the ``user_name`` of each record from its ``user_hash``.
+
+    The user table lives on the API server, while the records come from the
+    controller, so the display name is resolved here in one batched query.
+    Records created before the creator was recorded have no ``user_hash``; they
+    are left with ``user_name`` unset.
+    """
+    user_hashes = {
+        record['user_hash']
+        for record in service_records
+        if record.get('user_hash') is not None
+    }
+    if not user_hashes:
+        return
+    users = global_user_state.get_users(user_hashes)
+    for record in service_records:
+        user = users.get(record.get('user_hash'))
+        if user is not None:
+            record['user_name'] = user.name
+
+
 def status(
     service_names: Optional[Union[str, List[str]]] = None,
     pool: bool = False,
@@ -834,38 +962,9 @@ def status(
         replace('service', noun))
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if not use_legacy:
-        try:
-            service_records = serve_rpc_utils.RpcRunner.get_service_status(
-                handle, service_names, pool)
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-
-    if use_legacy:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-
-        code = serve_utils.ServeCodeGen.get_service_status(service_names,
-                                                           pool=pool)
-        returncode, serve_status_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
-
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               f'Failed to fetch {noun}s',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
-
-        service_records = serve_utils.load_service_status(serve_status_payload)
+    service_records = serve_runner.current().get_service_status(
+        handle=handle, service_names=service_names, pool=pool)
 
     # Get the endpoint for each service
     for service_record in service_records:
@@ -891,6 +990,8 @@ def status(
                     endpoint = endpoint.replace('https://',
                                                 '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
+
+    _resolve_user_names(service_records)
 
     return service_records
 

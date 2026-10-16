@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useClusterDetails } from '@/data/connectors/clusters';
+import {
+  useClusterDetails,
+  getClusterJobSpec,
+} from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
@@ -22,10 +25,13 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import {
-  extractLinksFromLogs,
+  LINK_SCOPE_JOBS,
   normalizeUrl,
-  useCustomUrlPatterns,
+  useLogLinkExtractor,
+  useScopedLinks,
+  useTemplateLinks,
 } from '@/utils/externalLinks';
 
 // Custom header component with buttons inline
@@ -97,6 +103,8 @@ export function JobDetailPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+  const [jobSpec, setJobSpec] = useState(null);
+  const [jobSpecRefreshToken, setJobSpecRefreshToken] = useState(0);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -122,6 +130,30 @@ export function JobDetailPage() {
     [cluster, job, clusterData?.workspace]
   );
 
+  // The spec is read from the API server's database, so it is fetched
+  // separately from the job queue and does not need the cluster to be UP.
+  const clusterLoaded = Boolean(clusterData);
+  const clusterWorkspace = clusterData?.workspace;
+  // Navigating between jobs reuses this page: drop the previous job's spec so
+  // it is never shown under another job's details while the new one loads.
+  useEffect(() => {
+    setJobSpec(null);
+  }, [cluster, job]);
+  useEffect(() => {
+    if (!cluster || !job || !clusterLoaded) return undefined;
+    let cancelled = false;
+    getClusterJobSpec({
+      clusterName: cluster,
+      jobId: job,
+      workspace: clusterWorkspace,
+    }).then((spec) => {
+      if (!cancelled) setJobSpec(spec);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, job, clusterLoaded, clusterWorkspace, jobSpecRefreshToken]);
+
   const handleStreamError = useCallback((error) => {
     console.error('Error streaming cluster logs:', error);
   }, []);
@@ -136,31 +168,48 @@ export function JobDetailPage() {
 
   // Scan streamed logs against built-in plus admin-configured URL patterns
   // and surface matches in the Details card as an External Links row.
-  const urlPatterns = useCustomUrlPatterns();
-  const extractedLinksRef = useRef({});
-  const [extractedLinks, setExtractedLinks] = useState({});
+  const { extractedLinks, scanLines } = useLogLinkExtractor(LINK_SCOPE_JOBS);
   useEffect(() => {
-    if (!displayLines || displayLines.length === 0) return;
-    const next = extractLinksFromLogs(
-      displayLines,
-      urlPatterns,
-      extractedLinksRef.current
-    );
-    extractedLinksRef.current = next;
-    if (Object.keys(next).length > 0) {
-      setExtractedLinks((prev) => {
-        const merged = { ...prev };
-        let changed = false;
-        for (const [label, url] of Object.entries(next)) {
-          if (merged[label] !== url) {
-            merged[label] = url;
-            changed = true;
-          }
-        }
-        return changed ? merged : prev;
-      });
+    scanLines(displayLines);
+  }, [displayLines, scanLines]);
+
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this job's metadata.
+  const jobRecord = useMemo(
+    () => clusterJobData?.find((j) => j.id == job),
+    [clusterJobData, job]
+  );
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: cluster,
+      job_id: job,
+      job_name: jobRecord?.job,
+      user: jobRecord?.user,
+      workspace: jobRecord?.workspace,
+    }),
+    [cluster, job, jobRecord?.job, jobRecord?.user, jobRecord?.workspace]
+  );
+  const templateLinks = useTemplateLinks(templateLinkContext, LINK_SCOPE_JOBS);
+
+  // Merge order on label collision: template links are the base,
+  // server-computed links (extracted from the full log, authoritative)
+  // override them, and client-extracted links only fill gaps, so a link
+  // surfaces even if the user never streamed the line it appeared on. The
+  // merged map is scope-filtered so server-computed links honor entry
+  // scopes too.
+  const mergedExternalLinks = useMemo(() => {
+    const combined = { ...templateLinks, ...(jobRecord?.links || {}) };
+    for (const [label, url] of Object.entries(extractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
     }
-  }, [displayLines, urlPatterns]);
+    return combined;
+  }, [templateLinks, jobRecord, extractedLinks]);
+  const combinedExternalLinks = useScopedLinks(
+    mergedExternalLinks,
+    LINK_SCOPE_JOBS
+  );
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
@@ -170,6 +219,7 @@ export function JobDetailPage() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setLogsRefreshToken((token) => token + 1);
+    setJobSpecRefreshToken((token) => token + 1);
     try {
       if (refreshData) {
         await refreshData();
@@ -338,14 +388,14 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
-                    {Object.keys(extractedLinks).length > 0 && (
+                    {Object.keys(combinedExternalLinks).length > 0 && (
                       <div className="col-span-2">
                         <div className="text-gray-600 font-medium text-base">
                           External Links
                         </div>
                         <div className="text-base mt-1">
                           <div className="flex flex-wrap gap-4">
-                            {Object.entries(extractedLinks).map(
+                            {Object.entries(combinedExternalLinks).map(
                               ([label, url]) => {
                                 const normalizedUrl = normalizeUrl(url);
                                 return (
@@ -365,6 +415,10 @@ export function JobDetailPage() {
                         </div>
                       </div>
                     )}
+                    <EntrypointAndYaml
+                      entrypoint={jobSpec?.entrypoint}
+                      taskYaml={jobSpec?.task_yaml}
+                    />
                   </div>
                 </div>
               </Card>

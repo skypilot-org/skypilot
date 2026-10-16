@@ -1,10 +1,12 @@
 import os
+import shlex
 import tempfile
 import textwrap
 from typing import Dict, List, Optional, Union
 
 import pytest
 from smoke_tests import smoke_tests_utils
+from smoke_tests.docker import docker_utils
 
 import sky
 from sky import skypilot_config
@@ -336,32 +338,50 @@ def wait_for_message_in_pool_logs(pool_name: str,
         'exit 1')
 
 
-def wait_for_message_in_pool_logs(pool_name: str,
-                                  message: str,
-                                  timeout: int = 300,
-                                  time_between_checks: int = 10):
-    """Wait for a specific message to appear in pool logs.
+def check_remaining_worker_is_busy(pool_name: str,
+                                   timeout: int = 30,
+                                   time_between_checks: int = 5):
+    """Check that exactly one worker remains and it is the busy one.
+
+    Used after scaling a pool down to a single worker to verify that the idle
+    worker was removed and the worker still running a job was kept.
+
+    We intentionally do NOT assert a specific worker ID here. Scaling a pool
+    bumps its version and performs a rolling update; depending on timing this
+    can either keep the busy worker in place or migrate its job onto a
+    freshly-provisioned replica with a new ID. Asserting a hard-coded ID is
+    therefore flaky. The stable invariant is that the single remaining worker
+    is the busy one, i.e. its USED_BY column (the last column of each
+    "Pool Workers" row) references a job rather than showing "-".
 
     Args:
-        pool_name: Name of the pool to check logs for.
-        message: The message to search for in the logs (case-insensitive).
+        pool_name: The name of the pool.
         timeout: Maximum time to wait in seconds.
         time_between_checks: Time to wait between checks in seconds.
     """
-    num_checks = timeout // time_between_checks
     return (
-        f'for i in {{1..{num_checks}}}; do '
-        f'logs=$(sky jobs pool logs --controller {pool_name} --no-follow 2>&1); '
-        'echo "$logs"; '
-        f'if echo "$logs" | grep -i "{message}"; then '
-        f'  echo "Found {message} in logs"; '
-        '  exit 0; '
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for the remaining '
+        f'worker to be busy"; exit 1; '
         'fi; '
-        f'echo "Check $i/{num_checks}: {message} not found yet"; '
+        f's=$(sky jobs pool status {pool_name} -v 2>&1); '
+        'echo "$s"; '
+        # USED_BY is the last column of each "Pool Workers" row; a busy worker
+        # shows a numeric job id while an idle worker shows "-".
+        'used_by=($(echo "$s" | awk \'/Pool Workers/{flag=1; next} '
+        f'flag && $1=="{pool_name}" {{print $NF}}\')); '
+        'if [[ ${#used_by[@]} -eq 1 && "${used_by[0]}" =~ ^[0-9]+$ ]]; then '
+        '  echo "Remaining worker is busy (USED_BY=${used_by[0]})"; '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'echo "Waiting for the single remaining worker to be busy..."; '
         f'sleep {time_between_checks}; '
-        'done; '
-        f'echo "ERROR: {message} not found in logs after timeout"; '
-        'exit 1')
+        'done')
 
 
 def basic_pool_conf(
@@ -575,8 +595,9 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=(f'sky jobs pool down {pool_name} -y && '
-                          f'sky storage delete -y {bucket_name} || true'),
+                teardown=smoke_tests_utils.chain_teardown(
+                    f'sky jobs pool down {pool_name} -y || true',
+                    f'sky storage delete -y {bucket_name} || true'),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -812,9 +833,10 @@ def test_pool_preemption(generic_cloud: str):
                     check_for_recovery_message_on_controller(job_name),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=
-                f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
-                f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                teardown=smoke_tests_utils.chain_teardown(
+                    cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(
+                        name, skip_remote_server_check=True)),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -1001,9 +1023,10 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=15),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=
-                f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
-                f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                teardown=smoke_tests_utils.chain_teardown(
+                    cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(
+                        name, skip_remote_server_check=True)),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -1245,6 +1268,26 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _parse_job_ids_snippet(source_var: str, ids_file: str) -> str:
+    """Shell snippet: extract launched job IDs into a comma list at ids_file.
+
+    ``sky jobs launch --num-jobs`` collapses contiguous IDs into ranges in its
+    "Jobs submitted with IDs:" line (e.g. ``2-11``), so widen the capture to
+    include ``-`` and expand any ``N-M`` range back into individual
+    comma-separated IDs (plain comma lists pass through unchanged). Downstream
+    ``awk -F,`` field access then works regardless of format. ``source_var`` is
+    the shell var holding the launch output (e.g. ``s`` for ``$s``).
+    """
+    # awk expands each field: an 'N-M' range becomes N,N+1,...,M; a bare id is
+    # kept as-is. Braces/`$i` are literal awk, not str formatting.
+    expand = (
+        r"""awk -F, '{o=""; for (i=1; i<=NF; i++) {n=split($i, a, "-"); """
+        r"""if (n==2) {for (j=a[1]; j<=a[2]; j++) o=o (o == "" ? "" : ",") j} """
+        r"""else o=o (o == "" ? "" : ",") $i} print o}'""")
+    return (f'echo "${source_var}" | grep "Jobs submitted with IDs:" | '
+            f'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | {expand} > {ids_file}')
+
+
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1267,8 +1310,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             launch_cmd = (
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--num-jobs {num_jobs} -d -y); echo "$s"; '
-                f'echo "$s" | grep "Jobs submitted with IDs:" | '
-                f'sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                f'{_parse_job_ids_snippet("s", ids_file)}; '
                 f'cat {ids_file}')
             id_expr = (lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})")
             test = smoke_tests_utils.Test(
@@ -1350,12 +1392,20 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Test parallel job launching with --num-jobs 3
-                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
-                     'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
-                     'sleep 5').format(pool_name=pool_name,
-                                       job_yaml=job_yaml.name)
+                    # Test parallel job launching with --num-jobs 10. The IDs
+                    # are collapsed into a single N-M range (see
+                    # _parse_job_ids_snippet); assert the range spans exactly 10
+                    # jobs rather than hard-coding the start ID, which is not 2
+                    # on a shared/long-lived server DB.
+                    (
+                        's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                        'echo "$s"; '
+                        'echo; echo; echo "$s" | grep "Jobs submitted with IDs:" | '
+                        'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | '
+                        # Braces doubled: this string goes through str.format().
+                        'awk -F- \'{{c = $2 - $1 + 1}} END {{exit !(c == 10)}}\'; '
+                        'sleep 5').format(pool_name=pool_name,
+                                          job_yaml=job_yaml.name)
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -1573,7 +1623,10 @@ def test_pools_double_launch(generic_cloud: str):
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
                 _TEARDOWN_POOL.format(pool_name=pool_name),
-                'sleep 60',  # Wait a little bit to ensure the pool is fully shut down.
+                # Wait until the pool is fully shut down; re-applying while it
+                # is still shutting down is rejected. A fixed sleep is too
+                # short on clouds with slow teardown (e.g. Nebius).
+                check_pool_not_in_status(pool_name),
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
@@ -1585,13 +1638,20 @@ def test_pools_double_launch(generic_cloud: str):
 
 
 def check_pool_not_in_status(pool_name: str,
-                             timeout: int = 30,
+                             timeout: int = 300,
                              time_between_checks: int = 5):
     """Check that a pool does not appear in `sky jobs pool status`.
+
+    Only a successful status query that shows the pool is gone counts: either
+    "No existing pools." or a pool table without the pool. Anything else (e.g.
+    a controller-unavailable message, which also lacks the pool name) keeps
+    polling, so a transient controller error cannot pass as a completed
+    teardown.
 
     Args:
         pool_name: The name of the pool to check for.
         timeout: Maximum time in seconds to wait for the pool to be removed.
+            Pool teardown can take minutes on some clouds (e.g. Nebius).
         time_between_checks: Time in seconds to wait between checks.
     """
     return (
@@ -1599,19 +1659,22 @@ def check_pool_not_in_status(pool_name: str,
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
         f'  echo "Timeout after {timeout} seconds waiting for pool {pool_name} to be removed"; '
-        f'  s=$(sky jobs pool status); '
-        f'  echo "$s"; '
-        f'  if echo "$s" | grep "{pool_name}"; then '
-        f'    echo "ERROR: Pool {pool_name} still exists in pool status"; '
-        f'    exit 1; '
-        f'  fi; '
-        f'  exit 0; '
+        '  echo "Last pool status output:"; '
+        '  echo "$s"; '
+        f'  echo "ERROR: Could not confirm pool {pool_name} was removed"; '
+        '  exit 1; '
         'fi; '
-        f's=$(sky jobs pool status); '
-        'echo "$s"; '
-        f'if ! echo "$s" | grep "{pool_name}"; then '
-        f'  echo "Pool {pool_name} correctly removed from pool status"; '
-        '  break; '
+        'if s=$(sky jobs pool status); then '
+        '  echo "$s"; '
+        '  if echo "$s" | grep -q "No existing pools." || '
+        '     { echo "$s" | grep -qE "^NAME +VERSION" && '
+        f'       ! echo "$s" | grep -qF "{pool_name}"; }}; then '
+        f'    echo "Pool {pool_name} correctly removed from pool status"; '
+        '    break; '
+        '  fi; '
+        'else '
+        '  echo "$s"; '
+        '  echo "sky jobs pool status failed; retrying"; '
         'fi; '
         f'echo "Waiting for pool {pool_name} to be removed..."; '
         f'sleep {time_between_checks}; '
@@ -1698,9 +1761,9 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
                         check_pool_not_in_status(pool_name_2),
                     ],
                     timeout=timeout,
-                    teardown=cancel_jobs_and_teardown_pool(pool_name_1,
-                                                           timeout=5) +
-                    cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
+                    teardown=smoke_tests_utils.chain_teardown(
+                        cancel_jobs_and_teardown_pool(pool_name_1, timeout=5),
+                        cancel_jobs_and_teardown_pool(pool_name_2, timeout=5)),
                 )
                 smoke_tests_utils.run_one_test(test)
 
@@ -1752,7 +1815,7 @@ def test_pool_down_single_pool(generic_cloud: str):
                     'sleep 10',
                     wait_until_job_status(
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name, timeout=30),
+                    check_pool_not_in_status(pool_name),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -2420,10 +2483,12 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
-                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                '{parse}; '
                 'cat {ids_file}').format(pool_name=pool_name,
                                          job_yaml=job_yaml.name,
                                          NUM_JOBS=NUM_JOBS,
+                                         parse=_parse_job_ids_snippet(
+                                             's', ids_file),
                                          ids_file=ids_file)
             test_commands.append(launch_cmd)
 
@@ -2770,7 +2835,9 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
         infra=generic_cloud,
         setup_cmd='echo hi',
         upscale_delay_seconds=20,
-        downscale_delay_seconds=20,
+        # The queue empties as soon as the first worker absorbs all jobs; keep
+        # the target at 3 long enough for the last worker to become READY.
+        downscale_delay_seconds=120,
     )
 
     # Quick job that just echoes hi and finishes instantly
@@ -2811,9 +2878,257 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
                     wait_for_message_in_pool_logs(
                         pool_name, 'SCALE_DOWN_TO_ZERO', timeout=300),
                     # Verify we scale down to 0 workers
-                    wait_until_num_workers(pool_name, 0, timeout=300),
+                    wait_until_num_workers(pool_name, 0, timeout=600),
                 ],
                 timeout=timeout * 3,  # Autoscaling takes time
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
+    """Test that when scaling down, replicas with fewer jobs are selected first.
+
+    This test:
+    1. Creates a pool with 1 worker
+    2. Launches a job (no resources specified) that sleeps forever
+    3. Checks that the job is running
+    4. Ups the number of workers to 2
+    5. Launches a second job that sleeps forever
+    6. Waits for it to run
+    7. Cancels the first job
+    8. Scales the pool down to 1 worker
+    9. Waits for there to be 1 worker
+    10. Confirms that the worker that remains is the busy one (the one still
+        running the second job), i.e. the idle worker was scaled down. The
+        remaining worker's ID is not asserted because scaling performs a
+        rolling version update that may reassign worker IDs.
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Create job configs with long-running sleep commands
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+
+    job_config = basic_job_conf(
+        job_name=job_name_1,  # Name will be overridden with -n flag
+        run_cmd='sleep infinity',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_scale_down_with_job_count_priority',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch first job (no resources specified)
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_1),
+                    wait_until_job_status(job_name_1, ['RUNNING'],
+                                          timeout=timeout),
+                    # Scale up to 2 workers
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=2),
+                    wait_until_num_workers(pool_name, 2, timeout=timeout),
+                    # Launch second job
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_2),
+                    wait_until_job_status(job_name_2, ['RUNNING'],
+                                          timeout=timeout),
+                    # Cancel the first job (so worker 1 has 0 jobs, worker 2 has 1 job)
+                    cancel_job(job_name_1),
+                    wait_until_job_status(
+                        job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
+                    # Scale down to 1 worker
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=1),
+                    wait_until_num_workers(pool_name, 1, timeout=timeout),
+                    # The second job must survive the scale-down: its worker is
+                    # the busy one and should be kept over the idle worker.
+                    wait_until_job_status(job_name_2, ['RUNNING'],
+                                          timeout=timeout),
+                    # Verify the remaining worker is the busy one (the one with
+                    # the job), rather than asserting a specific worker ID which
+                    # is not stable across the rolling scale-down update.
+                    check_remaining_worker_is_busy(pool_name, timeout=timeout),
+                ],
+                timeout=timeout,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+def _on_remote_server(cmd: str) -> str:
+    """Wraps `cmd` to run inside the --remote-server API server container."""
+    # Run from /skypilot, the editable install the server runs: `python -c`
+    # puts the working directory first on sys.path, and the container's
+    # default one holds a stale copy of the code (see entrypoint.sh).
+    activate = ('source ~/miniconda3/etc/profile.d/conda.sh && '
+                'conda activate base && cd /skypilot && ')
+    return (f'docker exec {docker_utils.get_container_name()} '
+            f'bash -c {shlex.quote(activate + cmd)}')
+
+
+# One pass of the API server's blob GC with no grace period, as if the pool
+# had been up for longer than the grace period (an hour by default).
+_RUN_BLOB_GC_NOW = (
+    'python -c "from unittest import mock; '
+    'from sky.server import server; '
+    'from sky.server.blob import blob_storage; '
+    'p = mock.patch.object(blob_storage, \'GC_GRACE_SECONDS\', 0); '
+    'p.start(); server.cleanup_unreferenced_file_mounts_once()"')
+
+
+def _wait_until_worker_ready(pool_name: str, worker_id: int,
+                             timeout: int) -> str:
+    worker_row = f'^{pool_name} +{worker_id} '
+    return ('start_time=$SECONDS; '
+            'while true; do '
+            f'if (( $SECONDS - $start_time > {timeout} )); then '
+            f'  echo "Timeout waiting for worker {worker_id} to be READY"; '
+            '  exit 1; '
+            'fi; '
+            f's=$(sky jobs pool status {pool_name}); echo "$s"; '
+            f'if echo "$s" | grep -E "{worker_row}" | grep FAILED; then '
+            '  exit 1; '
+            'fi; '
+            f'if echo "$s" | grep -E "{worker_row}" | grep READY; then '
+            '  break; '
+            'fi; '
+            'sleep 10; '
+            'done')
+
+
+def _wait_until_pool_removed(pool_name: str, timeout: int) -> str:
+    return ('start_time=$SECONDS; '
+            'while true; do '
+            f'if (( $SECONDS - $start_time > {timeout} )); then '
+            f'  echo "Timeout waiting for pool {pool_name} to be removed"; '
+            '  exit 1; '
+            'fi; '
+            # A failed query says nothing about the pool; retry it.
+            'if ! s=$(sky jobs pool status); then sleep 10; continue; fi; '
+            'echo "$s"; '
+            f'if echo "$s" | grep -E "^{pool_name} " | grep FAILED; then '
+            '  exit 1; '
+            'fi; '
+            f'if ! echo "$s" | grep -qE "^{pool_name} "; then '
+            '  break; '
+            'fi; '
+            'sleep 10; '
+            'done')
+
+
+def test_pool_local_file_mounts_two_hop(generic_cloud: str):
+    """A pool with local file_mounts/workdir and no cloud bucket works.
+
+    Without consolidation mode, the server stages worker sources via the
+    two-hop relay under ~/.sky/tmp/controller. In consolidation mode the
+    workers launch from the client's upload blob instead: the staged two-hop
+    sources would be outside the caller's roots, so the file-mount containment
+    check on a deployed server would reject them and the workers would never
+    become READY. Only discriminates on a deployed (remote) server, where
+    containment is on.
+
+    On a --remote-server container, the test also runs the blob GC past its
+    grace period and replaces the worker: the replacement launches from the
+    same blob, so the GC must keep a live pool's blob. In every mode,
+    `pool down` must complete and leave the user's own files alone (on a local
+    server in consolidation mode, the task points at them directly).
+
+    On an API server with several replicas, the controller and its launch
+    requests may run on a replica that never extracted the blob. This test
+    cannot force that placement; see tests/unit_tests/
+    test_serve_blob_file_mounts.py for that case.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    marker = f'pool-two-hop-{name}'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.TemporaryDirectory() as workdir:
+        user_file = os.path.join(workdir, 'hello.txt')
+        with open(user_file, 'w') as f:
+            f.write(marker)
+        pool_config = textwrap.dedent(f"""
+        workdir: {workdir}
+        file_mounts:
+          /data/hello.txt: {user_file}
+        pool:
+            workers: 1
+        resources:
+            infra: {generic_cloud}
+            cpus: 2+
+        setup: echo "pool setup"
+        """)
+        job_config = basic_job_conf(
+            job_name=name,
+            run_cmd='cat /data/hello.txt; cat ~/sky_workdir/hello.txt')
+        with tempfile.NamedTemporaryFile(suffix='.yaml') as pool_yaml, \
+                tempfile.NamedTemporaryFile(suffix='.yaml') as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            # The job runs on a worker and reads the pool's file mount.
+            launch_job_and_check = (
+                f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); '
+                f'echo "$s"; echo "$s" | grep "{marker}"')
+            commands = [
+                # Force the two-hop path (no cloud bucket) regardless of
+                # whether a storage cloud is enabled.
+                f'sky jobs pool apply -p {pool_name} {pool_yaml.name} '
+                f'--config serve.force_disable_cloud_bucket=true -y '
+                f'2>&1 | tee /dev/stderr | grep "Successfully created pool"',
+                # Workers must reach READY -- the fix keeps containment from
+                # rejecting the staged sources.
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                launch_job_and_check,
+            ]
+            if (smoke_tests_utils.is_docker_remote_api_server() and
+                    generic_cloud == 'kubernetes'):
+                # Only a remote client uploads a blob. The blob GC runs in the
+                # --remote-server container, a vanilla server with the default
+                # blob backend; a server given with --env-file has no container
+                # to run it in.
+                worker_pods = (
+                    'kubectl get pods -l skypilot-cluster-name --no-headers '
+                    '-o custom-columns=NAME:.metadata.name,'
+                    'CLUSTER:.metadata.annotations.skypilot-cluster-name | '
+                    # The annotation holds the cluster name as given, without
+                    # the user hash suffix of the name on the cloud.
+                    f'awk \'$2 == "{pool_name}-1" {{print $1}}\'')
+                commands += [
+                    _on_remote_server(_RUN_BLOB_GC_NOW),
+                    # Kill the worker so the controller launches a replacement
+                    # from the pool's blob.
+                    _on_remote_server(f'pods=$({worker_pods}); echo "$pods"; '
+                                      '[ -n "$pods" ] && '
+                                      'kubectl delete pod $pods'),
+                    _wait_until_worker_ready(pool_name, 2, timeout),
+                    launch_job_and_check,
+                ]
+            commands += [
+                f'sky jobs pool down {pool_name} -y',
+                # Not stuck in FAILED_CLEANUP.
+                _wait_until_pool_removed(pool_name, timeout=300),
+                f'test -f {user_file}',
+            ]
+            test = smoke_tests_utils.Test(
+                'test_pool_local_file_mounts_two_hop',
+                commands,
+                teardown=cancel_jobs_and_teardown_pool(pool_name),
+                timeout=2 * timeout,
             )
             smoke_tests_utils.run_one_test(test)

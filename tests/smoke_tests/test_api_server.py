@@ -159,7 +159,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         controller_related_test_cmds = [
             'echo "==== Test jobs controller cluster user ===="',
-            f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
+            f's=$(sky status -u) && echo "$s" && echo "$s" | grep "^sky-jobs-controller-" | grep -v {user_1_name} | grep -v {user_2_name}',
             'echo "==== Test controller down blocked by other users ===="',
             *set_user(user_1, user_1_name, [
                 f'sky jobs launch -n {name}-3 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d sleep 1000',
@@ -174,10 +174,17 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                     ],
                     timeout=60),
             ]),
-            *set_user(user_2, user_2_name, [
-                f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
-                f'sky jobs cancel -y -n {name}-3',
-            ]),
+            *set_user(
+                user_2,
+                user_2_name,
+                [
+                    # Match only the table row: debug log lines can also name the
+                    # controller. sky down must refuse because of user1's job.
+                    f'controller=$(sky status -u | awk \'/^sky-jobs-controller-/ {{print $1; exit}}\') && [ -n "$controller" ] && echo "$controller" && '
+                    f's=$(echo delete | sky down "$controller" 2>&1) && exit 1; '
+                    f'echo "$s" && echo "$s" | grep "In-progress managed jobs found"',
+                    f'sky jobs cancel -y -n {name}-3',
+                ]),
         ]
 
     test = smoke_tests_utils.Test(
@@ -294,6 +301,55 @@ def test_requests_scheduling(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# Regression: a --retry-until-up launch that exhausts launchable resources
+# parks its request in WAITING and re-enqueues it; the worker must re-execute
+# it (previously it ran only PENDING requests, so the re-enqueued one was
+# dropped). Kubernetes-only and size-independent: 1-CPU nodes fit any node's
+# capacity (pass feasibility) but 100 of them fit no single smoke node, so the
+# pods stay Pending and provisioning fails into the retry/WAITING path.
+@pytest.mark.kubernetes
+def test_retry_until_up_waiting_request_is_reexecuted(generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    name = smoke_tests_utils.get_cluster_name()
+    req_file = f'/tmp/{name}.req'
+    # Capture the async launch's request id so we can poll its status.
+    launch = (
+        f'req=$(sky launch -c {name} --infra kubernetes --cpus 1 '
+        f'--num-nodes 100 --retry-until-up -y --async "echo regression" '
+        f"| grep -oE 'request: [0-9a-f-]+' | head -1 | awk '{{print $2}}'); "
+        f'echo "captured request id: $req"; test -n "$req"; '
+        f'echo "$req" > {req_file}')
+
+    def _wait_for_status(status: str, timeout: int) -> str:
+        # -a so WAITING (hidden by the default active filter) is shown.
+        return (f'req=$(cat {req_file}); start=$SECONDS; '
+                f'until sky api status -a "$req" | grep -qw {status}; do '
+                f'  if [ $((SECONDS - start)) -gt {timeout} ]; then '
+                f'    echo "timed out waiting for request to reach {status}"; '
+                f'    sky api status -a "$req"; exit 1; '
+                f'  fi; '
+                f'  sleep 5; '
+                f'done; echo "request reached {status}"')
+
+    test = smoke_tests_utils.Test(
+        'test_retry_until_up_waiting_request_is_reexecuted',
+        [
+            launch,
+            # 1st attempt fails to schedule 100 nodes -> parks in WAITING.
+            _wait_for_status('WAITING', timeout=300),
+            # The fix: any RUNNING after WAITING is the re-execution. Pre-fix
+            # the request is stranded in WAITING and this times out.
+            _wait_for_status('RUNNING', timeout=300),
+        ],
+        teardown=(f'req=$(cat {req_file} 2>/dev/null); '
+                  f'sky api cancel -y "$req" 2>/dev/null || true; '
+                  f'sky down -y {name} 2>/dev/null || true; '
+                  f'rm -f {req_file}'),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
 # ---- Test recent request tracking -----
@@ -490,6 +546,7 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
 
 
 # TODO(aylei): this case should not be retried in buildkite.
+@pytest.mark.no_remote_identity_none  # Runs sky in the pod.
 def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
@@ -497,10 +554,12 @@ def test_api_server_start_stop(generic_cloud: str):
         'test_api_server_start_stop',
         [
             # To avoid interference with other tests, we launch a separate API server for this test.
-            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            # No LOW_RESOURCE_ARG here: this case runs a full API server inside the
+            # cluster, which does not fit in 4GB. Sizing comes from the YAML.
+            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y'
         ],
         f'sky down -y {name} || true',
-        timeout=1200,
+        timeout=1800,
     )
     smoke_tests_utils.run_one_test(test)
 

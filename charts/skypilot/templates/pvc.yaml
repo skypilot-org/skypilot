@@ -1,4 +1,4 @@
-{{- if .Values.storage.enabled }}
+{{- if and .Values.storage.enabled (not .Values.storage.existingClaim) }}
 {{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: PersistentVolumeClaim

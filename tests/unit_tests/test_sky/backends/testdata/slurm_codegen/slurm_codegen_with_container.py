@@ -346,11 +346,23 @@ def make_task_bash_script(codegen: str,
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
-            source ~/.bashrc
+            [ -f ~/.bashrc ] && source ~/.bashrc
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
+            # Activate the default user environment (replaces conda base) so
+            # user commands get a writable python/pip. DEACTIVATE above unsets
+            # VIRTUAL_ENV, so re-activate here to keep it consistent (a venv
+            # uses VIRTUAL_ENV, unlike conda which uses CONDA_PREFIX).
+            # Use getattr with a fallback: this function is embedded into the
+            # on-cluster job program via inspect.getsource (see
+            # sky/backends/task_codegen.py) and evaluated at runtime against the
+            # cluster's own sky.skylet.constants. Older clusters predate
+            # ACTIVATE_SKY_USER_ENV, so referencing it directly would raise
+            # AttributeError; those clusters have no ~/sky-user-env anyway, so an
+            # empty string is the correct no-op.
+            {getattr(constants, 'ACTIVATE_SKY_USER_ENV', '')}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
@@ -541,18 +553,11 @@ if script or False:
         #   resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
         #   fetch_config: DNS SRV lookup failed
         #   fatal: Could not establish a configuration source
-        cmd_parts = []
-        # Only unset SKY_RUNTIME_DIR for container runs. For non-container
-        # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
-        # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
-        if True:
-            cmd_parts.append('unset SKY_RUNTIME_DIR;')
-        cmd_parts.extend([
+        bash_cmd = shlex.quote(' '.join([
             constants.SKY_SLURM_PYTHON_CMD,
             '-m sky.skylet.executor.slurm',
             runner_args,
-        ])
-        bash_cmd = shlex.quote(' '.join(cmd_parts))
+        ]))
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '

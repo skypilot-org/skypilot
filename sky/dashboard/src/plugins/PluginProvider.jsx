@@ -27,8 +27,10 @@ const PluginContext = createContext({
   components: {},
   dataEnhancements: {},
   tableColumns: {},
+  tableFilters: {},
   dataProviders: {},
   recipeTypes: [],
+  accessChecks: {},
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -68,8 +70,10 @@ const initialState = {
   components: {}, // Map of slot name → array of component configs
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
+  tableFilters: {}, // Map of table name → array of filter property configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
   recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
+  accessChecks: {}, // Map of action → array of { id, action, check }
 };
 
 const actions = {
@@ -78,9 +82,11 @@ const actions = {
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
+  REGISTER_TABLE_FILTER: 'REGISTER_TABLE_FILTER',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
   REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
+  REGISTER_ACCESS_CHECK: 'REGISTER_ACCESS_CHECK',
 };
 
 function pluginReducer(state, action) {
@@ -155,6 +161,19 @@ function pluginReducer(state, action) {
         },
       };
     }
+    case actions.REGISTER_TABLE_FILTER: {
+      const { table } = action.payload;
+      const existing = state.tableFilters[table] || [];
+      const updated = upsertById(existing, action.payload);
+      updated.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+      return {
+        ...state,
+        tableFilters: {
+          ...state.tableFilters,
+          [table]: updated,
+        },
+      };
+    }
     case actions.REGISTER_DATA_PROVIDER:
       return {
         ...state,
@@ -173,6 +192,19 @@ function pluginReducer(state, action) {
         ...state,
         recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
+    case actions.REGISTER_ACCESS_CHECK: {
+      const { action: checkAction } = action.payload;
+      return {
+        ...state,
+        accessChecks: {
+          ...state.accessChecks,
+          [checkAction]: upsertById(
+            state.accessChecks[checkAction] || [],
+            action.payload
+          ),
+        },
+      };
+    }
     default:
       return state;
   }
@@ -337,9 +369,19 @@ function normalizeRoute(route) {
     ? normalizedPath
     : `/${normalizedPath}`;
 
+  // Optional: the built-in nav link this route belongs under (e.g. '/jobs'),
+  // so the sidebar can highlight it while the route is open. Plugin routes
+  // are all served by one catch-all page, so the router's pathname alone
+  // cannot tell the sidebar which section a plugin page is part of.
+  const navHref =
+    typeof route.navHref === 'string' && route.navHref.startsWith('/')
+      ? route.navHref
+      : undefined;
+
   return {
     id: String(route.id),
     path: pathname,
+    navHref,
     title: typeof route.title === 'string' ? route.title : undefined,
     description:
       typeof route.description === 'string' ? route.description : undefined,
@@ -460,6 +502,34 @@ function normalizeTableColumn(config) {
                 : undefined,
           }
         : undefined,
+  };
+}
+
+function normalizeTableFilter(config) {
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    !config.id ||
+    !config.table ||
+    !config.key ||
+    !config.label
+  ) {
+    console.warn(
+      '[SkyDashboardPlugin] Invalid table filter registration:',
+      config
+    );
+    return null;
+  }
+  return {
+    id: String(config.id),
+    table: String(config.table),
+    // Shape of the page filter schemas (e.g. JOB_FILTER_SCHEMA): `key` is
+    // what the URL carries and what the fetch path sends to the provider,
+    // `label` is what the dropdown and the filter chip show.
+    key: String(config.key),
+    label: String(config.label),
+    kind: config.kind ? String(config.kind) : 'text',
+    order: Number.isFinite(config.order) ? config.order : 100,
   };
 }
 
@@ -691,6 +761,17 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    registerTableFilter(config) {
+      const normalized = normalizeTableFilter(config);
+      if (!normalized) {
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_TABLE_FILTER,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     getContext() {
       return {
         basePath: BASE_PATH,
@@ -781,6 +862,33 @@ function createPluginApi(dispatch) {
       };
       dispatch({
         type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
+    // Lets a plugin allow a non-admin to do something the dashboard otherwise
+    // reserves for admins. `check(context)` returns (a promise of) a boolean;
+    // the action is allowed if any registered check says yes. This only gates
+    // the UI: the server still authorizes every request.
+    //
+    // Actions:
+    // - `workspaces.detail.open`: open a workspace's page from the Workspaces
+    //   list. Context: { workspaceName }.
+    registerAccessCheck(config) {
+      if (!config?.id || !config.action || typeof config.check !== 'function') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid access check registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        action: String(config.action),
+        check: config.check,
+      };
+      dispatch({
+        type: actions.REGISTER_ACCESS_CHECK,
         payload: normalized,
       });
       return normalized.id;
@@ -977,6 +1085,65 @@ export function usePluginRoutes() {
   return routes;
 }
 
+export function usePluginAccessChecks(action) {
+  const { accessChecks } = usePluginState();
+  return (accessChecks && accessChecks[action]) || EMPTY_ACCESS_CHECKS;
+}
+
+const EMPTY_ACCESS_CHECKS = [];
+
+// How long one access check may take before it counts as a no.
+export const ACCESS_CHECK_TIMEOUT_MS = 10000;
+
+/**
+ * Whether any of `checks` allows the action for `context`. Resolves `true` as
+ * soon as one check says yes. A check that throws, rejects or takes longer
+ * than ACCESS_CHECK_TIMEOUT_MS counts as a no.
+ */
+export function anyAccessCheckAllows(checks, context) {
+  const list = checks || [];
+  if (list.length === 0) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let pending = list.length;
+    const settle = (allowed) => {
+      if (allowed) {
+        resolve(true);
+      } else if (--pending === 0) {
+        resolve(false);
+      }
+    };
+    list.forEach((entry) => {
+      let timer;
+      const timeout = new Promise((done) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `[SkyDashboardPlugin] Access check ${entry.id} timed out`
+          );
+          done(false);
+        }, ACCESS_CHECK_TIMEOUT_MS);
+      });
+      const result = Promise.resolve()
+        .then(() => entry.check(context))
+        .then(
+          (allowed) => allowed === true,
+          (error) => {
+            console.warn(
+              `[SkyDashboardPlugin] Access check ${entry.id} failed:`,
+              error
+            );
+            return false;
+          }
+        );
+      Promise.race([result, timeout]).then((allowed) => {
+        clearTimeout(timer);
+        settle(allowed);
+      });
+    });
+  });
+}
+
 export function usePluginRecipeTypes() {
   const { recipeTypes } = usePluginState();
   return recipeTypes;
@@ -1062,6 +1229,27 @@ export function useTableColumns(tableName, context = {}) {
       return true;
     });
   }, [tableName, tableColumns, context]);
+}
+
+/**
+ * Hook to access plugin-registered filter properties for a table.
+ *
+ * Each entry is `{ id, table, key, label, kind, order }`, shaped like the
+ * page filter schemas (see e.g. JOB_FILTER_SCHEMA): the page appends these
+ * to its own schema so the dropdown offers them, the URL round-trips them,
+ * and the fetch path forwards their values to the data provider that
+ * registered them. Registration is reactive — a plugin may register after
+ * its first data fetch and the page picks the filters up live.
+ *
+ * @param {string} tableName - The table name (e.g., 'jobs')
+ * @returns {Array} Registered filter property configs, sorted by order
+ */
+export function usePluginTableFilters(tableName) {
+  const { tableFilters } = usePluginState();
+  return useMemo(
+    () => (tableName && tableFilters[tableName]) || [],
+    [tableName, tableFilters]
+  );
 }
 
 export function useDataProvider(id) {

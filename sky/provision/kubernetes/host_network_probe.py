@@ -1,0 +1,288 @@
+"""Verify the host ports assigned to a hostNetwork pod, before Ray binds them.
+
+When a K8s pod has ``hostNetwork: true`` it shares the host's network
+namespace, so a sibling SkyPilot pod scheduled to the same node would collide
+on Ray's default ports. The server assigns each pod a block and declares it as
+``hostPort`` (see ``host_network_ports``), which makes the scheduler refuse to
+co-schedule two pods wanting the same port.
+
+This script is the pod-side half, and it is an **assertion**, not an
+allocator: it binds each assigned port to prove it is actually free, then
+releases it just before ``ray start`` takes it. It makes no Kubernetes API
+call, which is the point -- a workload pod needs no API access for this.
+
+The scheduler only knows about *declared* hostPorts, so a port held by
+something that never declared one -- a node daemon, or a SkyPilot pod created
+before ports moved into the pod spec -- is invisible to it. That is what this
+bind catches, and why it fails loudly rather than re-probing: a silent
+re-probe would paper over a mis-chosen port range instead of surfacing it.
+
+Stdlib-only so it can run during the window when the pod's skypilot install is
+in flux.
+"""
+import argparse
+import os
+import socket
+import subprocess
+import sys
+import time
+from typing import Dict, List, Optional, Tuple
+
+# SKYPILOT_RAY_PORT is the head's GCS port; a worker is handed the *head's*
+# value here, because that is what it must dial to join.
+_ENV_VAR_FOR_PORT: Dict[str, str] = {
+    'gcs': 'SKYPILOT_RAY_PORT',
+    'dashboard': 'SKYPILOT_RAY_DASHBOARD_PORT',
+    'node_manager': 'SKYPILOT_RAY_NODE_MANAGER_PORT',
+    'object_manager': 'SKYPILOT_RAY_OBJECT_MANAGER_PORT',
+    'ray_client_server': 'SKYPILOT_RAY_CLIENT_SERVER_PORT',
+    'dashboard_agent_listen': 'SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT',
+    'runtime_env_agent': 'SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT',
+    'metrics_export': 'SKYPILOT_RAY_METRICS_EXPORT_PORT',
+    # Pod sshd port. host:22 is owned by the K8s node's own sshd under
+    # hostNetwork, so the pod must bind sshd to its assigned port instead.
+    'sshd': 'SKYPILOT_SSHD_PORT',
+    # skylet's gRPC port, head only. Every skylet otherwise tries 46590 and
+    # falls back to the next free port, while the API server always dials
+    # 46590: two hostNetwork heads on one node then share one skylet, and one
+    # cluster's jobs run on the other.
+    'skylet': 'SKYPILOT_SKYLET_PORT',
+}
+
+# Public: the server assigns these (host_network_ports) and this script
+# verifies them. One list, so a port cannot be assigned without being checked
+# or checked without being assigned.
+#
+# THE ORDER IS THE ON-CLUSTER FORMAT. A pod's ports are reconstructed
+# positionally -- block start plus index -- so reordering silently re-maps
+# every running pod's ports while every check still passes: the block is
+# still BLOCK_SIZE contiguous ports in range. Append to add one; a longer
+# list fails loudly against existing pods, which is what you want.
+HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
+
+# A worker runs neither GCS, dashboard nor ray-client-server, so those three
+# slots of its block go unused -- every pod is given the head-sized block so
+# one pod spec serves every pod in the cluster.
+WORKER_PORT_NAMES: List[str] = [
+    'node_manager',
+    'object_manager',
+    'dashboard_agent_listen',
+    'runtime_env_agent',
+    'metrics_export',
+    'sshd',
+]
+
+# Deprecation window only. This pod no longer reads or writes the ConfigMap;
+# the API server still reads the one a pre-change cluster published, because
+# such a cluster's pods declare no ports and their head's block is knowable
+# from nowhere else. Delete both with that read, one release on.
+SSHD_KEY_PREFIX = 'sshd_'
+
+
+def ray_ports_configmap_name(cluster_name_on_cloud: str) -> str:
+    """Name of the ConfigMap a pre-change cluster's head published to."""
+    return f'{cluster_name_on_cloud}-ray-ports'
+
+
+_HEAD_GCS_TCP_WAIT_TIMEOUT_S = 600
+_HEAD_GCS_TCP_WAIT_INTERVAL_S = 2
+
+
+def env_var_for_port(name: str) -> str:
+    """The env var this port is passed in.
+
+    Public so the server exports the same names the pod reads; one mapping,
+    so a renamed var cannot be exported under the old name.
+    """
+    return _ENV_VAR_FOR_PORT[name]
+
+
+def _assigned_ports(names: List[str]) -> Dict[str, int]:
+    """Read the assigned ports out of the pod env."""
+    ports: Dict[str, int] = {}
+    missing: List[str] = []
+    for name in names:
+        raw = os.environ.get(_ENV_VAR_FOR_PORT[name])
+        if raw is None:
+            missing.append(_ENV_VAR_FOR_PORT[name])
+            continue
+        ports[name] = int(raw)
+    if missing:
+        raise RuntimeError(
+            'Host ports were not assigned to this pod: '
+            f'{", ".join(sorted(missing))} unset. The pod spec should carry '
+            'them; this pod was likely created by an older SkyPilot.')
+    return ports
+
+
+_EPHEMERAL_RANGE_PATH = '/proc/sys/net/ipv4/ip_local_port_range'
+
+
+def _node_ephemeral_range() -> Optional[Tuple[int, int]]:
+    """The node's ephemeral port range, or None if it cannot be read.
+
+    Valid only from a hostNetwork pod: the sysctl is per network namespace,
+    so an ordinary pod reports its own namespace's default (32768-60999)
+    rather than the node's. Measured on one node both ways: 10240-65535
+    with hostNetwork, 32768-60999 without.
+
+    No Kubernetes API call -- a file read, which a zero-permission pod can
+    still do.
+    """
+    try:
+        with open(_EPHEMERAL_RANGE_PATH, encoding='utf-8') as f:
+            lo, hi = (int(x) for x in f.read().split()[:2])
+        return lo, hi
+    except Exception:  # pylint: disable=broad-except
+        # Non-Linux, a masked /proc, or an unexpected format. The caller is
+        # already reporting a failure; losing the hint must not replace it.
+        return None
+
+
+def _clash_hint(port: int) -> str:
+    """Why this clash happened, in the terms that decide what to do next.
+
+    Three causes share one symptom, and they need different responses:
+    relaunch, reconfigure the range, or go inspect the node. Without this
+    the message lists all three and the reader has to guess.
+    """
+    rng = _node_ephemeral_range()
+    if rng is None:
+        return ''
+    lo, hi = rng
+    if lo <= port <= hi:
+        return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which '
+                f'covers port {port}: the kernel hands ports from that range '
+                'to outbound connections, so clashes here are a matter of how '
+                'busy the node is rather than a fixed obstacle. Relaunching '
+                'still helps, but a range outside the ephemeral pool avoids '
+                'the contention entirely.')
+    return (f'\nThis node\'s ephemeral port range is {lo}-{hi}, which does '
+            f'NOT cover port {port}, so something on the node is holding it '
+            'rather than the kernel having handed it out.')
+
+
+# The bootstrap writes the assigned sshd port here only after a verify passed,
+# so finding it means this container already verified; a re-run would fail on
+# our own sshd and skylet. Older pods have it too; a restart resets the file.
+_SSHD_CONFIG = '/etc/ssh/sshd_config'
+
+
+def _sshd_config_lines() -> List[str]:
+    try:
+        with open(_SSHD_CONFIG, encoding='utf-8') as f:
+            return f.read().splitlines()
+    except PermissionError:
+        pass
+    except OSError:
+        return []
+    # RHEL-family images ship it 0600; the bootstrap writes it via sudo, so
+    # read it the same way. No sudo means not verified, never a crash.
+    try:
+        result = subprocess.run(['sudo', '-n', 'cat', _SSHD_CONFIG],
+                                capture_output=True,
+                                text=True,
+                                check=False)
+    except OSError:
+        return []
+    return result.stdout.splitlines()
+
+
+def _already_verified() -> bool:
+    port = os.environ.get(_ENV_VAR_FOR_PORT['sshd'])
+    return any(line.split() == ['Port', port] for line in _sshd_config_lines())
+
+
+def _verify_free(ports: Dict[str, int]) -> List[socket.socket]:
+    """Bind every assigned port, proving it is free.
+
+    Binds with SO_REUSEADDR, as the servers that take these ports do: a
+    restarted container's TIME_WAIT connections do not hold a port, a live
+    listener does. Returns the held sockets; the caller keeps them alive until
+    just before ``ray start`` and sshd rebind the same ports.
+    """
+    held: List[socket.socket] = []
+    for name, port in sorted(ports.items(), key=lambda kv: kv[1]):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(('0.0.0.0', port))
+            sock.listen(1)
+        except OSError as e:
+            for held_sock in held:
+                held_sock.close()
+            sock.close()
+            raise RuntimeError(
+                f'Assigned host port {port} ({name}) is already in use on '
+                f'this node: {e}.\n'
+                'Launching again assigns a different block and usually '
+                'succeeds -- blocks are chosen at random, so a clash is '
+                'rarely hit twice.\n'
+                'If it keeps failing, something on this node holds a port in '
+                'the range SkyPilot reserves for host-networked pods. The '
+                'Kubernetes scheduler only accounts for ports a pod '
+                '*declares*, so such a holder is invisible to it: a node '
+                'daemon, a SkyPilot pod created before host ports moved into '
+                'the pod spec, or an overlap with the cluster\'s NodePort '
+                'range.' + _clash_hint(port)) from e
+        held.append(sock)
+    return held
+
+
+def _wait_head_gcs_tcp(host: str, port: int) -> None:
+    """Block until the head's GCS port answers on TCP."""
+    deadline = time.monotonic() + _HEAD_GCS_TCP_WAIT_TIMEOUT_S
+    last_err: Optional[Exception] = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                return
+        except OSError as e:
+            last_err = e
+            time.sleep(_HEAD_GCS_TCP_WAIT_INTERVAL_S)
+    raise TimeoutError(
+        f'Head GCS {host}:{port} did not accept connections within '
+        f'{_HEAD_GCS_TCP_WAIT_TIMEOUT_S}s (last error: {last_err}).')
+
+
+def _verify_once(names: List[str]) -> None:
+    # Checked before the ports are read: a pre-assignment pod re-running has
+    # only its legacy ports, without the newer names.
+    if _already_verified():
+        return
+    held = _verify_free(_assigned_ports(names))
+    del held  # release just before ray start takes them
+
+
+def _run_head() -> None:
+    _verify_once(HEAD_PORT_NAMES)
+
+
+def _run_worker() -> None:
+    _verify_once(WORKER_PORT_NAMES)
+    # The head's GCS port, assigned by the server: head and workers are
+    # created concurrently, so a worker cannot read it off the head pod.
+    head_gcs = int(os.environ[_ENV_VAR_FOR_PORT['gcs']])
+    # The pod template points SKYPILOT_RAY_HEAD_IP at the head's headless
+    # Service DNS. Same-cluster pods never share a K8s node (per-cluster
+    # podAntiAffinity), so that resolves to the head's routable host IP.
+    head_ip = os.environ.get('SKYPILOT_RAY_HEAD_IP')
+    if head_ip:
+        _wait_head_gcs_tcp(head_ip, head_gcs)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    # No description: __doc__ is stripped by source_utils.minify_python_source
+    # before the script is inlined into the pod bootstrap.
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['head', 'worker'], required=True)
+    args = parser.parse_args(argv)
+    if args.mode == 'head':
+        _run_head()
+    else:
+        _run_worker()
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -4,7 +4,25 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
+
+/**
+ * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
+ * the API) should be excluded from free-GPU availability counts — i.e.,
+ * it's not ready, cordoned, or carries at least one taint that the
+ * configured `kubernetes.pod_config.spec.tolerations` does NOT tolerate.
+ * Taints with `tolerated: true` (set by the backend for matching
+ * tolerations) don't suppress availability.
+ */
+function isNodeNotReadyForGpus(nodeData) {
+  const isReady = nodeData['is_ready'] !== false;
+  const isCordoned = nodeData['is_cordoned'] === true;
+  const isTainted = (nodeData['taints'] || []).some(
+    (t) => t && t.tolerated !== true
+  );
+  return !isReady || isCordoned || isTainted;
+}
 
 /**
  * Fast function to get just the list of enabled clouds (without counts).
@@ -72,9 +90,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   try {
     // Fetch jobs, clusters, and workspaces in parallel for better performance
     const [jobsResult, clustersResult, workspacesData] = await Promise.all([
-      // Use shared cache key (no field filtering) - preloader uses same args
+      // Shared cache key — must match the preloader's args exactly
       dashboardCache
-        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
+        .get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS])
         .catch((error) => {
           console.error('Error fetching managed jobs:', error);
           return { jobs: [] };
@@ -188,6 +206,25 @@ export async function getCloudInfrastructure(forceRefresh = false) {
 export async function getGPUs() {
   // Legacy function - now redirects to workspace-aware infrastructure
   return await getWorkspaceInfrastructure();
+}
+
+/**
+ * Whether a Kubernetes context's node list is filtered by an `allowed_nodes`
+ * config. Drives the infra-page hint/badge that warn not all nodes in the
+ * context are shown, so a missing node isn't mistaken for a bug. Falls back to
+ * `{ configured: false }` on any error so the hint fails closed (no banner)
+ * rather than showing a misleading one.
+ */
+export async function getAllowedNodesConfig(context) {
+  try {
+    const response = await apiClient.get(
+      `/kubernetes/allowed_nodes?k8s_context=${encodeURIComponent(context)}`
+    );
+    if (!response.ok) return { configured: false };
+    return await response.json();
+  } catch {
+    return { configured: false };
+  }
 }
 
 // New workspace-aware infrastructure fetching function
@@ -427,15 +464,13 @@ export async function getContextGPUData(context) {
 
         const gpuName = nodeData['accelerator_type'] || '-';
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+        // Schedulable count: total comes from status.capacity (keeps devices
+        // the device plugin withdrew), while pods can only be placed against
+        // allocatable. Older servers don't send the key - fall back to total.
+        const allocatableCount =
+          nodeData['total']?.['accelerator_allocatable'] ?? totalCount;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-        const isReady = nodeData['is_ready'] !== false;
-        // Check if node is cordoned (defaults to false for backward compatibility)
-        const isCordoned = nodeData['is_cordoned'] === true;
-        // Check if node has taints (defaults to empty for backward compatibility)
-        const taints = nodeData['taints'] || [];
-        const isTainted = taints.length > 0;
-        // Node is considered not ready if it's not ready, cordoned, or tainted
-        const isNodeNotReady = !isReady || isCordoned || isTainted;
+        const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
         // Per-node data - use same field names as original getKubernetesGPUsFromContexts
         perNodeGPUs.push({
@@ -443,9 +478,9 @@ export async function getContextGPUData(context) {
           gpu_name: gpuName,
           gpu_total: totalCount,
           gpu_free: freeCount,
-          is_ready: isReady,
-          is_cordoned: isCordoned,
-          taints: taints,
+          is_ready: nodeData['is_ready'] !== false,
+          is_cordoned: nodeData['is_cordoned'] === true,
+          taints: nodeData['taints'] || [],
           context: context,
           ip_address: nodeData['ip_address'] || null,
           cpu_count: nodeData['cpu_count'] ?? null,
@@ -471,7 +506,7 @@ export async function getContextGPUData(context) {
           if (isNodeNotReady) {
             gpuToData[gpuName].gpu_not_ready += totalCount;
           }
-          gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+          gpuToData[gpuName].gpu_requestable_qty_per_node = allocatableCount;
         }
       }
     }
@@ -564,16 +599,12 @@ async function getKubernetesGPUsFromContexts(contextNames) {
 
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+          // See getContextGPUData: requestable must reflect allocatable, not
+          // physical capacity, on nodes with withdrawn devices.
+          const allocatableCount =
+            nodeData['total']?.['accelerator_allocatable'] ?? totalCount;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-          // Check if node is ready (defaults to true for backward compatibility)
-          const isReady = nodeData['is_ready'] !== false;
-          // Check if node is cordoned (defaults to false for backward compatibility)
-          const isCordoned = nodeData['is_cordoned'] === true;
-          // Check if node has taints (defaults to empty for backward compatibility)
-          const taints = nodeData['taints'] || [];
-          const isTainted = taints.length > 0;
-          // Node is considered not ready if it's not ready, cordoned, or tainted
-          const isNodeNotReady = !isReady || isCordoned || isTainted;
+          const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -591,7 +622,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (isNodeNotReady) {
               gpuToData[gpuName].gpu_not_ready += totalCount;
             }
-            gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+            gpuToData[gpuName].gpu_requestable_qty_per_node = allocatableCount;
           }
         }
         perContextGPUsData[context] = Object.values(gpuToData);
@@ -1057,51 +1088,31 @@ export async function getDetailedGpuInfo(filter) {
   }
 }
 
-async function getSlurmClusterGPUs() {
+// Deadline for the Slurm long-polls below. The POST returns instantly with a
+// request id; the /api/get long-poll then blocks server-side until the
+// request completes, so without a deadline a hung backend request (e.g. an
+// unresponsive login node) would pin the returned promise — and the
+// dashboard cache's in-flight dedup — forever. The server bounds each
+// cluster query separately; this is a belt-and-braces bound on top of it.
+const SLURM_FETCH_TIMEOUT_MS = 120 * 1000;
+
+// Long-poll `/api/get` for a scheduled request with an abort deadline.
+async function getSlurmRequestResult(requestId) {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), SLURM_FETCH_TIMEOUT_MS);
   try {
-    const response = await apiClient.post(`/slurm_gpu_availability`, {});
-    if (!response.ok) {
-      const msg = `Failed to get slurm cluster GPUs with status ${response.status}`;
-      throw new Error(msg);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      const msg = 'No request ID received from server for slurm cluster GPUs';
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            console.error('Error fetching Slurm cluster GPUs:', error.message);
-          } catch (jsonError) {
-            console.error('Error parsing JSON for Slurm error:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing JSON for Slurm 500 response:', parseError);
-      }
-      return [];
-    }
-    if (!fetchedData.ok) {
-      const msg = `Failed to get slurm cluster GPUs result with status ${fetchedData.status}`;
-      throw new Error(msg);
-    }
-    const data = await fetchedData.json();
-    const clusterGPUs = data.return_value ? JSON.parse(data.return_value) : [];
-    return clusterGPUs;
-  } catch (error) {
-    console.error('Error fetching Slurm cluster GPUs:', error);
-    return [];
+    return await apiClient.get(`/api/get?request_id=${requestId}`, {
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(deadline);
   }
 }
 
-async function getSlurmPerNodeGPUs() {
+async function getSlurmPerNodeGPUs(clusterName = null) {
   try {
-    const response = await apiClient.post(`/slurm_node_info`, {});
+    const body = clusterName ? { slurm_cluster_name: clusterName } : {};
+    const response = await apiClient.post(`/slurm_node_info`, body);
     if (!response.ok) {
       const msg = `Failed to get slurm node info with status ${response.status}`;
       throw new Error(msg);
@@ -1111,7 +1122,7 @@ async function getSlurmPerNodeGPUs() {
       const msg = 'No request ID received from server for slurm node info';
       throw new Error(msg);
     }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    const fetchedData = await getSlurmRequestResult(id);
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -1147,94 +1158,186 @@ async function getSlurmPerNodeGPUs() {
   }
 }
 
-// Export Slurm infrastructure fetching for parallel loading
-export async function getSlurmInfrastructure() {
-  return await getSlurmServiceGPUs();
+// The clusters in ~/.slurm/config, which the server answers without
+// contacting any login node. Independent of the GPU and node queries, so it is
+// fetched alongside them rather than before them: a cluster that is
+// unreachable still comes back here after those two report nothing for it.
+export async function getSlurmClusterNames() {
+  try {
+    const response = await apiClient.post(`/slurm_cluster_names`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm cluster names with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm cluster names';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm cluster names result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  } catch (error) {
+    console.error('Error fetching Slurm cluster names:', error);
+    return [];
+  }
 }
 
-async function getSlurmServiceGPUs() {
-  try {
-    // Fetch cluster GPUs and node GPUs in parallel for better performance
-    const [clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
-      getSlurmClusterGPUs(),
-      getSlurmPerNodeGPUs(),
-    ]);
-
-    const allSlurmGPUs = {};
-    const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes
-    const perNodeSlurmGPUs = {}; // { 'cluster/node_name': { ... } }
-
-    // Process cluster GPUs (similar to Kubernetes context GPUs)
-    // clusterGPUsRaw is expected to be like: [ [cluster_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
-    for (const clusterData of clusterGPUsRaw) {
-      const clusterName = clusterData[0];
-      const gpusInCluster = clusterData[1];
-
-      for (const gpuRaw of gpusInCluster) {
-        const gpuName = gpuRaw[0];
-        // gpuRaw[1] is counts (list of requestable quantities), e.g., [1, 2, 4]
-        const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
-        const gpuTotal = gpuRaw[2]; // capacity
-        const gpuFree = gpuRaw[3]; // available
-
-        // Aggregate for allSlurmGPUs
-        if (gpuName in allSlurmGPUs) {
-          allSlurmGPUs[gpuName].gpu_total += gpuTotal;
-          allSlurmGPUs[gpuName].gpu_free += gpuFree;
-        } else {
-          allSlurmGPUs[gpuName] = {
-            gpu_total: gpuTotal,
-            gpu_free: gpuFree,
-            gpu_name: gpuName,
-          };
-        }
-
-        // Store for perClusterSlurmGPUs (similar to perContextGPUs)
-        const clusterGpuKey = `${clusterName}#${gpuName}`; // Unique key for cluster-gpu combo
-        perClusterSlurmGPUs[clusterGpuKey] = {
-          gpu_name: gpuName,
-          gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
-          gpu_total: gpuTotal,
-          gpu_free: gpuFree,
-          cluster: clusterName,
-        };
-      }
+// Derive a Slurm cluster's per-type GPU entries from its shaped node rows.
+// The /slurm_gpu_availability endpoint reports the same numbers (server-side
+// it iterates slurm_node_info and sums total/free per GPU type, advertising
+// the same powers-of-2 requestable counts per node), but it is additionally
+// gated on the cached enabled-clouds check and would cost this page a second
+// scheduled request — and a second SSH invocation of the login node — per
+// cluster. Deriving from the node feed keeps the cluster cells, the summary
+// strip, and the partition breakdown consistent by construction: one source.
+// Exported for tests.
+export function slurmClusterGPUsFromNodes(clusterName, nodes) {
+  const byType = new Map();
+  (nodes || []).forEach((node) => {
+    const gpuName = node.gpu_name;
+    if (!gpuName || gpuName === '-' || !(node.gpu_total > 0)) {
+      return;
     }
+    const type = byType.get(gpuName) || {
+      gpu_name: gpuName,
+      gpu_total: 0,
+      gpu_free: 0,
+      cluster: clusterName,
+      requestableCounts: new Set(),
+    };
+    type.gpu_total += node.gpu_total || 0;
+    type.gpu_free += node.gpu_free || 0;
+    // Powers of 2 up to the node's total, plus the total itself — the same
+    // requestable-quantity derivation the catalog advertises per node.
+    for (let count = 1; count <= node.gpu_total; count *= 2) {
+      type.requestableCounts.add(count);
+    }
+    type.requestableCounts.add(node.gpu_total);
+    byType.set(gpuName, type);
+  });
+  return Array.from(byType.values())
+    .map(({ requestableCounts, ...type }) => ({
+      ...type,
+      gpu_requestable_qty_per_node: Array.from(requestableCounts)
+        .sort((a, b) => a - b)
+        .join(', '),
+    }))
+    .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
+}
 
-    // Process node GPUs
-    // nodeGPUsRaw is expected to be like: [ {node_name, slurm_cluster_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
-    for (const node of nodeGPUsRaw) {
-      const clusterName = node.slurm_cluster_name || 'default';
-      const key = `${clusterName}/${node.node_name}/${node.gpu_type || '-'}`;
-      perNodeSlurmGPUs[key] = {
-        node_name: node.node_name,
-        gpu_name: node.gpu_type || '-', // gpu_type might be null
-        gpu_total: node.total_gpus || 0,
-        gpu_free: node.free_gpus || 0,
-        cluster: clusterName,
-        partition: node.partition || 'default', // partition might be null
+// Shape raw /slurm_node_info rows into perNodeSlurmGPUs entries.
+// nodeGPUsRaw is expected to be like:
+// [ {node_name, slurm_cluster_name, partition, gpu_type, total_gpus,
+//    free_gpus, node_state, ...}, ... ]
+function shapeSlurmNodeGPUs(nodeGPUsRaw) {
+  const perNodeSlurmGPUs = {}; // { 'cluster/node_name/gpu': { ... } }
+  for (const node of nodeGPUsRaw || []) {
+    const clusterName = node.slurm_cluster_name || 'default';
+    const key = `${clusterName}/${node.node_name}/${node.gpu_type || '-'}`;
+    perNodeSlurmGPUs[key] = {
+      node_name: node.node_name,
+      gpu_name: node.gpu_type || '-', // gpu_type might be null
+      gpu_total: node.total_gpus || 0,
+      gpu_free: node.free_gpus || 0,
+      cluster: clusterName,
+      partition: node.partition || 'default', // partition might be null
+      // Raw sinfo state (e.g. 'idle~'); the '~' suffix marks a powered-down
+      // cloud node. Carried so the infra table can count only up nodes.
+      node_state: node.node_state,
+    };
+  }
+  return Object.values(perNodeSlurmGPUs).sort(
+    (a, b) =>
+      (a.cluster || '').localeCompare(b.cluster || '') ||
+      (a.node_name || '').localeCompare(b.node_name || '') ||
+      (a.gpu_name || '').localeCompare(b.gpu_name || '')
+  );
+}
+
+// Fleet-wide totals per GPU type, aggregated from perClusterSlurmGPUs
+// entries. Exported so the Infra page can derive the summary strip from
+// progressively-merged per-cluster data.
+export function aggregateSlurmGPUsByType(perClusterSlurmGPUs) {
+  const allSlurmGPUs = {};
+  for (const gpu of perClusterSlurmGPUs || []) {
+    if (gpu.gpu_name in allSlurmGPUs) {
+      allSlurmGPUs[gpu.gpu_name].gpu_total += gpu.gpu_total || 0;
+      allSlurmGPUs[gpu.gpu_name].gpu_free += gpu.gpu_free || 0;
+    } else {
+      allSlurmGPUs[gpu.gpu_name] = {
+        gpu_total: gpu.gpu_total || 0,
+        gpu_free: gpu.gpu_free || 0,
+        gpu_name: gpu.gpu_name,
       };
     }
+  }
+  return Object.values(allSlurmGPUs).sort((a, b) =>
+    a.gpu_name.localeCompare(b.gpu_name)
+  );
+}
 
-    return {
-      allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
+// One cluster's node info plus the per-type GPU totals derived from it,
+// shaped like the matching slices of getSlurmInfrastructure()'s arrays. The
+// Infra page fans out one call per configured cluster and merges each result
+// as it settles, so a single slow or unreachable cluster only affects its own
+// row instead of holding the whole Slurm section on a spinner.
+export async function getSlurmClusterInfrastructure(clusterName) {
+  const nodeGPUsRaw = await getSlurmPerNodeGPUs(clusterName);
+  const perNodeGPUs = shapeSlurmNodeGPUs(nodeGPUsRaw);
+  return {
+    cluster: clusterName,
+    perClusterGPUs: slurmClusterGPUsFromNodes(clusterName, perNodeGPUs),
+    perNodeGPUs,
+  };
+}
+
+// Aggregate Slurm infrastructure across every configured cluster. Kept for
+// cache preloading and consumers that want the whole picture in one call.
+// Internally it settles per cluster (see getSlurmClusterInfrastructure) and
+// shares the per-cluster cache entries with the Infra page, so a single
+// unreachable cluster contributes empty slices instead of hiding the other
+// clusters' data behind its timeout.
+export async function getSlurmInfrastructure() {
+  try {
+    const clusterNames = await dashboardCache.get(getSlurmClusterNames);
+    const results = await Promise.allSettled(
+      (clusterNames || []).map((name) =>
+        dashboardCache.get(getSlurmClusterInfrastructure, [name])
+      )
+    );
+    const perClusterSlurmGPUs = [];
+    const perNodeSlurmGPUs = [];
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !result.value) continue;
+      perClusterSlurmGPUs.push(...result.value.perClusterGPUs);
+      perNodeSlurmGPUs.push(...result.value.perNodeGPUs);
+    }
+    perClusterSlurmGPUs.sort(
+      (a, b) =>
+        a.cluster.localeCompare(b.cluster) ||
         a.gpu_name.localeCompare(b.gpu_name)
-      ),
-      perClusterSlurmGPUs: Object.values(perClusterSlurmGPUs).sort(
-        (a, b) =>
-          a.cluster.localeCompare(b.cluster) ||
-          a.gpu_name.localeCompare(b.gpu_name)
-      ),
-      perNodeSlurmGPUs: Object.values(perNodeSlurmGPUs).sort(
-        (a, b) =>
-          (a.cluster || '').localeCompare(b.cluster || '') ||
-          (a.node_name || '').localeCompare(b.node_name || '') ||
-          (a.gpu_name || '').localeCompare(b.gpu_name || '')
-      ),
+    );
+    perNodeSlurmGPUs.sort(
+      (a, b) =>
+        (a.cluster || '').localeCompare(b.cluster || '') ||
+        (a.node_name || '').localeCompare(b.node_name || '') ||
+        (a.gpu_name || '').localeCompare(b.gpu_name || '')
+    );
+    return {
+      slurmClusterNames: clusterNames || [],
+      allSlurmGPUs: aggregateSlurmGPUsByType(perClusterSlurmGPUs),
+      perClusterSlurmGPUs,
+      perNodeSlurmGPUs,
     };
   } catch (error) {
     console.error('Error fetching Slurm GPUs:', error);
     return {
+      slurmClusterNames: [],
       allSlurmGPUs: [],
       perClusterSlurmGPUs: [],
       perNodeSlurmGPUs: [],

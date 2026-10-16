@@ -357,6 +357,9 @@ async function pollForTaskCompletion(requestId, taskName) {
 
   if (!resultResponse.ok) {
     let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+    // The server-side exception class, when the response carries one, so
+    // callers can tell specific failures apart.
+    let errorType;
     try {
       const errorData = await resultResponse.json();
       console.error(
@@ -372,6 +375,7 @@ async function pollForTaskCompletion(requestId, taskName) {
           // The error field contains a JSON string with the actual error details
           try {
             const errorInfo = JSON.parse(errorData.detail.error);
+            errorType = errorInfo?.type;
             if (errorInfo && errorInfo.message) {
               errorDetail = `${taskName} failed: ${errorInfo.message}`;
             } else if (errorInfo && typeof errorInfo === 'object') {
@@ -419,7 +423,9 @@ async function pollForTaskCompletion(requestId, taskName) {
       console.error(`[Error Debug] Failed to parse error response:`, e);
       /* ignore error parsing errorData */
     }
-    throw new Error(errorDetail);
+    const error = new Error(errorDetail);
+    error.type = errorType;
+    throw error;
   }
 
   const resultData = await resultResponse.json();
@@ -594,14 +600,18 @@ export async function getEnabledCloudsBatch(
   }
 }
 
-export async function updateWorkspace(workspaceName, config) {
+// `expectedConfig`: the config this update is based on. When given, the
+// server rejects the update with a WorkspaceConfigConflictError (error.type)
+// if the workspace was changed since, instead of overwriting that change.
+export async function updateWorkspace(workspaceName, config, expectedConfig) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
 
-    const scheduleResponse = await apiClient.post(`/workspaces/update`, {
-      workspace_name: workspaceName,
-      config: config,
-    });
+    const body = { workspace_name: workspaceName, config: config };
+    if (expectedConfig !== undefined) {
+      body.expected_config = expectedConfig;
+    }
+    const scheduleResponse = await apiClient.post(`/workspaces/update`, body);
 
     if (!scheduleResponse.ok) {
       throw new Error(
@@ -740,6 +750,63 @@ export async function updateConfig(config) {
     return await pollForTaskCompletion(requestId, 'updateConfig');
   } catch (error) {
     console.error('Failed to update config:', error);
+    throw error;
+  }
+}
+
+export async function batchAddUsersToWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_add_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchAddUsersToWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchAddUsersToWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(requestId, 'batchAddUsersToWorkspaces');
+  } catch (error) {
+    console.error('Failed to batch add users to workspaces:', error);
+    throw error;
+  }
+}
+
+export async function batchRemoveUsersFromWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_remove_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchRemoveUsersFromWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchRemoveUsersFromWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(
+      requestId,
+      'batchRemoveUsersFromWorkspaces'
+    );
+  } catch (error) {
+    console.error('Failed to batch remove users from workspaces:', error);
     throw error;
   }
 }

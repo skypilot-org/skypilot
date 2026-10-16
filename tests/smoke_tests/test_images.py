@@ -24,13 +24,16 @@ import pathlib
 import subprocess
 import tempfile
 import textwrap
+import uuid
 
 import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import catalog
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.skylet import constants
 
 
@@ -95,6 +98,102 @@ def test_azure_images():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.azure
+def test_azure_private_image():
+    # Exercises booting from a private Shared Image Gallery (SIG) image-version
+    # resource ID (see parse_shared_image_gallery_id in
+    # sky/clouds/utils/azure_utils.py). The image is a copy of the SkyPilot CPU
+    # image maintained in SkyPilot's Azure CI subscription; it lives in the same
+    # subscription the CI authenticates to and is replicated only to East US, so
+    # the region is pinned below.
+    name = smoke_tests_utils.get_cluster_name()
+    # Build the resource ID from the active subscription so the subscription
+    # GUID is not committed to source.
+    subscription_id = azure.get_subscription_id()
+    image_id = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                'skypilot-sig-test/providers/Microsoft.Compute/galleries/'
+                'skypilot_sig_test_gallery/images/skypilot-sig-test-cpu/'
+                'versions/1.0.0')
+    test = smoke_tests_utils.Test(
+        'azure_private_image',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id {image_id} --infra azure/eastus tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_acr_managed_identity_image():
+    """Pulls a private ACR image authenticated by the VM's managed identity.
+
+    The test creates an isolated registry and user-assigned identity, grants
+    AcrPull, and removes the resource group during teardown. Empty docker
+    credentials select the managed-identity path; azure.remote_identity
+    attaches the generated identity to the VM.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    suffix = uuid.uuid4().hex[:10]
+    resource_group = f'sky-acr-smoke-{suffix}'
+    registry_name = f'skyacr{suffix}'
+    registry = f'{registry_name}.azurecr.io'
+    identity_name = f'sky-acr-pull-{suffix}'
+    subscription_id = azure.get_subscription_id()
+    identity = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                f'{resource_group}/providers/Microsoft.ManagedIdentity/'
+                f'userAssignedIdentities/{identity_name}')
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          infra: azure/eastus
+          image_id: docker:{registry}/skypilot-ci-test:latest
+        envs:
+          SKYPILOT_DOCKER_USERNAME: ""
+          SKYPILOT_DOCKER_PASSWORD: ""
+          SKYPILOT_DOCKER_SERVER: {registry}
+        run: |
+          echo hello-from-acr-image
+        """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'azure_acr_managed_identity_image',
+            [
+                f'az group create --name {resource_group} '
+                '--location eastus --output none',
+                f'az acr create --resource-group {resource_group} '
+                f'--name {registry_name} --sku Basic --output none',
+                f'az acr import --name {registry_name} '
+                '--source docker.io/library/ubuntu:22.04 '
+                '--image skypilot-ci-test:latest --force --output none',
+                f'az identity create --resource-group {resource_group} '
+                f'--name {identity_name} --output none',
+                f'principal_id=$(az identity show --resource-group '
+                f'{resource_group} --name {identity_name} '
+                '--query principalId --output tsv) && '
+                f'scope=$(az acr show --name {registry_name} '
+                '--query id --output tsv) && '
+                'az role assignment create '
+                '--assignee-principal-type ServicePrincipal '
+                '--assignee-object-id "$principal_id" --role AcrPull '
+                '--scope "$scope" --output none',
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config azure.remote_identity={identity} {f.name}',
+                f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+                f'sky logs {name} 1 | grep hello-from-acr-image',
+            ],
+            f'sky down -y {name}; '
+            f'az group delete --name {resource_group} --yes --no-wait',
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 def test_aws_image_id_dict():
     name = smoke_tests_utils.get_cluster_name()
@@ -110,6 +209,44 @@ def test_aws_image_id_dict():
             f'sky logs {name} 3 --status',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_image_id_dict_with_docker():
+    """Specify both a cloud VM image (AMI) and a Docker image (PR #9759).
+
+    Regression test for the old behavior where specifying a Docker image
+    caused a custom cloud VM image to be ignored. The motivating case is a
+    too-old default AMI driver for new GPUs: users want to boot a custom AMI
+    (correct NVIDIA driver) and still run their own container on top.
+
+    Asserts both halves are honored: the job runs inside the container, and
+    the VM booted from the requested AMI (read from instance metadata, which
+    is reachable because the container runs with --net=host).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-west-2'
+    # Resolve the AMI that the SkyPilot image tag maps to in this region, so
+    # we can assert the VM actually booted from the requested cloud image.
+    # Must match tests/test_yamls/test_aws_ami_and_docker.yaml.
+    expected_ami = catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004',
+                                                 region,
+                                                 clouds='aws')
+    test = smoke_tests_utils.Test(
+        'aws_image_id_dict_with_docker',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_aws_ami_and_docker.yaml',
+            f'sky logs {name} 1 --status',
+            # The job ran inside the Docker container.
+            f'sky logs {name} 1 --no-follow | grep "SKY_IN_CONTAINER=yes"',
+            # The VM booted from the requested AMI, not the default image.
+            f'sky logs {name} 1 --no-follow | grep "SKY_BOOTED_AMI={expected_ami}"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -380,7 +517,11 @@ def test_gcp_mig():
                      f'"(labels.ray-cluster-name:{name}-cpu)" '
                      f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            # `{name}-cpu` is only downed by a test command, which is skipped
+            # when the test fails before it.
+            f'sky down -y {name} {name}-cpu',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         env={
             skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
         })
@@ -453,6 +594,41 @@ def test_image_no_conda():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_default_image_no_conda():
+    """The default K8s image ships no conda, but tasks get a writable py env.
+
+    Regression guard: conda was removed from the default K8s images and
+    install_conda now defaults to false. A user task must:
+      1. find no conda on PATH (fails if conda is baked back in), and
+      2. still `pip install` successfully — i.e. land in the auto-activated,
+         user-writable venv rather than a non-writable system site-packages.
+    Dropping the default venv (or its .bashrc activation) makes `pip install`
+    hit `Permission denied` on /usr/local/lib/.../dist-packages and fails (2).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Use single quotes inside; the whole command is wrapped in double quotes
+    # by the launch string below.
+    check_cmd = (
+        "if which conda; then echo 'conda unexpectedly present'; exit 1; fi && "
+        'python --version && '
+        # Must install into a writable env, not system site-packages.
+        'pip install --quiet requests && '
+        "python -c 'import requests' && "
+        'echo CONDA_FREE_OK')
+    test = smoke_tests_utils.Test(
+        'kubernetes_default_image_no_conda',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra kubernetes "{check_cmd}"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep CONDA_FREE_OK',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
@@ -466,23 +642,31 @@ def test_custom_default_conda_env(generic_cloud: str):
     elif generic_cloud == 'nebius':
         timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test('custom_default_conda_env', [
-        f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky status -r {name} | grep "UP"',
-        f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 2 --status',
-        f'sky autostop -y -i 0 {name}',
-        smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-            cluster_name=name,
-            cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=timeout),
-        f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 3 --status',
-    ], f'sky down -y {name}')
+    test = smoke_tests_utils.Test(
+        'custom_default_conda_env',
+        [
+            # conda is not installed by default; opt in via a temporary config so
+            # this test can exercise the custom-default-conda-env behavior (and the
+            # install_conda=true opt-in path). install_conda is provisioning-time,
+            # and conda persists on disk across stop/start, so it is only needed at
+            # launch. `sky start` does not accept --config.
+            f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --config provision.install_conda=true --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky status -r {name} | grep "UP"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky autostop -y -i 0 {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=timeout),
+            f'sky start -y {name}',
+            f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
 
 

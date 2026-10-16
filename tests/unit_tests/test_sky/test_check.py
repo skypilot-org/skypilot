@@ -13,6 +13,7 @@ from sky.client.cli import command
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.cloud import CloudCapability
 from sky.utils import config_utils
+from sky.workspaces import constants as workspace_constants
 
 
 def strip_ansi(s: str) -> str:
@@ -233,8 +234,10 @@ def _mock_k8s_env(monkeypatch,
         lambda: False)
 
     # Mock per-context credential checks as enabled
-    def mock_check_credentials(context, run_optional_checks=True):
-        del run_optional_checks
+    def mock_check_credentials(context,
+                               run_optional_checks=True,
+                               cloud='kubernetes'):
+        del run_optional_checks, cloud
         return True, check_note
 
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_credentials',
@@ -268,8 +271,15 @@ def _mock_k8s_env(monkeypatch,
         'default': {},
         'ws1': {}
     })
+
+    # check writes each visited workspace's cached rows, so it must ask for the
+    # writable set; assert that rather than swallowing the argument.
+    def _accessible_workspace_names(action):
+        assert action == workspace_constants.WORKSPACE_ACTION_WRITE, action
+        return {'default', 'ws1'}
+
     monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
-                        lambda: {'default', 'ws1'})
+                        _accessible_workspace_names)
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',

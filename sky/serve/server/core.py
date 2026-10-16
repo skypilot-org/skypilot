@@ -28,6 +28,7 @@ logger = sky_logging.init_logger(__name__)
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Spins up a service.
 
@@ -36,13 +37,18 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+        file_mounts_blob_id: The blob the client uploaded the task's workdir
+            and file mounts into, if any.
 
     Returns:
         service_name: str; The name of the service.  Same if passed in as an
             argument.
         endpoint: str; The service endpoint.
     """
-    return impl.up(task, service_name, pool=False)
+    return impl.up(task,
+                   service_name,
+                   pool=False,
+                   file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint
@@ -189,7 +195,19 @@ def status(
             'status': (sky.serve.ReplicaStatus) replica status,
             'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
-            'handle': (ResourceHandle) handle of the replica cluster,
+            'handle': (Optional[ResourceHandle]) handle of the replica
+                cluster. New API servers (>=
+                MIN_LAZY_REPLICA_HANDLE_API_VERSION) strip this to ``None``
+                on the wire to keep payloads small; callers should read the
+                pre-computed string fields below instead. Old servers still
+                return a full handle.
+            'cloud': (Optional[str]) cloud name of the replica,
+            'region': (Optional[str]) region of the replica,
+            'infra': (Optional[str]) human-readable infra string,
+                e.g. ``'aws (us-east-1)'``,
+            'resources_str': (Optional[str]) simplified resource string,
+            'resources_str_full': (Optional[str]) full resource string with
+                accelerator details,
             'endpoint': (str) endpoint of the replica,
         }
 

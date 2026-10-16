@@ -1,5 +1,7 @@
-"""Tests for _summarize_pod_reasons in backend_utils."""
+"""Tests for the summarize helpers in backend_utils."""
+from sky import exceptions
 from sky.backends.backend_utils import _summarize_pod_reasons
+from sky.backends.backend_utils import _summarize_probe_failure
 from sky.provision.kubernetes.instance import NodeHealthInfo
 from sky.utils import status_lib
 
@@ -172,3 +174,53 @@ class TestStatusReasonIntegration:
             else:
                 init_reason = f'ray cluster is unhealthy ({ray_status_details})'
         assert 'ray cluster is unhealthy' in init_reason
+
+
+class TestSummarizeProbeFailure:
+    """Tests for _summarize_probe_failure."""
+
+    def _make_error(self,
+                    detailed_reason,
+                    error_msg='Failed to check ray '
+                    'cluster\'s healthiness.\n-- stdout --\n\n'):
+        return exceptions.CommandError(255, 'x' * 700, error_msg,
+                                       detailed_reason)
+
+    def test_uses_last_stderr_line(self):
+        e = self._make_error(
+            'mux_client_request_session: read from master failed: '
+            'Broken pipe\n'
+            'ssh: connect to host 1.2.3.4 port 22: Operation timed out\n')
+        result = _summarize_probe_failure(e)
+        assert result == ('health probe failed: ssh: connect to host '
+                          '1.2.3.4 port 22: Operation timed out')
+
+    def test_connection_refused(self):
+        e = self._make_error(
+            'ssh: connect to host 1.2.3.4 port 22: Connection refused')
+        result = _summarize_probe_failure(e)
+        assert result == ('health probe failed: ssh: connect to host '
+                          '1.2.3.4 port 22: Connection refused')
+
+    def test_excludes_remote_command(self):
+        # str(e) embeds the (long) remote command; the summary must not.
+        e = self._make_error('ssh: connect to host 1.2.3.4 port 22: '
+                             'Connection refused')
+        result = _summarize_probe_failure(e)
+        assert 'x' * 100 not in result
+        assert len(result) < 200
+
+    def test_falls_back_to_error_msg(self):
+        e = self._make_error(None, error_msg='Ray cluster is not found.')
+        result = _summarize_probe_failure(e)
+        assert result == 'health probe failed: Ray cluster is not found.'
+
+    def test_whitespace_stderr_falls_back(self):
+        e = self._make_error('  \n \n', error_msg='some error')
+        result = _summarize_probe_failure(e)
+        assert result == 'health probe failed: some error'
+
+    def test_no_detail_uses_return_code(self):
+        e = self._make_error(None, error_msg='')
+        result = _summarize_probe_failure(e)
+        assert result == 'health probe failed with return code 255'

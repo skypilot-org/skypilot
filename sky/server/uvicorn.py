@@ -8,16 +8,18 @@ import asyncio
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 import time
 from types import FrameType
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import filelock
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
+from sky import exceptions
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
@@ -55,6 +57,63 @@ _RETRIABLE_REQUEST_NAMES = {
     'sky.jobs.logs',
     'sky.serve.logs',
 }
+
+
+def _reuse_port_enabled(config: uvicorn.Config) -> bool:
+    """Whether to bind a per-worker SO_REUSEPORT socket.
+
+    With uvicorn's default multiprocess model the parent binds a single
+    listening socket and all workers inherit that one fd, so they share a
+    single kernel accept queue. The kernel wakes waiters on that queue in
+    LIFO order, which tends to hand new connections to the same few "warm"
+    workers repeatedly and leaves the rest idle. With SO_REUSEPORT each worker
+    binds its own socket on the same address and the kernel distributes new
+    connections across the per-socket queues by a 4-tuple hash, spreading the
+    load evenly.
+
+    Opt-in via env var, and Linux-only: macOS and BSD have SO_REUSEPORT but
+    hand every new connection to a single socket instead of distributing them,
+    which concentrates all traffic on one worker.
+    SO_REUSEPORT only applies to TCP host/port binding, so it is disabled when
+    the server listens on a Unix domain socket or an inherited file descriptor.
+    A single worker has nothing to balance against, and binding with
+    SO_REUSEPORT there would drop the EADDRINUSE guard that keeps two servers
+    off the same port.
+    """
+    if config.workers <= 1:
+        return False
+    if not sys.platform.startswith('linux'):
+        return False
+    if not hasattr(socket, 'SO_REUSEPORT'):
+        return False
+    if config.uds is not None or config.fd is not None:
+        return False
+    return os.environ.get(constants.ENV_VAR_SERVER_REUSE_PORT,
+                          '').lower() in ('1', 'true', 'yes')
+
+
+def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
+    """Bind a listening socket with SO_REUSEPORT for the given config.
+
+    Mirrors ``uvicorn.Config.bind_socket`` for the TCP host/port case but also
+    sets SO_REUSEPORT so that multiple workers can bind the same address and
+    the kernel load-balances new connections across them.
+    """
+    host = config.host or ''
+    family = socket.AF_INET
+    if host and ':' in host:
+        # It's an IPv6 address.
+        family = socket.AF_INET6
+    sock = socket.socket(family=family, type=socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    try:
+        sock.bind((host, config.port))
+    except OSError as exc:
+        logger.error(exc)
+        sys.exit(1)
+    sock.set_inheritable(True)
+    return sock
 
 
 def add_timestamp_prefix_for_server_logs() -> None:
@@ -125,35 +184,69 @@ class Server(uvicorn.Server):
 
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
-        """Perform graceful shutdown."""
-        time.sleep(_GRACE_WAIT_SECONDS)
-        # Block new requests so that we can wait until all on-going requests
-        # are finished. Note that /api/$verb operations are still allowed in
-        # this stage to ensure the client can still operate the on-going
-        # requests, e.g. /api/logs, /api/cancel, etc.
-        logger.info('Block new requests being submitted in worker '
-                    f'{os.getpid()}.')
-        state.set_block_requests(True)
-        # Ensure the shutting_down are set on all workers before next step.
-        # TODO(aylei): hacky, need a reliable solution.
-        time.sleep(1)
+        """Perform graceful shutdown.
 
-        lock = filelock.FileLock(_GRACEFUL_SHUTDOWN_LOCK_PATH)
-        # Elect a coordinator process to handle on-going requests check
-        with lock.acquire():
-            logger.info(f'Worker {os.getpid()} elected as shutdown coordinator')
-            self._wait_requests()
+        Runs in a separate daemon thread. This must *always* end by setting
+        ``should_exit`` and forwarding the exit to the parent handler, even if
+        draining on-going requests fails or hangs. ``set_block_requests(True)``
+        is set early so new requests are rejected while we drain; if we then
+        failed to exit (e.g. the request backend / database is unreachable and
+        the drain raises), the worker would stay up rejecting every request
+        forever. The try/finally below guarantees the process still exits and
+        gets restarted, clearing the block.
+        """
+        try:
+            time.sleep(_GRACE_WAIT_SECONDS)
+            # Block new requests so that we can wait until all on-going
+            # requests are finished. Note that /api/$verb operations are still
+            # allowed in this stage to ensure the client can still operate the
+            # on-going requests, e.g. /api/logs, /api/cancel, etc.
+            logger.info('Block new requests being submitted in worker '
+                        f'{os.getpid()}.')
+            state.set_block_requests(True)
+            # Ensure the shutting_down are set on all workers before next step.
+            # TODO(aylei): hacky, need a reliable solution.
+            time.sleep(1)
 
-        logger.info('Shutting down server...')
-        self.should_exit = True
-        super().handle_exit(sig, frame)
+            lock = filelock.FileLock(_GRACEFUL_SHUTDOWN_LOCK_PATH)
+            # Elect a coordinator process to handle on-going requests check.
+            # Bound the wait: a coordinator stuck draining (e.g. blocked on an
+            # unreachable database) must not keep the other workers from
+            # exiting.
+            try:
+                with lock.acquire(timeout=_WAIT_REQUESTS_TIMEOUT_SECONDS):
+                    logger.info(
+                        f'Worker {os.getpid()} elected as shutdown coordinator')
+                    self._wait_requests()
+            except filelock.Timeout:
+                logger.warning(
+                    f'Worker {os.getpid()} timed out waiting for the shutdown '
+                    'coordinator lock; proceeding to exit without draining.')
+        except Exception:  # pylint: disable=broad-except
+            # A drain failure must never prevent the worker from exiting.
+            logger.exception('Error during graceful shutdown drain; '
+                             'proceeding to exit anyway.')
+        finally:
+            logger.info('Shutting down server...')
+            self.should_exit = True
+            super().handle_exit(sig, frame)
 
     def _wait_requests(self) -> None:
-        """Wait until all on-going requests are finished or cancelled."""
+        """Wait until all on-going requests are finished or cancelled.
+
+        Best-effort: if the request backend is unreachable (e.g. database
+        outage) we log and stop draining so the shutdown can still proceed.
+        """
         start_time = time.time() - _GRACE_WAIT_SECONDS
         while True:
-            requests = (request_storage.get_request_backend().
-                        get_shutdown_active_requests())
+            try:
+                requests = (request_storage.get_request_backend().
+                            get_shutdown_active_requests())
+            except Exception:  # pylint: disable=broad-except
+                logger.exception(
+                    'Failed to query on-going requests during shutdown; '
+                    'stopping drain and proceeding to exit.')
+                break
             if not requests:
                 break
             logger.info(f'{len(requests)} on-going requests '
@@ -166,8 +259,18 @@ class Server(uvicorn.Server):
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
-                for request_id, _ in requests:
-                    self.interrupt_request_for_retry(request_id)
+                for request_id, name in requests:
+                    # should_retry means "the client can meaningfully retry
+                    # by re-submitting" — true only for the logs requests
+                    # (their SDK wrappers re-POST a fresh request) and
+                    # internal daemons (re-registered on boot). For anything
+                    # else, e.g. sky.launch, the client's retry unit only
+                    # re-attaches the same dead request id, so signal a
+                    # plain terminal cancellation instead.
+                    self.interrupt_request_for_retry(
+                        request_id,
+                        should_retry=(name in _RETRIABLE_REQUEST_NAMES or
+                                      request_id in internal_request_ids))
                 break
             interrupted = 0
             for request_id, name in requests:
@@ -183,8 +286,19 @@ class Server(uvicorn.Server):
             if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
-    def interrupt_request_for_retry(self, request_id: str) -> None:
-        """Interrupt a request for retry."""
+    def interrupt_request_for_retry(self,
+                                    request_id: str,
+                                    should_retry: bool = True) -> None:
+        """Interrupt a request, optionally signaling clients to re-submit.
+
+        Args:
+            request_id: The request to interrupt.
+            should_retry: Whether clients can recover by re-submitting the
+                original request. True for the logs requests (SDK wrappers
+                re-POST a fresh request on interruption) and internal
+                daemons; False for requests whose client-side retry would
+                only re-attach the same interrupted request id.
+        """
         with requests_lib.update_request(request_id) as req:
             if req is None:
                 return
@@ -194,24 +308,45 @@ class Server(uvicorn.Server):
                 except ProcessLookupError:
                     logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
-            req.should_retry = True
+            req.should_retry = should_retry
+            # Stamp finished_at: retention cleanup selects finished
+            # requests with finished_at < cutoff, so a NULL finished_at
+            # would keep the cancelled row around forever.
+            req.finished_at = time.time()
+            # Also record a terminal error so that clients polling
+            # /api/get get a definitive answer instead of a retryable
+            # 503 forever: the server does not re-execute interrupted
+            # requests after a restart, so the original request must be
+            # re-submitted by the client.
+            req.set_error(
+                exceptions.RequestInterruptedError(
+                    f'Request {request_id!r} was interrupted by an API '
+                    'server restart and will not be resumed. Please '
+                    're-submit the original request.'))
+        outcome = ('instructed to re-submit it'
+                   if should_retry else 'given a terminal error')
         logger.info(
-            f'Request {request_id} interrupted and will be retried by client.')
+            f'Request {request_id} interrupted; the client will be {outcome}.')
 
-    def run(self, *args, **kwargs):
+    def run(self, sockets: Optional[List[socket.socket]] = None, **kwargs):
         """Run the server process."""
         if self.max_db_connections is not None:
             db_utils.set_max_connections(self.max_db_connections)
+        # When reuse-port is enabled the parent does not pre-bind a shared
+        # socket; each worker binds its own SO_REUSEPORT socket here instead.
+        # This also covers workers restarted by the multiprocess supervisor,
+        # which re-invoke run() with the same (empty) socket list.
+        if _reuse_port_enabled(self.config) and not sockets:
+            sockets = [_bind_reuse_port_socket(self.config)]
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
-        lag_threshold = perf_utils.get_loop_lag_threshold()
-        if lag_threshold is not None:
-            event_loop = asyncio.get_event_loop()
-            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
-            event_loop.set_debug(True)
-            event_loop.slow_callback_duration = lag_threshold
+        # Reap this worker's per-pid prometheus multiproc files at exit so
+        # that recycled workers do not leak stale liveall gauge values
+        # (e.g. event-loop-lag peaks recorded just before the worker died)
+        # to every subsequent /metrics scrape and liveall-based probe.
+        metrics_lib.register_multiproc_cleanup_atexit()
         stop_monitor = threading.Event()
         monitor = threading.Thread(
             target=metrics_lib.process_monitor,
@@ -221,10 +356,29 @@ class Server(uvicorn.Server):
         monitor.start()
         try:
             with self.capture_signals():
-                asyncio.run(self.serve(*args, **kwargs))
+                asyncio.run(self._serve_with_debug(sockets=sockets, **kwargs))
         finally:
             stop_monitor.set()
             monitor.join()
+
+    async def _serve_with_debug(self, *args, **kwargs):
+        """Applies asyncio debug settings to the loop that actually serves.
+
+        These have to be applied from inside the coroutine: `asyncio.run()`
+        builds its own loop and closes it afterwards, so anything configured on
+        the loop that `asyncio.get_event_loop()` returns before the call is
+        thrown away along with that loop.
+        """
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            loop = asyncio.get_running_loop()
+            # Same as setting PYTHONASYNCIODEBUG=1, but with a custom
+            # threshold. Opt-in only: debug mode captures a source traceback
+            # on every handle creation. For always-on stall attribution see
+            # sky/server/loop_stall.py.
+            loop.set_debug(True)
+            loop.slow_callback_duration = lag_threshold
+        await self.serve(*args, **kwargs)
 
 
 def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
@@ -237,9 +391,34 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
-            sock = config.bind_socket()
+            sockets: List[socket.socket]
+            if _reuse_port_enabled(config):
+                # Do not pre-bind a shared socket in the parent: each worker
+                # binds its own SO_REUSEPORT socket in Server.run() so the
+                # kernel spreads connections across workers. An empty socket
+                # list is forwarded to every (re)started worker. The parent
+                # still test-binds to fail fast on startup errors (port taken
+                # by a non-SO_REUSEPORT process, permission denied); otherwise
+                # only the workers crash-loop as they each hit the bind error.
+                probe_socket = _bind_reuse_port_socket(config)
+                # Each worker binds on its own, so an ephemeral port has to be
+                # resolved here or every worker would land on a different port.
+                if config.port == 0:
+                    config.port = probe_socket.getsockname()[1]
+                probe_socket.close()
+                sockets = []
+                # Neither uvicorn's parent (no bind_socket() call) nor its
+                # workers (they get a non-None socket list) log the bound
+                # address in this path.
+                scheme = 'https' if config.is_ssl else 'http'
+                host = config.host or '0.0.0.0'
+                addr = f'[{host}]' if ':' in host else host
+                logger.info(f'Uvicorn running on {scheme}://{addr}:'
+                            f'{config.port} (SO_REUSEPORT, per-worker sockets)')
+            else:
+                sockets = [config.bind_socket()]
             SlowStartMultiprocess(config, target=server.run,
-                                  sockets=[sock]).run()
+                                  sockets=sockets).run()
         else:
             server.run()
     finally:

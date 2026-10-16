@@ -49,6 +49,35 @@ export async function getServiceAccountTokens() {
   }
 }
 
+export async function batchUpdateUserRoles(userIds, role) {
+  const response = await apiClient.post('/users/batch_update', {
+    user_ids: userIds,
+    role,
+  });
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const data = await response.json();
+      detail = data?.detail || JSON.stringify(data);
+    } catch (e) {
+      detail = await response.text().catch(() => '');
+    }
+    throw new Error(
+      detail || `Batch update user roles failed with status ${response.status}`
+    );
+  }
+  return response.json();
+}
+
+/** The caller's own role (`admin`, `user` or `viewer`) and name. */
+export async function getUserRole() {
+  const response = await apiClient.get(`/users/role`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user role with status ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function getUsers() {
   try {
     const response = await apiClient.get(`/users`);

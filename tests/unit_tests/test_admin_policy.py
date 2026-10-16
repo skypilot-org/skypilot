@@ -1,6 +1,8 @@
 import contextlib
 import copy
 import importlib
+import io
+import logging
 import os
 import subprocess
 import sys
@@ -560,6 +562,49 @@ def test_apply_no_client_version_at_client_side(add_example_policy_paths, task):
         versions.set_remote_version('unknown')
 
 
+def test_apply_surfaces_resolved_active_workspace(add_example_policy_paths,
+                                                  task):
+    """The resolved active workspace is surfaced to the policy's config.
+
+    The active workspace can be resolved into a thread-local context (e.g. by
+    the server-side workspace resolver) rather than being written into the
+    config file. Verify that admin policies still receive it as
+    `active_workspace` instead of `None`.
+    """
+    captured_requests = []
+
+    class CaptureWorkspacePolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                    return_value=CaptureWorkspacePolicy()):
+        # add_labels.yaml does not set active_workspace, so without the fix
+        # the policy would receive `active_workspace: None`.
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+            POLICY_PATH, 'add_labels.yaml')
+        importlib.reload(skypilot_config)
+
+        # Simulate the server-side resolver setting the active workspace in a
+        # thread-local context rather than in the config file.
+        with skypilot_config.local_active_workspace_ctx('team-a'):
+            dag, mutated_config = admin_policy_utils.apply(
+                task,
+                request_name=request_names.AdminPolicyRequestName.
+                CLUSTER_LAUNCH,
+                at_client_side=True)
+
+    assert len(captured_requests) == 1
+    assert captured_requests[0].skypilot_config.get(
+        'active_workspace') == 'team-a', (
+            'Policy should receive the resolved active workspace')
+    assert mutated_config.get('active_workspace') == 'team-a'
+
+
 def test_reject_old_clients_policy(add_example_policy_paths, task):
     """Test RejectOldClientsPolicy rejects old clients."""
     from example_policy.skypilot_policy import RejectOldClientsPolicy
@@ -696,9 +741,12 @@ def _policy_server(policy: str) -> Iterator[str]:
         env=env)
     start_time = time.time()
     server_ready = False
-    while time.time() - start_time < 5.0:
+    # 30s budget: cold-start of a uvicorn subprocess (interpreter + fastapi
+    # + sky imports) routinely exceeds the prior 5s on CI runners.
+    timeout_s = 30.0
+    while time.time() - start_time < timeout_s:
         try:
-            response = requests.get(f'http://localhost:{port}', timeout=0.1)
+            response = requests.get(f'http://localhost:{port}', timeout=0.5)
             if response.status_code == 200:
                 server_ready = True
                 break
@@ -710,7 +758,8 @@ def _policy_server(policy: str) -> Iterator[str]:
     if not server_ready:
         proc.terminate()
         raise RuntimeError(
-            f'Policy server on port {port} failed to start within 5 seconds')
+            f'Policy server on port {port} failed to start within '
+            f'{timeout_s:.0f} seconds')
     try:
         yield f'http://localhost:{port}'
     finally:
@@ -932,3 +981,42 @@ def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
             server_mutated_request.task.volumes)
     assert client_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
     assert server_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+
+
+def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
+                                                  task, tmp_path):
+    """The mutated-request debug log must not carry the API server token.
+
+    MutatedUserRequest holds the whole SkyPilot config, so logging it renders
+    the config as a dict repr -- a different path from the YAML config dumps,
+    and one that leaked the token into CI logs until it was redacted too.
+    """
+    token = 'sky_eyJhbGciOiJIUzI1NiJ9.CANARYTOKENVALUE.sig'
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('admin_policy: example_policy.AddLabelsPolicy\n'
+                           'api_server:\n'
+                           '  endpoint: https://api.example.com\n'
+                           f'  service_account_token: {token}\n')
+
+    # sky loggers do not propagate to root, so caplog cannot see them; attach
+    # a handler to the emitting logger directly.
+    emitter = logging.getLogger('sky.utils.admin_policy_utils')
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    previous_level = emitter.level
+    emitter.addHandler(handler)
+    emitter.setLevel(logging.DEBUG)
+    try:
+        _load_task_and_apply_policy(task, str(config_path))
+    finally:
+        emitter.removeHandler(handler)
+        emitter.setLevel(previous_level)
+
+    logged = stream.getvalue()
+    assert 'Mutated user request:' in logged, (
+        f'expected the debug line to be emitted, got: {logged!r}')
+    assert token not in logged, 'the API token reached a log line'
+    assert '<redacted>' in logged, (
+        'the token should be replaced, not dropped, so the log still shows '
+        'that the field was set')

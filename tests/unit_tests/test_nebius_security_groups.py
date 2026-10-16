@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import nebius as nebius_adaptor
 from sky.provision import common
 from sky.provision.nebius import config as nebius_config
@@ -204,19 +205,143 @@ def test_open_ports_skips_for_byo_sg():
     assert any('user-managed (BYO) security group' in m for m in info_calls)
 
 
-def test_cleanup_ports_is_noop():
-    """SG deletion is the VM-lifecycle concern; cleanup_ports must not
-    touch the SG (which is still attached to live VMs at this point in
-    most invocation paths)."""
-    with mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
-         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup:
+def test_cleanup_ports_deletes_sg_when_cluster_is_gone():
+    """Autodown runs terminate_instances on the head node, which dies before
+    the SG cleanup runs. The API server's post-teardown cleanup_ports call
+    must reap the SG once no instances are left."""
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           return_value={}), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2') as mock_lookup, \
+         mock.patch.object(nebius_instance,
+                           '_wait_for_instances_terminated') as mock_wait, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
         nebius_instance.cleanup_ports(
             'mycluster',
             ['8080'],
             provider_config={'region': 'eu-north1'},
         )
-    mock_del.assert_not_called()
+    mock_lookup.assert_called_once_with('proj-abc', 'sky-sg-mycluster')
+    mock_wait.assert_not_called()
+    mock_del.assert_called_once_with('sg-2')
+
+
+def test_cleanup_ports_keeps_sg_while_instances_remain():
+    """The SG must not be deleted from under a VM that still exists."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           return_value={
+                               'i-1': {
+                                   'name': 'mycluster-aaaa-head',
+                                   'status': 'RUNNING'
+                               }
+                           }), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
     mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_raises_when_instance_listing_fails():
+    """A failed instance listing must not look like a completed cleanup:
+    post_teardown_cleanup would then drop the cluster record and the SG
+    would never be retried. Raise ClusterStatusFetchingError so the record
+    is kept and a status refresh reports the cluster as UNKNOWN. The listing
+    is retried a bounded number of times first."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=RuntimeError('list timed out')) as mock_filter, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
+         mock.patch('time.sleep'), \
+         pytest.raises(exceptions.ClusterStatusFetchingError,
+                       match='list timed out'):
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
+    # pylint: disable-next=protected-access
+    assert mock_filter.call_count == nebius_instance._CLEANUP_LIST_ATTEMPTS
+    mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_retries_transient_listing_error():
+    """A transient listing error must not fail the teardown (or abort a
+    provisioning failover): the retry succeeds and the SG is reaped."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=[RuntimeError('blip'),
+                                        RuntimeError('blip'), {}]), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del, \
+         mock.patch('time.sleep'):
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            ['8080'],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_del.assert_called_once_with('sg-2')
+
+
+def test_cleanup_ports_noop_when_sg_already_deleted():
+    """After a normal `sky down`, terminate_instances already removed the
+    SG; cleanup_ports finds nothing and must not error."""
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           return_value={}), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value=None), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            [],
+            provider_config={'region': 'eu-north1'},
+        )
+    mock_del.assert_not_called()
+
+
+def test_cleanup_ports_skips_byo_sg():
+    """A user-managed SG is never deleted, even after termination, and no
+    instance listing happens: a listing failure must not block a teardown
+    that has nothing to clean up."""
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=RuntimeError('list timed out')) as mock_filter, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
+        nebius_instance.cleanup_ports(
+            'mycluster',
+            [],
+            provider_config={
+                'region': 'eu-north1',
+                'security_group': {
+                    'GroupName': 'my-byo',
+                    'ManagedBySkyPilot': False,
+                },
+            },
+        )
+    mock_filter.assert_not_called()
+    mock_lookup.assert_not_called()
+    mock_del.assert_not_called()
 
 
 def test_terminate_instances_deletes_sg_on_full_teardown():
@@ -255,6 +380,94 @@ def test_terminate_instances_skips_sg_delete_for_worker_only():
     mock_del.assert_not_called()
 
 
+def test_terminate_instances_worker_only_waits_for_workers():
+    """Scale-down must return only after the deleted workers are gone.
+
+    `run_instances` runs right after a resize scale-down and counts RUNNING
+    instances; a worker whose delete is still in flight would be counted
+    against the requested node count. The head must be neither removed nor
+    waited on.
+    """
+    head = {'name': 'mycluster-aaaa-head', 'status': 'RUNNING'}
+    worker = {'name': 'mycluster-aaaa-worker', 'status': 'RUNNING'}
+    # Terminate-loop listing, then the wait polls: the worker is still
+    # listed (delete in flight), then only the head remains.
+    filter_results = iter([
+        {
+            'i-head': head,
+            'i-worker': worker
+        },
+        {
+            'i-head': head,
+            'i-worker': dict(worker, status='DELETING')
+        },
+        {
+            'i-head': head
+        },
+    ])
+    with mock.patch.object(nebius_instance,
+                           '_filter_instances',
+                           side_effect=lambda *a, **k: next(filter_results)), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep') as mock_sleep:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=True,
+        )
+    mock_remove.assert_called_once_with('i-worker')
+    # One poll saw the deleting worker, the next saw only the head.
+    assert mock_sleep.call_count == 1
+    # All three listings were consumed: we did not return early.
+    assert next(filter_results, None) is None
+    mock_del_cluster.assert_not_called()
+    mock_del_sg.assert_not_called()
+
+
+def test_terminate_instances_worker_only_wait_times_out():
+    """If workers never drain, the bounded wait gives up instead of hanging
+    and raises, so a resize does not re-provision while the deleted worker
+    may still be counted as RUNNING. The head is never removed."""
+    filter_calls = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        filter_calls['n'] += 1
+        return {
+            'i-head': {
+                'name': 'mycluster-aaaa-head',
+                'status': 'RUNNING'
+            },
+            'i-worker': {
+                'name': 'mycluster-aaaa-worker',
+                'status': 'DELETING'
+            },
+        }
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove') as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch('time.sleep'), \
+         mock.patch.object(nebius_instance, 'logger') as mock_logger, \
+         pytest.raises(RuntimeError, match='Timed out waiting for the worker'):
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=True,
+        )
+    mock_remove.assert_called_once_with('i-worker')
+    # pylint: disable-next=protected-access
+    assert filter_calls['n'] == 1 + nebius_instance._TERMINATION_POLL_ATTEMPTS
+    warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]
+    assert any('still present' in m for m in warn_calls)
+
+
 def test_terminate_instances_noop_for_legacy_cluster_sg():
     """If no SG exists for the cluster (pre-PR launch), terminate cleanly
     skips the SG-delete branch."""
@@ -272,6 +485,208 @@ def test_terminate_instances_noop_for_legacy_cluster_sg():
             worker_only=False,
         )
     mock_del.assert_not_called()
+
+
+def test_terminate_instances_waits_for_termination_before_sg_delete():
+    """SG delete must happen only after the cluster's instances are gone.
+
+    Nebius instance deletion is async, so the SG stays attached to
+    terminating VMs for a while after DeleteInstance is accepted. Deleting
+    the SG before the instances are reaped exhausts the bounded retry and
+    leaks one SG per cluster.
+    """
+    order = []
+    # _filter_instances: first call (terminate loop) returns one RUNNING
+    # instance; the wait-for-termination poll then sees one DELETING
+    # instance and finally an empty cluster.
+    filter_results = iter([
+        {
+            'i-1': {
+                'name': 'mycluster-aaaa-head',
+                'status': 'RUNNING'
+            }
+        },
+        {
+            'i-1': {
+                'name': 'mycluster-aaaa-head',
+                'status': 'DELETING'
+            }
+        },
+        {},
+    ])
+
+    def fake_filter(*_args, **_kwargs):
+        result = next(filter_results)
+        order.append(('filter', len(result)))
+        return result
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove',
+                           side_effect=lambda i: order.append(('remove', i))), \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(
+             nebius_utils, 'delete_security_group',
+             side_effect=lambda sg: order.append(('delete_sg', sg))), \
+         mock.patch('time.sleep'):
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+
+    # The SG delete comes strictly after the instance list drained.
+    assert order == [
+        ('filter', 1),  # terminate loop enumerates the cluster
+        ('remove', 'i-1'),
+        ('filter', 1),  # wait poll: still DELETING
+        ('filter', 0),  # wait poll: drained
+        ('delete_sg', 'sg-2'),
+    ]
+
+
+def test_terminate_instances_sg_cleanup_runs_when_termination_fails():
+    """A failed instance termination must not leak the SG: cleanup still
+    runs (without the wait poll) and the original error propagates."""
+    with mock.patch.object(
+            nebius_instance, '_filter_instances',
+            return_value={
+                'i-1': {
+                    'name': 'mycluster-aaaa-head',
+                    'status': 'RUNNING'
+                }
+            }) as mock_filter, \
+         mock.patch.object(nebius_utils, 'remove',
+                           side_effect=RuntimeError('boom')), \
+         mock.patch.object(nebius_utils, 'delete_cluster') as mock_del_cluster, \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'):
+        with pytest.raises(RuntimeError, match='Failed to terminate instance'):
+            nebius_instance.terminate_instances(
+                'mycluster',
+                provider_config={'region': 'eu-north1'},
+                worker_only=False,
+            )
+    mock_del_sg.assert_called_once_with('sg-2')
+    mock_del_cluster.assert_not_called()
+    # The error path must not sit in the wait-for-termination poll (the
+    # instances are known to still exist): only the terminate-loop listing
+    # ran.
+    assert mock_filter.call_count == 1
+
+
+def test_terminate_instances_stuck_worker_does_not_block_head():
+    """A worker whose delete keeps failing, listed before the head, must not
+    keep the head from being deleted; the failure is still reported.
+
+    This is the autodown fallback path: the worker-only call already failed
+    on this worker and the full termination retries it.
+    """
+
+    def fake_remove(inst_id):
+        if inst_id == 'i-worker':
+            raise RuntimeError('worker delete rejected')
+
+    with mock.patch.object(
+            nebius_instance, '_filter_instances',
+            return_value={
+                'i-worker': {
+                    'name': 'mycluster-aaaa-worker',
+                    'status': 'RUNNING'
+                },
+                'i-head': {
+                    'name': 'mycluster-aaaa-head',
+                    'status': 'RUNNING'
+                },
+            }), \
+         mock.patch.object(nebius_utils, 'remove',
+                           side_effect=fake_remove) as mock_remove, \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group'), \
+         mock.patch('time.sleep'):
+        with pytest.raises(RuntimeError,
+                           match='i-worker: .*worker delete rejected'):
+            nebius_instance.terminate_instances(
+                'mycluster',
+                provider_config={'region': 'eu-north1'},
+                worker_only=False,
+            )
+    assert [c.args[0] for c in mock_remove.call_args_list
+           ] == ['i-worker', 'i-head']
+
+
+def test_terminate_instances_sg_cleanup_error_does_not_mask_failure():
+    """An SG-cleanup error inside the `finally` must never mask the
+    original instance-termination error."""
+    with mock.patch.object(
+            nebius_instance, '_filter_instances',
+            return_value={
+                'i-1': {
+                    'name': 'mycluster-aaaa-head',
+                    'status': 'RUNNING'
+                }
+            }), \
+         mock.patch.object(nebius_utils, 'remove',
+                           side_effect=RuntimeError('boom')), \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           side_effect=Exception('sg lookup exploded')), \
+         mock.patch('time.sleep'):
+        with pytest.raises(RuntimeError, match='Failed to terminate instance'):
+            nebius_instance.terminate_instances(
+                'mycluster',
+                provider_config={'region': 'eu-north1'},
+                worker_only=False,
+            )
+
+
+def test_terminate_instances_sg_delete_proceeds_on_wait_timeout():
+    """If instances never drain within the bounded wait, we still take a
+    best-effort shot at the SG delete (its internal retry may catch a
+    late detach) instead of silently skipping it."""
+    filter_calls = {'n': 0}
+
+    def fake_filter(*_args, **_kwargs):
+        filter_calls['n'] += 1
+        return {'i-1': {'name': 'mycluster-aaaa-head', 'status': 'DELETING'}}
+
+    with mock.patch.object(nebius_instance, '_filter_instances',
+                           side_effect=fake_filter), \
+         mock.patch.object(nebius_utils, 'remove'), \
+         mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value='sg-2'), \
+         mock.patch.object(nebius_utils, 'delete_security_group') as mock_del_sg, \
+         mock.patch('time.sleep'), \
+         mock.patch.object(nebius_instance, 'logger') as mock_logger:
+        nebius_instance.terminate_instances(
+            'mycluster',
+            provider_config={'region': 'eu-north1'},
+            worker_only=False,
+        )
+
+    mock_del_sg.assert_called_once_with('sg-2')
+    # Terminate-loop listing + the full bounded wait.
+    # pylint: disable-next=protected-access
+    assert filter_calls['n'] == 1 + nebius_instance._TERMINATION_POLL_ATTEMPTS
+    warn_calls = [c.args[0] for c in mock_logger.warning.call_args_list]
+    assert any('still present' in m for m in warn_calls)
 
 
 # --- BYO security group (nebius.security_group_name config) ----------------
@@ -594,3 +1009,68 @@ def test_delete_sg_drains_rules_first():
         nebius_utils.delete_security_group('sg-with-rules')
 
     mock_del_rule.assert_called_once_with('vpcsecurityrule-abc')
+
+
+# --- get_or_create_security_group error handling ---------------------------
+
+
+def _sg_create_error(code, message):
+    """A nebius RequestError whose create() would raise it."""
+    err_cls = nebius_adaptor.request_error()
+    status = mock.MagicMock()
+    status.code = code
+    status.__str__ = lambda self, _m=message: _m
+    return err_cls(status)
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_propagates_non_conflict_create_error():
+    """A non-ALREADY_EXISTS create failure must surface the real error
+    instead of being masked by a misleading NOT_FOUND from the re-fetch."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.NOT_FOUND,
+                                  'NOT_FOUND: SecurityGroup ... not found')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value=None) as mock_lookup:
+        with pytest.raises(nebius_adaptor.request_error()) as exc_info:
+            nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')
+    assert 'NOT_FOUND' in str(exc_info.value)
+    # Only the initial existence check ran; no race re-fetch on a real error.
+    mock_lookup.assert_called_once_with('proj', 'sg-x')
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_recovers_from_already_exists_race():
+    """ALREADY_EXISTS means a concurrent bootstrap created it: re-fetch."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.ALREADY_EXISTS,
+                                  'ALREADY_EXISTS: security group exists')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           side_effect=[None, 'sg-raced']) as mock_lookup:
+        out = nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')
+    assert out == 'sg-raced'
+    assert mock_lookup.call_count == 2  # initial check + race re-fetch
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_reraises_if_race_refetch_missing():
+    """ALREADY_EXISTS but the SG is gone on re-fetch → surface original."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.ALREADY_EXISTS,
+                                  'ALREADY_EXISTS: security group exists')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           side_effect=[None, None]):
+        with pytest.raises(nebius_adaptor.request_error()):
+            nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')

@@ -71,7 +71,8 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
 
 def get_node_hash(node_name: str):
     # Generates a 32 character md5 hash from a string
-    md5_hash = hashlib.md5(node_name.encode()).hexdigest()
+    md5_hash = hashlib.md5(node_name.encode(),
+                           usedforsecurity=False).hexdigest()
     return md5_hash[:32]
 
 
@@ -316,7 +317,8 @@ def label_gpus_server(context: Optional[str] = None,
         Dict with 'success' boolean and 'message' string.
     """
     # Check prerequisites
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason, flush=True)  # Will be streamed to client
         return {'success': False, 'message': reason}
@@ -374,7 +376,8 @@ def main():
         context = args.context
 
     # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason)
         sys.exit(1)

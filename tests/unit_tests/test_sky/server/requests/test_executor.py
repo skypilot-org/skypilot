@@ -2,25 +2,34 @@
 import asyncio
 import concurrent.futures
 import functools
+import gc
 import os
 import pathlib
 import queue as queue_lib
+import threading
 import time
 from typing import List
 from unittest import mock
+import weakref
 
 import pytest
 
 from sky import exceptions
+from sky import global_user_state
+from sky import models
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons as server_daemons
+from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture()
@@ -172,6 +181,185 @@ async def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _make_pending_request(request_id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=0.0,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_marks_request_failed(isolated_database):
+    """A failed queue put must leave the request FAILED, not PENDING."""
+    req = _make_pending_request('enqueue-fails')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    error = updated.get_error()
+    assert error is not None
+    assert 'put failed' in str(error['object'])
+
+
+@pytest.mark.asyncio
+async def test_enqueue_cancellation_marks_request_failed(isolated_database):
+    """A cancelled queue put must not strand the request in PENDING."""
+    req = _make_pending_request('enqueue-cancelled')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=asyncio.CancelledError())
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(asyncio.CancelledError):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-cancelled')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.parametrize('claimed_status', [
+    requests_lib.RequestStatus.RUNNING,
+    requests_lib.RequestStatus.WAITING,
+])
+@pytest.mark.asyncio
+async def test_enqueue_failure_does_not_clobber_claimed_request(
+        isolated_database, claimed_status):
+    """A row claimed by a worker before the failure mark is left untouched.
+
+    The queue put may commit and still raise (e.g. a timeout racing the
+    commit); a worker can then dequeue and claim the request -- and even park
+    it WAITING for a retry -- before the failure path runs. The failure mark
+    must not overwrite the claimed run.
+    """
+    req = _make_pending_request('enqueue-claimed')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    async def claim_then_fail(input_tuple):
+        del input_tuple
+        with requests_lib.update_request('enqueue-claimed') as claimed:
+            assert claimed is not None
+            claimed.status = claimed_status
+        raise RuntimeError('put failed after commit')
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=claim_then_fail)
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed after commit'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-claimed')
+    assert updated is not None
+    assert updated.status == claimed_status
+
+
+class _AlwaysMetPrecondition(preconditions.Precondition):
+
+    async def check(self):
+        return True, None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_with_precondition_marks_request_failed(
+        isolated_database):
+    """The terminal-state guard must also cover the precondition path."""
+    req = _make_pending_request('enqueue-fails-precondition')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(
+            req, precondition=_AlwaysMetPrecondition(req.request_id))
+        new_tasks = preconditions.background_tasks - before
+        assert len(new_tasks) == 1
+        with pytest.raises(RuntimeError, match='put failed'):
+            await next(iter(new_tasks))
+
+    updated = requests_lib.get_request('enqueue-fails-precondition')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
+                                                       mock_global_user_state,
+                                                       mock_skypilot_config):
+    """A dequeued WAITING request must execute, not be skipped.
+
+    WAITING is the state a request is parked in while waiting to resume (retry
+    backoff or an external continue-condition). When such a request is
+    re-enqueued and dequeued, the execution wrapper must pick it up and run it
+    just like PENDING. Regression test: the guard previously accepted only
+    PENDING, so a re-enqueued WAITING request was silently dropped and stranded.
+    """
+    req = requests_lib.Request(request_id='waiting-executes',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.WAITING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('waiting-executes',
+                                        ignore_return_value=False)
+
+    # The request ran to completion instead of being skipped while WAITING.
+    updated = requests_lib.get_request('waiting-executes')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.SUCCEEDED
+    assert updated.return_value == 'success'
+
+
+class _ResultTooLargeError(Exception):
+    """A database error that carries the statement's parameters."""
+
+    def __init__(self, params):
+        super().__init__('invalid memory alloc request size 1073741824')
+        self.params = params
+
+
+@pytest.mark.asyncio
+async def test_result_that_cannot_be_stored_fails_the_request(
+        mock_fd_operations, mock_global_user_state, mock_skypilot_config):
+    """A result the database rejects ends the request FAILED, not RUNNING."""
+    req = requests_lib.Request(request_id='result-not-stored',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    error = _ResultTooLargeError(params={'return_value': 'x' * 10000})
+    with mock.patch.object(requests_lib,
+                           'set_request_succeeded',
+                           side_effect=error):
+        executor._request_execution_wrapper('result-not-stored',
+                                            ignore_return_value=False)
+
+    updated = requests_lib.get_request('result-not-stored')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    message = updated.get_error()['message']
+    assert 'invalid memory alloc request size' in message
+    # The rejected result is not copied into the stored error.
+    assert 'x' * 100 not in message
 
 
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
@@ -574,11 +762,22 @@ async def test_request_worker_retry_execution_retryable_error(
 
     monkeypatch.setattr(executor, '_get_queue', mock_get_queue)
 
-    # Mock time.sleep to track calls (but still sleep for very short waits)
+    # Mock time.sleep to track calls (but still sleep for very short waits).
+    # Capture the request status and queue length observed *at the moment*
+    # the backoff sleep happens, to pin the ordering: the request must be
+    # PENDING (not RUNNING) and not yet re-enqueued before we wait.
     sleep_calls = []
+    status_at_sleep = []
+    status_msg_at_sleep = []
+    queue_len_at_sleep = []
 
     def mock_sleep(seconds):
         sleep_calls.append(seconds)
+        observed = requests_lib.get_request(request_id,
+                                            fields=['status', 'status_msg'])
+        status_at_sleep.append(observed.status if observed else None)
+        status_msg_at_sleep.append(observed.status_msg if observed else None)
+        queue_len_at_sleep.append(len(queue_items))
 
     monkeypatch.setattr('time.sleep', mock_sleep)
 
@@ -629,11 +828,34 @@ async def test_request_worker_retry_execution_retryable_error(
     ], (f'Expected first time.sleep call to be 30 seconds, got {sleep_calls[0]}'
        )
 
-    # Verify the request status was reset to PENDING
+    # Verify the status was set to WAITING *before* the backoff wait, and that
+    # the request was not yet re-enqueued at that point. This guards the
+    # failover-safety ordering: a server interrupted mid-wait leaves the
+    # request in WAITING (recoverable) rather than a stuck RUNNING orphan.
+    assert status_at_sleep == [
+        requests_lib.RequestStatus.WAITING
+    ], (f'Expected status to be WAITING at sleep time, got {status_at_sleep}')
+    assert queue_len_at_sleep == [
+        0
+    ], ('Expected request to be re-enqueued only after the wait, but it was '
+        f'already on the queue at sleep time: {queue_len_at_sleep}')
+
+    # The status message during the backoff should surface both the retry
+    # reason (from the exception message) and the wait time.
+    assert len(status_msg_at_sleep) == 1
+    msg = status_msg_at_sleep[0]
+    assert msg is not None
+    assert 'Failed to provision all possible launchable resources' in msg, (
+        f'Expected retry reason in status_msg, got: {msg!r}')
+    assert 'retrying in 30s' in msg, (
+        f'Expected wait time in status_msg, got: {msg!r}')
+
+    # The request stays WAITING through the backoff and re-enqueue; a worker
+    # flips it to RUNNING only when it picks the request back up.
     updated_request = requests_lib.get_request(request_id, fields=['status'])
     assert updated_request is not None
-    assert updated_request.status == requests_lib.RequestStatus.PENDING, (
-        f'Expected request status to be PENDING, got {updated_request.status}')
+    assert updated_request.status == requests_lib.RequestStatus.WAITING, (
+        f'Expected request status to be WAITING, got {updated_request.status}')
 
     # Call process_request - it should pick up the request from the queue
     # and call submit_until_success
@@ -643,6 +865,588 @@ async def test_request_worker_retry_execution_retryable_error(
     assert len(submit_calls) == 1, (
         f'Expected submit_until_success to be called once, got {len(submit_calls)} calls'
     )
+
+
+class _PauseHarness:
+    """Bundles the worker, queue, and request id for pause/watch tests."""
+
+    def __init__(self, worker, request_id, queue_items, sleep_calls, queued):
+        self.worker = worker
+        self.request_id = request_id
+        self.queue_items = queue_items
+        self.sleep_calls = sleep_calls
+        # Set on every requeue; the async-path tests wait on it.
+        self.queued = queued
+
+    def run(self, condition, retry_wait_seconds=30):
+        """Drive handle_task_result with an ExecutionPausedError."""
+        paused_error = exceptions.ExecutionPausedError(
+            'Waiting on external admission.',
+            hint='Will resume when admitted',
+            retry_wait_seconds=retry_wait_seconds,
+            continue_condition=condition)
+        fut = concurrent.futures.Future()
+        fut.set_exception(paused_error)
+        request_element = (self.request_id, False, True)
+        self.worker.handle_task_result(fut, request_element)
+        return request_element
+
+
+@pytest.fixture()
+def pause_harness(isolated_database, monkeypatch):
+    """A RequestWorker wired to an in-memory queue, watching time.sleep."""
+    request_id = 'test-pause-request'
+    request = requests_lib.Request(
+        request_id=request_id,
+        name='test-request',
+        entrypoint=_dummy_entrypoint_for_retry_test,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.RUNNING,
+        created_at=time.time(),
+        user_id='test-user',
+    )
+    asyncio.run(requests_lib.create_if_not_exists_async(request))
+
+    queue_items = []
+    backing = queue_lib.Queue()
+
+    queued = threading.Event()
+
+    class MockRequestQueue:
+
+        def get(self):
+            try:
+                return backing.get(block=False)
+            except queue_lib.Empty:
+                return None
+
+        def put(self, item):
+            queue_items.append(item)
+            backing.put(item)
+            # Signals the async-path tests, whose requeue happens on the
+            # shared request event loop after handle_task_result returned.
+            queued.set()
+
+    request_queue = MockRequestQueue()
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: request_queue)
+
+    # Capture (and skip) the fixed fallback sleep so the tests run instantly.
+    sleep_calls = []
+
+    def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr('time.sleep', mock_sleep)
+
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.LONG,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls, queued)
+
+
+class _RecordingCondition(continue_condition_lib.ContinueCondition):
+    """A ContinueCondition whose wait() returns a fixed verdict.
+
+    Records the wait() arguments so tests can assert the executor
+    drives the condition's interface correctly.
+    """
+
+    def __init__(self, verdict: bool):
+        self._verdict = verdict
+        self.calls = []
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del update_status_msg  # This condition reports no reason.
+        self.calls.append({
+            'is_cancelled': is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+        })
+        return self._verdict
+
+
+def test_pause_reschedules_when_wait_returns_true(pause_harness):
+    """The executor calls condition.wait() and reschedules when it returns True.
+
+    The wait policy (poll interval, backoff, deadline, fallback) lives in the
+    condition; the executor just acts on the boolean verdict.
+    """
+    condition = _RecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == [request_element]
+    # wait() was given the fallback and a working cancellation check.
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30
+    }]
+    # During the pause the request is WAITING with a "waiting to resume" msg.
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status', 'status_msg'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+    assert 'waiting to resume' in updated.status_msg
+
+
+def test_pause_dropped_when_wait_returns_false(pause_harness):
+    """A condition.wait() returning False drops the request (no reschedule)."""
+    condition = _RecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert pause_harness.queue_items == []
+
+
+def test_pause_base_condition_does_fixed_fallback_wait(pause_harness):
+    """The base ContinueCondition just waits the fallback, then reschedules."""
+    condition = continue_condition_lib.ContinueCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.sleep_calls == [30]
+    assert pause_harness.queue_items == [request_element]
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_base_condition_dropped_if_cancelled_during_wait(
+        pause_harness, monkeypatch):
+    """The base condition drops the request if it is cancelled while waiting.
+
+    Also exercises the is_cancelled check, which the base wait()
+    consults after the fallback sleep.
+    """
+
+    def cancel_on_sleep(seconds):
+        pause_harness.sleep_calls.append(seconds)
+        with requests_lib.update_request(pause_harness.request_id) as r:
+            r.status = requests_lib.RequestStatus.CANCELLED
+
+    monkeypatch.setattr('time.sleep', cancel_on_sleep)
+
+    pause_harness.run(continue_condition_lib.ContinueCondition())
+
+    assert pause_harness.queue_items == []
+
+
+class _ReportingCondition(continue_condition_lib.ContinueCondition):
+    """A condition that pushes fresh reasons while parked."""
+
+    def __init__(self, reasons, before_report=None):
+        self._reasons = reasons
+        self._before_report = before_report
+        self.got_updater = None
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.got_updater = update_status_msg
+        if self._before_report is not None:
+            self._before_report()
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            update_status_msg(reason)
+        return True
+
+
+def test_pause_status_msg_refreshed_while_parked(pause_harness):
+    """A parked request's status message follows the condition's latest reason.
+
+    A pause can last hours (e.g. waiting on queue admission), so the message
+    the client is shown must not be frozen at the one written when the request
+    parked. The scheduler owns the formatting, so the refreshed message carries
+    the same suffix as the initial one.
+    """
+    condition = _ReportingCondition(
+        reasons=['Pending (Queue: q, Position: 4)', 'Pending (Queue: q)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.got_updater is not None
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    # The last reason wins, formatted exactly like the initial message.
+    assert updated.status_msg == 'Pending (Queue: q) (waiting to resume)'
+
+
+def test_pause_status_msg_refresh_skipped_once_not_waiting(pause_harness):
+    """A late refresh must not resurrect a parked message.
+
+    The wait runs concurrently with cancellation (and with the resume that
+    follows it), so a reason arriving after the request left WAITING must be
+    dropped rather than overwrite the newer state's message.
+    """
+
+    def cancel():
+        with requests_lib.update_request(pause_harness.request_id) as request:
+            request.status = requests_lib.RequestStatus.CANCELLED
+            request.status_msg = 'cancelled by user'
+
+    condition = _ReportingCondition(reasons=['Pending (Queue: q, Position: 4)'],
+                                    before_report=cancel)
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == 'cancelled by user'
+
+
+def test_pause_status_msg_reason_truncated(pause_harness):
+    """A long reason is truncated but keeps the suffix readable."""
+    condition = _ReportingCondition(reasons=['x' * 500])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg.endswith('... (waiting to resume)')
+    assert len(updated.status_msg) < 250
+
+
+class _LegacyWaitCondition:
+    """A duck-typed condition whose wait() predates update_status_msg."""
+
+    def __init__(self):
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append(fallback_wait_seconds)
+        del is_cancelled
+        return True
+
+
+class _KwargsWaitCondition:
+    """A duck-typed condition that absorbs unknown kwargs."""
+
+    def __init__(self):
+        self.kwargs = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds, **kwargs) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.kwargs.append(sorted(kwargs))
+        return True
+
+
+def test_pause_tolerates_condition_wait_without_the_new_kwarg(pause_harness):
+    """A condition from a separately versioned package still waits normally.
+
+    The continue-condition contract is duck-typed, so an implementation whose
+    wait() predates update_status_msg must keep parking the request rather than
+    failing the call and degrading to a fixed-backoff retry loop.
+    """
+    condition = _LegacyWaitCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.calls == [30]
+    assert pause_harness.queue_items == [request_element]
+
+
+def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
+    """A wait() with **kwargs is given the updater rather than skipped."""
+    condition = _KwargsWaitCondition()
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.kwargs == [['update_status_msg']]
+
+
+class _AsyncRecordingCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async() returns a fixed verdict.
+
+    Records what the executor drives it with, so tests can assert the async
+    contract: awaitable callbacks, and the coroutine running off the monitor
+    thread on the shared request event loop.
+    """
+
+    def __init__(self, verdict: bool, reasons=()):
+        self._verdict = verdict
+        self._reasons = reasons
+        self.calls = []
+        self.done = threading.Event()
+
+    def wait(self, **kwargs) -> bool:
+        raise AssertionError(
+            'sync wait() must not run for an async-capable condition')
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        self.calls.append({
+            'is_cancelled': await is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+            'thread': threading.current_thread(),
+        })
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            await update_status_msg(reason)
+        self.done.set()
+        return self._verdict
+
+
+def test_pause_async_condition_reschedules(pause_harness):
+    """An async condition's True verdict requeues the request.
+
+    Also pins down the contract: the coroutine runs off the monitor thread,
+    and is_cancelled is awaitable there.
+    """
+    condition = _AsyncRecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30,
+        'thread': mock.ANY,
+    }]
+    assert condition.calls[0]['thread'] is not threading.current_thread()
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_async_condition_dropped_when_wait_returns_false(pause_harness):
+    """An async condition's False verdict drops the request (no reschedule)."""
+    condition = _AsyncRecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert condition.done.wait(timeout=10)
+    # The requeue (if any, wrongly) would follow right after the verdict on
+    # the same coroutine; give it a beat before asserting it never happened.
+    assert not pause_harness.queued.wait(timeout=0.2)
+    assert pause_harness.queue_items == []
+
+
+def test_pause_async_status_msg_refreshed_while_parked(pause_harness):
+    """A reason pushed through the awaitable updater lands on the request."""
+    condition = _AsyncRecordingCondition(
+        verdict=True, reasons=['Pending (Queue: q, Position: 4)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == (
+        'Pending (Queue: q, Position: 4) (waiting to resume)')
+
+
+class _GatedAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that stays parked until the test releases it."""
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        await asyncio.get_running_loop().run_in_executor(
+            None, self.release.wait)
+        return True
+
+
+def test_pause_async_wait_does_not_hold_the_monitor_thread(pause_harness):
+    """handle_task_result returns while the async wait is still parked.
+
+    This is the point of wait_async: parked requests can outnumber executor
+    workers by orders of magnitude, so the wait must not keep the per-request
+    monitor thread alive for its duration.
+    """
+    condition = _GatedAsyncCondition()
+
+    # Returns immediately; on a thread-blocking wait this would deadlock
+    # until the (never-released) gate.
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == []
+    condition.release.set()
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _FailingAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that dies mid-wait."""
+
+    async def wait_async(self, **kwargs) -> bool:
+        del kwargs
+        raise RuntimeError('probe exploded')
+
+
+def test_pause_async_wait_failure_falls_back_to_fixed_wait(pause_harness):
+    """A failing wait_async degrades to one fixed backoff, then reschedules.
+
+    Same policy as the sync path: a broken probe must not drop the request.
+    """
+    condition = _FailingAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=0)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _NonCoroutineWaitAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async attribute is not a coroutine function."""
+
+    def __init__(self):
+        self.sync_calls = 0
+
+    def wait_async(self, **kwargs) -> bool:
+        raise AssertionError('a non-coroutine wait_async must be ignored')
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        self.sync_calls += 1
+        return True
+
+
+def test_pause_non_coroutine_wait_async_uses_sync_path(pause_harness):
+    """Only a real coroutine function opts into the waiter loop.
+
+    A plain callable named wait_async cannot be awaited; degrading it to the
+    fallback wait would silently discard the condition's wait() policy, so
+    the executor must keep the thread-based path instead.
+    """
+    condition = _NonCoroutineWaitAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.sync_calls == 1
+    assert pause_harness.queue_items == [request_element]
+
+
+@pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
+    ('Pending (Queue: q)', 'waiting to resume',
+     'Pending (Queue: q) (waiting to resume)'),
+    ('multi\nline   reason', 'retrying in 5s',
+     'multi line reason (retrying in 5s)'),
+    ('', 'waiting to resume', 'Waiting to resume'),
+])
+def test_waiting_status_msg_formatting(reason, suffix, expected):
+    """Whitespace is collapsed, and an empty reason leaves just the suffix."""
+    assert executor._waiting_status_msg(reason, suffix) == expected
+
+
+def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
+    """The freed worker process is accounted for before the pause wait runs.
+
+    The worker process is released the instant the future completes (it raised
+    ExecutionPausedError), so the free-executor gauge must be incremented
+    before the - potentially long-lived - pause wait, not after the request
+    reschedules. Otherwise the gauge under-reports idle executors for the whole
+    duration of the pause.
+
+    This snapshots the gauge's inc() count at the moment condition.wait() is
+    entered; on the old code (increment in a post-wait finally) it would be 0.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    inc_count_at_wait = []
+
+    class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
+
+        def wait(self,
+                 *,
+                 is_cancelled,
+                 fallback_wait_seconds,
+                 update_status_msg=None) -> bool:
+            del is_cancelled, fallback_wait_seconds, update_status_msg
+            inc_count_at_wait.append(gauge.inc.call_count)
+            return True
+
+    request_element = pause_harness.run(_GaugeWatchingCondition(),
+                                        retry_wait_seconds=30)
+
+    # The slot was marked free (inc()'d) before the wait began ...
+    assert inc_count_at_wait == [1]
+    # ... and exactly once overall: no lingering post-wait finally double-counts.
+    assert gauge.inc.call_count == 1
+    # Sanity: the request still rescheduled as before.
+    assert pause_harness.queue_items == [request_element]
+
+
+def test_monitor_thread_start_failure_returns_the_slot(pause_harness,
+                                                       monkeypatch):
+    """A monitor thread that never starts must not leak a free-executor slot.
+
+    handle_task_result, which runs in that thread, owns the increment matching
+    process_request()'s decrement. If the thread never starts the slot is gone
+    for the lifetime of the process, and enough of these drive the gauge
+    negative - indistinguishable from a genuine request backlog.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    class _UnstartableThread:
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    real_thread = executor.threading.Thread
+
+    def _thread_factory(*args, **kwargs):
+        # Only the monitor thread is made unstartable; anything else the
+        # request path spawns must keep working.
+        if kwargs.get('target') == pause_harness.worker.handle_task_result:
+            return _UnstartableThread()
+        return real_thread(*args, **kwargs)
+
+    monkeypatch.setattr(executor.threading, 'Thread', _thread_factory)
+
+    class _MockExecutor:
+
+        def submit_until_success(self, fn, *args, **kwargs):
+            del fn, args, kwargs
+            fut = concurrent.futures.Future()
+            fut.set_result(None)
+            return fut
+
+    class _OneShotQueue:
+
+        def __init__(self, item):
+            self._item = item
+
+        def get(self):
+            item, self._item = self._item, None
+            return item
+
+    request_queue = _OneShotQueue((pause_harness.request_id, False, True))
+
+    # The thread failure is still swallowed by process_request's handler, so
+    # the dispatcher loop survives it - only the accounting must be repaired.
+    pause_harness.worker.process_request(_MockExecutor(), request_queue)
+
+    # Assert the invariant, not where the decrement sits: a failed monitor
+    # thread must leave the gauge net-zero either way.
+    assert gauge.dec.call_count == gauge.inc.call_count
 
 
 def test_resolve_blob_valid(tmp_path, monkeypatch):
@@ -686,6 +1490,146 @@ def test_resolve_blob_invalid_id(tmp_path, monkeypatch):
         server_common.resolve_blob_dir('not-a-hash', 'testuser')
 
 
+@pytest.fixture()
+def stub_override_request_env_deps(monkeypatch):
+    """Stub out reload/permissions/user upsert for override_request_env tests.
+
+    Lets the tests assert only what override_request_env_and_config does to
+    os.environ, without needing a real DB / context / permission backend.
+    """
+    monkeypatch.setattr('sky.server.common.reload_for_new_request', mock.Mock())
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        mock.Mock())
+
+    fake_user = mock.Mock()
+    fake_user.id = 'client-user-id'
+    fake_user.name = 'client-user'
+
+    def fake_add_or_update_user(user, return_user=False, **kwargs):
+        if return_user:
+            return True, fake_user
+        return True
+
+    monkeypatch.setattr('sky.global_user_state.add_or_update_user',
+                        fake_add_or_update_user)
+
+
+def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
+                                                 monkeypatch):
+    """Daemon request_ids must NOT have their persisted env_vars overlaid.
+
+    Regression: a daemon row in PG carrying stale downward-API
+    values from a previous deployment generation must not clobber the
+    current pod's os.environ.
+    """
+    # Seed the "current pod" env with realistic downward-API values.
+    monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
+    monkeypatch.setenv('SKYPILOT_APISERVER_UUID', 'current-pod-uuid')
+
+    # Persisted daemon body has STALE values from a now-dead pod.
+    body = payloads.RequestBody(
+        env_vars={
+            'SKYPILOT_POD_MEMORY_BYTES_LIMIT': str(100 * 1024 * 1024),
+            'SKYPILOT_APISERVER_UUID': 'stale-pod-uuid',
+            constants.USER_ID_ENV_VAR: 'irrelevant',
+            constants.USER_ENV_VAR: 'irrelevant',
+        })
+
+    # Pick a real daemon id so daemons.is_daemon_request_id returns True.
+    daemon_id = server_daemons.INTERNAL_REQUEST_DAEMONS[0].id
+
+    with executor.override_request_env_and_config(body,
+                                                  request_id=daemon_id,
+                                                  request_name='daemon'):
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(
+            300 * 1024**3), ('daemon override clobbered the current pod env')
+        assert os.environ['SKYPILOT_APISERVER_UUID'] == 'current-pod-uuid'
+
+
+def test_override_env_applied_for_client_request(stub_override_request_env_deps,
+                                                 monkeypatch):
+    """Regression guard: client requests must still have env_vars applied."""
+    monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
+
+    body = payloads.RequestBody(
+        env_vars={
+            'SKYPILOT_POD_MEMORY_BYTES_LIMIT': str(100 * 1024 * 1024),
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
+                                                                    1024)
+
+
+@pytest.mark.parametrize('server_value', [None, '8'])
+def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
+                                                monkeypatch, server_value):
+    """A client-supplied SKYPILOT_AUTH_DB_TIMEOUT_SECONDS is dropped.
+
+    The users upsert inside the overlay derives its server-side SET LOCAL
+    timeouts from that variable at call time, so a client (an older one
+    still forwards every SKYPILOT_* variable) must not be able to loosen
+    or break them: the worker keeps the server's own setting, or none.
+    """
+    if server_value is None:
+        monkeypatch.delenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           raising=False)
+    else:
+        monkeypatch.setenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           server_value)
+    expected_deadline = db_utils.get_auth_db_timeout_seconds()
+    expected_timeouts = global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS: '1000000',
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ.get(
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS) == server_value
+        assert db_utils.get_auth_db_timeout_seconds() == expected_deadline
+        assert (global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+                == expected_timeouts)
+    assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
+
+
+def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
+                                               monkeypatch):
+    """Daemon env mutations inside the with block must be reverted on exit.
+
+    Daemons (e.g. InternalRequestDaemon.run_event) set
+    SKYPILOT_DISABLE_LOGGING from inside the with block. If that mutation
+    leaked, the next request handled by the same worker would inherit it.
+    """
+    monkeypatch.setenv('SKYPILOT_PRE_EXISTING', 'before')
+    monkeypatch.delenv('SKYPILOT_NEW_VAR', raising=False)
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'irrelevant',
+            constants.USER_ENV_VAR: 'irrelevant',
+        })
+
+    daemon_id = server_daemons.INTERNAL_REQUEST_DAEMONS[0].id
+
+    with executor.override_request_env_and_config(body,
+                                                  request_id=daemon_id,
+                                                  request_name='daemon'):
+        os.environ['SKYPILOT_NEW_VAR'] = 'inside'
+        del os.environ['SKYPILOT_PRE_EXISTING']
+
+    assert 'SKYPILOT_NEW_VAR' not in os.environ
+    assert os.environ['SKYPILOT_PRE_EXISTING'] == 'before'
+
+
 def test_resolve_blob_missing_file(tmp_path, monkeypatch):
     """Test that resolve_blob_dir raises FileNotFoundError when blob is missing."""
     blob_id = 'b' * 64
@@ -696,3 +1640,559 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
     from sky.server import common as server_common
     with pytest.raises(FileNotFoundError, match='Blob not found'):
         server_common.resolve_blob_dir(blob_id, 'testuser')
+
+
+# Gated SIGTERM handler tests.
+
+
+@pytest.fixture()
+def reset_sigterm_gate():
+    """Reset module-level flag (shared across tests in same process)."""
+    import signal as _signal
+    original_handler = _signal.getsignal(_signal.SIGTERM)
+    executor._in_request_execution = False
+    yield
+    executor._in_request_execution = False
+    _signal.signal(_signal.SIGTERM, original_handler)
+
+
+def test_gated_sigterm_handler_raises_when_active(reset_sigterm_gate):
+    import signal as _signal
+    executor._in_request_execution = True
+    with pytest.raises(KeyboardInterrupt):
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+
+
+def test_gated_sigterm_handler_swallows_when_idle(reset_sigterm_gate):
+    import signal as _signal
+    executor._in_request_execution = False
+    # Must not raise; pool would break if SIGTERM escapes _process_worker.
+    executor._gated_sigterm_handler(_signal.SIGTERM, None)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_in_request_execution_after_success(
+        isolated_database, reset_sigterm_gate):
+    req = requests_lib.Request(request_id='gate-cleared-on-success',
+                               name='test',
+                               entrypoint=_gate_clears_after_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    executor._request_execution_wrapper('gate-cleared-on-success',
+                                        ignore_return_value=False)
+
+    assert executor._in_request_execution is False
+
+
+def _gate_clears_after_success_entrypoint():
+    return 'ok'
+
+
+class _Result(list):
+    """A request result that can be weakly referenced."""
+
+
+_result_refs: List['weakref.ReferenceType[_Result]'] = []
+
+
+def _result_entrypoint():
+    result = _Result(['x' * 1024])
+    _result_refs.append(weakref.ref(result))
+    return result
+
+
+@pytest.mark.asyncio
+async def test_wrapper_releases_result_before_release_memory(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """The peak RSS sample sees the result; release_memory() can free it."""
+    req = requests_lib.Request(request_id='result-released',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    result_alive = []
+
+    def _check_release_memory():
+        gc.collect()
+        result_alive.append(_result_refs[-1]() is not None)
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        _check_release_memory)
+    result_alive_at_rss_sample = []
+
+    class _Process(executor.psutil.Process):
+
+        def memory_info(self):
+            ref = _result_refs[-1] if _result_refs else None
+            result_alive_at_rss_sample.append(ref is not None and
+                                              ref() is not None)
+            return super().memory_info()
+
+    monkeypatch.setattr(executor.psutil, 'Process', _Process)
+
+    executor._request_execution_wrapper('result-released',
+                                        ignore_return_value=False)
+
+    assert True in result_alive_at_rss_sample
+    assert result_alive == [False]
+    assert requests_lib.get_request('result-released').get_return_value() == [
+        'x' * 1024
+    ]
+
+
+def _install_gated_handler_in_worker():
+    import signal as _signal
+
+    from sky.server.requests import executor as _executor
+    _signal.signal(_signal.SIGTERM, _executor._gated_sigterm_handler)
+    _executor._in_request_execution = False
+
+
+def _worker_pid():
+    return os.getpid()
+
+
+def _identity(x):
+    return x
+
+
+def test_idle_worker_survives_sigterm_with_gated_handler():
+    """Regression: SIGTERM to an idle worker must not break the pool.
+
+    With the bare _sigterm_handler (always raises KI), the post-SIGTERM
+    submit below fails with BrokenProcessPool.
+    """
+    import signal as _signal
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,
+            initializer=_install_gated_handler_in_worker) as pool:
+        pid = pool.submit(_worker_pid).result(timeout=10)
+        os.kill(pid, _signal.SIGTERM)
+
+        # Poll-submit until signal delivers; bug surfaces on first attempt.
+        deadline = time.time() + 5
+        last_exc = None
+        while time.time() < deadline:
+            try:
+                result = pool.submit(_identity, 'alive').result(timeout=5)
+                assert result == 'alive'
+                last_exc = None
+                break
+            except concurrent.futures.process.BrokenProcessPool as e:
+                last_exc = e
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                last_exc = e
+                time.sleep(0.1)
+        assert last_exc is None, (
+            f'Pool should remain usable after SIGTERM to an idle worker, '
+            f'but got: {type(last_exc).__name__}: {last_exc}')
+
+        for i in range(3):
+            assert pool.submit(_identity, i).result(timeout=5) == i
+
+
+# ---- Workspace resolution info log -------------------------------------
+#
+# `override_request_env_and_config` writes an INFO-level log when the
+# resolver picks a workspace implicitly (preferred / default-fallback /
+# single-membership) for a resource-creating request. The launch flow
+# streams that log back to the CLI, so the user sees which workspace
+# their cluster / job ended up in.
+#
+# The tests below are unit-level: they stub the resolver + permission
+# check and verify the log gating logic, not the resolver itself
+# (covered in test_resolve_workspace_for_user.py).
+
+
+def _resolution(workspace, source):
+    """Build a fake WorkspaceResolution for tests below."""
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.WorkspaceResolution(workspace=workspace,
+                                               source=source)
+
+
+@pytest.fixture()
+def resolver_log_deps(monkeypatch, stub_override_request_env_deps):
+    """Pin the resolver gate to ON and stub the resolver itself."""
+    monkeypatch.setattr(
+        'sky.server.requests.executor._should_apply_workspace_resolver',
+        lambda is_daemon, client_api_version: True)
+    return monkeypatch
+
+
+def _run_override(request_name: str, resolution):
+    """Drive override_request_env_and_config with a mocked resolution.
+
+    Returns the list of `logger.info` calls (so tests can assert on the
+    "Using workspace ..." line without depending on log capture).
+    """
+    from sky.workspaces import core as workspaces_core
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    info_calls: List[str] = []
+    with mock.patch.object(workspaces_core,
+                           'resolve_workspace_for_user',
+                           return_value=resolution), \
+         mock.patch.object(executor.logger, 'info',
+                           side_effect=lambda msg, *a, **k: info_calls.append(
+                               msg)):
+        with executor.override_request_env_and_config(
+                body, request_id='not-a-daemon-uuid',
+                request_name=request_name):
+            pass
+    return info_calls
+
+
+def test_resolution_log_fires_for_launch_with_implicit_source(
+        resolver_log_deps):
+    """`sky launch` with no explicit workspace → resolver picks via
+    preferred / default-fallback / single-membership. The user sees
+    "Using workspace 'X' (source: …)" so they know which workspace
+    SkyPilot stamped onto the cluster row.
+
+    The request_name passed to override_request_env_and_config is the
+    name as stored on the task row — `REQUEST_NAME_PREFIX + <enum>`.
+    `prepare_request_async` does the prefixing once at enqueue time."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1, (
+        f'Expected one resolution-log line, got: {info_calls}')
+    msg = matching[0]
+    assert "'team-a'" in msg
+    assert workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP in msg
+
+
+def test_resolution_log_fires_for_jobs_launch_with_preferred(resolver_log_deps):
+    """Same log path for managed jobs — `sky jobs launch` is also a
+    resource-creating verb (writes job_info.workspace), users need to
+    see which workspace it landed in."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'jobs.launch'),
+        resolution=_resolution('team-b',
+                               workspace_constants.WORKSPACE_SOURCE_PREFERRED))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1
+    assert "'team-b'" in matching[0]
+
+
+def test_resolution_log_silent_when_source_default_fallback(resolver_log_deps):
+    """Landing on 'default' via default-fallback is the pre-existing
+    silent behavior — every user without a preferred who has access to
+    'default' lands there. Surfacing that in the log on every launch
+    would clutter the common case while telling the user nothing new
+    (they're already used to landing on 'default').
+
+    Revert check: drop DEFAULT_FALLBACK from
+    `_SILENT_WORKSPACE_RESOLUTION_SOURCES` and this test flips to a
+    log-firing assertion failure."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'default', workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'DEFAULT_FALLBACK must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_when_source_explicit(resolver_log_deps):
+    """When `active_workspace` was explicitly set (--workspace flag or
+    a config file), the user already named the workspace — repeating
+    it in the log is noise. EXPLICIT must not trigger the line."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution('team-c',
+                               workspace_constants.WORKSPACE_SOURCE_EXPLICIT))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'EXPLICIT source must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_non_resource_creating_request(
+        resolver_log_deps):
+    """`sky status` / `sky queue` etc. resolve the same way but don't
+    persist the workspace onto durable state. Logging there would be
+    noise on commands the user runs frequently. The whitelist
+    (_RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG) is what
+    keeps this scoped — extend it when adding a new resource-creating
+    verb (SERVE_UP, etc.)."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'status'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'`status` must not surface the resolution log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_bare_launch_without_prefix(
+        resolver_log_deps):
+    """Protocol lock: the runtime `request_name` (read off
+    `request_task.name`) is always the prefixed form
+    (`'sky.launch'`); the raw enum value `'launch'` never reaches
+    `override_request_env_and_config`. If a future refactor drops the
+    prefix in the whitelist, this test would START passing the log
+    line and then break BOTH this case AND production — keep this case
+    locking the prefix in.
+
+    Revert check: drop `REQUEST_NAME_PREFIX +` from the whitelist and
+    this test still passes (no log) but the prefixed tests above flip
+    to failing — the two sides together pin the contract."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name='launch',
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'bare `launch` (without prefix) must not match the whitelist; '
+        f'got: {info_calls}')
+
+
+def _reset_thread_executors():
+    """Drop both cached per-process executors so each test starts clean."""
+    # pylint: disable=protected-access
+    executor._REQUEST_THREAD_EXECUTOR = None
+    executor._AUTH_THREAD_EXECUTOR = None
+
+
+def test_auth_and_request_executors_are_distinct():
+    _reset_thread_executors()
+    try:
+        request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor is not auth_executor
+        assert request_executor.name != auth_executor.name
+        # Each getter still memoizes per process.
+        assert executor.get_request_thread_executor() is request_executor
+        assert executor.get_auth_thread_executor() is auth_executor
+    finally:
+        _reset_thread_executors()
+
+
+def test_saturating_request_executor_does_not_block_auth():
+    """The point of the split: streaming work filling the request executor
+    must not make authentication fail.
+
+    Before the split both shared one pool, so enough long-lived streams
+    starved the auth lookups that run on every request and the server
+    answered 503 to traffic that had nothing to do with streaming.
+    """
+    _reset_thread_executors()
+    release = threading.Event()
+    futures = []
+    try:
+        # Shrink the request pool for the duration: what matters is that it
+        # reaches *its* limit, not how big that limit is. Filling the real 128
+        # would spawn 128 threads inside a test worker, which under `pytest
+        # -n` starves the whole run -- enough to push neighbouring tests past
+        # their own timeouts.
+        with mock.patch.object(executor, '_REQUEST_THREADS_LIMIT', 4):
+            request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor.max_workers == 4
+
+        # Fill the request executor to its limit with tasks that do not finish,
+        # standing in for in-flight log streams.
+        for _ in range(request_executor.max_workers):
+            futures.append(request_executor.submit(release.wait, 10))
+
+        # It is now full: one more task is rejected.
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            request_executor.submit(release.wait, 10)
+
+        # Auth is unaffected and still serves requests.
+        assert auth_executor.submit(lambda: 'ok').result(timeout=5) == 'ok'
+        assert auth_executor.check_available() >= 0
+    finally:
+        release.set()
+        for fut in futures:
+            try:
+                fut.result(timeout=5)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        _reset_thread_executors()
+
+
+def test_maybe_observe_request_pending_first_execution_only():
+    """Pending-time metric observes first executions only.
+
+    The retry/pause requeue path sets WAITING (and clears pid) before
+    re-enqueueing, so a WAITING request at execution start is a
+    re-execution and must not re-observe its age; a PENDING request is
+    the first start and must observe exactly once.
+    """
+
+    def make_request(status):
+        return requests_lib.Request(
+            request_id='pending-metric-test',
+            name='test-request',
+            status=status,
+            created_at=time.time() - 5,
+            user_id='test-user',
+            entrypoint=dummy_entrypoint,
+            request_body=payloads.RequestBody(),
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+    with mock.patch.object(executor.metrics_utils,
+                           'observe_request_pending') as observe:
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.PENDING))
+        assert observe.call_count == 1
+        name, schedule_type, pending_seconds = observe.call_args[0]
+        assert name == 'test-request'
+        assert schedule_type == requests_lib.ScheduleType.SHORT.value
+        assert pending_seconds >= 5
+
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.WAITING))
+        assert observe.call_count == 1
+
+
+class TestClientUserIdValidation:
+    """The client-supplied user id is validated before it becomes an owner.
+
+    Regression tests for #9621: a corrupted ~/.sky/user_hash used to be stored
+    verbatim as a cluster's owner, producing an identity that matches no user.
+    """
+
+    def _body(self, user_id: str) -> payloads.RequestBody:
+        body = payloads.RequestBody()
+        body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        body.env_vars[constants.USER_ENV_VAR] = 'someone'
+        return body
+
+    async def _prepare(self, user_id: str, auth_user=None):
+        # Everything after the identity check needs the requests DB, which is
+        # not what these tests are about.
+        with mock.patch.object(executor.api_requests,
+                               'create_if_not_exists_async',
+                               new=mock.AsyncMock(return_value=True)), \
+             mock.patch.object(executor.workspace_access,
+                               'for_current_request',
+                               return_value=None), \
+             mock.patch.object(pathlib.Path, 'touch'):
+            return await executor.prepare_request_async(
+                request_id='req-9621',
+                request_name='test.identity',
+                request_body=self._body(user_id),
+                func=lambda: None,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                auth_user=auth_user)
+
+    @pytest.mark.parametrize(
+        'user_id',
+        [
+            'abc%123',  # the shape reported in #9621
+            '',
+            '-leading-hyphen',
+            '../x',  # path traversal characters
+            '/abs',
+            'abcdef12\n',  # trailing newline: a distinct identity
+        ])
+    @pytest.mark.asyncio
+    async def test_malformed_user_id_is_rejected(self, user_id):
+        with pytest.raises(exceptions.InvalidUserIdError):
+            await self._prepare(user_id)
+
+    @pytest.mark.asyncio
+    async def test_valid_user_id_passes_through(self):
+        request = await self._prepare('abcdef12')
+        assert request.user_id == 'abcdef12'
+
+    @pytest.mark.asyncio
+    async def test_service_account_id_still_accepted(self):
+        """Service-account ids use hyphens and must keep working."""
+        request = await self._prepare('sa-abc123-token-xyz')
+        assert request.user_id == 'sa-abc123-token-xyz'
+
+    @pytest.mark.asyncio
+    async def test_authenticated_identity_bypasses_client_value(self):
+        """With auth on, the server's identity wins and the bad client value
+        is overwritten rather than rejected."""
+        auth_user = models.User(id='authuser1', name='auth-user')
+        request = await self._prepare('bad%id', auth_user=auth_user)
+        assert request.user_id == 'authuser1'
+
+
+@pytest.mark.parametrize('missing,claimed,seeded', [
+    (True, True, True),
+    (True, False, False),
+    (False, True, False),
+])
+def test_seed_role_if_missing(missing, claimed, seeded):
+    """A role-less user is seeded only when this worker claims the attempt."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing',
+                           return_value=missing), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=claimed), \
+            mock.patch.object(executor.permission,
+                              'seed_new_user_role') as seed_new_user_role:
+        executor._seed_role_if_missing('user1')
+    if seeded:
+        seed_new_user_role.assert_called_once_with('user1')
+    else:
+        seed_new_user_role.assert_not_called()
+
+
+def test_seed_role_if_missing_swallows_seed_failure():
+    """A failed seed (e.g. a policy lock timeout) does not raise."""
+    service = executor.permission.permission_service
+    with mock.patch.object(service, 'role_seed_missing', return_value=True), \
+            mock.patch.object(service, 'claim_role_seed_attempt',
+                              return_value=True), \
+            mock.patch.object(executor.permission, 'seed_new_user_role',
+                              side_effect=RuntimeError('lock timeout')):
+        executor._seed_role_if_missing('user1')
+
+
+@pytest.mark.parametrize('seed_error', [None, RuntimeError('lock timeout')])
+def test_override_env_seeds_role_before_workspace_check(
+        stub_override_request_env_deps, monkeypatch, seed_error):
+    """A request's role-less user is seeded before the workspace check.
+
+    The user is created by the request itself when there is no auth (e.g. on
+    a jobs controller's API server); without a role every workspace except
+    `default` denies them. A failing seed must not fail the request.
+    """
+    calls = []
+    service = executor.permission.permission_service
+    monkeypatch.setattr(service, 'role_seed_missing', lambda user_id: True)
+    monkeypatch.setattr(service, 'claim_role_seed_attempt',
+                        lambda user_id: True)
+
+    def fake_seed(user_id):
+        calls.append(('seed', user_id))
+        if seed_error is not None:
+            raise seed_error
+
+    monkeypatch.setattr(executor.permission, 'seed_new_user_role', fake_seed)
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        lambda *args, **kwargs: calls.append(('workspace_check',)))
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+
+    assert calls == [('seed', 'client-user-id'), ('workspace_check',)]

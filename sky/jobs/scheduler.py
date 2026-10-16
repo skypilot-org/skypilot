@@ -47,9 +47,11 @@ import contextlib
 import os
 import pathlib
 import shutil
+import signal
 import sys
+import time
 import typing
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
 import uuid
 
 import filelock
@@ -63,6 +65,7 @@ from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
@@ -78,13 +81,15 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 # Job controller lock. This is used to synchronize writing/reading the
 # controller pid file.
-JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
+JOB_CONTROLLER_PID_LOCK = runtime_utils.expanduser(
     '~/.sky/locks/job_controller_pid.lock')
 
-JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
-JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
+JOB_CONTROLLER_PID_PATH = runtime_utils.expanduser('~/.sky/job_controller_pid')
+JOB_CONTROLLER_ENV_PATH = runtime_utils.expanduser('~/.sky/job_controller_env')
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
+
+_CONTROLLER_START_INTERVAL_SECONDS = 0.5
 
 
 def _parse_controller_pid_entry(
@@ -157,8 +162,7 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
-    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
-    logs_dir = os.path.expanduser(
+    logs_dir = runtime_utils.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
     controller_uuid = str(uuid.uuid4())
@@ -168,7 +172,15 @@ def start_controller() -> None:
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
-    run_cmd = (f'{activate_python_env_cmd}'
+    # Bake IS_SKYPILOT_JOB_CONTROLLER into the shell command rather than
+    # mutating os.environ. Setting os.environ here was harmless before
+    # PR #9731 (the daemon ran in a child process with its own isolated env),
+    # but after #9731 the daemon runs as a main-process thread — the mutation
+    # leaks permanently into the API server's os.environ and causes
+    # serve_utils.is_consolidation_mode() to return True for all serve
+    # requests, even when serve consolidation mode is not configured.
+    run_cmd = (f'export {constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
+               f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
     logger.info(f'Running controller with command: {run_cmd}')
@@ -193,28 +205,89 @@ def get_alive_controllers() -> Optional[int]:
     return alive
 
 
-def maybe_start_controllers(from_scheduler: bool = False) -> None:
+def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
+    """SIGTERM all live controller PIDs recorded on this host.
+
+    Returns:
+        The number of signals delivered.
+    """
+    records = get_controller_process_records()
+    if not records:
+        return 0
+    signaled = 0
+    for record in records:
+        if not managed_job_utils.controller_process_alive(record):
+            continue
+        try:
+            os.kill(record.pid, sig)
+            signaled += 1
+        except ProcessLookupError:
+            # Already gone between the alive-check and the kill — fine.
+            pass
+        except OSError as e:
+            logger.warning(f'Failed to signal controller pid={record.pid}: {e}')
+    if signaled:
+        logger.info(f'Sent {sig.name if hasattr(sig, "name") else sig} to '
+                    f'{signaled} job controller(s)')
+    return signaled
+
+
+def maybe_start_controllers(
+        from_scheduler: bool = False,
+        still_owned: Optional[Callable[[], bool]] = None) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
+
+    Args:
+        still_owned: re-checked between starts; once it returns False the
+            rest of the pool is not started. Starting the pool spans tens of
+            seconds, so a caller whose right to own the pool is a lease (the
+            consolidation leader's advisory lock) must not assume a check made
+            before the call still holds.
     """
-    # In consolidation mode, during rolling update, two API servers may be
-    # running. If we are on the new API server, and we haven't finished the
-    # recovery process, we should avoid starting new controllers. The old API
-    # server/consolidated jobs controller could run update_managed_jobs_statuses
-    # and if there are jobs running on the new API server, the old one will not
-    # see the corresponding processes and may mark them as FAILED_CONTROLLER.
-    if from_scheduler and managed_job_utils.is_consolidation_mode(
-    ) and os.path.exists(
-            os.path.expanduser(
-                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
-        # This could happen during an API server rolling update, or during
-        # normal running while managed-job-status-refresh-daemon is running. In
-        # either case, the controllers should be already started or will be
-        # started by the recovery process.
-        logger.info('Recovery is still in progress, skipping controller start.')
+    if from_scheduler and managed_job_utils.is_consolidation_mode():
+        # In consolidation mode the controller pool is owned exclusively by the
+        # leader-elected managed-job refresh daemon (see
+        # sky/jobs/managed_job_refresh_thread.py). Never start controllers from
+        # a request: the request path runs on whichever API server instance
+        # handled the request, whose controller PIDs the leader cannot see (its
+        # liveness check is a local psutil lookup), and controller startup
+        # would inherit per-request state into a long-lived process tree.
+        #
+        # This is safe for launch latency: submit_jobs has already moved the job
+        # to WAITING, and a controller from the leader's warm pool claims it
+        # within ~10s (controller.py::monitor_loop). The pool itself is started
+        # by ha_recovery_for_consolidation_mode at leader election.
+        #
+        # Caveat: a controller that dies mid-life is now only replaced on the
+        # daemon's ManagedJobEvent tick (~300s), where previously the next
+        # in-request start would have replaced it immediately. This only delays
+        # a job when the pool is fully drained -- with a typical pool size the
+        # surviving controllers keep claiming WAITING jobs on their ~10s poll.
+        #
+        # NOTE: `from_scheduler` is only ever True from submit_jobs(), which is
+        # only reached from this module's __main__, which is only spawned by
+        # sky/templates/jobs-controller.yaml.j2. In particular it is never
+        # reached from the controller process itself -- where
+        # is_consolidation_mode() returns True unconditionally because
+        # start_controller() exports OVERRIDE_CONSOLIDATION_MODE. See
+        # tests/unit_tests/test_sky/jobs/test_consolidation_mode_gate.py.
+        #
+        # Corollary: in the transitional misconfiguration where
+        # jobs.controller.consolidation_mode is flipped to true but the API
+        # server has not been restarted (already warned about, see
+        # controller_utils.is_jobs_consolidation_mode), a jobs-controller VM may
+        # read itself as consolidated and skip the in-request start. Jobs still
+        # run -- the VM's skylet ManagedJobEvent tops the pool up -- just with
+        # that event's cadence of added latency.
+        #
+        # Logged at info (not debug) so that a misdetection is greppable in
+        # ~/sky_logs/managed_jobs/submit-job-*.log rather than a silent stall.
+        logger.info('Consolidation mode: controller startup is owned by the '
+                    'managed-job refresh daemon; skipping in-request start.')
         return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
@@ -253,11 +326,24 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             started = 0
 
             while alive + started < wanted:
+                if started:
+                    time.sleep(_CONTROLLER_START_INTERVAL_SECONDS)
+                    if still_owned is not None and not still_owned():
+                        logger.error(
+                            'Lost ownership of the controller pool after '
+                            f'starting {started} of {wanted} controllers; not '
+                            'starting the rest.')
+                        return
                 start_controller()
                 started += 1
 
             if started > 0:
-                logger.info(f'Started {started} controllers')
+                explicit = controller_utils.explicit_jobs_controllers()
+                source = ('derived' if explicit is None else
+                          f'from {constants.ENV_VAR_SERVER_JOBS_CONTROLLERS}')
+                spread = (started - 1) * _CONTROLLER_START_INTERVAL_SECONDS
+                logger.info(f'Started {started} controllers over {spread:.1f}s '
+                            f'(pool size {wanted}, {source})')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -375,7 +461,7 @@ async def scheduled_launch(
     multiple uses of this context are nested, behavior is undefined. Don't do
     that.
     """
-    pool = state.get_pool_from_job_id(job_id)
+    pool = await asyncio.to_thread(state.get_pool_from_job_id, job_id)
     # For pool, since there is no execution.launch, we don't need to have all
     # the ALIVE_WAITING state. The state transition will be
     # WAITING -> ALIVE -> DONE without any intermediate transitions.
@@ -388,7 +474,8 @@ async def scheduled_launch(
     # level in _run_job_group(), so bypass per-task scheduling here.
     # Check if job is a JobGroup by examining the DAG YAML content.
     # TODO(zhwu): make JobGroup scheduler aware.
-    dag_content = file_content_utils.get_job_dag_content(job_id)
+    dag_content = await asyncio.to_thread(
+        file_content_utils.get_job_dag_content, job_id)
     if dag_content is not None and dag_utils.is_job_group_yaml_str(dag_content):
         yield
         return
@@ -398,8 +485,9 @@ async def scheduled_launch(
 
     while True:
         async with starting_lock:
-            starting_count = len(starting)
-            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
+            # start_job already reserved this job's slot for its first launch.
+            if (job_id in starting or
+                    len(starting) < controller_utils.LAUNCHES_PER_WORKER):
                 break
             logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

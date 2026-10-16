@@ -428,6 +428,25 @@ These are the minimal policy rules required by SkyPilot:
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
 
+**Optional**: To have SkyPilot tag the EBS volumes attached to your clusters (in
+addition to the instances), add the following permissions to the policy above as
+well. Without them SkyPilot logs a warning and launches with the volumes
+untagged; clusters are unaffected.
+
+These permissions become **required** if you set
+:ref:`aws.enforce_tags <config-yaml-aws-enforce-tags>` to include ``volume``,
+which turns that warning into a failed launch.
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "ec2:CreateTags"
+                ],
+                "Resource": "arn:aws:ec2:*:<account-ID-without-hyphens>:volume/*"
+            }
+
 **Optional**: To enable ``sky launch --clone-disk-from``, you need to add the following permissions to the policy above as well.
 
 .. code-block:: json

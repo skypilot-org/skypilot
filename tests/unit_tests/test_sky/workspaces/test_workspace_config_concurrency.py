@@ -7,7 +7,6 @@ import time
 import unittest
 from unittest import mock
 
-import filelock
 import pytest
 
 from sky import skypilot_config
@@ -55,10 +54,17 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                                           side_effect=mock_to_dict)
         self.to_dict_patcher.start()
 
+        # _update_workspaces_config reload_config()s inside the lock to pick up
+        # other replicas' committed writes; to_dict (mocked above) already
+        # reflects the temp file here, so make the reload a no-op.
+        self.reload_patcher = mock.patch('sky.skypilot_config.reload_config')
+        self.reload_patcher.start()
+
     def tearDown(self):
         """Clean up test environment."""
         self.config_path_patcher.stop()
         self.to_dict_patcher.stop()
+        self.reload_patcher.stop()
         # Clean up temp files
         if os.path.exists(self.temp_config_file):
             os.remove(self.temp_config_file)
@@ -149,14 +155,14 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
     def test_lock_timeout_handling(self):
         """Test that lock timeout is handled gracefully."""
+        from sky.utils import locks
 
-        # Mock filelock to always timeout
-        with mock.patch('filelock.FileLock') as mock_filelock:
-            mock_context = mock.MagicMock()
-            # Create a proper Timeout exception with lock_file argument
-            mock_context.__enter__.side_effect = filelock.Timeout(
-                'test_lock_file')
-            mock_filelock.return_value = mock_context
+        # Mock the distributed config lock to always time out.
+        with mock.patch(
+                'sky.skypilot_config.get_skypilot_config_lock') as mock_lock:
+            cm = mock.MagicMock()
+            cm.__enter__.side_effect = locks.LockTimeout('config lock')
+            mock_lock.return_value = cm
 
             def modifier_fn(workspaces):
                 workspaces['test'] = {'aws': {'disabled': True}}

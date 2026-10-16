@@ -30,6 +30,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import common
 from sky.adaptors import oci as oci_adaptor
+from sky.adaptors import oci_s3
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
@@ -446,6 +447,11 @@ class OCI(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         OCI's storage service."""
+        if oci_s3.use_s3_api():
+            # OCI Object Storage is accessed via the S3-compatible API,
+            # authenticated with a Customer Secret Key; the native OCI
+            # credentials are not required for storage.
+            return oci_s3.check_storage_credentials()
         # TODO(seungjin): Implement separate check for
         # if the user has access to OCI Object Storage.
         return cls._check_credentials()
@@ -525,6 +531,13 @@ class OCI(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
+        file_mounts: Dict[str, str] = {}
+        if oci_s3.use_s3_api():
+            # Object Storage is accessed via the S3-compatible API; the
+            # native credentials below are still mounted if configured
+            # (compute provisioning needs them), but are not required.
+            file_mounts.update(oci_s3.get_credential_file_mounts())
+
         try:
             oci_cfg_file = oci_adaptor.get_config_file()
             # Pass-in a profile parameter so that multiple profile in oci
@@ -537,9 +550,9 @@ class OCI(clouds.Cloud):
         # Must catch ImportError before any oci_adaptor.oci.exceptions
         # because oci_adaptor.oci.exceptions can throw ImportError.
         except ImportError:
-            return {}
+            return file_mounts
         except oci_adaptor.oci.exceptions.ConfigFileNotFound:
-            return {}
+            return file_mounts
 
         # OCI config and API key file are mandatory
         credential_files = [oci_cfg_file, api_key_file]
@@ -548,9 +561,8 @@ class OCI(clouds.Cloud):
         if os.path.exists(os.path.expanduser(sky_cfg_file)):
             credential_files.append(sky_cfg_file)
 
-        file_mounts = {
-            f'{filename}': f'{filename}' for filename in credential_files
-        }
+        file_mounts.update(
+            {f'{filename}': f'{filename}' for filename in credential_files})
 
         logger.debug(f'OCI credential file mounts: {file_mounts}')
         return file_mounts

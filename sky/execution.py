@@ -3,13 +3,14 @@
 See `Stage` for a Task's life cycle.
 """
 import asyncio
+import contextlib
 import enum
 import logging
 import os
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -43,6 +44,52 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+
+_QUEUE_ADMISSION_TIMEOUT_KEYS = ('kubernetes', 'kueue', 'admission_timeout')
+
+
+@contextlib.contextmanager
+def _queue_admission_wait(
+        task: 'sky.Task', is_launched_by_jobs_controller: bool,
+        is_launched_by_sky_serve_controller: bool) -> Iterator[None]:
+    """Lets launches bounded elsewhere wait indefinitely for queue admission.
+
+    When the cluster is placed in a Kueue local queue and quota is short, its
+    pods are held by an admission gate. With the default
+    ``kubernetes.kueue.admission_timeout`` the launch would fail after 24
+    hours and the relaunch would create a new Workload at the back of the
+    queue. Two kinds of launch default to waiting indefinitely (``-1``)
+    instead:
+
+    - A SkyServe replica or pool worker, a standing request for capacity: the
+      controller relaunches it until it is up.
+    - A managed job task that sets ``job.wait_for_scheduling_timeout``: the
+      jobs controller cancels the job once that is reached, so it is the only
+      bound on the wait.
+
+    The default is installed at the global cloud scope, the lowest in the
+    resolution order (see ``skypilot_config.get_effective_queue_admission_
+    timeout``), and only when that scope has no value of its own. An
+    explicit ``admission_timeout`` at any scope (global, workspace, context,
+    or the task's ``config`` block) therefore still wins. The replacement is
+    in-process only: the provisioner reads it while the launch runs, no
+    subprocess needs it, and no temporary config file is left behind.
+    """
+    bounded_elsewhere = (
+        is_launched_by_sky_serve_controller or
+        (is_launched_by_jobs_controller and
+         task.job.get('wait_for_scheduling_timeout') is not None))
+    if not bounded_elsewhere:
+        yield
+        return
+    config = skypilot_config.to_dict()
+    if config.get_nested(_QUEUE_ADMISSION_TIMEOUT_KEYS,
+                         default_value=None) is not None:
+        yield
+        return
+    config.set_nested(_QUEUE_ADMISSION_TIMEOUT_KEYS, -1)
+    with skypilot_config.replace_skypilot_config_in_process(config):
+        yield
 
 
 class Stage(enum.Enum):
@@ -119,16 +166,17 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
             continue
 
         ext_ctx = plugins.get_extension_context()
-        if ext_ctx is None:
-            raise RuntimeError(
-                'Task references managed_secrets but no plugin system '
-                'is available.')
-        provider = ext_ctx.managed_secrets_provider
+        provider = (ext_ctx.managed_secrets_provider
+                    if ext_ctx is not None else None)
         if provider is None:
+            names = ', '.join(
+                sorted(set(ref.name for ref in task.managed_secret_refs)))
             raise RuntimeError(
-                'Task references managed_secrets but no managed secrets '
-                'provider is configured. Install a secrets management '
-                'plugin.')
+                f'No value available for secret(s): {names}. A secret with '
+                'no inline value must be provided at launch with the '
+                '--secret flag (e.g. --secret NAME=value), or resolved by a '
+                'managed secrets provider. No managed secrets provider is '
+                'configured.')
 
         # The provider.resolve() is async; run it from this sync context.
         resolved = asyncio.run(
@@ -155,6 +203,49 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
                 task.update_file_mounts({fm.mount_path: tmp_path})
 
 
+def _compute_set_autostop_args_for_hooks_only_relaunch(
+        cluster_name: str, hooks_payload: List[Dict[str,
+                                                    Any]]) -> Dict[str, Any]:
+    """Build set_autostop kwargs when a re-launch updates only hooks.
+
+    The `elif hooks_payload is not None:` branch in `_execute` updates
+    stored hooks on the skylet without the user re-passing
+    ``--idle-minutes-to-autostop`` (or YAML autostop) — for example,
+    re-launching a cluster with a new preemption hook. Previously this
+    path passed ``idle_minutes_to_autostop=-1`` (= "unset autostop"),
+    which silently wiped any prior autostop config.
+
+    We instead read the prior autostop value + ``to_down`` flag from
+    local state and pass them through, so re-launches that change only
+    hooks preserve the cluster's existing autostop. ``wait_for`` is not
+    persisted client-side; on this path it defaults back to
+    ``jobs_and_ssh`` (the documented default), which is the same value a
+    user would get on a fresh ``sky autostop``.
+
+    The helper is named ``set_autostop`` because the underlying RPC
+    that propagates hooks IS ``SetAutostop`` (hooks ride on it for
+    wire-compat reasons — see
+    ``sky/schemas/proto/autostopv1.proto``). If a future PR adds a
+    dedicated ``SetHooks`` RPC, this helper's name and call site can
+    track that rename.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        prior_idle_minutes = -1
+        prior_to_down = False
+    else:
+        prior_idle_minutes = record.get('autostop', -1)
+        if prior_idle_minutes is None:
+            prior_idle_minutes = -1
+        prior_to_down = bool(record.get('to_down', False))
+    return dict(
+        idle_minutes_to_autostop=prior_idle_minutes,
+        wait_for=None,
+        down=prior_to_down,
+        hooks=hooks_payload,
+    )
+
+
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
@@ -171,6 +262,7 @@ def _execute(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
@@ -179,6 +271,7 @@ def _execute(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -261,6 +354,11 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        if _kubernetes_identity is not None:
+            # After the admin policy, which may rebuild the dag.
+            for task in dag.tasks:
+                for resource in task.resources:
+                    resource.set_kubernetes_identity(_kubernetes_identity)
         dag.resolve_and_validate_volumes()
         if (not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
@@ -286,12 +384,24 @@ def _execute(
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            resize=resize,
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
             _is_launched_by_sky_serve_controller,
             _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
+
+
+def _autodown_needs_identity_it_lacks(
+        handle: Optional[backends.ResourceHandle]) -> bool:
+    """Whether the cluster's pods have no credentials to autodown with."""
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return False
+    launched = handle.launched_resources
+    return (isinstance(launched.cloud, clouds.Kubernetes) and
+            clouds.Kubernetes.remote_identity_is_none(launched.region,
+                                                      launched))
 
 
 def _execute_dag(
@@ -308,6 +418,7 @@ def _execute_dag(
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
+    resize: bool,
     # pylint: disable=invalid-name
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
@@ -387,16 +498,12 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-        hook: Optional[str] = None
-        hook_timeout: Optional[int] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
-                hook = resource_autostop_config.hook
-                hook_timeout = resource_autostop_config.hook_timeout
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -515,14 +622,18 @@ def _execute_dag(
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped) = backend.provision(
-                task,
-                task.best_resources,
-                dryrun=dryrun,
-                stream_logs=stream_logs,
-                cluster_name=cluster_name,
-                retry_until_up=retry_until_up,
-                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+            with _queue_admission_wait(task, _is_launched_by_jobs_controller,
+                                       _is_launched_by_sky_serve_controller):
+                (handle, provisioning_skipped) = backend.provision(
+                    task,
+                    task.best_resources,
+                    dryrun=dryrun,
+                    stream_logs=stream_logs,
+                    cluster_name=cluster_name,
+                    retry_until_up=retry_until_up,
+                    skip_unnecessary_provisioning=(
+                        skip_unnecessary_provisioning),
+                    resize=resize)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -572,6 +683,39 @@ def _execute_dag(
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
+            task_hooks = resources[0].hooks
+            # Hooks payload sent to skylet:
+            #   None  → "leave stored hooks alone" (first launch w/o hooks)
+            #   []    → "clear stored hooks" (re-launch dropping hooks)
+            #   [...] → "replace stored hooks"
+            if task_hooks is not None:
+                hooks_payload: Optional[List[Dict[str, Any]]] = task_hooks
+            elif cluster_exists:
+                hooks_payload = []
+            else:
+                hooks_payload = None
+            # Synthesize the legacy pre-v7 hook/hook_timeout pair from
+            # the new-style hooks list. Match the event equivalent for
+            # this launch: ``down`` for autodown, ``stop`` otherwise.
+            # AutostopCodeGen.set_autostop dual-emits both fields so
+            # pre-v7 skylets keep working until v0.15.0.
+            hook: Optional[str] = None
+            hook_timeout: Optional[int] = None
+            legacy_event = 'down' if down else 'stop'
+            for entry in (resources[0].hooks or []):
+                if legacy_event in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
+            if (idle_minutes_to_autostop is not None and
+                    _is_launched_by_jobs_controller and down and
+                    _autodown_needs_identity_it_lacks(handle)):
+                # The controller's leak guard, on a pod that cannot delete
+                # itself: setting it would wedge the cluster, not free it.
+                job_logger.info('Not setting the autodown leak guard: '
+                                '`remote_identity: NONE` gives the cluster no '
+                                'credentials to delete itself.')
+                idle_minutes_to_autostop = None
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -580,7 +724,18 @@ def _execute_dag(
                                      wait_for,
                                      down,
                                      hook=hook,
-                                     hook_timeout=hook_timeout)
+                                     hook_timeout=hook_timeout,
+                                     hooks=hooks_payload)
+            elif hooks_payload is not None:
+                # Hooks can fire on preemption/down independent of
+                # autostop — persist them even when autostop is disabled.
+                # Re-launches with hooks dropped from YAML hit this with
+                # hooks_payload=[] so the skylet clears its stored hooks.
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                kwargs = _compute_set_autostop_args_for_hooks_only_relaunch(
+                    handle.cluster_name, hooks_payload)
+                backend.set_autostop(handle, **kwargs)
 
         job_id = None
         if Stage.EXEC in stages:
@@ -619,17 +774,21 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    # In-process callers only; never map it from a request body. Kubernetes
+    # gives controller-named clusters the controller service account.
     _disable_controller_check: bool = False,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     _include_credentials: bool = False,
+    _kubernetes_identity: Optional[str] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -805,11 +964,9 @@ def launch(
     # ``_include_credentials`` is accepted unconditionally so the
     # request payload's ``LaunchBody.to_kwargs`` mapping always type-
     # checks against this signature. The in-tree implementation does
-    # not bundle credentials with the response; a downstream extension
-    # may override this function and re-register the ``launch``
-    # response encoder to return a 3-tuple when the flag is set.
-    # Without such an override, the client decodes the legacy 2-key
-    # response shape and falls back to the ``/status`` SSH-config path.
+    # not bundle credentials with the response, so the client decodes
+    # the legacy 2-key response shape and falls back to the ``/status``
+    # SSH-config path.
     del _include_credentials
     return _execute(
         entrypoint=entrypoint,
@@ -827,12 +984,14 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        resize=resize,
         _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
         _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
+        _kubernetes_identity=_kubernetes_identity,
         job_logger=job_logger)
 
 

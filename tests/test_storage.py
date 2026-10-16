@@ -804,6 +804,14 @@ class TestMountConfig:
         restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
         assert restored.read_only is False
 
+    def test_round_trip_yaml_hf_mount_args(self):
+        args = ['--cache-dir', '/mnt/nvme/hf', '--advanced-writes']
+        config = storage_lib.MountConfig(hf_mount_args=args)
+        yaml_dict = config.to_yaml_config()
+        assert yaml_dict == {'hf_mount_args': args}
+        restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
+        assert restored.hf_mount_args == args
+
 
 class TestStorageFromYamlWithMountConfig:
     """Tests for Storage.from_yaml_config with mount config."""

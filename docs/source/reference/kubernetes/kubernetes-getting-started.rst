@@ -450,13 +450,8 @@ FAQs
         apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
         rm -rf /var/lib/apt/lists/*
 
-    # Install conda and other python dependencies
-    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
-        bash Miniconda3-Linux-x86_64.sh -b && \
-        eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
-        grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
-        rm Miniconda3-Linux-x86_64.sh && \
-        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    # Install SkyPilot python dependencies into a dedicated runtime venv.
+    RUN export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
         python3 -m venv ~/skypilot-runtime && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
         $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \

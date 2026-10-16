@@ -1,8 +1,11 @@
 """Nebius cloud adaptor."""
 import asyncio
+import logging
 import os
 import threading
-from typing import Any, Awaitable, List, Optional
+from typing import (Any, Awaitable, Dict, List, NamedTuple, Optional, Tuple,
+                    Union)
+import weakref
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -19,6 +22,27 @@ _loop_lock = threading.Lock()
 _loop = None
 
 
+def _loop_exception_handler(loop: asyncio.AbstractEventLoop,
+                            context: Dict[str, Any]) -> None:
+    """Exception handler for the dedicated nebius SDK event loop.
+
+    grpc.aio can raise exceptions in loop callbacks (e.g.
+    PollerCompletionQueue._handle_events) when a nebius API call fails.
+    The default asyncio handler logs these at ERROR level to stderr,
+    polluting user-facing CLI output. API errors are still raised to
+    callers through sync_call(), so log the callback noise at debug level
+    for diagnostics instead. This handler is scoped to the dedicated
+    nebius event loop and does not affect other event loops.
+    """
+    del loop  # Unused.
+    message = context.get('message', 'Exception in nebius SDK event loop')
+    exception = context.get('exception')
+    exc_info: Any = False
+    if exception is not None:
+        exc_info = (type(exception), exception, exception.__traceback__)
+    logger.debug(f'nebius SDK event loop: {message}', exc_info=exc_info)
+
+
 def _get_event_loop() -> asyncio.AbstractEventLoop:
     """Get event loop for nebius sdk."""
     global _loop
@@ -29,8 +53,10 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
     with _loop_lock:
         if _loop is None:
             # Create a new event loop in a dedicated thread
-            _loop = asyncio.new_event_loop()
-            threading.Thread(target=_loop.run_forever, daemon=True).start()
+            loop = asyncio.new_event_loop()
+            loop.set_exception_handler(_loop_exception_handler)
+            threading.Thread(target=loop.run_forever, daemon=True).start()
+            _loop = loop
 
         return _loop
 
@@ -119,11 +145,63 @@ POLL_INTERVAL = 5
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
                          'Try pip install "skypilot[nebius]"')
 
-nebius = common.LazyImport(
-    'nebius',
-    import_error_message=_IMPORT_ERROR_MESSAGE,
+
+class _NebiusDeprecationFilter(logging.Filter):
+    """Drops nebius SDK records logged to the 'deprecation' logger.
+
+    The nebius SDK emits deprecated-field warnings (e.g.
+    'Field .nebius.compute.v1.PreemptibleSpec.priority is deprecated')
+    to a logger named 'deprecation'. They are not actionable by users and
+    pollute user-facing CLI output. Only records originating from the
+    nebius package are dropped, so other libraries using the same logger
+    name are unaffected.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return f'{os.sep}nebius{os.sep}' not in record.pathname
+
+
+class _NebiusGrpcPollerFilter(logging.Filter):
+    """Downgrades grpc.aio poller errors logged to the 'asyncio' logger.
+
+    The nebius SDK's grpc.aio channels raise exceptions in event-loop
+    callbacks (PollerCompletionQueue._handle_events, e.g.
+    'BlockingIOError: [Errno 11] Resource temporarily unavailable') when
+    the SDK's pollers race with fd availability. asyncio's default
+    exception handler logs them at ERROR to the 'asyncio' logger, which
+    propagates to the root logger and pollutes user-facing CLI output.
+    The exceptions are internal to grpc's poller and are not actionable;
+    real API errors are still raised to callers through sync_call().
+
+    The loop-scoped handler installed by _get_event_loop() only covers
+    the dedicated loop used by sync_call(), but the SDK also runs
+    pollers on its own internal loops, whose records we can only
+    intercept here. The records are re-logged at debug level instead of
+    being dropped, so SKYPILOT_DEBUG=1 still shows them for diagnostics.
+
+    Only records mentioning the grpc poller are downgraded, so unrelated
+    asyncio errors (from any library) keep their original level.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if 'PollerCompletionQueue' not in record.getMessage():
+            return True
+        logger.debug('nebius SDK grpc.aio poller: %s',
+                     record.getMessage(),
+                     exc_info=record.exc_info)
+        return False
+
+
+def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
-    set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
+    os.environ['GRPC_VERBOSITY'] = 'NONE'
+    logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
+    logging.getLogger('asyncio').addFilter(_NebiusGrpcPollerFilter())
+
+
+nebius = common.LazyImport('nebius',
+                           import_error_message=_IMPORT_ERROR_MESSAGE,
+                           set_loggers=_set_nebius_loggers)
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
@@ -141,6 +219,12 @@ def request_error():
     return service_error.RequestError
 
 
+def status_code():
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio.service_error import StatusCode
+    return StatusCode
+
+
 def compute():
     # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.compute import v1 as compute_v1
@@ -155,8 +239,8 @@ def iam():
 
 def billing():
     # pylint: disable=import-outside-toplevel
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
-    return billing_v1alpha1
+    from nebius.api.nebius.billing import v1 as billing_v1
+    return billing_v1
 
 
 def nebius_common():
@@ -232,18 +316,121 @@ def sdk():
     return _sdk(None, default_cred_path)
 
 
-@annotations.lru_cache(scope='request')
+def _user_agent_prefix() -> str:
+    # Import locally to avoid a circular import while sky is initialized.
+    # pylint: disable=import-outside-toplevel
+    from sky import __version__
+    return f'skypilot/{__version__}'
+
+
+# SDKs own a loop thread, channel pool and token-renewal task. Dropping a
+# request-scoped cache entry does not release those resources. Reuse clients
+# across requests, serializing construction to avoid concurrent cache misses.
+_SDK_CLOSE_TIMEOUT = 30
+_sdk_lock = threading.Lock()
+
+
+class _SDKHandle:
+    """Keep an SDK alive while service clients, requests or operations use it.
+
+    The SDK's renewal task retains the raw SDK, so finalizing the SDK itself
+    cannot reclaim it. This separate handle is retained by the cache and SDK
+    consumers, but not by the SDK's internal background tasks.
+    """
+
+    def __init__(self, sdk_client: Any) -> None:
+        # Loop creation can trigger GC while holding _loop_lock. Initialize it
+        # before registering any finalizer that could try to acquire that lock.
+        _get_event_loop()
+        self._sdk_client = sdk_client
+        # At interpreter exit the OS reclaims process-owned resources. Do not
+        # attempt to start/join event-loop threads during interpreter shutdown.
+        finalizer = weakref.finalize(self, _close_sdk, sdk_client)
+        # Typeshed declares this writable property as a field outside __slots__.
+        finalizer.atexit = False  # type: ignore[misc]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sdk_client, name)
+
+
+class _SDKCacheEntry(NamedTuple):
+    credential_version: Union[str, Tuple[int, int, int, int]]
+    client: _SDKHandle
+
+
+_SDKSource = Tuple[bool, str, Optional[str]]
+_sdk_cache: Dict[_SDKSource, _SDKCacheEntry] = {}
+_sdk_sources: Dict[Tuple[str, Optional[str]], _SDKSource] = {}
+
+
+async def _close_sdk_async(sdk_client: Any) -> None:
+    try:
+        await asyncio.wait_for(sdk_client.close(), timeout=_SDK_CLOSE_TIMEOUT)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning('Failed to close a cached Nebius SDK.', exc_info=True)
+
+
+def _close_sdk(sdk_client: Any) -> None:
+    # The last reference can disappear on an SDK thread or an async caller's
+    # loop. Never block that thread while waiting for the SDK to shut down.
+    asyncio.run_coroutine_threadsafe(_close_sdk_async(sdk_client),
+                                     _get_event_loop())
+
+
 def _sdk(token: Optional[str], cred_path: Optional[str]):
-    # Exactly one of token or cred_path must be provided
+    # Exactly one of token or cred_path must be provided.
     assert (token is None) != (cred_path is None), (token, cred_path)
-    if token is not None:
-        return nebius.sdk.SDK(credentials=token, domain=api_domain())
-    if cred_path is not None:
-        return nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(cred_path),
-            domain=api_domain(),
-        )
-    raise ValueError('Either token or credentials file path must be provided')
+    domain = api_domain()
+    source_path = os.path.abspath(
+        os.path.expanduser(
+            cred_path if cred_path is not None else iam_token_path()))
+    source = (token is not None, source_path, domain)
+    owner = (skypilot_config.get_active_workspace(), domain)
+    with _sdk_lock:
+        credential_version: Union[str, Tuple[int, int, int, int]]
+        if token is not None:
+            credential_version = token
+        else:
+            # The SDK reads service-account credentials only at construction.
+            # Preserve credential refresh when a file is edited or replaced.
+            stat = os.stat(source_path)
+            credential_version = (stat.st_ino, stat.st_size, stat.st_mtime_ns,
+                                  stat.st_ctime_ns)
+        entry = _sdk_cache.get(source)
+        if (entry is None or entry.credential_version != credential_version):
+            if token is not None:
+                sdk_client = nebius.sdk.SDK(
+                    credentials=token,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            else:
+                sdk_client = nebius.sdk.SDK(
+                    credentials_file_name=source_path,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            entry = _SDKCacheEntry(credential_version, _SDKHandle(sdk_client))
+            _sdk_cache[source] = entry
+
+        # A source switch (e.g. adding/removing the IAM token file) must also
+        # retire the previous client, unless another workspace still selects it.
+        previous_source = _sdk_sources.get(owner)
+        _sdk_sources[owner] = source
+        if (previous_source is not None and previous_source != source and
+                previous_source not in _sdk_sources.values()):
+            _sdk_cache.pop(previous_source, None)
+        return entry.client
+
+
+def clear_sdk_cache() -> None:
+    """Retire cached SDKs without interrupting their existing consumers.
+
+    SDKs close asynchronously after the last service client, request or
+    operation releases its handle. The catalog fetcher calls this between
+    asyncio.run() cycles; concurrent callers can safely finish on retired SDKs.
+    """
+    with _sdk_lock:
+        _sdk_cache.clear()
+        _sdk_sources.clear()
 
 
 def get_nebius_credentials(boto3_session):

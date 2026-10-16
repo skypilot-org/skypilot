@@ -21,9 +21,11 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
 from sky.adaptors import gcp
+from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import oci_s3
 from sky.adaptors import vastdata
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -110,6 +112,121 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def is_hf_path(source: str) -> bool:
+    """Returns True iff the source is a Hugging Face URL (bucket or repo)."""
+    return source.startswith(huggingface.HF_URL_PREFIX)
+
+
+def is_hf_bucket_path(source: str) -> bool:
+    """Returns True iff the source is a Hugging Face Bucket URL."""
+    return source.startswith(huggingface.HF_BUCKETS_URL_PREFIX)
+
+
+def split_hf_path(hf_path: str) -> Tuple[str, str]:
+    """Splits an HF Buckets URL into (bucket_id, sub_path).
+
+    ``bucket_id`` follows the ``<namespace>/<bucket-name>`` format (e.g.
+    ``user/my-bucket``); ``sub_path`` is the path *within* the bucket, which
+    may be empty.
+
+    Accepts both the canonical form ``hf://buckets/<ns>/<name>[/<path>]`` and
+    the short form ``<ns>/<name>[/<path>]``.
+    """
+    prefix = huggingface.HF_BUCKETS_URL_PREFIX
+    trimmed = hf_path[len(prefix):] if hf_path.startswith(prefix) else hf_path
+    parts = trimmed.split('/', 2)
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        raise ValueError(
+            f'Hugging Face bucket URL {hf_path!r} must be of the form '
+            f'"{prefix}<namespace>/<bucket-name>[/<sub-path>]".')
+    bucket_id = f'{parts[0]}/{parts[1]}'
+    sub_path = parts[2] if len(parts) == 3 else ''
+    return bucket_id, sub_path
+
+
+def split_hf_repo_path(hf_path: str) -> Tuple[str, str, Optional[str], str]:
+    """Splits an HF repo URL into ``(repo_type, repo_id, revision, sub_path)``.
+
+    ``repo_type`` is one of ``'model'``, ``'dataset'``, or ``'space'``.
+    ``repo_id`` is ``<namespace>/<name>``. ``revision`` is the optional
+    ``@<rev>`` portion (``None`` if unspecified). ``sub_path`` is the path
+    *within* the repo (possibly empty).
+
+    Accepts:
+        - ``hf://<ns>/<model>[@<rev>][/<path>]`` (model)
+        - ``hf://datasets/<ns>/<ds>[@<rev>][/<path>]``
+        - ``hf://spaces/<ns>/<sp>[@<rev>][/<path>]``
+    """
+    if not hf_path.startswith(huggingface.HF_URL_PREFIX):
+        raise ValueError(f'Hugging Face repo URL {hf_path!r} must start with '
+                         f'"{huggingface.HF_URL_PREFIX}".')
+    body = hf_path[len(huggingface.HF_URL_PREFIX):]
+
+    repo_type = 'model'
+    if body.startswith('datasets/'):
+        repo_type = 'dataset'
+        body = body[len('datasets/'):]
+    elif body.startswith('spaces/'):
+        repo_type = 'space'
+        body = body[len('spaces/'):]
+    elif body.startswith('buckets/'):
+        raise ValueError(f'{hf_path!r} is a bucket URL, not a repo URL.')
+
+    parts = body.split('/', 2)
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        raise ValueError(
+            f'Hugging Face repo URL {hf_path!r} must be of the form '
+            '"hf://<ns>/<repo>[@<revision>][/<sub-path>]" '
+            '(optionally prefixed with "datasets/" or "spaces/").')
+    namespace, name_rev = parts[0], parts[1]
+    sub_path = parts[2] if len(parts) == 3 else ''
+
+    # Extract optional ``@<revision>`` suffix from the repo name.
+    revision: Optional[str] = None
+    if '@' in name_rev:
+        name, revision = name_rev.split('@', 1)
+        if not revision:
+            revision = None
+    else:
+        name = name_rev
+    if not name:
+        raise ValueError(
+            f'Hugging Face repo URL {hf_path!r} has an empty repo name.')
+    repo_id = f'{namespace}/{name}'
+    return repo_type, repo_id, revision, sub_path
+
+
+def verify_hf_bucket(bucket_id: str) -> bool:
+    """Returns True iff the HF bucket ``<namespace>/<bucket-name>`` exists.
+
+    Uses :meth:`huggingface_hub.HfApi.bucket_info`. Only treats explicit
+    "not found" signals (``RepositoryNotFoundError``, ``EntryNotFoundError``,
+    or an HTTP 404) as absence. Other failures — auth errors, rate limits,
+    network issues — are re-raised so callers can surface them rather than
+    silently "creating a new bucket".
+    """
+    token = huggingface.get_token()
+    try:
+        huggingface.api().bucket_info(bucket_id, token=token)
+        return True
+    except Exception as e:  # pylint: disable=broad-except
+        errors = huggingface.hf_hub_errors()
+        explicit_not_found_types: Tuple[type, ...] = tuple(cls for cls in (
+            getattr(errors, 'RepositoryNotFoundError', None),
+            getattr(errors, 'EntryNotFoundError', None),
+        ) if cls is not None)
+        if isinstance(e, explicit_not_found_types):
+            return False
+        # ``HfHubHTTPError`` exposes ``.response.status_code``; only a 404
+        # indicates "bucket does not exist". 401/403/5xx/etc should propagate.
+        response = getattr(e, 'response', None)
+        status_code = getattr(response, 'status_code',
+                              None) if response is not None else None
+        if status_code == 404:
+            return False
+        raise
 
 
 def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
@@ -309,7 +426,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
     # Storage account must be length of 3-24
     # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
     pattern = re.compile(
-        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)+$')
     match = pattern.match(endpoint_url)
     if match is None:
         return False
@@ -629,6 +746,7 @@ class Rclone:
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
         VASTDATA = 'VASTDATA'
+        OCI = 'OCI'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -649,6 +767,7 @@ class Rclone:
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
                 Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
+                Rclone.RcloneStores.OCI: 'sky-oci',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -787,6 +906,26 @@ class Rclone:
                     acl = private
                     force_path_style = false
                     """)
+            elif self is Rclone.RcloneStores.OCI:
+                oci_s3_session = oci_s3.session()
+                oci_s3_credentials = oci_s3.get_oci_s3_credentials(
+                    oci_s3_session)
+                endpoint_url = oci_s3.get_endpoint()
+                access_key_id = oci_s3_credentials.access_key
+                secret_access_key = oci_s3_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
+                    force_path_style = true
+                    """)
+                oci_region = oci_s3.get_region()
+                if oci_region:
+                    config += f'region = {oci_region}\n'
             elif self is Rclone.RcloneStores.VASTDATA:
                 vastdata_session = vastdata.session()
                 vastdata_credentials = vastdata.get_vastdata_credentials(
@@ -964,6 +1103,28 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_oci_s3_client() -> Client:
+    """Create a client for OCI Object Storage's S3-compatible API."""
+    return oci_s3.client('s3')
+
+
+def verify_oci_s3_bucket(name: str) -> bool:
+    """Verify an OCI bucket exists via the S3-compatible API."""
+    client = create_oci_s3_client()
+    try:
+        client.head_bucket(Bucket=name)
+        return True
+    except oci_s3.botocore_exceptions().ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '403':
+            logger.error(f'Access denied to OCI bucket {name}')
+        elif error_code == '404':
+            logger.debug(f'OCI bucket {name} does not exist')
+        else:
+            logger.debug(f'Unexpected error checking OCI bucket {name}: {e}')
+        return False
 
 
 def create_coreweave_client() -> Client:

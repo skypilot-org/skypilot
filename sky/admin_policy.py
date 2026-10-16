@@ -77,7 +77,9 @@ class UserRequest:
 
     Args:
         task: User specified task.
-        skypilot_config: Global skypilot config to be used in this request.
+        skypilot_config: Global skypilot config to be used in this request,
+              with `active_workspace` set to the workspace resolved for this
+              request.
         request_options: Request options. It is None for jobs and services.
         at_client_side: Is the request intercepted by the policy at client-side?
         user: User who made the request.

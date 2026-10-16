@@ -3,7 +3,9 @@
 from contextlib import suppress
 import os
 import select
+import shlex
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -11,11 +13,15 @@ from unittest import mock
 
 import paramiko
 import pytest
+import sqlalchemy
 
+from sky import exceptions
+from sky import skypilot_config
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import interactive_utils
+from sky.utils.db import kv_cache
 
 
 def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
@@ -348,6 +354,291 @@ class TestSSHCommandRunnerInteractiveAuth:
             handler_thread.join(timeout=2)
             if os.path.exists(log_path):
                 os.unlink(log_path)
+
+
+class TestSlurmCommandRunnerUserImpersonation:
+
+    @pytest.fixture(autouse=True)
+    def isolated_home_cache(self, tmp_path, monkeypatch):
+        engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/cache.db')
+        kv_cache.Base.metadata.create_all(engine)
+        monkeypatch.setattr(kv_cache._db_manager, '_engine', engine)
+        yield
+        engine.dispose()
+
+    @staticmethod
+    def _login_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmLoginNodeCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            slurm_user=slurm_user)
+
+    @staticmethod
+    def _slurm_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None,
+            slurm_user=slurm_user)
+
+    @pytest.mark.parametrize('use_sudo', [False, True])
+    def test_wrap_command_preserves_literal_arguments(self, use_sudo):
+        args = ['/usr/bin/printf', '%s', 'a b; $(id)', '$HOME', 'a\nb']
+        wrapped = command_runner.wrap_command_as_user(args,
+                                                      'alice',
+                                                      use_sudo=use_sudo)
+        prefix = (['sudo', '--non-interactive', '-H', '-u', 'alice', '--']
+                  if use_sudo else ['runuser', '-u', 'alice', '--'])
+        assert shlex.split(wrapped) == prefix + args
+
+    @pytest.mark.parametrize('argv', ['', [], 'squeue --me'])
+    def test_wrap_rejects_shell_strings(self, argv):
+        with pytest.raises(ValueError):
+            command_runner.wrap_command_as_user(argv, 'alice')
+
+    @pytest.mark.parametrize('ssh_user', ['root', 'ubuntu'])
+    def test_login_node_direct_command(self, ssh_user):
+        runner = self._login_runner('alice', ssh_user=ssh_user)
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as run:
+            runner.run(['squeue', '--me'], require_outputs=True)
+        argv = shlex.split(run.call_args.args[1])
+        assert argv[-2:] == ['squeue', '--me']
+        assert argv[argv.index('-u') + 1] == 'alice'
+        assert '/bin/bash' not in argv
+
+    def test_shell_orchestration_runs_as_login_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        cmd = 'sinfo | cat'
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as run:
+            runner.run(cmd, require_outputs=True)
+        assert run.call_args.args[1] == cmd
+
+    def test_login_node_sudo_failure_propagates(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        failure = (1, '', 'sudo: a password is required')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=failure) as run:
+            assert runner.run(['squeue', '--me'],
+                              require_outputs=True) == failure
+        assert run.call_count == 1
+
+    def test_disabled_impersonation_quotes_argv(self):
+        runner = self._login_runner(None, ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=0) as run:
+            runner.run(['cat', '/path with spaces'])
+        assert shlex.split(
+            run.call_args.args[1]) == ['cat', '/path with spaces']
+
+    def test_login_node_rsync_as_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as rsync:
+            runner.rsync('/tmp/source',
+                         '/home/alice/.sky_provision/file',
+                         up=True)
+        assert shlex.split(rsync.call_args.kwargs['remote_rsync_command']) == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'rsync'
+        ]
+
+    def test_srun_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=0) as run:
+            runner.run('printf "%s" "a b; $(id)"')
+        argv = shlex.split(run.call_args.args[1])
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
+        ]
+        assert argv[-3:-1] == ['bash', '-c']
+        assert argv[-1].endswith('printf "%s" "a b; $(id)"')
+
+    def test_srun_rsync_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as rsync:
+            runner.rsync('/tmp/source', '~/file', up=True)
+        argv = shlex.split(rsync.call_args.kwargs['remote_rsync_command'])
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
+        ]
+        assert argv[-1] == 'rsync'
+        assert 'bash' not in argv
+
+    def test_home_lookup_runs_as_login_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(
+                    0, 'banner\nalice:x:1001:1001::/home/alice:/bin/bash\n',
+                    '')) as run:
+            assert runner.get_remote_home_dir() == '/home/alice'
+        assert shlex.split(
+            run.call_args.args[1]) == ['getent', 'passwd', 'alice']
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_login_node_rsync_resolves_tilde_via_home_lookup(self, timeout):
+        """rsync passes the lookup a timeout; the override must accept it."""
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        rsync_commands = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            rsync_commands.append(command)
+            return 0, '', ''
+
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run, \
+             mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner.rsync('/tmp',
+                         '~/.sky_provision/file',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert shlex.split(
+            run.call_args.args[1]) == ['getent', 'passwd', 'alice']
+        if timeout is None:
+            assert run.call_args.kwargs['timeout'] is None
+        else:
+            assert 0 < run.call_args.kwargs['timeout'] <= timeout
+        assert len(rsync_commands) == 1
+        assert '/home/alice/.sky_provision/file' in rsync_commands[0]
+
+    def test_home_cache_shared_between_runners_and_expires(self):
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run, mock.patch.object(
+                                  command_runner.time,
+                                  'time',
+                                  return_value=1000) as now:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            now.return_value = 1029
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            assert run.call_count == 1
+            now.return_value = 1030
+            run.return_value = (0, 'alice:x:1001:1001::/new/alice:/bin/bash',
+                                '')
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/new/alice'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('changes', [
+        {
+            'slurm_user': 'bob'
+        },
+        {
+            'node': ('other.example.com', 22)
+        },
+        {
+            'node': ('login.example.com', 2222)
+        },
+        {
+            'ssh_user': 'ubuntu'
+        },
+        {
+            'ssh_proxy_command': 'ssh gateway -W %h:%p'
+        },
+        {
+            'ssh_proxy_jump': 'gateway'
+        },
+    ])
+    def test_home_cache_isolates_connection_and_user(self, changes):
+        kwargs = dict(node=('login.example.com', 22),
+                      ssh_user='root',
+                      ssh_private_key=None,
+                      slurm_user='alice')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            kwargs.update(changes)
+            user = kwargs['slurm_user']
+            run.return_value = (0, f'{user}:x:1001:1001::/other/home:/bin/bash',
+                                '')
+            runner = command_runner.SlurmLoginNodeCommandRunner(**kwargs)
+            assert runner.get_remote_home_dir() == '/other/home'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('result', [
+        (2, '', ''),
+        (0, 'alice:x:1001:1001::relative:/bin/bash', ''),
+        (0, 'bob:x:1001:1001::/home/bob:/bin/bash', ''),
+    ])
+    def test_home_cache_does_not_store_failed_lookups(self, result):
+        runner = self._login_runner('alice')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=result) as run:
+            for _ in range(2):
+                with pytest.raises(ValueError, match='Cannot resolve home'):
+                    runner.get_remote_home_dir()
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('container_args,home', [
+        (None, '/home/alice/.sky_clusters/test'),
+        ('--container-name=test:exec', '/root'),
+    ])
+    def test_compute_home_lookup_runs_in_allocation(self, container_args, home):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        runner.container_args = container_args
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, f'SKYPILOT_HOME_DIR: {home}\n',
+                                             '')) as run:
+            assert runner.get_remote_home_dir() == home
+        argv = shlex.split(run.call_args.args[1])
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
+        ]
+        assert '--jobid=123' in argv
+        if container_args:
+            assert container_args in argv
+        assert 'SKYPILOT_HOME_DIR:' in argv[-1]
+
+    def test_home_lookup_failure_is_not_login_home(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=(2, '', '')):
+            with pytest.raises(ValueError, match='Cannot resolve home'):
+                runner.get_remote_home_dir()
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
@@ -723,3 +1014,457 @@ class TestProxyJumpToProxyCommand:
                 port_forward=None,
                 connect_timeout=None,
             )
+
+
+def test_kubernetes_runner_diagnose_dead_pod_surfaces_oom() -> None:
+    """A 'pod gone' exec error triggers a pod-termination diagnosis."""
+    oom_msg = 'Pod pod terminated: OOMKilled (exit code 137).\nHint: ...'
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod',
+                    return_value=oom_msg) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        result = runner._diagnose_dead_pod(
+            'error: cannot exec into a container in a completed pod; '
+            'current phase is Failed')
+    assert result == oom_msg
+    mock_diagnose.assert_called_once_with('ctx', 'ns', 'pod')
+
+
+def test_kubernetes_runner_diagnose_dead_pod_ignores_unrelated_stderr() -> None:
+    """Ordinary command failures (e.g. exit 127) don't query the pod."""
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        result = runner._diagnose_dead_pod(
+            '/bin/bash: line 1: conda: command not found')
+    assert result is None
+    mock_diagnose.assert_not_called()
+
+
+def test_kubernetes_runner_diagnose_dead_pod_skips_deployment() -> None:
+    """Deployment targets have no single pod_name to diagnose."""
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'),
+                                                        deployment='dep')
+        result = runner._diagnose_dead_pod(
+            'cannot exec into a container in a completed pod')
+    assert result is None
+    mock_diagnose.assert_not_called()
+
+
+def test_kubernetes_runner_run_enriches_stderr_on_oom() -> None:
+    """run() appends the OOM diagnosis to stderr on a failed exec."""
+    pod_gone_stderr = ('error: cannot exec into a container in a completed '
+                       'pod; current phase is Failed')
+    oom_msg = 'Pod pod terminated: OOMKilled (exit code 137).'
+
+    def fake_run_with_log(*args, **kwargs):
+        return 1, '', pod_gone_stderr
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log), \
+         mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod',
+                    return_value=oom_msg):
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        returncode, _, stderr = runner.run('echo hi',
+                                           require_outputs=True,
+                                           stream_logs=False)
+
+    assert returncode == 1
+    assert pod_gone_stderr in stderr
+    assert oom_msg in stderr
+
+
+def test_kubernetes_runner_run_does_not_enrich_on_success() -> None:
+    """A successful exec is returned unchanged, with no pod query."""
+
+    def fake_run_with_log(*args, **kwargs):
+        return 0, 'ok', ''
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log), \
+         mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        returncode, stdout, stderr = runner.run('echo hi',
+                                                require_outputs=True,
+                                                stream_logs=False)
+
+    assert (returncode, stdout, stderr) == (0, 'ok', '')
+    mock_diagnose.assert_not_called()
+
+
+class TestRsyncTimeout:
+    """Tests for the optional total timeout on CommandRunner.rsync."""
+
+    def test_timeout_passed_to_run_with_log_as_remaining_budget(self) -> None:
+        """The first attempt receives (nearly) the whole timeout budget."""
+        captured = {}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['timeout'] = kwargs.get('timeout')
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync('/tmp/src',
+                         '/tmp/dst',
+                         up=True,
+                         stream_logs=False,
+                         timeout=100)
+
+        # The per-attempt timeout is the remaining budget, so the first attempt
+        # should get close to the full 100s (minus negligible elapsed time).
+        assert isinstance(captured['timeout'], int)
+        assert 90 <= captured['timeout'] <= 100
+
+    def test_no_timeout_passes_none_to_run_with_log(self) -> None:
+        """Without a timeout, run_with_log is called with timeout=None."""
+        captured = {}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['timeout'] = kwargs.get('timeout', 'MISSING')
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
+
+        assert captured['timeout'] is None
+
+    def test_timeout_expiry_raises_command_error_without_retry(self) -> None:
+        """A timeout exhausts the budget: raise immediately, do not retry."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            raise subprocess.TimeoutExpired(command, kwargs.get('timeout'))
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=3,
+                             timeout=30)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # The single attempt consumed the whole budget; no retries.
+        assert len(calls) == 1
+        mock_sleep.assert_not_called()
+
+    def test_failures_retry_while_budget_remains(self) -> None:
+        """Plain failures retry up to max_retry while budget remains."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 1, '', 'boom'
+
+        # Mock sleep so no wall-clock is consumed by the backoff; with a large
+        # timeout the deadline never trips and all retries run.
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError):
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=2,
+                             timeout=600)
+
+        # max_retry=2 -> 3 attempts total.
+        assert len(calls) == 3
+        # Each attempt got a positive remaining budget.
+        assert all(t is not None and t > 0 for t in calls)
+
+    def test_deadline_exhausted_before_first_attempt_raises_cleanly(
+            self) -> None:
+        """A non-positive timeout trips the deadline before any attempt runs.
+
+        This must raise a clean CommandError rather than UnboundLocalError
+        from referencing undefined returncode/stdout/stderr after the loop.
+        """
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             timeout=0)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # No rsync attempt should have run.
+        assert calls == []
+
+    def test_deadline_stops_retries_even_with_budget_for_max_retry(
+            self) -> None:
+        """The deadline caps total time even if max_retry is not exhausted."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 1, '', 'boom'
+
+        # A monotonic clock that advances 10s on every read, so the 15s budget
+        # is exhausted after the first attempt despite max_retry=5.
+        clock = [1000.0]
+
+        def fake_monotonic():
+            value = clock[0]
+            clock[0] += 10.0
+            return value
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'), \
+             mock.patch.object(command_runner.time,
+                               'monotonic',
+                               side_effect=fake_monotonic):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=5,
+                             timeout=15)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # Deadline tripped before max_retry was exhausted.
+        assert len(calls) == 1
+
+
+class TestRemoteHomeDirLookup:
+    """Tests for resolving a `~` rsync path through get_remote_home_dir."""
+
+    @staticmethod
+    def _capture_rsync_commands():
+        commands = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            commands.append(command)
+            return 0, '', ''
+
+        return commands, fake_run_with_log
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_ssh_default_home_dir_resolves_tilde_target(self, timeout) -> None:
+        """The SSH default callable must accept the per-attempt timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                 '/dev/null')
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/sky_workdir',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert len(commands) == 1
+        assert "ubuntu@1.2.3.4:'~/sky_workdir'" in commands[0]
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_slurm_runner_resolves_tilde_target(self, timeout) -> None:
+        """Slurm passes its own home-dir callable; it must take the timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None)
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/.sky/.runtime_files',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert len(commands) == 1
+        assert '/home/alice/.sky_clusters/test/.sky/.runtime_files' in commands[
+            0]
+        mock_sleep.assert_not_called()
+
+    def test_lookup_retries_share_the_rsync_deadline(self) -> None:
+        """A wedged lookup cannot overshoot the rsync's total timeout.
+
+        Each lookup attempt gets only the remaining budget, and no new attempt
+        starts once the budget is spent, however large max_retry is.
+        """
+        lookup_timeouts = []
+
+        def wedged_lookup(timeout):
+            lookup_timeouts.append(timeout)
+            clock[0] += timeout  # The attempt burns its whole budget.
+            raise exceptions.CommandError(124, 'echo ~', 'timed out', None)
+
+        clock = [1000.0]
+        rsync_calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            rsync_calls.append(command)
+            return 0, '', ''
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time,
+                               'sleep',
+                               side_effect=fake_sleep), \
+             mock.patch.object(command_runner.time,
+                               'monotonic',
+                               side_effect=lambda: clock[0]):
+            runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                     '/dev/null')
+            with pytest.raises(exceptions.CommandError):
+                runner.rsync('/tmp',
+                             '~/sky_workdir',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=5,
+                             get_remote_home_dir=wedged_lookup,
+                             timeout=30)
+
+        # The first attempt used the whole 30s budget, so no retry started,
+        # and the rsync itself never ran.
+        assert lookup_timeouts == [30]
+        assert clock[0] - 1000.0 <= 30
+        assert not rsync_calls
+
+
+class TestInlineCommandLimit:
+    """Inline-vs-upload decision, per runner transport."""
+
+    def _slurm_runner(self, slurm_user, via_srun):
+        cls = (command_runner.SlurmCommandRunner
+               if via_srun else command_runner.SlurmLoginNodeCommandRunner)
+        extra = dict(sky_dir='/d',
+                     skypilot_runtime_dir='/r',
+                     job_id='1',
+                     slurm_node='n',
+                     container_args=None) if via_srun else {}
+        return cls(('h', 22), 'root', None, slurm_user=slurm_user, **extra)
+
+    def test_ssh_counts_shell_quoting(self):
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky', None)
+        command = "a'b" * 5000
+        assert runner.inline_command_size(command) == len(
+            shlex.quote(shlex.quote(command)))
+        assert runner.max_inline_command_length() == 100 * 1024
+
+    @pytest.mark.parametrize('slurm_user,via_srun,expected', [
+        (None, False, 2),
+        ('alice', False, 2),
+        (None, True, 3),
+        ('alice', True, 3),
+    ])
+    def test_slurm_quote_levels(self, slurm_user, via_srun, expected):
+        # srun adds a `bash -c` shell that re-quotes the payload.
+        runner = self._slurm_runner(slurm_user, via_srun)
+        assert runner._inline_command_quote_levels() == expected
+
+    def test_srun_quoting_pushes_command_over_limit(self):
+        # A command that fits at 2 quote levels but not at 3.
+        command = "a'b" * 5000
+        assert not self._slurm_runner(
+            None, False).is_command_length_over_limit(command)
+        assert self._slurm_runner('alice',
+                                  True).is_command_length_over_limit(command)
+
+    def test_kubernetes_counts_url_bytes_not_shell_bytes(self):
+        # `kubectl exec` sends the command as URL query params, so what counts
+        # is the percent-encoded length -- which for a script is far larger than
+        # the shell-quoted length that a shell transport would care about.
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        script = 'echo "hello world"\nexit 0\n' * 500
+        ssh_runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky',
+                                                     None)
+        assert runner.inline_command_size(
+            script) > 1.5 * ssh_runner.inline_command_size(script)
+
+    def test_kubernetes_default_limit_is_proxy_sized(self):
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        assert runner.max_inline_command_length() == 32 * 1024
+
+    def test_kubernetes_limit_read_from_config(self, monkeypatch, tmp_path):
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          '  context_configs:\n'
+                          '    tight-proxy:\n'
+                          '      max_inline_command_length: 2048\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        # Per-context wins; other contexts fall back to the cloud-level value.
+        assert limit('tight-proxy') == 2048
+        assert limit('other-ctx') == 8192
+        assert limit(None) == 8192
+
+    def test_kubernetes_limit_for_ssh_node_pool(self, monkeypatch, tmp_path):
+        # SSH node pools run through this runner but are configured under their
+        # own cloud, keyed by the pool name without the `ssh-` context prefix.
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          'ssh:\n'
+                          '  max_inline_command_length: 20480\n'
+                          '  context_configs:\n'
+                          '    mypool:\n'
+                          '      max_inline_command_length: 4096\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        assert limit('ssh-mypool') == 4096
+        assert limit('ssh-other') == 20480
+        # A real Kubernetes context still reads the kubernetes block.
+        assert limit('gke-x') == 8192

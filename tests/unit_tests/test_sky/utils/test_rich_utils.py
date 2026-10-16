@@ -3,6 +3,7 @@ from unittest import mock
 
 import requests
 
+from sky.utils import message_utils
 from sky.utils import rich_utils
 
 
@@ -81,3 +82,53 @@ class RichUtilsTest(unittest.TestCase):
         # Verify the output
         joined_result = ''.join(r for r in result if r is not None)
         self.assertEqual(joined_result, progress_bar)
+
+    def test_decode_rich_status_relay_forwards_payloads_verbatim(self):
+        """relay_rich_status should forward encoded payloads as raw lines."""
+        status = rich_utils.EncodedStatusMessage('Launching')
+        init_line = status.init()
+        update_line = status.update('Preparing SkyPilot runtime (1/3)')
+        exit_line = status.exit()
+        chunks = [
+            b'Some provisioning log line\n',
+            init_line.encode('utf-8'),
+            update_line.encode('utf-8'),
+            exit_line.encode('utf-8'),
+        ]
+        mock_response = mock.MagicMock(spec=requests.Response)
+        mock_response.iter_content.return_value = chunks
+
+        result = list(
+            rich_utils.decode_rich_status(mock_response,
+                                          relay_rich_status=True))
+        # The plain log line plus every (non-heartbeat) control payload should
+        # be forwarded verbatim so a downstream reader can re-render the
+        # spinner.
+        self.assertIn('Some provisioning log line\n', result)
+        self.assertIn(init_line, result)
+        self.assertIn(update_line, result)
+        self.assertIn(exit_line, result)
+        # No control payload should have been swallowed (the default
+        # non-relay path would consume them and yield None instead).
+        self.assertNotIn(None, result)
+
+    def test_decode_rich_status_relay_drops_heartbeat(self):
+        """Heartbeats are not relayed, but still yield None for retry progress.
+
+        The encoded payload must not reach the log (it would bloat it), yet we
+        still yield None so `stream_response` advances its progress counter and
+        the retry decorator sees forward progress during quiet phases.
+        """
+        heartbeat = message_utils.encode_payload(
+            rich_utils.Control.HEARTBEAT.encode(''))
+        mock_response = mock.MagicMock(spec=requests.Response)
+        mock_response.iter_content.return_value = [heartbeat.encode('utf-8')]
+
+        result = list(
+            rich_utils.decode_rich_status(mock_response,
+                                          relay_rich_status=True))
+        # The encoded heartbeat line is not relayed...
+        self.assertNotIn(heartbeat, result)
+        self.assertEqual([r for r in result if r is not None], [])
+        # ...but a None is yielded so progress_count still advances.
+        self.assertEqual(result, [None])

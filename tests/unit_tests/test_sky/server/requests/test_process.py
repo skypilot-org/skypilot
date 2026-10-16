@@ -185,7 +185,13 @@ def test_burstable_executor_pool_recovery():
             # This should trigger the pool recovery logic in
             # _submit_to_guaranteed_pool
             future = executor.submit_until_success(dummy_task)
-            result = future.result(timeout=5.0)
+            # Recovery replaces the guaranteed pool with a brand-new
+            # ProcessPoolExecutor, so this future's task runs on a worker
+            # that must be spawned from scratch (fork/spawn + ``import sky``
+            # in the child). That cold start can take several seconds under
+            # CI load, so use a generous timeout to keep the test
+            # deterministic while still catching genuine hangs.
+            result = future.result(timeout=60.0)
 
             # Verify the task completed successfully despite initial failure
             assert result is True

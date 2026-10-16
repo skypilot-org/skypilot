@@ -69,7 +69,12 @@ _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
 adapter = requests.adapters.HTTPAdapter(
     pool_connections=50,
-    pool_maxsize=200,
+    # Sized for the jobs controller, the heaviest single-process consumer: it
+    # can hold one long-lived log stream per job with an in-flight launch
+    # request (up to MAX_JOBS_PER_WORKER=200), plus short-lived status polls
+    # on top. The pool never blocks (pool_block defaults to False); this cap
+    # only bounds how many connections are kept for reuse.
+    pool_maxsize=256,
     # We handle retries by ourselves in SDK.
     max_retries=0,
 )
@@ -80,8 +85,8 @@ _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())
 
-# Allow the client type to be set via environment variable.
-# Used by enterprise CLI distributions to identify themselves.
+# Allow the client type to be set via environment variable, so that a
+# client distribution can identify itself.
 _client_type = os.environ.get('SKYPILOT_CLIENT_TYPE')
 if _client_type:
     _session.headers['X-SkyPilot-Client-Type'] = _client_type
@@ -170,9 +175,14 @@ def retry_transient_errors(max_retries: int = 3,
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
-                    # new replica.
+                    # new server.
                     except exceptions.RequestInterruptedError:
                         _handle_exception()
+                        if consecutive_failed_count >= max_retries:
+                            # Retries exhausted: surface the interruption
+                            # instead of falling out of the loop and
+                            # silently returning None to the caller.
+                            raise
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
                     except Exception as e:  # pylint: disable=broad-except

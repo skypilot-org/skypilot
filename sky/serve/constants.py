@@ -46,11 +46,12 @@ LB_MAX_RETRY = 3
 # Large LLMs like Llama2-70b is able to process the request within ~30 seconds.
 # We set the timeout to 120s to be safe. For reference, FastChat uses 100s:
 # https://github.com/lm-sys/FastChat/blob/f2e6ca964af7ad0585cadcf16ab98e57297e2133/fastchat/constants.py#L39 # pylint: disable=line-too-long
-# TODO(tian): Expose this option to users in yaml file.
-LB_STREAM_TIMEOUT = 120
+DEFAULT_LB_STREAM_TIMEOUT = 120
 
-# Interval in seconds to probe replica endpoint.
-ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Default interval in seconds to probe replica endpoint.
+DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Backward compatibility alias.
+ENDPOINT_PROBE_INTERVAL_SECONDS = DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS
 
 # The default timeout in seconds for a readiness probe request. We set the
 # timeout to 15s since using actual generation in LLM services as readiness
@@ -77,13 +78,13 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # When max_workers is set but queue_length_threshold is not specified,
 # this default threshold will be used.
 AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD = 1
-# The default controller resources. We need 200 GB disk space to enable using
-# Azure as controller, since its default image size is 150 GB.
+# The default controller resources. We use default 257 GB disk space to
+# enable using Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
 # Set default minimal memory to 8GB to allow at least one service to run.
-CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+', 'disk_size': 200}
+CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+'}
 # Autostop config for the jobs controller. These are the default values for
 # serve.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP = {
@@ -107,6 +108,12 @@ INITIAL_VERSION = 1
 
 # Replica ID environment variable name that can be accessed on the replica.
 REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
+
+# Blob holding the task's workdir and file mounts, passed to a service
+# controller started in consolidation mode. An env var rather than a flag: the
+# HA recovery daemon reruns the stored controller script with its own code, and
+# an older API server replica's code would reject an unknown flag.
+FILE_MOUNTS_BLOB_ID_ENV_VAR = 'SKYPILOT_SERVE_FILE_MOUNTS_BLOB_ID'
 
 # The version of the lib files that serve use. Whenever there is an API
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that

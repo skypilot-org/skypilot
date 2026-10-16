@@ -183,6 +183,181 @@ def test_no_auto_retry_marker():
         f"no_auto_retry step should allow manual retry: {retry}"
 
 
+def test_concurrency_group_marker():
+    """Test that a concurrency_group(name) marker serializes a test globally.
+
+    The marker should make the generated step carry that concurrency_group with
+    a limit of 1, so instances of the test serialize across all builds and
+    pipelines while every other step is unaffected.
+    """
+    # The generator only walks tests/smoke_tests, so the marked test must live
+    # there. Use a throwaway file (removed in the finally block) rather than
+    # marking a real test, so no real test's CI concurrency is changed.
+    test_file = pathlib.Path(
+        'tests/smoke_tests/test_concurrency_group_marker_tmp.py')
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.kubernetes\n'
+                         '@pytest.mark.concurrency_group("my-global-lock")\n'
+                         'def test_concurrency_group_example():\n'
+                         '    pass\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:" \
+                            f"{env.get('PYTHONPATH', '')}"
+
+        subprocess.run([
+            'python', '.buildkite/generate_pipeline.py', '--args',
+            '--kubernetes', '--file_pattern',
+            'test_concurrency_group_marker_tmp'
+        ],
+                       env=env,
+                       check=True)
+
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        steps = _extract_steps_from_pipeline(pipeline_path)
+
+        target_steps = [
+            s for s in steps
+            if 'test_concurrency_group_example' in s.get('label', '')
+        ]
+        assert len(target_steps) == 1, \
+            f"Expected 1 step, got {len(target_steps)}"
+
+        step = target_steps[0]
+        assert step.get('concurrency') == 1, \
+            f"concurrency_group step should have concurrency 1: {step}"
+        assert step.get('concurrency_group') == 'my-global-lock', \
+            f"concurrency_group step should carry the marker name: {step}"
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
+def _k_selected(args):
+    """Return the test names the generator selects for `args`."""
+    env = dict(os.environ)
+    env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:{env.get('PYTHONPATH', '')}"
+    pipeline_path = pathlib.Path('.buildkite/pipeline_smoke_tests_release.yaml')
+    pipeline_path.unlink(missing_ok=True)
+    subprocess.run([
+        'python', '.buildkite/generate_pipeline.py', '--args', args,
+        '--file_pattern', 'test_k_expression_tmp'
+    ],
+                   env=env,
+                   check=True)
+    # Not _extract_test_names_from_pipeline: that one assumes a flat step
+    # list, and the release pipeline nests its steps under a group.
+    return {
+        step['command'].split('::')[-1].split()[0]
+        for step in _extract_steps_from_pipeline(pipeline_path)
+    }
+
+
+def test_k_expression_is_pytests_own():
+    """`-k` selects what pytest would select, operators included.
+
+    The generator used to apply `-k` itself, as a substring test against the
+    test function name and the file path. That could not express `or` / `and`
+    / `not`: a compound expression matched nothing and the build died on an
+    empty pipeline. It also saw less than pytest does -- pytest matches each
+    test's parents and its markers as well as its own name.
+    """
+    test_file = pathlib.Path('tests/smoke_tests/test_k_expression_tmp.py')
+    # A throwaway file rather than real tests, so the assertions below cannot
+    # be broken by an unrelated rename. `no_hyperbolic` is a cloud-exclusion
+    # marker: it is inert under --kubernetes, so it only serves as a keyword
+    # here.
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.no_hyperbolic\n'
+                         'def test_kexpr_alpha():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         'def test_kexpr_beta():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         'def test_kexpr_gamma():\n'
+                         '    pass\n')
+    try:
+        alpha, beta, gamma = ('test_kexpr_alpha', 'test_kexpr_beta',
+                              'test_kexpr_gamma')
+
+        # A bare substring keeps working, so every existing -k in CI keeps
+        # selecting what it selects today.
+        assert _k_selected('--kubernetes -k test_kexpr_alpha') == {alpha}
+
+        # The operators, which is what this is for.
+        assert _k_selected(f'--kubernetes -k "{alpha} or {gamma}"') == {
+            alpha, gamma
+        }
+        assert _k_selected(f'--kubernetes -k "test_kexpr and not {beta}"') == {
+            alpha, gamma
+        }
+
+        # A parent's name counts: naming the module takes the whole file,
+        # which is how `-k cli` picks up all of test_cli.py.
+        assert _k_selected('--kubernetes -k test_k_expression_tmp') == {
+            alpha, beta, gamma
+        }
+
+        # So does a marker's name -- the one place this selects more than the
+        # old substring test did, since `no_hyperbolic` appears in neither the
+        # function name nor the path.
+        assert _k_selected('--kubernetes -k no_hyperbolic') == {alpha}
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
+def test_k_expression_reaches_unsplit_steps():
+    """A step that was not split per parameter still carries the -k.
+
+    Most parametrized functions get one step per parameter, each naming that
+    parameter with its own -k. `test_mount_and_storage` is excluded from that
+    split, so its node id alone does not say which parameters were selected --
+    without the caller's expression the step re-collects the whole function
+    and runs every parameter, which is not what `pytest -k` would do.
+    """
+    # The exclusion is keyed on the path containing `test_mount_and_storage`,
+    # so the throwaway file has to be named into it.
+    test_file = pathlib.Path(
+        'tests/smoke_tests/test_mount_and_storage_kexpr_tmp.py')
+    test_file.write_text(
+        'import pytest\n'
+        '\n'
+        '\n'
+        "@pytest.mark.parametrize('store', ['ALPHA', 'BETA'])\n"
+        'def test_kexpr_store(store):\n'
+        '    pass\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = (f"{pathlib.Path.cwd()}/tests:"
+                             f"{env.get('PYTHONPATH', '')}")
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        pipeline_path.unlink(missing_ok=True)
+        subprocess.run([
+            'python', '.buildkite/generate_pipeline.py', '--args',
+            '--kubernetes -k alpha', '--file_pattern',
+            'test_mount_and_storage_kexpr_tmp'
+        ],
+                       env=env,
+                       check=True)
+        steps = _extract_steps_from_pipeline(pipeline_path)
+        assert len(steps) == 1, f'expected one unsplit step, got {steps}'
+        command = steps[0]['command']
+        # Lowercase `alpha` against the `ALPHA` id: pytest's -k is
+        # case-insensitive, and the step has to select the same way.
+        assert '-k alpha' in command, \
+            f'the step dropped the -k, so it would run every parameter: {command}'
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
 @pytest.mark.parametrize('args', [
     '',
     '--aws',

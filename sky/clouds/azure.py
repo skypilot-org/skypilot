@@ -203,6 +203,27 @@ class Azure(clouds.Cloud):
 
         # Process user-specified images.
         azure_utils.validate_image_id(image_id)
+
+        # Private Shared Image Gallery image. The gallery may live in a
+        # different subscription than the active project, so query the
+        # image's own subscription (parsed from the resource ID).
+        shared_gallery_image = azure_utils.parse_shared_image_gallery_id(
+            image_id)
+        if shared_gallery_image is not None:
+            try:
+                compute_client = azure.get_client(
+                    'compute', shared_gallery_image['subscription_id'])
+                return azure_utils.get_shared_image_gallery_image_size(
+                    compute_client, shared_gallery_image['resource_group'],
+                    shared_gallery_image['gallery_name'],
+                    shared_gallery_image['image_name'],
+                    shared_gallery_image['version'])
+            except (azure.exceptions().AzureError, RuntimeError,
+                    exceptions.ResourcesUnavailableError):
+                # Fall back to the default if the image's subscription is not
+                # readable with the caller's credentials.
+                return 0.0
+
         try:
             compute_client = azure.get_client('compute', cls.get_project_id())
         except (azure.exceptions().AzureError, RuntimeError):
@@ -365,8 +386,8 @@ class Azure(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if (resources.image_id is None or
-                resources.extract_docker_image() is not None):
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is None:
             # pylint: disable=import-outside-toplevel
             from sky.catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
@@ -374,11 +395,11 @@ class Azure(clouds.Cloud):
             image_id = self._get_default_image_tag(gen_version,
                                                    resources.instance_type)
         else:
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region_name in resources.image_id, resources.image_id
-                image_id = resources.image_id[region_name]
+                assert region_name in cloud_image_id, cloud_image_id
+                image_id = cloud_image_id[region_name]
 
         # Checked basic image syntax in resources.py
         if image_id.startswith('skypilot:'):
@@ -398,6 +419,9 @@ class Azure(clouds.Cloud):
 
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
             image_config = {'community_gallery_image_id': image_id}
+        elif azure_utils.parse_shared_image_gallery_id(image_id) is not None:
+            # Private Shared Image Gallery image, booted by resource ID.
+            image_config = {'shared_gallery_image_id': image_id}
         else:
             publisher, offer, sku, version = image_id.split(':')
             image_config = {

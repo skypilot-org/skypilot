@@ -8,6 +8,7 @@ from sky import logs
 from sky import resources
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.catalog import gcp_catalog
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.gcp import GCP
@@ -15,8 +16,44 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.gcp import volume_utils as gcp_volume_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import resources_utils
+
+
+def test_gcp_rtxpro6000_instance_type_mapping():
+    # RTXPRO6000 (GCP G4) maps to g4-standard-{48,96,192,384} for 1/2/4/8 GPUs.
+    assert gcp_catalog._ACC_INSTANCE_TYPE_DICTS['RTXPRO6000'] == {
+        1: ['g4-standard-48'],
+        2: ['g4-standard-96'],
+        4: ['g4-standard-192'],
+        8: ['g4-standard-384'],
+    }
+    expected = {
+        'g4-standard-48': 1,
+        'g4-standard-96': 2,
+        'g4-standard-192': 4,
+        'g4-standard-384': 8,
+    }
+    for instance_type, count in expected.items():
+        assert gcp_catalog._INSTANCE_TYPE_TO_ACC[instance_type] == {
+            'RTXPRO6000': count,
+        }
+
+
+@pytest.mark.parametrize(
+    'instance_type',
+    ['g4-standard-48', 'g4-standard-96', 'g4-standard-192', 'g4-standard-384'])
+def test_gcp_g4_uses_hyperdisk_balanced(instance_type):
+    # G4 only supports hyperdisk-balanced (no pd-* support), like n4/a4.
+    tier2name = gcp_volume_utils.get_data_disk_tier_mapping(instance_type)
+    for tier in resources_utils.DiskTier:
+        if tier == resources_utils.DiskTier.BEST:
+            continue
+        assert tier2name[tier] == 'hyperdisk-balanced', (
+            f'{instance_type} tier {tier.value} should be hyperdisk-balanced, '
+            f'got {tier2name[tier]}')
 
 
 @pytest.mark.parametrize((
@@ -433,3 +470,128 @@ def test_gcp_network_config_override_in_cluster_config(monkeypatch):
             wheel_hash='fake-wheel-hash',
             region=Region(name='us-central1'),
             zones=[Zone(name='us-central1-a')])
+
+
+# --- Tests for _is_reservation_bound ---
+
+
+class TestIsReservationBound:
+    """Tests for DENSE/CALENDAR reservation detection."""
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_dense_reservation_returns_true(self, mock_load):
+        """DENSE reservation should trigger RESERVATION_BOUND."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.return_value = {
+                'items': [{
+                    'name': 'my-dense-reservation',
+                    'deploymentType': 'DENSE',
+                }]
+            }
+
+        result = _is_reservation_bound('my-project', 'us-central1-a',
+                                       'my-dense-reservation')
+        assert result is True
+
+        mock_compute.reservations.return_value.list.assert_called_once_with(
+            project='my-project',
+            zone='us-central1-a',
+            filter='name=my-dense-reservation',
+        )
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_standard_reservation_returns_false(self, mock_load):
+        """Standard (SPECIFIC) reservation should not trigger override."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.return_value = {
+                'items': [{
+                    'name': 'my-standard-reservation',
+                    'deploymentType': 'DEPLOYMENT_TYPE_UNSPECIFIED',
+                }]
+            }
+
+        result = _is_reservation_bound('my-project', 'us-central1-a',
+                                       'my-standard-reservation')
+        assert result is False
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_no_deployment_type_returns_false(self, mock_load):
+        """Reservation without deploymentType field should not override."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.return_value = {
+                'items': [{
+                    'name': 'my-reservation',
+                }]
+            }
+
+        result = _is_reservation_bound('my-project', 'us-central1-a',
+                                       'my-reservation')
+        assert result is False
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_reservation_not_found_returns_false(self, mock_load):
+        """Empty list result should return False."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.return_value = {
+                'items': []
+            }
+
+        result = _is_reservation_bound('my-project', 'us-central1-a',
+                                       'nonexistent-reservation')
+        assert result is False
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_api_failure_returns_false(self, mock_load):
+        """API errors should gracefully fall back to False."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.side_effect = Exception('Permission denied')
+
+        result = _is_reservation_bound('my-project', 'us-central1-a',
+                                       'my-reservation')
+        assert result is False
+
+    @patch('sky.provision.gcp.instance_utils'
+           '.GCPComputeInstance.load_resource')
+    def test_full_uri_parses_short_name(self, mock_load):
+        """Full reservation URI should be parsed to short name for API call."""
+        from sky.provision.gcp.instance_utils import _is_reservation_bound
+        mock_compute = MagicMock()
+        mock_load.return_value = mock_compute
+        mock_compute.reservations.return_value.list.return_value \
+            .execute.return_value = {
+                'items': [{
+                    'name': 'my-dense-res',
+                    'deploymentType': 'DENSE',
+                }]
+            }
+
+        full_uri = ('projects/my-project/zones/us-central1-a'
+                    '/reservations/my-dense-res')
+        result = _is_reservation_bound('my-project', 'us-central1-a', full_uri)
+        assert result is True
+
+        mock_compute.reservations.return_value.list.assert_called_once_with(
+            project='my-project',
+            zone='us-central1-a',
+            filter='name=my-dense-res',
+        )

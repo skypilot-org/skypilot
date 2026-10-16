@@ -151,7 +151,7 @@ def _list_accelerators(
         return {}, {}, {}
 
     # Verify that the credentials are still valid.
-    if not kubernetes_utils.check_credentials(context)[0]:
+    if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)
@@ -200,6 +200,9 @@ def _list_accelerators(
     total_accelerators_available: Dict[str, int] = {}
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
+    configured_tolerations = kubernetes_utils.get_configured_tolerations(
+        context)
+
     for node in nodes:
         # Check if node is ready
         node_is_ready = node.is_ready()
@@ -208,8 +211,13 @@ def _list_accelerators(
             exclude_cordon=True,
             exclude_not_ready=True,
             exclude_effects=['PreferNoSchedule'],
-            exclude_keys=kubernetes_utils.get_handled_taint_keys())
-        node_is_tainted = len(node_taints) > 0
+            exclude_keys=kubernetes_utils.get_handled_taint_keys(),
+            tolerations=configured_tolerations)
+        # A taint that is tolerated by the user's configured pod tolerations
+        # does not make the node un-schedulable for the user's workloads.
+        # Without configured tolerations, every retained taint has
+        # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
+        node_is_tainted = kubernetes_utils.has_untolerated_taint(node_taints)
 
         for key in keys:
             if key in node.metadata.labels:
@@ -236,30 +244,47 @@ def _list_accelerators(
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
                         context, node.status.allocatable))
+                # Physical device count for the TOTAL column: capacity keeps
+                # devices the device plugin has withdrawn from scheduling,
+                # matching get_kubernetes_node_info's total so the show-gpus
+                # summary and the per-node rows agree on degraded nodes. The
+                # requestable-quantity ladder and availability stay
+                # allocatable-based - only schedulable devices can be
+                # requested.
+                accelerator_capacity = max(
+                    kubernetes_utils.get_node_accelerator_count(
+                        context, node.status.capacity), accelerator_count)
 
-                if accelerator_count > 0:
+                # The quantity ladder describes the node's hardware shape
+                # (what request sizes fit on it), so it derives from capacity
+                # like the total: a node with every device temporarily
+                # withdrawn still advertises its shape, with availability
+                # (below) carrying the live signal. Otherwise such a node
+                # contributes capacity but no quantities, rendering a blank
+                # QTY column in `sky show-gpus`.
+                if accelerator_capacity > 0:
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
                     if kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
-                            (accelerator_name, accelerator_count))
+                            (accelerator_name, accelerator_capacity))
                     else:
                         count = 1
-                        while count <= accelerator_count:
+                        while count <= accelerator_capacity:
                             accelerators_qtys.add((accelerator_name, count))
                             count *= 2
                         # Add the accelerator count if it's not already in the
                         # set (e.g., if there's 12 GPUs, we should have qtys 1,
                         # 2, 4, 8, 12)
-                        if accelerator_count not in accelerators_qtys:
+                        if accelerator_capacity not in accelerators_qtys:
                             accelerators_qtys.add(
-                                (accelerator_name, accelerator_count))
+                                (accelerator_name, accelerator_capacity))
 
-                if accelerator_count >= min_quantity_filter:
+                if accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
-                        (accelerator_count // min_quantity_filter))
+                        (accelerator_capacity // min_quantity_filter))
                     if accelerator_name not in total_accelerators_capacity:
                         total_accelerators_capacity[
                             accelerator_name] = quantized_count

@@ -19,21 +19,31 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import fcntl
 import json
 import os
 import pathlib
+import re
+import shlex
+import socket
+import stat
+import struct
 import subprocess
+import sys
 import tempfile
+import termios
 import textwrap
 import threading
 import time
-from typing import Generator, Optional
+from typing import Dict, Generator, Optional
 
+import psutil
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
@@ -59,9 +69,12 @@ def test_minimal(generic_cloud: str):
     disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
         generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
-    check_raylet_cmd = '"prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"'
+    # Ensure the raylet process has the correct file descriptor limit.
+    check_raylet_cmd = smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name)
     if generic_cloud == 'slurm':
-        check_raylet_cmd = 'true'
+        # No raylet on Slurm, but keep the `sky exec` so this step still
+        # creates a job and the job IDs asserted below stay in sync.
+        check_raylet_cmd = f'sky exec {name} true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
@@ -79,8 +92,7 @@ def test_minimal(generic_cloud: str):
             # expand it when having it in a variable.
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
-            # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} {check_raylet_cmd}',
+            check_raylet_cmd,
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -156,7 +168,7 @@ def test_minimal_arm64(generic_cloud: str):
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name),
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -179,6 +191,64 @@ def test_minimal_arm64(generic_cloud: str):
         smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Clamp the nofile limit on low-soft-limit containers ----------
+@pytest.mark.kubernetes
+def test_kubernetes_nofile_limit_clamp():
+    """The raylet must not be left with a low soft nofile limit.
+
+    Kubernetes containers commonly start with 1024:524288 nofile limits
+    (systemd's default, which containerd 2.0+ inherits), and the hard limit
+    cannot be raised inside the container (no CAP_SYS_RESOURCE). On such
+    clusters an unclamped raise fails and the raylet runs out of file
+    descriptors while starting many workers at once.
+
+    Test clusters' containers start with a high soft limit, so the shape is
+    recreated with `kubernetes.post_provision_runcmd`, which runs at the top
+    of the pod entrypoint before SkyPilot raises the limit: lower the limits
+    to 1024:4096, then assert the raylet ends up at exactly 4096:4096.
+    Asserting the hard limit proves the runcmd applied, so the test cannot
+    pass vacuously on a cluster whose native soft limit is already high.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config:
+        config.write(
+            textwrap.dedent("""\
+                kubernetes:
+                  post_provision_runcmd:
+                    - ulimit -Sn 1024 && ulimit -Hn 4096
+                """))
+        config.flush()
+        check_raylet_clamped = shlex.quote(
+            'pid=$(pgrep -f "raylet/raylet --raylet_socket_name"); '
+            'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+            'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+            'echo "raylet nofile: soft=$soft hard=$hard (want 4096 4096)"; '
+            '[ "$soft" = 4096 ] && [ "$hard" = 4096 ]')
+        # What actually breaks without the clamp: a job process (forked by the
+        # raylet, inheriting its limits) needing more fds than the container's
+        # 1024 default soft limit.
+        open_2000_fds = shlex.quote(
+            'python3 -c "import os; '
+            'fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(2000)]; '
+            'print(\'opened\', len(fds), \'fds\')"')
+        test = smoke_tests_utils.Test(
+            'kubernetes_nofile_limit_clamp',
+            [
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --config {config.name} '
+                'tests/test_yamls/minimal.yaml',
+                f'sky logs {name} 1 --status',
+                f'sky exec {name} {check_raylet_clamped}',
+                f'sky logs {name} 2 --status',
+                f'sky exec {name} {open_2000_fds}',
+                f'sky logs {name} 3 --status',
+            ],
+            f'sky down -y {name}',
+            smoke_tests_utils.get_timeout('kubernetes'),
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- A minimal task with git repository workdir ----------
@@ -360,10 +430,14 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky logs {name} 2 --status',
                 f'sky status -r {name} | grep UP',
 
-                # Verify the hook was executed by checking the autostop hook log and skylet logs
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
-                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
+                # Verify the hook was executed by checking the stop-event
+                # hook log and skylet logs. The legacy `autostop.hook` YAML
+                # field routes to `events: [stop]` when `autostop.down` is
+                # false (the default), so the log lives at
+                # ~/.sky/hooks/stop.log and is read via `--hook stop`.
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
+                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Stop hook executed successfully"',
             ],
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) +
@@ -510,7 +584,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
     Regression test for https://github.com/skypilot-org/skypilot/issues/9524.
     psutil's get_terminal_map() is module-globally memoized; if skylet's
-    first AutostopEvent tick after `sky start` runs with no SSH attached,
+    first StopEvent tick after `sky start` runs with no SSH attached,
     the cache freezes empty and any later SSH session is invisible. The
     cluster then autostops despite an active interactive session even
     when wait_for=jobs_and_ssh.
@@ -529,7 +603,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
             # The #9524 trigger: stop, then start. Crucially, do not SSH
             # during `sky start` so /dev/pts/ is empty when skylet's first
-            # AutostopEvent tick fires (~60s after boot) and primes the
+            # StopEvent tick fires (~60s after boot) and primes the
             # buggy cache.
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -542,7 +616,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
 
-            # Arm autostop FIRST so AutostopEvent ticks actually call
+            # Arm autostop FIRST so StopEvent ticks actually call
             # has_active_ssh_sessions() (otherwise they early-exit on
             # boot_time mismatch and never touch psutil's terminal-map
             # cache). idle_minutes=3 leaves a buffer past the assertion
@@ -552,7 +626,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
             f'sky status | grep {name} | grep "3m"',
 
             # Now wait 90s with NO SSH so skylet's first 1-2
-            # AutostopEvent ticks call has_active_ssh_sessions() while
+            # StopEvent ticks call has_active_ssh_sessions() while
             # /dev/pts/ is empty, priming the buggy psutil cache as empty.
             'sleep 90',
 
@@ -1002,7 +1076,9 @@ def test_aws_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1072,7 +1148,10 @@ def test_aws_manual_restart_recovery():
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=300),
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(
+                name, skip_remote_server_check=True)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1109,7 +1188,9 @@ def test_gcp_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1419,6 +1500,94 @@ def test_cluster_labels_in_status(generic_cloud: str):
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=600),
                 lambda: check_labels_in_status(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_cluster_job_spec(generic_cloud: str):
+    """Each cluster job's task YAML and entrypoint are recorded and returned.
+
+    Covers a YAML `sky launch` (job 1), a YAML `sky exec` with `--env`,
+    `--name` and `--num-nodes` overrides (job 2) and an inline `sky exec`
+    command (job 3), that the recorded YAML carries the overrides and has
+    secrets redacted, and that the specs are dropped with the cluster on
+    `sky down`. The file asks for 2 nodes and both submissions override it to
+    1, so the cluster stays a single node.
+    """
+    from sky.client import sdk
+
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'spec-marker-{name}'
+    override_marker = f'override-{name}'
+    inline_marker = f'inline-{name}'
+    renamed = f'renamed-{name}'
+    secret_value = f'secret-{name}'
+
+    def get_spec(job_id: int):
+        return sdk.stream_and_get(sdk.cluster_job_spec(name, job_id))
+
+    def check_specs():
+        expected = {
+            1: ('sky launch', marker),
+            2: ('sky exec', override_marker),
+            3: ('sky exec', inline_marker),
+        }
+        for job_id, (command, yaml_text) in expected.items():
+            spec = get_spec(job_id)
+            assert spec is not None, f'No spec recorded for job {job_id}'
+            assert spec['entrypoint'].startswith(command), spec
+            assert name in spec['entrypoint'], spec
+            assert yaml_text in spec['task_yaml'], spec
+            assert secret_value not in spec['task_yaml'], (
+                f'Secret leaked into the recorded YAML of job {job_id}: '
+                f'{spec["task_yaml"]}')
+        assert get_spec(4) is None, 'Spec returned for a job that never ran'
+
+        # `--num-nodes 1` on a file asking for 2, and `--name` on job 2.
+        for job_id in (1, 2):
+            recorded = yaml_utils.safe_load(get_spec(job_id)['task_yaml'])
+            assert recorded['num_nodes'] == 1, (job_id, recorded)
+        assert yaml_utils.safe_load(get_spec(2)['task_yaml'])['name'] == renamed
+
+    def check_specs_dropped():
+        assert get_spec(1) is None, 'Spec outlived the terminated cluster'
+
+    yaml_content = textwrap.dedent(f"""\
+        name: spec-file-name
+
+        resources:
+          cpus: 2+
+
+        num_nodes: 2
+
+        envs:
+          SPEC_MARKER: {marker}
+
+        secrets:
+          SPEC_SECRET: {secret_value}
+
+        run: |
+          echo "$SPEC_MARKER"
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_job_spec',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} --env SPEC_MARKER={override_marker} --name {renamed} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} "echo {inline_marker}"',
+                lambda: check_specs(),
+                f'sky down -y {name}',
+                lambda: check_specs_dropped(),
             ],
             teardown=f'sky down -y {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1827,6 +1996,79 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
+    """Debug dump must fast-fail on a dead kube context.
+
+    With an unreachable context in allowed_contexts, the dump must (a)
+    complete within a hard wall-clock ceiling -- without fast-fail each dead
+    context stacked unbounded probe/exec timeouts -- and (b) still contain
+    the live cluster's data plus an explicit reachable:false marker for
+    the dead context, so fast-failing never silently drops resources.
+
+    The cluster-on-a-dead-context path (skylet-log and managed-jobs
+    gating) can't be built in CI -- a launch on a dead context fails -- and
+    is pinned by unit tests instead (test_debug_utils.py).
+
+    Marked no_remote_server: the fixture injects the dead context into the
+    kubeconfig on the machine running the test, but against a remote API
+    server the kubeconfig the server reads lives elsewhere, so the injected
+    context never reaches existing_allowed_contexts() and no marker is dumped.
+    """
+    if unreachable_context is None:
+        pytest.skip('No kubeconfig available to inject the dead context into')
+
+    live_context = subprocess.check_output('kubectl config current-context',
+                                           shell=True).decode('utf-8').strip()
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - {live_context}
+        - {unreachable_context}
+    """)
+    name = smoke_tests_utils.get_cluster_name()
+    dump_prefix = f'/tmp/{name}-dump'
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'debug_dump_unreachable_context_fast_fail',
+            [
+                f'sky launch -y -c {name} --cpus 1 '
+                f'--infra kubernetes/{live_context} echo hi',
+                # The ceiling. Generous for a healthy dump (typically well
+                # under a minute here); far below what unbounded kubectl /
+                # credential-probe timeouts against the dead context stack
+                # up to. Asserted via $SECONDS rather than GNU timeout so
+                # the step also runs on macOS dev machines; a fully hung
+                # dump is still bounded by the Test-level timeout.
+                f'start=$SECONDS && sky debug-dump --recent-minutes 5 '
+                f'--output {dump_prefix}.zip && '
+                'elapsed=$((SECONDS - start)) && '
+                'echo "dump took ${elapsed}s" && [ "$elapsed" -lt 300 ]',
+                f'test -f {dump_prefix}.zip',
+                f'unzip -o {dump_prefix}.zip -d {dump_prefix}',
+                # Live cluster data is intact.
+                f'test -f {dump_prefix}/debug_dump_*/clusters/{name}/'
+                'cluster_info.json',
+                # The dead context is present and explicitly marked
+                # unreachable rather than silently missing.
+                f'grep -r \'"reachable": false\' '
+                f'{dump_prefix}/debug_dump_*/kubernetes_contexts/',
+            ],
+            f'sky down -y {name}; rm -rf {dump_prefix} {dump_prefix}.zip',
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
+                constants.SKY_API_SERVER_URL_ENV_VAR:
+                    sky.server.common.get_server_url()
+            },
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_launch_image_pull_back_off():
     """The launch error message for an unresolvable image must contain the
     Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
@@ -2124,6 +2366,84 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
+    smoke_tests_utils.run_one_test(test)
+
+
+# Regression: a launch interrupted after its pods are Running but before the
+# SkyPilot runtime is set up leaves the DB with the bare pre-provision handle
+# (no cached IPs, has_ray=False). A status refresh used to see all pods up,
+# skip the ray health check, and promote the cluster to UP with that bare
+# handle -- wedging it in a state where `sky exec`/ssh fail with
+# ClusterNotUpError and plain `sky start` no-ops ("already up"). The refresh
+# must keep such a cluster INIT so `sky start` can recover it.
+# Kubernetes-only: pods report Running long before runtime setup finishes,
+# which is the window this race needs.
+@pytest.mark.kubernetes
+def test_status_refresh_keeps_interrupted_launch_init(generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    name = smoke_tests_utils.get_cluster_name()
+    req_file = f'/tmp/{name}.req'
+    # Capture the async launch's request id so we can cancel it mid-flight.
+    launch = (f'req=$(sky launch -c {name} --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y --async '
+              f'| grep -oE \'request: [0-9a-f-]+\' | head -1 | '
+              f'awk \'{{print $2}}\'); '
+              f'echo "captured request id: $req"; test -n "$req"; '
+              f'echo "$req" > {req_file}')
+    # 'Pod is up.' is logged when provisioning finishes and runtime setup
+    # starts; from here until the completed handle is persisted, the DB holds
+    # the bare handle while the pod is Running.
+    wait_runtime_setup = (
+        f'req=$(cat {req_file}); start=$SECONDS; '
+        f'until sky api logs "$req" --no-follow 2>&1 | '
+        f'grep -q "Pod is up."; do '
+        f'  if [ $((SECONDS - start)) -gt 480 ]; then '
+        f'    echo "timed out waiting for runtime setup to start"; '
+        f'    sky api status -a "$req"; exit 1; '
+        f'  fi; '
+        f'  sleep 2; '
+        f'done; echo "runtime setup started"')
+    # Interrupt the launch and wait for the worker to actually die, so the
+    # per-cluster lock is released and the refresh below really evaluates
+    # (instead of timing out on the lock and returning the cached record).
+    cancel = (f'req=$(cat {req_file}); sky api cancel "$req" -y; '
+              f'start=$SECONDS; '
+              f'until sky api status -a "$req" | grep -qw CANCELLED; do '
+              f'  if [ $((SECONDS - start)) -gt 120 ]; then '
+              f'    echo "timed out waiting for cancellation"; '
+              f'    sky api status -a "$req"; exit 1; '
+              f'  fi; '
+              f'  sleep 2; '
+              f'done; echo "request cancelled"')
+    test = smoke_tests_utils.Test(
+        'status_refresh_keeps_interrupted_launch_init',
+        [
+            launch,
+            wait_runtime_setup,
+            cancel,
+            # Force a refresh (same code path as the status refresh daemon):
+            # the pod is Running but the handle has no cached IPs, so the
+            # cluster must stay INIT. Pre-fix, the row shows UP here.
+            f's=$(sky status -r {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep INIT',
+            # INIT is recoverable with a plain `sky start` (the hint the CLI
+            # gives for INIT clusters); a false UP is not, since `sky start`
+            # no-ops on UP clusters.
+            f'sky start -y {name}',
+            f'sky status {name} | grep UP',
+            f'sky exec {name} \'echo recovered\'',
+            f'sky logs {name} 1 --status | grep SUCCEEDED',
+            # Direct ssh exercises the ssh config that `sky status` writes,
+            # which the bare handle used to break.
+            f's=$(ssh {name} \'echo ssh_works\' 2>&1) && '
+            f'echo "$s" | grep ssh_works',
+        ],
+        teardown=(f'req=$(cat {req_file} 2>/dev/null); '
+                  f'sky api cancel "$req" -y 2>/dev/null || true; '
+                  f'sky down -y {name} 2>/dev/null || true; '
+                  f'rm -f {req_file}'),
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
     smoke_tests_utils.run_one_test(test)
 
 
@@ -2827,6 +3147,155 @@ def test_nebius_security_group_attached_and_enforced():
     smoke_tests_utils.run_one_test(test)
 
 
+def _nebius_sg_reap_checks(name: str, region: str, teardown: str):
+    """Returns (record, verify) callables for the Nebius SG leak tests.
+
+    `record` finds the cluster's SkyPilot-managed SG while the cluster is
+    up; `verify` asserts it is gone after `teardown` (used in the failure
+    message) has removed the cluster.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.nebius import utils as nebius_utils
+
+    # Populated by `_record_sg` while the cluster is up; consumed by
+    # `_verify_sg_reaped` after the teardown.
+    state: Dict[str, str] = {}
+
+    def _record_sg():
+        # `cluster_name_on_cloud` is `name` plus a user-hash suffix added
+        # by `make_cluster_name_on_cloud`, so the SG name can't be
+        # computed from `name` alone. Recover it from the head VM's name
+        # instead: `utils.launch` names nodes
+        # `<cluster_name_on_cloud>-<4-hex-uuid>-<node_type>`, so drop the
+        # last two dash-separated segments.
+        project_id = nebius_utils.get_project_by_region(region)
+        instances = nebius_utils.list_instances(project_id)
+        heads = [
+            info for info in instances.values()
+            if info.get('name', '').startswith(name) and
+            info['name'].endswith('-head')
+        ]
+        assert len(heads) == 1, (
+            f'expected exactly one head VM with name prefix {name!r}, '
+            f'got {[h["name"] for h in heads]}; all VM names in project: '
+            f'{[i.get("name") for i in instances.values()]}')
+        cluster_name_on_cloud = heads[0]['name'].rsplit('-', 2)[0]
+        sg_name = nebius_utils.SECURITY_GROUP_TEMPLATE.format(
+            cluster_name_on_cloud)
+        sg_id = nebius_utils.get_security_group_by_name(project_id, sg_name)
+        assert sg_id is not None, (
+            f'managed SG {sg_name!r} not found while the cluster is up; '
+            f'cannot verify its post-teardown reaping. Head VM: '
+            f'{heads[0]["name"]!r}, attached SGs: '
+            f'{heads[0].get("security_group_ids")}')
+        attached = heads[0].get('security_group_ids') or []
+        assert sg_id in attached, (
+            f'SG {sg_name!r} ({sg_id}) exists but is not attached to the '
+            f'head VM (attached: {attached}); the name-derivation in this '
+            f'test is probably stale vs. `utils.launch` naming.')
+        state['project_id'] = project_id
+        state['sg_name'] = sg_name
+
+    def _verify_sg_reaped():
+        assert state, '_record_sg did not run; nothing to verify.'
+        # The SG delete is issued before the teardown completes, but Nebius
+        # deletes are async; give the control plane a short window to
+        # stop reporting the SG before declaring a leak.
+        sg_id = None
+        for _ in range(6):
+            sg_id = nebius_utils.get_security_group_by_name(
+                state['project_id'], state['sg_name'])
+            if sg_id is None:
+                return
+            time.sleep(5)
+        raise AssertionError(
+            f'security group {state["sg_name"]!r} ({sg_id}) still exists '
+            f'after {teardown}: the SG leaked. Each leak consumes one slot '
+            f'of the per-network SG quota until launches fail with '
+            f'vpc.network.max-security-groups-count.')
+
+    return _record_sg, _verify_sg_reaped
+
+
+@pytest.mark.nebius
+def test_nebius_sg_reaped_after_down():
+    """`sky down` must delete the cluster's SkyPilot-managed SG.
+
+    Nebius instance deletion is async: DeleteInstance is accepted before
+    the VM (and its NIC's SG attachment) is actually gone, and Nebius
+    refuses to delete an SG that a NIC still references. Without the
+    wait-for-termination in `terminate_instances`, teardowns orphan their
+    `sky-sg-<cluster>` SG; leaks accumulate until the per-network SG
+    quota is exhausted (`vpc.network.max-security-groups-count`) and all
+    launches in the region fail.
+
+    Launches a real 2-node cluster (multi-node covers the N-instance
+    drain and widens the reap window), records the managed SG while the
+    cluster is up, runs `sky down`, then asserts the SG is gone.
+
+    Cheap: 2 small CPU instances, ~5 min including teardown. Skipped by
+    default; runs only with `pytest --nebius`.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    record_sg, verify_sg_reaped = _nebius_sg_reap_checks(
+        name, 'eu-north1', '`sky down` returned')
+    test = smoke_tests_utils.Test(
+        'nebius_sg_reaped_after_down',
+        [
+            f'sky launch -y -c {name} --infra nebius --num-nodes 2 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml',
+            record_sg,
+            f'sky down -y {name}',
+            verify_sg_reaped,
+        ],
+        # Safety net for failures above; `sky down` on an already-downed
+        # cluster is a no-op that exits 0.
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('nebius'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_sg_reaped_after_autodown():
+    """Autodown must not leak the cluster's SkyPilot-managed SG.
+
+    On autodown the skylet runs `terminate_instances` on the head node
+    itself, so the head VM is gone before its SG cleanup can run. The SG
+    is instead reaped by `cleanup_ports` when the API server's status
+    refresh finds the autodowned cluster gone (`post_teardown_cleanup`).
+
+    Launches a 2-node cluster with `-i 1 --down`, records the managed SG,
+    waits (with `sky status -r`) until the refresh removes the cluster,
+    then asserts the SG is gone.
+
+    Cheap: 2 small CPU instances, ~10 min including the idle wait.
+    Skipped by default; runs only with `pytest --nebius`.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    record_sg, verify_sg_reaped = _nebius_sg_reap_checks(
+        name, 'eu-north1', 'autodown and the status refresh')
+    timeout = smoke_tests_utils.get_timeout('nebius')
+    test = smoke_tests_utils.Test(
+        'nebius_sg_reaped_after_autodown',
+        [
+            f'sky launch -y -c {name} --infra nebius --num-nodes 2 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            f'tests/test_yamls/minimal.yaml',
+            record_sg,
+            # The cluster downs itself once idle; the refresh in this wait
+            # runs post_teardown_cleanup, which reaps the SG.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name, timeout=timeout),
+            verify_sg_reaped,
+        ],
+        f'sky down -y {name}',
+        timeout=timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 def test_cli_output(generic_cloud: str):
     """Test that CLI commands properly stream output."""
     name = smoke_tests_utils.get_cluster_name()
@@ -2840,7 +3309,11 @@ def test_cli_output(generic_cloud: str):
                 f's=$(yes no | sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} || true) && '
                 'echo "$s" && echo "===Validating launch plan===" && '
                 'echo "$s" | grep "CHOSEN" && '
-                'border=$(echo "$s" | grep -A 1 "Considered resources" | tail -n +2) && '
+                # Match the border by pattern instead of taking the line right
+                # after "Considered resources": debug log lines (e.g. from
+                # catalog lookups on Nebius) can be interleaved in between.
+                'border=$(echo "$s" | grep -A 30 "Considered resources" | grep -m1 -oE -- "-{20,}") && '
+                '[ -n "$border" ] && '
                 'echo $border && echo "===Table should have 3 borders===" && '
                 # Strawman idea: validate the table has 3 borders to ensure it is completed.
                 'echo "$s" | grep -- "$border" | wc -l | grep 3'),
@@ -3067,6 +3540,48 @@ def test_cancel_logs_request(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_interrupted_logs_follow_leaves_no_remote_tail():
+    """An interrupted `sky logs` follow must not leave its tail in the pod.
+
+    `kubectl exec -i` sends the remote command no signal when the exec session
+    ends, so the follow-mode `tail_logs` used to keep running in the head pod
+    until the job finished. A normal follow must still print every line.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The [t] keeps the pattern from matching this command's own shell.
+    count_remote_tails = (f'ssh {name} \'ps -eo args | '
+                          f'grep -c "[t]ail_logs.*follow=True"\' || true')
+    test = smoke_tests_utils.Test(
+        'interrupted_logs_follow_leaves_no_remote_tail',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -d '
+            '\'for i in $(seq 1 100000); do echo "tick $i"; sleep 2; done\'',
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=300),
+            # Follow is the default; SIGINT is what Ctrl-C sends.
+            f'(timeout --signal=INT 20 sky logs {name} 1 || true) | '
+            'grep "tick"',
+            # The remote tail checks for a closed stdin every 5 seconds.
+            f'sleep 20; n=$({count_remote_tails}); '
+            'echo "remote tail processes left: $n"; [ "$n" -eq 0 ]',
+            f'sky cancel -y {name} 1',
+            f'sky exec -d {name} '
+            '\'for i in $(seq 1 15); do echo "line $i of 15"; sleep 1; done\'',
+            f'out=$(sky logs {name} 2) && echo "$out" && '
+            'for i in $(seq 1 15); do '
+            'echo "$out" | grep -q "line $i of 15" || exit 1; done',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_aws
 @pytest.mark.no_gcp
 @pytest.mark.no_nebius
@@ -3093,6 +3608,89 @@ def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
         ],
         f'sky down -y {cluster_name}',
         timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_slurm_submit_as_authenticated_user():
+    """Submit a Slurm allocation as the authenticated user's Unix account."""
+    configured_cluster = os.environ.get('SLURM_CLUSTER')
+    cluster_names = slurm_utils.get_all_slurm_cluster_names()
+    if configured_cluster is None:
+        if len(cluster_names) != 1:
+            pytest.skip('Set SLURM_CLUSTER when multiple Slurm clusters are '
+                        'configured.')
+        slurm_cluster = cluster_names[0]
+    else:
+        matching_clusters = [
+            cluster for cluster in cluster_names
+            if cluster == configured_cluster or
+            cluster.endswith(f'-{configured_cluster}')
+        ]
+        if not matching_clusters:
+            pytest.skip(f'Slurm cluster {configured_cluster!r} is not '
+                        'configured in ~/.slurm/config.')
+        assert len(matching_clusters) == 1, matching_clusters
+        slurm_cluster = matching_clusters[0]
+
+    ssh_config = slurm_utils.get_slurm_ssh_config()
+    transport_user = ssh_config.lookup(slurm_cluster)['user']
+    assert transport_user != 'ci', (
+        'The test must use a distinct SSH transport user, but the configured '
+        f'user for {slurm_cluster!r} is already ci.')
+
+    slurm_config_path = os.path.expanduser(slurm_utils.DEFAULT_SLURM_PATH)
+    user_check = subprocess.run(
+        ['ssh', '-F', slurm_config_path, slurm_cluster, 'getent passwd ci'],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if user_check.returncode != 0:
+        pytest.skip(f'Unix user ci is not configured on {slurm_cluster!r}.')
+    print(f'Using Slurm cluster {slurm_cluster!r}: '
+          f'transport user={transport_user!r}, submit user=\'ci\'')
+
+    name = smoke_tests_utils.get_cluster_name()
+    user_id = 'ci-smoke-test'
+    name_on_cloud = f'{name}-{user_id}'
+    ssh_squeue = shlex.join([
+        'ssh', '-F', slurm_config_path, slurm_cluster,
+        f'squeue --noheader --name={name_on_cloud} --format=%u'
+    ])
+    test = smoke_tests_utils.Test(
+        'slurm_submit_as_authenticated_user',
+        [
+            smoke_tests_utils.SKY_API_RESTART,
+            'sky check slurm',
+            f'sky launch -y -c {name} --infra slurm/{slurm_cluster} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -- '
+            "'test \"$(id -un)\" = ci && echo SLURM_SUBMIT_USER_OK'",
+            f'owner=$({ssh_squeue}); '
+            'echo "Slurm allocation owner: $owner"; test "$owner" = ci',
+            f'logs="$(sky logs {name} 1)"; printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *SLURM_SUBMIT_USER_OK* ]]',
+        ],
+        teardown=(f'sky down -y {name} || true; '
+                  f'unset {constants.USER_ENV_VAR} '
+                  f'{constants.USER_ID_ENV_VAR}; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout('slurm'),
+        env={
+            constants.USER_ENV_VAR: 'ci@example.com',
+            constants.USER_ID_ENV_VAR: user_id,
+        },
+        config_dict={
+            'slurm': {
+                'allowed_clusters': [slurm_cluster],
+                'submit_as_user': True,
+            },
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -3192,6 +3790,102 @@ def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
         ],
         f'sky down -y {cluster_name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _find_skylet_tunnel_process(cluster_name: str) -> psutil.Process:
+    """Returns the local kubectl port-forward process to the cluster's skylet."""
+    remote_port_suffix = f':{constants.SKYLET_GRPC_PORT}'
+    candidates = []
+    for proc in psutil.process_iter(['name', 'cmdline', 'create_time']):
+        cmdline = proc.info['cmdline'] or []
+        if (proc.info['name'] == 'kubectl' and 'port-forward' in cmdline and
+                any(cluster_name in arg for arg in cmdline) and
+                any(arg.endswith(remote_port_suffix) for arg in cmdline)):
+            candidates.append(proc)
+    assert candidates, (
+        f'No kubectl port-forward to port {constants.SKYLET_GRPC_PORT} found '
+        f'for cluster {cluster_name}')
+    return max(candidates, key=lambda p: p.info['create_time'])
+
+
+def _queued_stdout_bytes(pid: int) -> int:
+    """Returns the bytes waiting to be read in a process's stdout pipe.
+
+    Opening /proc/<pid>/fd/1 yields another reader on the same pipe, and
+    FIONREAD reports its queued bytes without consuming them. Linux only.
+    """
+    fd = os.open(f'/proc/{pid}/fd/1', os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        mode = os.fstat(fd).st_mode
+        assert stat.S_ISFIFO(mode), f'stdout of process {pid} is not a pipe'
+        buf = fcntl.ioctl(fd, termios.FIONREAD, struct.pack('i', 0))
+        return struct.unpack('i', buf)[0]
+    finally:
+        os.close(fd)
+
+
+# Only inspects processes on the local machine, so skip remote server test.
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_skylet_tunnel_survives_many_connections():
+    """The skylet gRPC tunnel keeps forwarding after many local connections.
+
+    kubectl port-forward prints a line to stdout for every accepted local
+    connection before forwarding it. The API server must keep reading that
+    output, or kubectl blocks once the pipe is full: local TCP connects still
+    succeed, but no bytes reach the skylet and every gRPC call times out.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Each connection prints ~30 bytes, so this writes well past a 64 KiB
+    # pipe buffer.
+    num_connections = 3000
+    max_queued_bytes = 4096
+
+    def hammer_tunnel() -> Generator[str, None, None]:
+        proc = _find_skylet_tunnel_process(name)
+        local_port = None
+        for arg in proc.info['cmdline']:
+            match = re.fullmatch(rf'(\d+):{constants.SKYLET_GRPC_PORT}', arg)
+            if match:
+                local_port = int(match.group(1))
+        assert local_port is not None, proc.info['cmdline']
+        yield f'Tunnel process {proc.pid} listens on port {local_port}'
+
+        measure = sys.platform.startswith('linux')
+        if measure:
+            yield (f'Queued stdout bytes before: '
+                   f'{_queued_stdout_bytes(proc.pid)}')
+        for _ in range(num_connections):
+            with socket.create_connection(('127.0.0.1', local_port), timeout=5):
+                pass
+        yield f'Opened and closed {num_connections} connections'
+        # Let kubectl finish handling the accepted connections.
+        time.sleep(5)
+        assert proc.is_running(), 'tunnel process exited'
+        if measure:
+            queued = _queued_stdout_bytes(proc.pid)
+            yield f'Queued stdout bytes after: {queued}'
+            assert queued < max_queued_bytes, (
+                f'{queued} bytes are queued in the tunnel stdout pipe')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_skylet_tunnel_survives_many_connections',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'sky logs {name} 1 --status',
+            hammer_tunnel,
+            # Skylet calls through a wedged tunnel hang until their gRPC
+            # deadline, so bound how long these calls may take.
+            f'timeout 60 sky queue {name}',
+            f'timeout 60 sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+        env={'SKYPILOT_ENABLE_GRPC': '1'},
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
 

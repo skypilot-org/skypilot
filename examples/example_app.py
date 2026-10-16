@@ -41,9 +41,9 @@ def make_application():
 
         train_op.set_resources({
             sky.Resources(infra='aws',
-                          instance_type='p3.2xlarge'),  # 1 V100, EC2.
+                          instance_type='g4dn.xlarge'),  # 1 T4, EC2.
             sky.Resources(infra='aws',
-                          instance_type='p3.8xlarge'),  # 4 V100s, EC2.
+                          instance_type='g4dn.12xlarge'),  # 4 T4s, EC2.
             # Tuples mean all resources are required.
             sky.Resources(infra='gcp', accelerators='tpu-v3-8'),
         })
@@ -61,7 +61,7 @@ def make_application():
 
         infer_op.set_resources({
             sky.Resources(infra='aws', instance_type='inf1.2xlarge'),
-            sky.Resources(infra='aws', instance_type='p3.2xlarge'),
+            sky.Resources(infra='aws', instance_type='g4dn.xlarge'),
             sky.Resources(infra='gcp',
                           instance_type='n1-standard-4',
                           accelerators='T4'),

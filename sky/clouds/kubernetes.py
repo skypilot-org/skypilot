@@ -1,10 +1,13 @@
 """Kubernetes."""
 import concurrent.futures
+import fnmatch
 import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
+import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -12,20 +15,22 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import oci_nccl
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -35,6 +40,10 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
+    from sky import task as task_lib
+
 logger = sky_logging.init_logger(__name__)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
@@ -42,11 +51,161 @@ logger = sky_logging.init_logger(__name__)
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
-# Shared directory to communicate with fusermount-server, refer to
-# addons/fuse-proxy/README.md for more details.
-_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
-
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
+
+# Cluster-autoscaler caps graceful pod termination at this many
+# seconds by default (--max-graceful-termination-sec=600). Rendering a
+# higher `terminationGracePeriodSeconds` doesn't extend the autoscaler's
+# willingness to wait — it just SIGKILLs at 600 anyway. Keep our render
+# inside that envelope so a "hooks took longer than expected" failure
+# mode falls inside the kubelet's deterministic SIGKILL rather than
+# the autoscaler's.
+_PREEMPTION_GRACE_CAP_SECONDS = 600
+
+
+def _compute_preemption_hook_timeout(
+        hooks: Optional[List[Dict[str, Any]]]) -> Optional[int]:
+    """Sum of timeouts for all preemption-event hooks, capped.
+
+    Returns ``None`` when no hook declares the ``preemption`` event,
+    so the caller can omit ``terminationGracePeriodSeconds`` from the
+    pod spec entirely (K8s falls back to its 30 s default).
+
+    Why sum rather than max: ``hook_executor.run`` executes matching
+    hooks sequentially, so the wall-clock cost is the sum of per-hook
+    timeouts. Using max would let kubelet SIGKILL the daemon
+    mid-execution after the first hook's timeout expires.
+
+    Why we cap at 600s: cluster-autoscaler's
+    ``--max-graceful-termination-sec`` defaults to 600. A render larger
+    than that is silently truncated by the autoscaler on scale-down,
+    so the daemon would be SIGKILLed mid-hook anyway. We log a stderr
+    warning when the raw sum exceeds the cap so users can shrink their
+    timeouts (or the operator can raise ``--max-graceful-termination-sec``
+    on their cluster). See:
+    https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#does-ca-respect-gracefultermination-in-scale-down
+    """
+    timeouts = [
+        entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        for entry in (hooks or [])
+        if 'preemption' in (entry.get('events') or [])
+    ]
+    if not timeouts:
+        return None
+    raw = sum(timeouts)
+    if raw > _PREEMPTION_GRACE_CAP_SECONDS:
+        cap = _PREEMPTION_GRACE_CAP_SECONDS
+        sys.stderr.write(
+            f'WARNING: preemption-hook timeouts sum to {raw}s, but '
+            f'cluster-autoscaler caps graceful pod termination at '
+            f'{cap}s by default. Capping '
+            f'terminationGracePeriodSeconds at {cap}s. '
+            f'Reduce per-hook timeouts or raise '
+            f'--max-graceful-termination-sec on your cluster if longer '
+            f'hooks are required.\n')
+        return _PREEMPTION_GRACE_CAP_SECONDS
+    return raw
+
+
+def warn_if_preemption_grace_change_requires_relaunch(
+    cloud: Optional['clouds.Cloud'],
+    prior_hooks: Optional[List[Dict[str, Any]]],
+    new_hooks: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Return a warning string if a re-launch would need more K8s grace.
+
+    Pod ``terminationGracePeriodSeconds`` is set at pod-creation time
+    and is immutable for the lifetime of the pod. Re-launching an
+    existing Kubernetes cluster with a *larger* preemption-hook timeout
+    than before means the new timeout would be silently truncated by
+    kubelet at SIGTERM — the preemption hook would be SIGKILLed
+    mid-run.
+
+    Returns ``None`` when no warning is needed (non-K8s cloud, no new
+    preemption hooks, or new timeout ≤ prior timeout).
+
+    Lives here (rather than in the re-launch caller in
+    ``cloud_vm_ray_backend``) so the ``_compute_preemption_hook_timeout``
+    helper stays a same-module private — see review thread on PR #9064.
+    """
+    if not isinstance(cloud, Kubernetes):
+        return None
+    prior_t = _compute_preemption_hook_timeout(prior_hooks)
+    new_t = _compute_preemption_hook_timeout(new_hooks)
+    if new_t is None:
+        return None
+    if prior_t is not None and new_t <= prior_t:
+        return None
+    prior_label = f'{prior_t}s' if prior_t is not None else '~30s (k8s default)'
+    return (f'Re-launch increased the preemption-hook grace requirement '
+            f'from {prior_label} to {new_t}s, but Kubernetes pod\'s '
+            '`terminationGracePeriodSeconds` is fixed at pod creation and '
+            'cannot be updated in place. The new preemption hooks will be '
+            'SIGKILLed by kubelet once the existing grace expires. To apply '
+            'the new grace, run `sky down <cluster>` then `sky launch` to '
+            'recreate the pod.')
+
+
+def cap_preemption_hook_timeouts(
+    hooks: Optional[List[Dict[str, Any]]],) -> Optional[List[Dict[str, Any]]]:
+    """Cap each preemption-event hook's ``timeout`` to the K8s grace cap.
+
+    On Kubernetes the pod's ``terminationGracePeriodSeconds`` is
+    bounded by cluster-autoscaler's ``--max-graceful-termination-sec``
+    (default 600). A user-set or default hook ``timeout`` larger than
+    that is meaningless — kubelet SIGKILLs at the grace, leaving the
+    skylet's stored timeout misleading. Cap the individual timeout on
+    send so the stored value matches what kubelet will actually honor,
+    and warn the user once per offending hook.
+
+    Only ``preemption``-event entries are affected; ``autostop``/``down``
+    hooks don't interact with the pod grace.
+    """
+    if not hooks:
+        return hooks
+    out: List[Dict[str, Any]] = []
+    for entry in hooks:
+        events = list(entry.get('events') or [])
+        timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        if ('preemption' in events and timeout > _PREEMPTION_GRACE_CAP_SECONDS):
+            sys.stderr.write(
+                f'WARNING: preemption-hook timeout {timeout}s on '
+                f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
+                f'(pod terminationGracePeriodSeconds limit; '
+                f'cluster-autoscaler --max-graceful-termination-sec). '
+                f'Raise the autoscaler flag if longer hooks are needed.\n')
+            other_events = [e for e in events if e != 'preemption']
+            # Split a multi-event entry so the K8s grace cap only
+            # applies to the preemption dispatch. The non-preemption
+            # events (stop/down) keep the user's original timeout —
+            # kubelet's SIGKILL boundary doesn't apply to idle-timer
+            # stops or `sky down` teardowns.
+            capped = dict(entry)
+            capped['events'] = ['preemption']
+            capped['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
+            out.append(capped)
+            if other_events:
+                uncapped = dict(entry)
+                uncapped['events'] = other_events
+                out.append(uncapped)
+        else:
+            out.append(entry)
+    return out
+
+
+def _match_remote_identity(remote_identity: Any,
+                           context: Optional[str]) -> Optional[str]:
+    """The identity for `context`; a dict maps context patterns (fnmatch)."""
+    if isinstance(remote_identity, dict):
+        remote_identity = next(
+            (sa_name for pattern, sa_name in remote_identity.items()
+             if fnmatch.fnmatchcase(context or '', str(pattern))), None)
+    # NONE is case-insensitive: a security setting must not silently become
+    # a service account named `none`.
+    none = schemas.RemoteIdentityOptions.NONE.value
+    if isinstance(remote_identity, str) and remote_identity.upper() == none:
+        return none
+    return remote_identity
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
@@ -94,8 +253,21 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
+    # Default images. The `-vN` suffix is the *image contract version*: it is
+    # resolved to a concrete, immutable image via the service catalog
+    # (kubernetes/images.csv), so a given tag always maps to one built image.
+    #
+    # When to bump `-vN` (e.g. -v1 -> -v2): ONLY for a breaking image change
+    # that an older API server cannot use correctly (e.g. removing conda, which
+    # older servers assume is present). Bumping keeps the old tag frozen to the
+    # old image, so old servers keep working while new servers get the new one.
+    #
+    # When NOT to bump (most cases): routine / CVE rebuilds that keep the
+    # same contract. Do not change this string; instead repoint the same tag to
+    # the new image (a new concrete datetag) in the catalog, so existing servers
+    # pick up the update.
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -104,6 +276,157 @@ class Kubernetes(clouds.Cloud):
 
     # Set of contexts that has logged as temporarily unreachable
     logged_unreachable_contexts: Set[str] = set()
+
+    @classmethod
+    def _server_remote_identity(cls, context: Optional[str]) -> Optional[str]:
+        """The identity the server's own config gives this context."""
+        value = skypilot_config.get_server_workspace_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('kubernetes'))
+        return _match_remote_identity(value, context)
+
+    @classmethod
+    def remote_identity_is_none(cls, context: Optional[str],
+                                resources: 'resources_lib.Resources') -> bool:
+        """Whether pods launched for `resources` in `context` get no token."""
+        if isinstance(resources.kubernetes_identity, str):
+            return False
+        # An existing cluster: what its pods got, not what today's config says.
+        if isinstance(resources.remote_identity_none_at_launch, bool):
+            return resources.remote_identity_none_at_launch
+        none = schemas.RemoteIdentityOptions.NONE.value
+        if cls._server_remote_identity(context) == none:
+            return True
+        merged = skypilot_config.get_effective_workspace_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('kubernetes'),
+            override_configs=resources.cluster_config_overrides)
+        return _match_remote_identity(merged, context) == none
+
+    @classmethod
+    def check_request_keeps_server_none(cls) -> None:
+        """Raises if the request's own config loosens a NONE the server's
+        config set for an allowed context.
+
+        For managed jobs and services, checked when they are submitted: the
+        request's config travels with them to their controller, which reads
+        it as its server config, so the loosened value would not be refused
+        there. Whatever the task's resources are, since that config applies to
+        every cluster the controller launches.
+        """
+        try:
+            contexts = cls.existing_allowed_contexts()
+        except Exception:  # pylint: disable=broad-except
+            return  # e.g. no kubernetes package: nothing to launch there.
+        none = schemas.RemoteIdentityOptions.NONE.value
+        for context in contexts:
+            if cls._server_remote_identity(context) != none:
+                continue
+            requested = _match_remote_identity(
+                skypilot_config.get_effective_workspace_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=schemas.get_default_remote_identity(
+                        'kubernetes')), context)
+            if requested is not None:
+                cls._refuse_undoing_none(context, requested, {})
+
+    @classmethod
+    def check_task_keeps_server_none(cls, task: 'task_lib.Task') -> None:
+        """Raises if every resource alternative of `task` would loosen a NONE
+        the server's config set.
+
+        For managed jobs and services, checked when they are submitted: their
+        cluster launch would be refused anyway, and the controller would retry
+        it forever instead of failing. An alternative that may land elsewhere
+        is left to the launch, which fails over to it.
+        """
+        errors = []
+        for resources in task.resources:
+            try:
+                cls.check_resources_keep_server_none(resources)
+            except exceptions.InvalidCloudConfigs as e:
+                errors.append(e)
+                continue
+            return
+        if errors:
+            raise errors[0]
+
+    @classmethod
+    def check_resources_keep_server_none(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Raises if `resources`, pinned to Kubernetes, would loosen a NONE
+        the server's config set.
+
+        Unpinned resources are not checked: they may land on another cloud.
+        Without a context, any allowed context with a server NONE counts, even
+        if the launch might first pick one without it.
+        """
+        cloud = resources.cloud
+        if not isinstance(cloud, Kubernetes):
+            return
+        if isinstance(resources.kubernetes_identity, str):
+            return
+        if resources.region is not None:
+            contexts: List[Optional[str]] = [resources.region]
+        else:
+            try:
+                contexts = list(type(cloud).existing_allowed_contexts())
+            except Exception:  # pylint: disable=broad-except
+                # e.g. no kubernetes package: the launch reports it.
+                return
+        none = schemas.RemoteIdentityOptions.NONE.value
+        overrides = resources.cluster_config_overrides
+        for context in contexts:
+            if cls._server_remote_identity(context) != none:
+                continue
+            requested = _match_remote_identity(
+                skypilot_config.get_effective_workspace_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=schemas.get_default_remote_identity(
+                        'kubernetes'),
+                    override_configs=overrides), context)
+            if requested is not None:
+                cls._refuse_undoing_none(context, requested, overrides)
+
+    @classmethod
+    def _refuse_undoing_none(cls, context: Optional[str], requested: str,
+                             cluster_config_overrides: Dict[str, Any]) -> None:
+        """Raises if anything would hand a NONE pod an identity after all."""
+        none = schemas.RemoteIdentityOptions.NONE.value
+        prefix = ('`remote_identity: NONE` is set for Kubernetes context '
+                  f'{context!r}')
+        if requested != none:
+            raise exceptions.InvalidCloudConfigs(
+                f'{prefix} on the API server; `remote_identity: '
+                f'{requested}` from your config or task cannot override it.')
+        spec = (kubernetes_utils.resolve_effective_pod_config(
+            cluster_config_overrides, cls(), context).get('spec') or {})
+        conflicts = [
+            f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                                 'serviceAccount')
+            if key in spec
+        ]
+        if spec.get('automountServiceAccountToken') is True:
+            conflicts.append('pod_config.spec.automountServiceAccountToken')
+        for volume in spec.get('volumes') or []:
+            sources = (volume.get('projected') or {}).get('sources') or []
+            if any('serviceAccountToken' in src for src in sources):
+                conflicts.append(
+                    f'pod_config.spec.volumes[{volume.get("name")}]'
+                    ' (projected serviceAccountToken)')
+        if conflicts:
+            raise exceptions.InvalidCloudConfigs(
+                f'{prefix}, so pods get no API credentials, but '
+                f'{", ".join(conflicts)} would give them some. Remove it, or '
+                'use another remote_identity.')
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -124,6 +447,14 @@ class Kubernetes(clouds.Cloud):
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
         for context in contexts:
+            if cls.remote_identity_is_none(context, resources):
+                unsupported_features[
+                    clouds.CloudImplementationFeatures.AUTODOWN] = (
+                        'Autodown needs the pod to delete itself through the '
+                        'Kubernetes API, and `remote_identity: NONE` '
+                        f'(context {context!r}) gives it no credentials. '
+                        'Tear the cluster down with `sky down`, or use another '
+                        'remote_identity.')
             # Allow spot instances if supported by the cluster
             try:
                 # Run spot label check and network type detection concurrently
@@ -197,6 +528,14 @@ class Kubernetes(clouds.Cloud):
                 keys=('allowed_contexts',),
                 default_value=None)
 
+        # Whether the user explicitly pinned the contexts to a list, as
+        # opposed to leaving them to be derived (`'all'`, the allow-all env
+        # var, or the in-cluster fallback below). The in-cluster exclusion at
+        # the end of this method only applies to the derived case; an explicit
+        # list is a deliberate choice and is honored as-is.
+        contexts_explicitly_set = (allowed_contexts is not None and
+                                   allowed_contexts != 'all')
+
         # Exclude contexts starting with `ssh-`
         # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
         all_contexts = [
@@ -231,6 +570,21 @@ class Kubernetes(clouds.Cloud):
                 if context.startswith('ssh-'):
                     continue
                 skipped_contexts.append(context)
+
+        # `SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false` keeps the
+        # API server's own in-cluster context from being surfaced as a
+        # user-facing compute target. Applied to the final result so it holds
+        # regardless of how the contexts were derived -- the `allowed_contexts:
+        # all` expansion, the allow-all env var, or the in-cluster fallback
+        # above. An explicitly configured list is honored as-is. Default is to
+        # include in-cluster (backward compatible).
+        if (not contexts_explicitly_set and not env_options.Options.
+                ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.get()):
+            in_cluster_name = kubernetes.in_cluster_context_name()
+            existing_contexts = [
+                c for c in existing_contexts if c != in_cluster_name
+            ]
+
         if not silent:
             cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
@@ -308,8 +662,17 @@ class Kubernetes(clouds.Cloud):
         for r in regions:
             context = r.name
             try:
+                # On Kubernetes, disk_size maps to ephemeral-storage requests,
+                # but only when the user explicitly set it (see
+                # `make_deploy_resources_variables`). Only then do we check
+                # that a node can fit the requested ephemeral storage.
+                ephemeral_storage_gb = (resources.disk_size
+                                        if resources is not None and
+                                        resources.disk_size_specified else None)
                 fits, reason = kubernetes_utils.check_instance_fits(
-                    context, instance_type)
+                    context,
+                    instance_type,
+                    ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 continue
@@ -475,6 +838,7 @@ class Kubernetes(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
         is_using_queueing: bool,
+        auto_mounts: Optional[List['volume_lib.AutoMount']] = None,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -485,13 +849,20 @@ class Kubernetes(clouds.Cloud):
             num_nodes: Number of nodes being provisioned
             volume_mounts: Volume mounts for the pod
             enable_flex_start: Whether flex start is enabled
+            auto_mounts: Volumes this launch will mount from the auto_mounts
+                config. They are not in volume_mounts, which only holds the
+                volumes declared on the task.
 
         Returns:
             Timeout in seconds
         """
         if is_using_queueing:
-            # Return a large timeout to let the
-            # queue system handle the provisioning
+            # Queued (e.g. Kueue) workloads wait for quota admission before
+            # they can schedule. The scheduling wait loop separately pauses
+            # the provisioning clock while pods are held by scheduling gates
+            # (see provision/kubernetes/instance.py), so this large default
+            # keeps the post-admission scheduling wait generous for
+            # deployments that have not set provision_timeout explicitly.
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node
@@ -502,18 +873,25 @@ class Kubernetes(clouds.Cloud):
             base_timeout = 1200
             per_node_timeout = 10
             max_timeout = 2400
-        elif volume_mounts is not None:
-            for volume_mount in volume_mounts:
-                if (volume_mount.volume_config.type ==
-                        volume_lib.VolumeType.PVC.value):
-                    if (volume_mount.volume_config.config.get(
-                            'access_mode', '') ==
-                            volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
-                        # GKE may take several minutes to provision a PV
-                        # supporting READ_WRITE_MANY with filestore.
-                        base_timeout = 180
-                        max_timeout = 240
-                        break
+        else:
+            slow_volume = any(
+                volume_lib.mount_is_read_write_many_pvc(volume_mount)
+                for volume_mount in (volume_mounts or [])) or any(
+                    volume_lib.is_read_write_many_pvc(auto_mount.volume_config)
+                    for auto_mount in (auto_mounts or []))
+            if slow_volume:
+                # Creating the network filesystem behind a READ_WRITE_MANY PV
+                # takes minutes: a 1 TiB GKE Filestore instance on the
+                # enterprise tier measured ~7 minutes end to end. The previous
+                # 180-240s could not cover that, so such a launch timed out
+                # while its volume was being created normally.
+                #
+                # Waiting this long is only reasonable because a volume that
+                # will not bind no longer needs the timeout to report it -- the
+                # scheduling wait loop fails on what the storage backend says
+                # (see _PendingVolumeProbe), whatever the timeout is.
+                base_timeout = 600
+                max_timeout = 900
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),
@@ -529,7 +907,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones  # Unused.
+        del zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -606,6 +984,10 @@ class Kubernetes(clouds.Cloud):
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            elif kubernetes_utils.is_neuron_accelerator(acc_type):
+                # AWS Neuron (Trainium/Inferentia) uses its own resource key;
+                # the pod requests aws.amazon.com/neuron instead of a GPU key.
+                k8s_resource_key = kubernetes_utils.NEURON_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
                     context)
@@ -627,7 +1009,7 @@ class Kubernetes(clouds.Cloud):
                 avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None, context)
 
-        remote_identity = skypilot_config.get_effective_region_config(
+        remote_identity = skypilot_config.get_effective_workspace_region_config(
             # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
@@ -635,23 +1017,60 @@ class Kubernetes(clouds.Cloud):
             default_value=schemas.get_default_remote_identity('kubernetes'),
             override_configs=resources.cluster_config_overrides)
 
-        if isinstance(remote_identity, dict):
-            # If remote_identity is a dict, use the service account for the
-            # current context
-            k8s_service_account_name = remote_identity.get(context, None)
-            if k8s_service_account_name is None:
-                err_msg = (f'Context {context!r} not found in '
-                           'remote identities from config.yaml')
-                raise ValueError(err_msg)
-        else:
-            # If remote_identity is not a dict, use
-            k8s_service_account_name = remote_identity
+        k8s_service_account_name = _match_remote_identity(
+            remote_identity, context)
+        if k8s_service_account_name is None:
+            err_msg = (f'Context {context!r} not found in '
+                       'remote identities from config.yaml')
+            raise ValueError(err_msg)
 
         lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
         no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
+        none = schemas.RemoteIdentityOptions.NONE.value
 
-        if k8s_service_account_name in (lc, sa, no_upload):
+        # A controller cluster provisions other clusters, so its pod needs
+        # cluster-scoped permissions no pod running user code should hold.
+        # Match on the *display* name: name_on_cloud is transformed and never
+        # carries the controller prefixes.
+        #
+        # This makes check_cluster_name_not_controller() (controller_utils)
+        # load-bearing for a permission boundary: it is what stops a user
+        # launching `sky-jobs-controller-mine` to be handed this identity.
+        # Relaxing that guard, or letting a request skip it
+        # (`_disable_controller_check` is in-process only), would turn into
+        # privilege escalation -- see test_kubernetes_ray_template_snapshot.py
+        # and test_payloads.py under tests/unit_tests/test_sky/.
+        is_controller = common.is_controller_name(cluster_name.display_name)
+
+        # NONE set by the server holds even when the requester's layer says
+        # otherwise; the check below refuses that rather than obeying it.
+        identity_none = (k8s_service_account_name == none or
+                         self._server_remote_identity(context) == none)
+        if isinstance(resources.kubernetes_identity, str):
+            # A cluster SkyPilot launches for itself with a fixed account
+            # (execution.launch's _kubernetes_identity), never user code.
+            k8s_service_account_name = resources.kubernetes_identity
+            identity_none = False
+            is_controller = False
+        elif identity_none and is_controller:
+            # A controller provisions clusters and needs its identity; NONE
+            # still reaches the clusters it launches, through the user's config.
+            logger.info(f'Ignoring `remote_identity: NONE` (context '
+                        f'{context!r}) for controller '
+                        f'{cluster_name.display_name!r}: it needs an identity '
+                        'to provision clusters.')
+            identity_none = False
+            k8s_service_account_name = (
+                kubernetes_utils.CONTROLLER_SERVICE_ACCOUNT_NAME)
+        elif identity_none:
+            self._refuse_undoing_none(context, k8s_service_account_name,
+                                      resources.cluster_config_overrides)
+            # Same account name as SERVICE_ACCOUNT, so imagePullSecrets on it
+            # keep working; it gets no token and no roles.
+            k8s_service_account_name = (
+                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+        elif k8s_service_account_name in (lc, sa, no_upload):
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
             # which needs a serviceaccount (specifically for SSH node pools
@@ -660,18 +1079,36 @@ class Kubernetes(clouds.Cloud):
             # For NO_UPLOAD, we don't upload credentials but still need a
             # service account for pod creation.
             k8s_service_account_name = (
+                kubernetes_utils.CONTROLLER_SERVICE_ACCOUNT_NAME
+                if is_controller else
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+        else:
+            # An operator-supplied account owns its own permissions; SkyPilot
+            # creates and reconciles nothing for it, controller or not.
+            is_controller = False
 
         fuse_device_required = bool(resources.requires_fuse)
 
         # Configure spot labels, if requested and supported
         spot_label_key, spot_label_value = None, None
         if resources.use_spot:
-            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+            # Pass the provisioning context so get_spot_label() can resolve the
+            # autoscaler type per-context. Without it, only a global
+            # kubernetes.autoscaler setting is honored, and per-context configs
+            # (context_configs.<ctx>.autoscaler) never inject the spot label.
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label(
+                context)
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
-            k8s_resource_key, acc_count)
+            k8s_resource_key, acc_count, acc_type)
+        oci_roce_enabled = (
+            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+        # The NCCL profile picked below depends on it: a pod holding SR-IOV
+        # VFs cannot see the host's physical functions, so the HCA list has
+        # to change with the delivery model.
+        rdma_mode = self._resolve_rdma_mode(context, oci_roce_enabled)
+        sriov_mode = (rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV)
 
         k8s_efa_count = None
         if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
@@ -682,19 +1119,18 @@ class Kubernetes(clouds.Cloud):
                     f'No EFA interfaces detected on AWS nodes with '
                     f'accelerator {k8s_acc_label_key}, skipping enabling EFA.')
 
-        # Check if this cluster supports high performance networking and
-        # configure appropriate settings for different cluster types
-        if (resources.network_tier is not None and
-                resources.network_tier == resources_utils.NetworkTier.BEST):
-            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
-            unsupported_features = self._unsupported_features_for_resources(
-                resources)
-            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
-                    not in unsupported_features:
-                # Add high-performance networking environment variables for
-                # clusters with high performance networking
-                network_env_vars = network_type.get_network_env_vars()
-                k8s_env_vars.update(network_env_vars)
+        # Multi-node EFA jobs must co-locate every replica in a single AZ: an
+        # AWS EFA placement group is single-AZ, so pods that scatter across AZs
+        # cannot form the fabric (NCCL degrades or fails to init). SkyPilot
+        # schedules each pod independently with no cross-pod topology
+        # constraint, so on a multi-AZ cluster they can scatter. For a
+        # multi-node network_tier: best job on AWS EFA, tell the template to
+        # inject a required same-zone podAffinity keyed on the per-job label so
+        # every replica follows the first into whatever AZ it lands in (the user
+        # names no zone). network_type is only AWS_EFA when network_tier is
+        # BEST, so this stays off for every other tier and cloud.
+        k8s_efa_same_az = (num_nodes > 1 and network_type
+                           == KubernetesHighPerformanceNetworkType.AWS_EFA)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -751,13 +1187,30 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
         is_using_kueue = k8s_kueue_local_queue_name is not None
+        # auto_mounts volumes are injected later, in write_cluster_config(), so
+        # they never reach volume_mounts. Resolve them here as well, or an
+        # auto-mounted ReadWriteMany volume would be held to the base timeout
+        # while the same volume declared on the task gets the extended one.
+        auto_mounts = volume_lib.resolve_auto_mounts(context).mounted
         timeout = self._calculate_provision_timeout(
-            num_nodes, volume_mounts, enable_flex_start or
-            enable_flex_start_queued_provisioning, is_using_kueue)
+            num_nodes,
+            volume_mounts,
+            enable_flex_start or enable_flex_start_queued_provisioning,
+            is_using_kueue,
+            auto_mounts=auto_mounts)
 
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
         # because it could be SSH node pool as well.
         cloud_config_str = self._REPR.lower()
+        # Resolved here, with the task's config overrides and the workspace
+        # scope, and passed to the provisioner through the cluster YAML so an
+        # explicit `kueue.admission_timeout` at any scope is honored while
+        # pods wait for queue admission. None leaves the provisioner default.
+        k8s_kueue_admission_timeout = (
+            skypilot_config.get_effective_queue_admission_timeout(
+                cloud=cloud_config_str,
+                region=context,
+                override_configs=resources.cluster_config_overrides))
         timeout = skypilot_config.get_effective_region_config(
             cloud=cloud_config_str,
             region=context,
@@ -765,7 +1218,165 @@ class Kubernetes(clouds.Cloud):
             default_value=timeout,
             override_configs=resources.cluster_config_overrides)
 
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        namespace = kubernetes_utils.get_namespace(
+            context=context,
+            override_configs=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
+        )
+
+        # Detect hostNetwork before the template is rendered so the probe
+        # env vars can be wired into deploy_vars. Two independent paths put
+        # a pod on the host network namespace, and both need the probe:
+        #   1. The user sets spec.hostNetwork in pod_config. Resolved through
+        #      the same helper combine_pod_config_fields() uses, so this
+        #      agrees with the pod_config folded into the rendered YAML.
+        #   2. OCI OKE RoCE defaults to host networking. Without the probe,
+        #      the pod's sshd can't bind host:22 (the K8s node's own sshd owns
+        #      it) and inter-node Ray ports collide.
+        # An explicit pod_config value wins over the OCI RoCE default, so a
+        # cluster whose RDMA arrives through a device plugin rather than the
+        # host namespace can opt out with `hostNetwork: false`. This value is
+        # also what gates `hostNetwork` in kubernetes-ray.yml.j2, so the pod
+        # and the probe can no longer disagree about which mode it is in.
+        merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
+            resources.cluster_config_overrides, self, context)
+
+        # Check if this cluster supports high performance networking and
+        # configure appropriate settings for different cluster types
+        if (resources.network_tier is not None and
+                resources.network_tier == resources_utils.NetworkTier.BEST):
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            unsupported_features = self._unsupported_features_for_resources(
+                resources)
+            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
+                    not in unsupported_features:
+                # Add high-performance networking environment variables for
+                # clusters with high performance networking.
+                if oci_roce_enabled:
+                    # OCI tunes NCCL per instance shape, so read it off the
+                    # nodes this pod can land on.
+                    shapes = oci_nccl.candidate_shapes(
+                        context, k8s_acc_label_key, k8s_acc_label_values,
+                        merged_pod_config.get('spec', {}).get('nodeSelector'))
+                    network_env_vars = oci_nccl.get_env_vars(
+                        context, namespace, shapes, pod_local_rdma=sriov_mode)
+                else:
+                    network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
+
+        # Precedence: a task's pod_config is more specific than an admin's
+        # per-context mode, which in turn is more specific than what the
+        # detected network type implies.
+        pod_config_host_network = merged_pod_config.get('spec',
+                                                        {}).get('hostNetwork')
+        # The one combination with no coherent meaning. Host networking puts
+        # the pod in the node's network namespace, where the VF attachments
+        # resolve to nothing -- the pod would schedule, run, and quietly move
+        # its traffic over TCP. Every other failure here is loud, so this one
+        # is too. Gated on the accelerator request for the same reason the VF
+        # injection below is: with no VFs requested there is nothing to be
+        # unreachable, and a CPU-only task may want host networking for
+        # unrelated reasons (host ports) on a context an admin marked sriov.
+        if pod_config_host_network and sriov_mode and acc_count:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'pod_config sets hostNetwork: true, but context '
+                    f'{context!r} declares kubernetes.rdma.mode: '
+                    f'{kubernetes_enums.KubernetesRdmaMode.SRIOV.value!r}. '
+                    'The two describe different ways of reaching the RDMA '
+                    'fabric and cannot be combined: in the host network '
+                    'namespace the pod\'s virtual functions are unreachable, '
+                    'so it would run without RDMA. Drop the hostNetwork '
+                    'override, or unset rdma.mode to use host networking.')
+        if pod_config_host_network is not None:
+            k8s_host_network = bool(pod_config_host_network)
+        elif sriov_mode:
+            k8s_host_network = False
+        else:
+            k8s_host_network = oci_roce_enabled
+
+        # Reaching the RDMA devices through a /dev/infiniband hostPath needs a
+        # privileged container, and is only how the bare-metal model works. An
+        # SR-IOV device plugin configured with isRdma injects the character
+        # devices itself, so mounting the host directory there would both
+        # shadow what the kubelet injected and hand the pod every device on the
+        # node instead of its own VFs. Not keyed on k8s_host_network: an
+        # explicit pod_config `hostNetwork: false` alone keeps today's device
+        # access, so only declaring a mode changes it.
+        if sriov_mode:
+            k8s_rdma_host_device_access = False
+        else:
+            k8s_rdma_host_device_access = oci_roce_enabled
+        # SR-IOV mode also needs the VF extended resource on the container and
+        # a Multus attachment per VF. Both names are chosen by whoever
+        # configured the device plugin on this cluster, so they are declared
+        # rather than guessed; the count is derived, since it follows from the
+        # node and the GPUs requested.
+        #
+        # Only when the task asks for accelerators. OCI RoCE is detected from
+        # node labels alone, so a CPU-only task can reach here on an SR-IOV
+        # context; it has no GPUs to size VFs against and no use for them.
+        # Skipping just this part rather than the whole block is deliberate --
+        # the mode still turns host networking off, which is what makes such a
+        # pod an ordinary one on a pod-networked cluster.
+        k8s_rdma_nic_resource = None
+        k8s_rdma_nic_count = None
+        k8s_rdma_networks = None
+        if sriov_mode and acc_count:
+            k8s_rdma_nic_resource = skypilot_config.get_effective_region_config(
+                cloud=cloud_config_str,
+                region=context,
+                keys=('rdma', 'resource'),
+                default_value=None)
+            k8s_rdma_networks = skypilot_config.get_effective_region_config(
+                cloud=cloud_config_str,
+                region=context,
+                keys=('rdma', 'networks'),
+                default_value=None)
+            if not k8s_rdma_nic_resource or not k8s_rdma_networks:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'kubernetes.rdma.mode is '
+                        f'{kubernetes_enums.KubernetesRdmaMode.SRIOV.value!r} '
+                        f'for context {context!r}, but rdma.resource and/or '
+                        'rdma.networks are not set. Both name cluster-specific '
+                        'objects that SkyPilot cannot infer: the extended '
+                        'resource advertised by the RDMA device plugin (e.g. '
+                        '"nvidia.com/rdma-vf") and the '
+                        'NetworkAttachmentDefinition to attach (e.g. '
+                        '"default/rdma-vf").')
+            # One attachment, repeated below once per VF. A value that is
+            # already a list would be repeated too, leaving more attachments
+            # than the resource request -- which fails at CNI time, far from
+            # the config that caused it.
+            if ',' in k8s_rdma_networks:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'kubernetes.rdma.networks for context {context!r} is '
+                        f'{k8s_rdma_networks!r}, but it names a single '
+                        'NetworkAttachmentDefinition, not a list. SkyPilot '
+                        'repeats it once per virtual function it requests.')
+            k8s_rdma_nic_count = self._derive_rdma_nic_count(
+                context, k8s_rdma_nic_resource, k8s_acc_label_key,
+                k8s_acc_label_values, k8s_resource_key, acc_count)
+            if k8s_rdma_nic_count is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Could not determine how many '
+                        f'{k8s_rdma_nic_resource!r} to request on context '
+                        f'{context!r}: no node advertises it while also being '
+                        'able to host this request. Check that the RDMA device '
+                        'plugin is running and that rdma.resource names the '
+                        'resource it advertises.')
+            # One attachment per VF, matching the resource count.
+            k8s_rdma_networks = ','.join([k8s_rdma_networks] *
+                                         k8s_rdma_nic_count)
+
+        if k8s_host_network:
+            # The port values themselves are written into the pod spec per pod
+            # (host_network_ports), not templated here: they are assigned once
+            # the existing pods are known, which this render cannot see.
+            k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -776,25 +1387,45 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
                              if k8s_efa_count is not None else None,
+            'k8s_efa_same_az': k8s_efa_same_az,
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
+            # Merged into the rendered pod by write_cluster_config().
+            'pod_fields': kubernetes_utils.get_pod_fields(
+                acc_label_key=k8s_acc_label_key,
+                acc_label_values=k8s_acc_label_values,
+                avoid_label_keys=avoid_label_keys,
+                topology_label_key=k8s_topology_label_key,
+                topology_label_value=k8s_topology_label_value,
+                spot_label_key=spot_label_key,
+                spot_label_value=spot_label_value,
+                enable_flex_start=enable_flex_start),
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_sa_token': 'true',
+            # Gates the provisioner-only roles: only a controller pod
+            # provisions, and only in non-consolidation deployments --
+            # under consolidation the controllers are API-server
+            # processes and no pod needs them at all.
+            'k8s_is_controller': is_controller,
+            'k8s_automount_sa_token': 'false' if identity_none else 'true',
+            'k8s_remote_identity_none': identity_none,
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
+            'k8s_kueue_admission_timeout': k8s_kueue_admission_timeout,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
-            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
-            'k8s_spot_label_key': spot_label_key,
-            'k8s_spot_label_value': spot_label_value,
+            'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_setup_command':
+                kubernetes_fuse.get_fusermount_shim_setup_command(
+                    sudo_cmd='$(prefix_cmd)',
+                    shared_dir=kubernetes_fuse.FUSERMOUNT_SHARED_DIR),
             'tpu_requested': tpu_requested,
-            'k8s_topology_label_key': k8s_topology_label_key,
-            'k8s_topology_label_value': k8s_topology_label_value,
             'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
             'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
+            'ray_patches_cmd': instance_setup.ray_patches_cmd(
+                constants.SKY_REMOTE_RAY_VERSION),
             'ray_head_start_command': instance_setup.ray_head_start_command(
                 custom_resources, custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -819,18 +1450,31 @@ class Kubernetes(clouds.Cloud):
                 constants.SKY_UNSET_PYTHONPATH_AND_SET_CWD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
-            'avoid_label_keys': avoid_label_keys,
-            'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
             'k8s_context': context,
             'k8s_namespace': namespace,
+            'k8s_host_network': k8s_host_network,
+            'k8s_rdma_host_device_access': k8s_rdma_host_device_access,
+            'k8s_rdma_nic_resource': k8s_rdma_nic_resource,
+            'k8s_rdma_nic_count': k8s_rdma_nic_count,
+            'k8s_rdma_networks': k8s_rdma_networks,
         }
 
-        # Add ephemeral storage to deploy vars if specified.
-        ephemeral_storage = resources.ephemeral_storage
-        if ephemeral_storage is not None:
-            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+        # Pod-level terminationGracePeriodSeconds rendered from any
+        # preemption hooks the resources declare (see
+        # `_compute_preemption_hook_timeout`).  Autostop and `sky down`
+        # paths control their own timing so they don't need a
+        # grace-period override — hook-free pods stay on the K8s
+        # default (30s).
+        preemption_timeout = _compute_preemption_hook_timeout(resources.hooks)
+        if preemption_timeout is not None:
+            deploy_vars['preemption_hook_timeout'] = preemption_timeout
+
+        # On Kubernetes, disk_size maps to ephemeral-storage requests.
+        disk_size = resources.disk_size
+        if resources.disk_size_specified:
+            deploy_vars['k8s_ephemeral_storage'] = str(disk_size)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
@@ -855,9 +1499,9 @@ class Kubernetes(clouds.Cloud):
             else:
                 deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
                 deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
-            if ephemeral_storage is not None:
+            if resources.disk_size_specified:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
-                    ephemeral_storage * mul, 3)
+                    disk_size * mul, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -875,6 +1519,13 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
+
+        # Superseded by k8s_rdma_host_device_access, which is what the
+        # template now gates the privileged container and the /dev/infiniband
+        # hostPath on. Still published because it answers a different question
+        # -- whether this is an OCI RoCE cluster at all, rather than how its
+        # NICs are delivered -- which consumers outside this repo may read.
+        deploy_vars['k8s_enable_oci_roce'] = oci_roce_enabled
 
         # User-specified APT mirror candidates for pod package installs.
         # None means unset (template uses built-in defaults); an empty list
@@ -917,12 +1568,7 @@ class Kubernetes(clouds.Cloud):
         return deploy_vars
 
     @staticmethod
-    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
-        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
-            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
-                        'is not supported by Kubernetes. '
-                        'To add additional disk, use volumes.'
-                        f'{colorama.Style.RESET_ALL}')
+    def _warn_on_disk_tier(resources: 'resources_lib.Resources'):
         if resources.disk_tier is not None:
             logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
                         'is not supported by Kubernetes. '
@@ -934,7 +1580,7 @@ class Kubernetes(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
-        self._warn_on_disk_size(resources)
+        self._warn_on_disk_tier(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -1039,7 +1685,7 @@ class Kubernetes(clouds.Cloud):
 
         try:
             check_result = kubernetes_utils.check_credentials(
-                context, run_optional_checks=True)
+                context, run_optional_checks=True, cloud=cls._REPR.lower())
             if check_result[0]:
                 if check_result[1] is not None:
                     return True, (_bright_green_color('enabled.') +
@@ -1245,8 +1891,10 @@ class Kubernetes(clouds.Cloud):
                              volume_name: str) -> Tuple[bool, Optional[str]]:
         """Validates that the volume name is valid for this cloud.
 
-        Follows Kubernetes DNS-1123 subdomain rules:
-        - must be <= 253 characters
+        Follows Kubernetes DNS-1123 subdomain rules, with a shorter length
+        cap: the name is also used as a pod spec.volumes[].name, which is an
+        RFC 1123 *label*.
+        - must be <= 63 characters (_MAX_VOLUME_NAME_LEN_LIMIT)
         - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
         """
         # Max length per DNS-1123 subdomain
@@ -1303,6 +1951,114 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
+    def _resolve_rdma_mode(
+        cls, context: str, oci_roce_enabled: bool
+    ) -> Optional[kubernetes_enums.KubernetesRdmaMode]:
+        """How RDMA NICs reach pods on this context, or None for the default.
+
+        Unset keeps the historical behavior, so this is additive: only a
+        context that declares a mode sees any change.
+
+        Scoped to the one network type whose NIC delivery it describes,
+        matching how every other per-cloud NIC injection is gated (AWS EFA,
+        CoreWeave and Together). A tenant-wide ``kubernetes.rdma`` therefore
+        applies only where it is meaningful instead of failing launches on the
+        rest of a mixed fleet -- and silently, since a fleet-wide default
+        landing on a cluster it does not describe is the intended case, not a
+        problem to report on every launch. The mechanism itself -- an SR-IOV
+        device plugin plus Multus -- is not OCI-specific, so widening this is
+        moving the check below.
+        """
+        if not oci_roce_enabled:
+            return None
+        mode = skypilot_config.get_effective_region_config(
+            cloud=cls._REPR.lower(),
+            region=context,
+            keys=('rdma', 'mode'),
+            default_value=None)
+        if mode is None:
+            return None
+        return kubernetes_enums.KubernetesRdmaMode(mode.lower())
+
+    @staticmethod
+    def _derive_rdma_nic_count(context: str, resource: str,
+                               k8s_acc_label_key: Optional[str],
+                               k8s_acc_label_values: Optional[List[str]],
+                               k8s_resource_key: Optional[str],
+                               acc_count: Optional[int]) -> Optional[int]:
+        """How many RDMA NICs to request, proportional to the GPUs requested.
+
+        Read off a node that both advertises ``resource`` and could host the
+        request, rather than whichever node happened to match the network-type
+        label first -- a drained node advertises neither. Matching the
+        accelerator label *value*, not just its key, matters on a cluster where
+        several GPU shapes share a key: the VF-per-GPU ratio differs per shape,
+        so reading it off a shape the pod's node affinity excludes would
+        under-request VFs and silently lose bandwidth. The values are raw node
+        label strings, not canonical accelerator names, which is what makes
+        comparing them against a node's own label correct. Returns None when no
+        such node exists, leaving the caller to fail with an actionable error
+        instead of guessing a count: over-requesting merely leaves the pod
+        unschedulable, but under-requesting yields a pod that runs with fewer
+        NICs than intended and silently loses bandwidth.
+
+        Proportional rather than 1:1 because the ratio is a property of the
+        shape: dual-port shapes advertise two VFs per GPU.
+        """
+        if not acc_count or not k8s_acc_label_key or not k8s_resource_key:
+            return None
+        # Deliberately not swallowing a failure to list nodes: the caller
+        # reports None as "no node advertises this resource", which would be a
+        # misleading diagnosis for an API or permission error.
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        for node in nodes:
+            allocatable = node.status.allocatable or {}
+            labels = node.metadata.labels or {}
+            if (k8s_acc_label_key not in labels or
+                    k8s_resource_key not in allocatable or
+                    resource not in allocatable):
+                continue
+            # Same node set the pod's affinity pins to.
+            if (k8s_acc_label_values is not None and
+                    labels[k8s_acc_label_key] not in k8s_acc_label_values):
+                continue
+            try:
+                node_gpu_count = int(allocatable[k8s_resource_key])
+                node_nic_count = int(allocatable[resource])
+            except (TypeError, ValueError):
+                continue
+            if node_gpu_count < acc_count or node_nic_count <= 0:
+                continue
+            return max(
+                1,
+                min(math.floor(acc_count / node_gpu_count * node_nic_count),
+                    node_nic_count))
+        return None
+
+    @staticmethod
+    def _derive_efa_count_from_catalog(acc_type: str,
+                                       acc_count: int) -> Optional[int]:
+        """EFA interfaces to request for ``acc_type:acc_count``, or None.
+
+        Delegates to the AWS instance-type catalog, which sizes from the lowest
+        EFA-per-accelerator ratio among the variants that can host the request
+        -- so the count is satisfiable on whatever variant a cold cluster's
+        autoscaler provisions and never strands GPUs. Returns None -- leaving
+        EFA unset, i.e. today's behavior -- whenever the catalog can't answer
+        (no MaximumEfaInterfaces column yet, or no hosting-capable variant).
+        Generic and autoscaler-agnostic.
+        """
+        # Local import: keeps the AWS-specific catalog off non-AWS import paths.
+        # pylint: disable-next=import-outside-toplevel
+        from sky.catalog import aws_catalog
+        try:
+            return aws_catalog.get_efa_count_for_accelerator(
+                acc_type, acc_count)
+        except (ValueError, KeyError, ImportError):
+            # Any catalog miss/parse issue -> degrade to no EFA (today's path).
+            return None
+
+    @classmethod
     def _detect_network_type(
         cls,
         context: str,
@@ -1310,6 +2066,7 @@ class Kubernetes(clouds.Cloud):
         k8s_acc_label_key: Optional[str] = None,
         k8s_resource_key: Optional[str] = None,
         acc_count: Optional[int] = None,
+        acc_type: Optional[str] = None,
     ) -> Tuple[KubernetesHighPerformanceNetworkType, Optional[Dict[str, Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
@@ -1320,6 +2077,9 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key: The key of the Kubernetes accelerator label.
             k8s_resource_key: The key of the Kubernetes resource.
             acc_count: The number of accelerators requested.
+            acc_type: The accelerator type requested (e.g. 'H100'). Used to
+                derive the EFA interface count on AWS scale-from-zero clusters
+                where no GPU+EFA node is running to scan.
 
         Returns:
             A tuple of (network_type, metadata).
@@ -1331,6 +2091,12 @@ class Kubernetes(clouds.Cloud):
         if (network_tier is None or
                 network_tier != resources_utils.NetworkTier.BEST):
             return KubernetesHighPerformanceNetworkType.NONE, None
+
+        # Whether we saw at least one AWS node (even a non-GPU system node).
+        # AWS EKS nodes always carry the cloud-provider/topology labels below,
+        # so this stays True on a scale-from-zero cluster where only system
+        # nodes are up -- letting the fallback below still derive an EFA count.
+        saw_aws_efa_node = False
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1349,11 +2115,21 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
                                 None)
+                        # OCI OKE bare-metal GPU nodes provisioned in a
+                        # dedicated RDMA capacity pool. The `rdma.*` label
+                        # family is only set on RoCE-capable nodes; matching
+                        # broader `oci.oraclecloud.com/` would false-positive
+                        # on non-RDMA OCI nodes.
+                        if label_key.startswith('oci.oraclecloud.com/rdma.'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.OCI_ROCE,
+                                None)
                         if label_key.startswith(
                             ('k8s.io/cloud-provider-aws', 'topology.k8s.aws',
                              'topology.ebs.csi.aws.com')):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
+                            saw_aws_efa_node = True
                             metadata: Optional[Dict[str, Any]] = None
                             # Only check for AWS EFA count if GPU is specified
                             if (not k8s_acc_label_key or not k8s_resource_key or
@@ -1451,14 +2227,41 @@ class Kubernetes(clouds.Cloud):
             # If we can't reach the cluster, assume no high perf networking
             pass
 
-        # If we cannot determine the network type based on nodes
-        # Check if the cluster has any node pools with autoscaling enabled
-        # with machine types that support high perf networking for GKE.
+        # Autoscaler configured for this context (karpenter/generic/gke), or
+        # None on a static cluster. Both cold-start fallbacks below require it:
+        # on a cluster that can't scale up a GPU node, deriving a count would
+        # request a fabric for a pod that can never be scheduled -- it would
+        # just pend to provision_timeout.
         autoscaler_type = skypilot_config.get_effective_region_config(
             cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)
+
+        # AWS EFA scale-from-zero fallback: the node scan above can only read an
+        # EFA count off an already-running GPU+EFA node. On a cold cluster
+        # (Karpenter / cluster-autoscaler at min=0) it finds none, so derive the
+        # count from the requested accelerator via the instance-type catalog --
+        # otherwise network_tier: best omits the EFA request and NCCL silently
+        # falls back to TCP. Mirrors the GKE machine-type fallback below. Gated
+        # on having seen an AWS node (any EKS node carries the cloud-provider
+        # labels, even a system node) and on an autoscaler being configured, so
+        # it never fires on non-AWS or static clusters. Degrades to today's
+        # behavior (no EFA metadata) whenever the catalog can't answer -- e.g. a
+        # hosted catalog predating the MaximumEfaInterfaces column, or an
+        # accelerator/instance it can't resolve -- rather than reporting an EFA
+        # fabric it can't size.
+        if (saw_aws_efa_node and autoscaler_type is not None and
+                acc_type is not None and acc_count):
+            derived_efa = cls._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+            if derived_efa is not None:
+                return (KubernetesHighPerformanceNetworkType.AWS_EFA, {
+                    'efa_count': derived_efa
+                })
+
+        # GKE machine-type cold-start fallback: check autoscaling node pools for
+        # high-perf-networking machine types.
         if (autoscaler_type !=
                 kubernetes_enums.KubernetesAutoscalerType.GKE.value):
             return KubernetesHighPerformanceNetworkType.NONE, None

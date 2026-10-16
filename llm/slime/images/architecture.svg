@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 860" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2b5fd9"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b23a20"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2e7d5b"/>
+    </marker>
+  </defs>
+
+  <!-- paper -->
+  <rect x="0" y="0" width="1240" height="860" rx="18" fill="#f7f6f3"/>
+
+  <!-- ============ JobGroup boundary ============ -->
+  <rect x="48" y="78" width="1160" height="440" rx="14" fill="none" stroke="#2b5fd9" stroke-width="1.6" stroke-dasharray="2 6"/>
+  <rect x="72" y="62" width="226" height="32" rx="16" fill="#f7f6f3" stroke="#2b5fd9" stroke-width="1.4"/>
+  <text x="185" y="83" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12.5" letter-spacing="2" fill="#2b5fd9">SKYPILOT JOB GROUP</text>
+
+  <!-- ============ Trainer member ============ -->
+  <rect x="88" y="128" width="640" height="350" rx="10" fill="#edf1fa" stroke="#2b4f9e" stroke-width="1.3"/>
+  <text x="108" y="156" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" letter-spacing="1.5" fill="#2b4f9e">JOB 1</text>
+  <text x="108" y="182" font-size="18" font-weight="700" fill="#1f2430">Trainer cluster</text>
+  <rect x="636" y="142" width="76" height="24" rx="12" fill="#ffffff" stroke="#2b4f9e" stroke-opacity="0.4"/>
+  <text x="674" y="158" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#2b4f9e">H100&#215;4</text>
+
+  <!-- Megatron -->
+  <rect x="528" y="200" width="184" height="92" rx="8" fill="#ffffff" stroke="#7f97c4" stroke-width="1.2"/>
+  <text x="620" y="230" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2430">Trainer</text>
+  <text x="620" y="248" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#6b7280">Megatron &#183; GPU</text>
+  <text x="620" y="272" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#1f2430">&#9315; GRPO + optimizer step</text>
+
+  <!-- RolloutManager -->
+  <rect x="108" y="240" width="360" height="200" rx="8" fill="#ffffff" stroke="#7f97c4" stroke-width="1.2"/>
+  <text x="124" y="268" font-size="14" font-weight="600" fill="#1f2430">RolloutManager</text>
+  <text x="124" y="286" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#6b7280">CPU &#183; mini-swe-agent loops &#183; router</text>
+
+  <rect x="124" y="340" width="104" height="52" rx="6" fill="#f3f6fc" stroke="#9db6ea" stroke-width="1.2"/>
+  <text x="176" y="369" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2430">agent loop 1</text>
+
+  <rect x="240" y="340" width="104" height="52" rx="6" fill="#f3f6fc" stroke="#9db6ea" stroke-width="1.2"/>
+  <text x="292" y="369" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2430">agent loop 2</text>
+
+  <rect x="356" y="340" width="96" height="52" rx="6" fill="none" stroke="#9db6ea" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="404" y="369" text-anchor="middle" font-size="12.5" fill="#6b7280">&#8230; loop N</text>
+
+  <!-- ============ Inference member(s) ============ -->
+  <rect x="790" y="128" width="400" height="350" rx="10" fill="#fbefe9" stroke="#a8402c" stroke-width="1.3"/>
+  <text x="810" y="156" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" letter-spacing="1.5" fill="#a8402c">JOBS 2&#8230;N+1</text>
+  <text x="810" y="182" font-size="18" font-weight="700" fill="#1f2430">Inference clusters</text>
+  <rect x="1078" y="142" width="96" height="24" rx="12" fill="#ffffff" stroke="#a8402c" stroke-opacity="0.4"/>
+  <text x="1126" y="158" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#a8402c">H100&#215;1 each</text>
+
+  <rect x="814" y="210" width="352" height="62" rx="8" fill="#ffffff" stroke="#c98872" stroke-width="1.2"/>
+  <text x="990" y="246" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1f2430">SGLang engine</text>
+
+  <rect x="814" y="286" width="352" height="62" rx="8" fill="#ffffff" stroke="#c98872" stroke-width="1.2"/>
+  <text x="990" y="322" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1f2430">SGLang engine</text>
+
+  <rect x="814" y="362" width="352" height="54" rx="8" fill="none" stroke="#c98872" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="990" y="394" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#6b7280">&#8230; &#215;N engines</text>
+
+  <!-- ============ Sandboxes ============ -->
+  <rect x="100" y="612" width="424" height="160" rx="10" fill="#f2f1ed" stroke="#9aa1ad" stroke-width="1.2"/>
+  <text x="116" y="638" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" letter-spacing="1.5" fill="#5c636e">SKYPILOT SANDBOXES</text>
+  <text x="116" y="655" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#6b7280">CPU</text>
+
+  <rect x="124" y="664" width="104" height="66" rx="8" fill="#ffffff" stroke="#9aa1ad" stroke-width="1.2"/>
+  <text x="176" y="701" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">sandbox 1</text>
+
+  <rect x="240" y="664" width="104" height="66" rx="8" fill="#ffffff" stroke="#9aa1ad" stroke-width="1.2"/>
+  <text x="292" y="701" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">sandbox 2</text>
+
+  <rect x="356" y="664" width="96" height="66" rx="8" fill="none" stroke="#9aa1ad" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="404" y="701" text-anchor="middle" font-size="12" fill="#6b7280">&#8230; sandbox N</text>
+
+  <!-- ============ RWX volume ============ -->
+  <path d="M880,632 a100,12 0 0 0 200,0 v66 a100,12 0 0 1 -200,0 z" fill="#ffffff" stroke="#9aa1ad" stroke-width="1.2"/>
+  <ellipse cx="980" cy="632" rx="100" ry="12" fill="#ffffff" stroke="#9aa1ad" stroke-width="1.2"/>
+  <text x="980" y="668" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1f2430">RWX volume</text>
+  <text x="980" y="686" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" fill="#6b7280">/shared/policy</text>
+
+  <!-- ============ flows (drawn last, over the boxes) ============ -->
+  <!-- (1) RolloutManager <-> engines -->
+  <path d="M300,240 V104 H920 V128" fill="none" stroke="#2b5fd9" stroke-width="1.6" stroke-dasharray="6 5" marker-start="url(#ab)" marker-end="url(#ab)"/>
+  <text x="640" y="97" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#2b5fd9">&#9312; each turn: messages &#8644; tokens + logprobs</text>
+
+  <!-- (2) each agent loop <-> its own sandbox -->
+  <path d="M176,392 V660" fill="none" stroke="#2e7d5b" stroke-width="1.6" stroke-dasharray="6 5" marker-start="url(#ag)" marker-end="url(#ag)"/>
+  <path d="M292,392 V660" fill="none" stroke="#2e7d5b" stroke-width="1.6" stroke-dasharray="6 5" marker-start="url(#ag)" marker-end="url(#ag)"/>
+  <path d="M404,392 V660" fill="none" stroke="#2e7d5b" stroke-width="1.6" stroke-dasharray="6 5" marker-start="url(#ag)" marker-end="url(#ag)"/>
+  <rect x="172" y="576" width="240" height="20" fill="#f7f6f3"/>
+  <text x="292" y="590" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#2e7d5b">&#9313; checkout &#183; exec &#183; grade</text>
+
+  <!-- (3) trajectories to trainer -->
+  <path d="M468,330 H498 V246 H522" fill="none" stroke="#2b5fd9" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#ab)"/>
+  <text x="478" y="352" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#2b5fd9">&#9314; trajectories + logprobs + rewards</text>
+
+  <!-- (5) weights write: Megatron -> volume -->
+  <path d="M712,246 H760 V665 H874" fill="none" stroke="#b23a20" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+  <rect x="766" y="573" width="112" height="20" fill="#f7f6f3"/>
+  <text x="772" y="587" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#b23a20">&#9316; write weights</text>
+
+  <!-- (6) engines pull: volume -> inference -->
+  <path d="M980,618 V484" fill="none" stroke="#b23a20" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+  <rect x="892" y="545" width="176" height="20" fill="#f7f6f3"/>
+  <text x="980" y="559" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#b23a20">&#9317; engines pull weights</text>
+
+  <!-- ============ legend ============ -->
+  <path d="M100,812 H140" stroke="#2b5fd9" stroke-width="1.6" stroke-dasharray="6 5"/>
+  <text x="148" y="816" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5c636e">rollout data</text>
+  <path d="M260,812 H300" stroke="#2e7d5b" stroke-width="1.6" stroke-dasharray="6 5"/>
+  <text x="308" y="816" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5c636e">sandbox actions</text>
+  <path d="M440,812 H480" stroke="#b23a20" stroke-width="1.6" stroke-dasharray="6 5"/>
+  <text x="488" y="816" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5c636e">policy weights</text>
+</svg>

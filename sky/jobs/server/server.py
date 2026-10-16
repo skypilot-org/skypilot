@@ -7,13 +7,14 @@ import fastapi
 from sky import sky_logging
 from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.server import core
+from sky.server import download_utils
 from sky.server import stream_utils
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
-from sky.skylet import constants
+from sky.server.requests import role_filter
 from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
@@ -42,6 +43,12 @@ async def launch(request: fastapi.Request,
     # the short executor instead - then jobs.launch will not be blocked by
     # sky.launch.
     consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    if jobs_launch_body.depends_on and not consolidation_mode:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=('depends_on requires the API server to run managed jobs '
+                    'in consolidation mode. This server uses a separate jobs '
+                    'controller.'))
     schedule_type = (api_requests.ScheduleType.SHORT
                      if consolidation_mode else api_requests.ScheduleType.LONG)
     await executor.schedule_request_async(
@@ -58,8 +65,11 @@ async def launch(request: fastapi.Request,
 # For backwards compatibility
 # TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')
-async def queue(request: fastapi.Request,
-                jobs_queue_body: payloads.JobsQueueBody) -> None:
+async def queue(
+    request: fastapi.Request,
+    jobs_queue_body: payloads.JobsQueueBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_queue_body),
+) -> None:
     needs_long = _controller_refresh_need_long(jobs_queue_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -74,8 +84,11 @@ async def queue(request: fastapi.Request,
 
 
 @router.post('/queue/v2')
-async def queue_v2(request: fastapi.Request,
-                   jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
+async def queue_v2(
+    request: fastapi.Request,
+    jobs_queue_body_v2: payloads.JobsQueueV2Body = fastapi.Depends(
+        role_filter.force_viewer_jobs_queue_v2_body),
+) -> None:
     needs_long = _controller_refresh_need_long(jobs_queue_body_v2.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -121,8 +134,10 @@ async def cancel(request: fastapi.Request,
 
 @router.post('/logs')
 async def logs(
-    request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
-    background_tasks: fastapi.BackgroundTasks
+    request: fastapi.Request,
+    background_tasks: fastapi.BackgroundTasks,
+    jobs_logs_body: payloads.JobsLogsBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_logs_body),
 ) -> fastapi.responses.StreamingResponse:
     schedule_type = api_requests.ScheduleType.SHORT
     if _controller_refresh_need_long(jobs_logs_body.refresh):
@@ -163,9 +178,12 @@ async def logs(
 
 @router.post('/download_logs')
 async def download_logs(
-        request: fastapi.Request,
-        jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
-    user_hash = jobs_download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
+    request: fastapi.Request,
+    jobs_download_logs_body: payloads.JobsDownloadLogsBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_download_logs_body),
+) -> None:
+    user_hash = download_utils.owner_user_id(request,
+                                             jobs_download_logs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -261,7 +279,8 @@ async def pool_download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.JobsPoolDownloadLogsBody,
 ) -> None:
-    user_hash = download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.owner_user_id(request,
+                                             download_logs_body.user_hash)
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
         pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /

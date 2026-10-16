@@ -1,4 +1,10 @@
-import { ENDPOINT } from '@/data/connectors/constants';
+import {
+  API_VERSION_HEADER,
+  CLIENT_API_VERSION,
+  CLIENT_VERSION,
+  ENDPOINT,
+  VERSION_HEADER,
+} from '@/data/connectors/constants';
 import { showToast } from '@/data/connectors/toast';
 
 // Configuration
@@ -115,6 +121,13 @@ export async function deploySSHNodePool(poolName) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Identify the dashboard as a contemporary client so the
+          // server-side workspace resolver runs on this queued ssh_up
+          // request — otherwise users without 'default' workspace
+          // access would be rejected at
+          // reject_request_for_unauthorized_workspace.
+          [API_VERSION_HEADER]: CLIENT_API_VERSION,
+          [VERSION_HEADER]: CLIENT_VERSION,
         },
       }
     );
@@ -138,6 +151,10 @@ export async function sshDownNodePool(poolName) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // See deploySSHNodePool() above for why the version header is
+          // load-bearing on this queued ssh_up cleanup request.
+          [API_VERSION_HEADER]: CLIENT_API_VERSION,
+          [VERSION_HEADER]: CLIENT_VERSION,
         },
       }
     );

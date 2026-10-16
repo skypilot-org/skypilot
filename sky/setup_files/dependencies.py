@@ -163,15 +163,23 @@ aws_dependencies = [
 
 # Kubernetes 32.0.0 has an authentication bug:
 # https://github.com/kubernetes-client/python/issues/2333
+# Kubernetes 36.0.0 (released 2026-05-20) broke a number of things for us:
+# in-cluster auth (kubernetes-client/python#2584), bearer token handling
+# (kubernetes-client/python#2582), and a swagger regen that renamed
+# attributes (e.g. V1ServiceSpec.external_i_ps -> external_ips) and
+# changed dict openapi_types from 'dict(K, V)' to 'dict[K, V]'. Pin away
+# from 36.x until upstream resolves these.
 kubernetes_dependencies = [
-    'kubernetes>=20.0.0,!=32.0.0',
+    'kubernetes>=20.0.0,!=32.0.0,<36.0.0',
     'websockets',
     'python-dateutil',
 ]
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
-AZURE_CLI = 'azure-cli>=2.65.0'
+# Cap <2.87.0: 2.87.0 pulls azure-mgmt-storage 25.0.0, whose TypeSpec models
+# break our Azure storage code (storage-account create and key listing).
+AZURE_CLI = 'azure-cli>=2.65.0,<2.87.0'
 
 cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -211,15 +219,23 @@ cloud_dependencies: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'coreweave': aws_dependencies + kubernetes_dependencies,
+    # Hugging Face Buckets require huggingface_hub>=1.5 (first version with
+    # the full buckets API: create_bucket / bucket_info / sync_bucket /
+    # batch_bucket_files / list_bucket_tree / download_bucket_files).
+    # 1.9+ drops Python 3.9 support, so pin to <1.9 there while letting
+    # Python 3.10+ install the latest.
+    'huggingface': [
+        'huggingface_hub>=1.5; python_version>="3.10"',
+        'huggingface_hub>=1.5,<1.9; python_version<"3.10"',
+    ],
     'scp': local_ray,
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,
-    # For the container registry auth api. Reference:
-    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': [
-        # For the container registry auth api. Reference:
-        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        # Pods, templates and registry credentials go through the REST API v2
+        # in sky/adaptors/runpod.py. The SDK reads the API key from
+        # ~/.runpod/config.toml and serves the spot pod GraphQL mutation.
         'runpod>=1.6.1',
         # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
         # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
@@ -252,7 +268,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        'nebius>=0.3.59',
+        # 0.6.12 adds explicit spot price-taking in Compute instance specs.
+        'nebius>=0.6.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
@@ -260,13 +277,17 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': ['python-hostlist'],
+    # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
+    'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(cloud_dependencies)
+# Vast is opt-in (`pip install "skypilot[vast]"`): its SDK brings a large
+# dependency tree that most installations never use.
+clouds_for_all.remove('vast')
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
@@ -280,9 +301,6 @@ if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
 
 cloud_extras = {
     cloud: dependencies + server_dependencies

@@ -20,6 +20,7 @@ from unittest import mock
 import pytest
 
 from sky.serve import service
+from sky.utils import yaml_utils
 
 
 def _bind_socket_async(host, port, delay):
@@ -171,6 +172,126 @@ class TestOrphanExit:
             mock_exit.assert_called_once_with(0)
 
 
+class TestBailOnBootFailure:
+    """`_bail_on_boot_failure` is the regression fix for the
+    catastrophic-cleanup bug: when `_wait_for_controller_ready` times out
+    in the recovery branch of `_start`, the previous code re-`raise`d the
+    RuntimeError, which fell through to `_start`'s outer `finally` →
+    `_cleanup` → `remove_ha_recovery_script` (+ possibly
+    `remove_service_completely` on pools with no replicas), turning a
+    transient boot failure into permanent service deletion.
+
+    Contract: like `_orphan_exit`, this helper must kill our forked
+    subprocess and `os._exit` to bypass the outer finally — it must NOT
+    touch any DB state and must NOT call `_cleanup`.
+    """
+
+    def test_calls_os_exit_one(self):
+        with mock.patch('os._exit') as mock_exit, \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes'):
+            ctrl = mock.Mock(pid=11111)
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_exit.assert_called_once_with(1)
+
+    def test_does_not_call_cleanup(self):
+        """The whole point of this bailout: do NOT enter the destructive
+        cleanup path. No DB mutations of any kind."""
+        with mock.patch('os._exit'), \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes'), \
+             mock.patch('sky.serve.service._cleanup') as mock_cleanup, \
+             mock.patch('sky.serve.service.serve_state.'
+                        'remove_ha_recovery_script') as mock_remove_script, \
+             mock.patch('sky.serve.service.serve_state.'
+                        'remove_service_completely') as mock_remove_svc, \
+             mock.patch('sky.serve.service.serve_state.'
+                        'remove_service') as mock_remove:
+            ctrl = mock.Mock(pid=11111)
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_cleanup.assert_not_called()
+            mock_remove_script.assert_not_called()
+            mock_remove_svc.assert_not_called()
+            mock_remove.assert_not_called()
+
+    def test_kills_controller_subprocess(self):
+        """Must SIGKILL the controller subprocess we spawned — otherwise
+        the daemon's next ha_recovery iteration spawns a new one and we
+        leak the old one (which never bound)."""
+        with mock.patch('os._exit'), \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes') as mock_kill:
+            ctrl = mock.Mock(pid=11111)
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            _, kwargs = mock_kill.call_args
+            assert kwargs['parent_pids'] == [11111]
+            assert kwargs['force'] is True
+
+    def test_handles_none_controller_process(self):
+        """If the RuntimeError fires before `controller_process.start()`
+        (rare, but possible), `controller_process` is None and we have
+        nothing to kill — but we still must os._exit."""
+        with mock.patch('os._exit') as mock_exit, \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes') as mock_kill:
+            service._bail_on_boot_failure(
+                'svc',
+                None,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_kill.assert_not_called()
+            mock_exit.assert_called_once_with(1)
+
+    def test_handles_none_controller_pid(self):
+        """If `controller_process` was created but `start()` never set a
+        pid (e.g. start() itself raised before assigning pid), we must
+        NOT pass `pid=None` to `kill_children_processes`:
+        `psutil.Process(None)` resolves to the *calling* process, so
+        passing `[None]` would SIGKILL ourselves (and our own children)
+        before `os._exit(1)` runs — defeating the cleanup bypass."""
+        with mock.patch('os._exit') as mock_exit, \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes') as mock_kill:
+            ctrl = mock.Mock()
+            ctrl.pid = None
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_kill.assert_not_called()
+            mock_exit.assert_called_once_with(1)
+
+    def test_swallows_kill_failure(self):
+        """If kill_children_processes raises (e.g. pid already gone
+        between when we read it and when we try to kill it), we still
+        must os._exit. Otherwise the exception bubbles up to the outer
+        try/finally — exactly the cleanup path we are trying to avoid."""
+        with mock.patch('os._exit') as mock_exit, \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes',
+                        side_effect=OSError('no such process')):
+            ctrl = mock.Mock(pid=11111)
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_exit.assert_called_once_with(1)
+
+
 class TestCleanupBlocksHaRecoveryButKeepsVersionSpecs:
     """`_cleanup` must:
 
@@ -204,6 +325,13 @@ class TestCleanupBlocksHaRecoveryButKeepsVersionSpecs:
                        return_value=[1, 2]),
             mock.patch('sky.serve.service.serve_state.get_yaml_content',
                        return_value='dummy: yaml'),
+            # _cleanup audit log reads current DB state for the WARN line.
+            mock.patch('sky.serve.service.serve_state.get_service_from_name',
+                       return_value={
+                           'controller_pid': 9999,
+                           'controller_ip': '10.0.0.1',
+                           'status': 'READY',
+                       }),
         ]
 
     def test_recovery_script_removed_on_storage_success(self):
@@ -259,6 +387,73 @@ class TestCleanupBlocksHaRecoveryButKeepsVersionSpecs:
             mock_remove_recovery.assert_called_once_with('svc')
 
 
+class TestCleanupAuditLog:
+    """`_cleanup` logs a WARN with the current DB controller_pid / ip /
+    status before deleting anything. _cleanup is destructive (deletes
+    the HA recovery script on its very first line and may remove the
+    entire service row at the end), so an audit trail is essential for
+    debugging double-spawn / unexpected-cleanup incidents.
+    """
+
+    def _common_patches(self, db_record):
+        # sky.serve.service uses sky_logging.init_logger with
+        # propagate=False, so caplog (rooted at the root logger) misses
+        # its records. Patch the module-level logger instead and inspect
+        # its `.warning(...)` calls directly.
+        return [
+            mock.patch('sky.serve.service.serve_state.get_replica_infos',
+                       return_value=[]),
+            mock.patch(
+                'sky.serve.service.global_user_state.'
+                'get_cluster_names_start_with',
+                return_value=[]),
+            mock.patch('sky.serve.service.serve_state.get_service_versions',
+                       return_value=[]),
+            mock.patch('sky.serve.service.serve_state.get_yaml_content',
+                       return_value='dummy: yaml'),
+            mock.patch('sky.serve.service.serve_state.get_service_from_name',
+                       return_value=db_record),
+            mock.patch(
+                'sky.serve.service.serve_state.remove_ha_recovery_script'),
+            mock.patch('sky.serve.service.cleanup_storage', return_value=True),
+        ]
+
+    def test_logs_db_state_when_row_present(self):
+        patches = self._common_patches({
+            'controller_pid': 4242,
+            'controller_ip': '10.4.7.7',
+            'status': 'READY',
+        })
+        for p in patches:
+            p.start()
+        try:
+            with mock.patch.object(service.logger, 'warning') as mock_warn:
+                service._cleanup('audit-svc', pool=True)
+        finally:
+            for p in patches:
+                p.stop()
+        joined = '\n'.join(call.args[0] for call in mock_warn.call_args_list)
+        # Audit line includes the service name and DB state we observed.
+        # Substring checks instead of exact match for copy-edit resilience.
+        assert 'audit-svc' in joined
+        assert 'db_controller_pid=4242' in joined
+        assert 'db_controller_ip=10.4.7.7' in joined
+
+    def test_logs_missing_row_when_db_returns_none(self):
+        patches = self._common_patches(None)
+        for p in patches:
+            p.start()
+        try:
+            with mock.patch.object(service.logger, 'warning') as mock_warn:
+                service._cleanup('gone-svc', pool=True)
+        finally:
+            for p in patches:
+                p.stop()
+        joined = '\n'.join(call.args[0] for call in mock_warn.call_args_list)
+        assert 'gone-svc' in joined
+        assert 'db row not found' in joined
+
+
 class TestCleanupStorageStaleBucket:
     """When a storage's bucket has already been deleted (e.g. by an earlier
     cleanup pass that succeeded for the bucket but crashed before remove_
@@ -278,10 +473,13 @@ class TestCleanupStorageStaleBucket:
         from sky import exceptions as sky_exc
 
         stale_storage = mock.MagicMock()
+        # Ephemeral storage: it is a teardown target, so cleanup constructs it.
+        stale_storage.persistent = False
         stale_storage.construct.side_effect = sky_exc.StorageBucketGetError(
             'Attempted to use a non-existent bucket as a source: s3://gone')
 
         live_storage = mock.MagicMock()
+        live_storage.persistent = False
         # construct() returns normally → storage stays in storage_mounts.
 
         mock_task = mock.MagicMock()
@@ -314,6 +512,7 @@ class TestCleanupStorageStaleBucket:
         """Non-bucket-missing construct errors still fail cleanup — we
         don't want to silently swallow real bugs like expired creds."""
         broken_storage = mock.MagicMock()
+        broken_storage.persistent = False
         broken_storage.construct.side_effect = RuntimeError(
             'credential expired')
 
@@ -334,3 +533,95 @@ class TestCleanupStorageStaleBucket:
             'unexpected construct errors must propagate as cleanup failure')
         # The broader except block aborted before reaching teardown.
         mock_backend.teardown_ephemeral_storage.assert_not_called()
+
+    def test_persistent_storage_not_constructed(self):
+        """A persistent storage must NOT be constructed during cleanup.
+
+        construct() auto-creates a missing bucket, so constructing a
+        persistent storage whose bucket the user just deleted would silently
+        re-create and leak it. teardown_ephemeral_storage() only deletes
+        persistent=False storages, so persistent ones need no construction.
+        """
+        persistent_storage = mock.MagicMock()
+        persistent_storage.persistent = True
+
+        mock_task = mock.MagicMock()
+        mock_task.storage_mounts = {'/persist': persistent_storage}
+        mock_task.file_mounts = None
+
+        mock_backend = mock.MagicMock()
+
+        with mock.patch('sky.serve.service.task_lib.Task.from_yaml_str',
+                        return_value=mock_task), \
+             mock.patch(
+                 'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend',
+                 return_value=mock_backend):
+            result = service.cleanup_storage('dummy: yaml')
+
+        assert result is True
+        persistent_storage.construct.assert_not_called()
+        # It stays in storage_mounts and teardown (which skips persistent
+        # storages) is still invoked for the ephemeral ones.
+        assert '/persist' in mock_task.storage_mounts
+        mock_backend.teardown_ephemeral_storage.assert_called_once_with(
+            mock_task)
+
+
+class TestCleanupStorageLocalSources:
+    """`cleanup_storage` removes the two-hop copies staged for the service and
+    nothing else. In consolidation mode the task's sources point into the
+    client's upload blob (shared with any other request that uploaded the
+    same content), and on a local API server at the user's own files."""
+
+    @pytest.fixture
+    def two_hop_base(self, tmp_path, monkeypatch):
+        base = tmp_path / 'controller'
+        monkeypatch.setattr(service.skylet_constants,
+                            'FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH', str(base))
+        return base
+
+    def _cleanup(self, file_mounts):
+        task_yaml = yaml_utils.dump_yaml_str({
+            'file_mounts': file_mounts,
+            'run': 'echo hi'
+        })
+        with mock.patch(
+                'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend'):
+            return service.cleanup_storage(task_yaml)
+
+    def test_removes_two_hop_copies(self, two_hop_base):
+        copy_dir = two_hop_base / 'run-1' / '0'
+        copy_dir.mkdir(parents=True)
+        (copy_dir / 'f.txt').write_text('x')
+        copy_file = two_hop_base / 'run-1' / '1'
+        copy_file.write_text('y')
+
+        assert self._cleanup({
+            '/remote/dir': str(copy_dir),
+            '/remote/f.txt': str(copy_file),
+        }) is True
+        assert not copy_dir.exists()
+        assert not copy_file.exists()
+
+    def test_keeps_sources_outside_two_hop_dir(self, tmp_path, two_hop_base):
+        del two_hop_base
+        blob_dir = tmp_path / 'blob-cache' / 'user' / ('a' * 64) / 'workdir'
+        blob_dir.mkdir(parents=True)
+        user_file = tmp_path / 'home' / 'hello.txt'
+        user_file.parent.mkdir()
+        user_file.write_text('hello')
+
+        assert self._cleanup({
+            '/remote/workdir': str(blob_dir),
+            '/remote/hello.txt': str(user_file),
+            # A '..' path that only looks like it is inside the two-hop dir.
+            '/remote/escape': str(
+                tmp_path / 'controller' / '..' / 'home' / 'hello.txt'),
+        }) is True
+        assert blob_dir.is_dir()
+        assert user_file.read_text() == 'hello'
+
+    def test_missing_two_hop_copy_is_already_clean(self, two_hop_base):
+        # E.g. an earlier cleanup attempt removed it before failing elsewhere.
+        assert self._cleanup(
+            {'/remote/gone': str(two_hop_base / 'run-1' / '0')}) is True

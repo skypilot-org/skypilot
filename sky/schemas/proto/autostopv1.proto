@@ -2,8 +2,24 @@ syntax = "proto3";
 
 package autostop.v1;
 
+// NOTE on naming. ``AutostopService`` predates the generalized
+// lifecycle-hooks framework. It is logically ``LifecycleService`` now
+// — ``SetAutostop`` carries both the autostop config AND the cluster's
+// hooks list. The naming is kept for wire-format back-compat: renaming
+// a gRPC service or RPC method is a wire-format break against every
+// pre-existing skylet running on disk. A future PR can:
+//   1. Introduce a parallel ``SetHooks`` RPC alongside ``SetAutostop``,
+//   2. Have new clients prefer ``SetHooks`` when ``SKYLET_LIB_VERSION``
+//      indicates support,
+//   3. Mark ``SetAutostopRequest.hooks`` / ``clear_hooks`` reserved
+//      once the minimum supported skylet version reaches that floor.
+// Until then, hooks ride on ``SetAutostop`` and the naming stays.
 service AutostopService {
   // Set autostop configuration for the cluster.
+  //
+  // NOTE: also carries the cluster's lifecycle-hooks list (the
+  // ``hooks`` / ``clear_hooks`` fields on the request). This is a
+  // wire-compat shim — see the comment on the service above.
   rpc SetAutostop(SetAutostopRequest) returns (SetAutostopResponse);
   // Check if the cluster is currently autostopping.
   rpc IsAutostopping(IsAutostoppingRequest) returns (IsAutostoppingResponse);
@@ -16,13 +32,45 @@ enum AutostopWaitFor {
   AUTOSTOP_WAIT_FOR_NONE = 3;
 }
 
+// Lifecycle-hook event. Exactly one event claims any given teardown
+// on any given node via the file-lock CAS.
+enum Event {
+  EVENT_UNSPECIFIED = 0;
+  EVENT_STOP = 1;
+  EVENT_PREEMPTION = 2;
+  EVENT_DOWN = 3;
+}
+
+// One lifecycle-hook entry (resources.hooks[*]).
+message Hook {
+  string run = 1;
+  repeated Event events = 2;
+  int32 timeout = 3;
+}
+
+// SetAutostopRequest is a wire-compat misnomer: it now carries both
+// the autostop config (idle_minutes / wait_for / down) AND the
+// cluster's lifecycle-hooks list (hooks / clear_hooks). See the
+// ``service AutostopService`` comment above for the future-rename
+// plan; until that lands, the message name stays as-is to avoid
+// breaking pre-existing skylets.
 message SetAutostopRequest {
   int32 idle_minutes = 1;
   string backend = 2;
   AutostopWaitFor wait_for = 3;
   bool down = 4;
+  // Pre-v7 legacy single-hook wire format. Use `hooks` for new clients.
   optional string hook = 5;
   optional int32 hook_timeout = 6;
+  // v7+: generalized lifecycle-hooks list.
+  repeated Hook hooks = 7;
+  // v7+: explicitly clear stored hooks. Required because proto3
+  // `repeated` has no presence — empty `hooks` is wire-indistinguishable
+  // from "field omitted". Without this the skylet cannot tell apart
+  // "this client doesn't know about hooks" from "user removed all
+  // hooks", and a re-launch that drops hooks would leave stale entries
+  // in skylet sqlite firing forever.
+  bool clear_hooks = 8;
 }
 
 message SetAutostopResponse {}

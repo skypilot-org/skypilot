@@ -137,7 +137,7 @@ produced several follow-up projects to expand the Sky Computing stack:
 - `FogROS2 <https://berkeleyautomation.github.io/FogROS2/about>`_: Open-source cloud robotics platform leveraging Sky Computing via SkyPilot.
 - …and a few more in the pipeline.
 
-To learn more about SkyPilot, refer to the `project announcement blog post <https://blog.skypilot.co/introducing-skypilot/>`_, or the   `SkyPilot NSDI 2023 paper
+To learn more about SkyPilot, refer to the `project announcement blog post <https://skypilot.ai/blog/introducing-skypilot>`_, or the   `SkyPilot NSDI 2023 paper
 <https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf>`_ and `talk
 <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_.
 

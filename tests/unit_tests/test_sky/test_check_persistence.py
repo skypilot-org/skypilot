@@ -5,6 +5,7 @@ import sky.check as sky_check
 from sky.clouds.cloud import CloudCapability
 from sky.skylet import constants
 from sky.utils.db import db_utils
+from sky.workspaces import constants as workspace_constants
 
 
 def _fresh_db(tmp_path, monkeypatch):
@@ -36,11 +37,19 @@ def _common_mocks(monkeypatch):
     monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
                         lambda *args, **kwargs: {})
 
-    # Workspaces: only 'default'.
+    # Workspaces: only 'default'. The requested action is asserted rather than
+    # ignored: every workspace the check loop visits gets its cached
+    # enabled-clouds and check-results rows rewritten, so check must ask for
+    # the writable set, never the wider read-only-visible one.
     monkeypatch.setattr('sky.workspaces.core.get_workspaces',
                         lambda: {'default': {}})
+
+    def _accessible_workspace_names(action):
+        assert action == workspace_constants.WORKSPACE_ACTION_WRITE, action
+        return ['default']
+
     monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
-                        lambda: ['default'])
+                        _accessible_workspace_names)
 
     # No previously enabled clouds.
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',

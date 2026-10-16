@@ -1,0 +1,24 @@
+# A persistent SkyPilot volume (Kubernetes PVC) for Cosmos3 checkpoints + exports.
+#
+# Create it once, then the fine-tuning job mounts it at /checkpoints so the
+# managed job auto-resumes from the latest checkpoint after a recovery and the
+# outputs outlive the job's cluster:
+#
+#   sky volumes apply examples/cosmos3-finetuning/cosmos3_checkpoints_volume.yaml
+#
+# See https://docs.skypilot.co/en/stable/reference/volumes.html
+
+name: cosmos3-checkpoints
+type: k8s-pvc
+infra: k8s  # or k8s/<context>
+size: 1000Gi
+
+config:
+  # ReadWriteMany lets the volume be reattached across managed-job recoveries
+  # (and shared by all nodes if you scale to multi-node). It needs a storage class
+  # that supports RWX (e.g. a shared filesystem such as JuiceFS, Nebius shared FS,
+  # AWS EFS, or GCP Filestore) -- set storage_class_name to one below. If your
+  # cluster only has ReadWriteOnce block storage, change access_mode to
+  # ReadWriteOnce (this single-node job works fine with it).
+  access_mode: ReadWriteMany
+  # storage_class_name: csi-mounted-fs-path-sc  # omit to use the default StorageClass

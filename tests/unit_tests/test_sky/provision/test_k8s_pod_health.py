@@ -1,8 +1,10 @@
 """Tests for Kubernetes pod health issue detection."""
+import datetime
 from typing import Optional
 from unittest import mock
 
 from sky.provision.kubernetes import instance as k8s_instance
+from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
@@ -23,6 +25,8 @@ def _make_condition(type_: str,
 def _make_container_status(ready: bool,
                            waiting_reason: Optional[str] = None,
                            terminated_exit_code: Optional[int] = None,
+                           last_terminated_exit_code: Optional[int] = None,
+                           last_terminated_reason: Optional[str] = None,
                            name: str = 'ray-node'):
     """Create a mock container status."""
     cs = mock.MagicMock()
@@ -39,6 +43,14 @@ def _make_container_status(ready: bool,
     else:
         cs.state.waiting = None
         cs.state.terminated = None
+
+    # Default: no previous termination. MagicMock would otherwise auto-create
+    # a truthy last_state.terminated and confuse the prior-termination check.
+    if last_terminated_exit_code is not None:
+        cs.last_state.terminated.exit_code = last_terminated_exit_code
+        cs.last_state.terminated.reason = last_terminated_reason
+    else:
+        cs.last_state.terminated = None
     return cs
 
 
@@ -122,6 +134,56 @@ class TestGetPodHealthIssues:
             container_statuses=[
                 _make_container_status(ready=False,
                                        waiting_reason='ContainerCreating'),
+            ],
+        )
+        assert _get_pod_health_issues(pod) is None
+
+    def test_restarting_after_oom_surfaces_last_state(self):
+        # Container OOMKilled, now restarting (waiting) -> surface the prior
+        # OOM that the current waiting state alone does not explain.
+        pod = _make_pod(
+            conditions=[
+                _make_condition('Ready', 'False', reason='ContainersNotReady')
+            ],
+            container_statuses=[
+                _make_container_status(ready=False,
+                                       waiting_reason='CrashLoopBackOff',
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
+            ],
+        )
+        result = _get_pod_health_issues(pod)
+        assert result is not None
+        assert 'CrashLoopBackOff' in result
+        assert 'OOMKilled' in result
+        assert '137' in result
+
+    def test_running_again_after_oom_surfaces_last_state(self):
+        # Container restarted after OOM and is running but not yet ready, with
+        # no current waiting/terminated reason -- the OOM lives only in
+        # last_state and must still be surfaced.
+        pod = _make_pod(
+            conditions=[
+                _make_condition('Ready', 'False', reason='ContainersNotReady')
+            ],
+            container_statuses=[
+                _make_container_status(ready=False,
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
+            ],
+        )
+        result = _get_pod_health_issues(pod)
+        assert result is not None
+        assert 'OOMKilled (exit code 137)' in result
+
+    def test_ready_pod_with_prior_oom_returns_none(self):
+        # A fully-recovered (Ready=True) pod must not surface a stale prior OOM.
+        pod = _make_pod(
+            conditions=[_make_condition('Ready', 'True')],
+            container_statuses=[
+                _make_container_status(ready=True,
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
             ],
         )
         assert _get_pod_health_issues(pod) is None
@@ -322,3 +384,343 @@ class TestQueryInstancesHealthIntegration:
         )
         assert result['head'][1] is None
         assert result['worker-0'][1] is None
+
+
+class TestGetPodTerminationReason:
+    """Tests for _get_pod_termination_reason (Failed-phase path)."""
+
+    def _make_terminated_pod(self, *, reason=None, message=None):
+        pod = mock.MagicMock()
+        pod.metadata.name = 'p'
+        pod.status.start_time = datetime.datetime(2026,
+                                                  1,
+                                                  1,
+                                                  tzinfo=datetime.timezone.utc)
+        pod.status.conditions = []
+        pod.status.container_statuses = []
+        pod.status.reason = reason
+        pod.status.message = message
+        return pod
+
+    def test_evicted_ephemeral_storage_surfaced(self, monkeypatch):
+        # Ephemeral-storage eviction is recorded only at the pod level.
+        monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
+                            lambda *a, **k: None)
+        pod = self._make_terminated_pod(
+            reason='Evicted',
+            message='Pod ephemeral local storage usage exceeds the total '
+            'limit of containers 1Gi.')
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
+        assert 'Evicted' in result
+        assert 'ephemeral' in result
+
+    def test_no_pod_reason_keeps_default(self, monkeypatch):
+        monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
+                            lambda *a, **k: None)
+        pod = self._make_terminated_pod(reason=None, message=None)
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
+        assert 'Terminated unexpectedly' in result
+
+    def test_none_conditions_does_not_raise(self, monkeypatch):
+        # status.conditions is nullable in the Kubernetes API and is often
+        # None for pods in Failed/Unknown phase (e.g. after a node becomes
+        # unreachable). It must not raise TypeError.
+        monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
+                            lambda *a, **k: None)
+        pod = self._make_terminated_pod(reason=None, message=None)
+        pod.status.conditions = None
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
+        assert 'Terminated unexpectedly' in result
+
+
+def _make_event(reason, message, at=None):
+    """Create a mock kubelet pod event.
+
+    *at* is when the event was observed; leaving it out makes an undated
+    event, which is what a MagicMock with no timestamps reads as.
+    """
+    e = mock.MagicMock()
+    e.reason = reason
+    e.message = message
+    if at is not None:
+        # The reader prefers these over the creation timestamp; leaving them
+        # as auto-created MagicMocks would make the event read as undated.
+        e.series = None
+        e.last_timestamp = None
+        e.event_time = None
+        e.metadata.creation_timestamp = at
+    return e
+
+
+class TestGetPodFailureReasonFromEvents:
+    """Tests for _get_pod_failure_reason_from_events."""
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_evicted_event_surfaced(self, mock_events):
+        mock_events.return_value = [
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage exceeds '
+                'the total limit of containers 1Gi.'),
+            _make_event('Scheduled', 'Successfully assigned default/p to n'),
+        ]
+        result = k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p')
+        assert result is not None
+        assert result.startswith('Evicted: ')
+        assert 'ephemeral' in result
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_no_failure_event_returns_none(self, mock_events):
+        mock_events.return_value = [
+            _make_event('Scheduled', 'Successfully assigned default/p to n'),
+            _make_event('Pulled', 'Container image already present'),
+        ]
+        assert k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p') is None
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events',
+                side_effect=Exception('api down'))
+    def test_event_lookup_error_returns_none(self, mock_events):
+        assert k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p') is None
+
+
+class TestQueryInstancesEventEnrichment:
+    """query_instances recovers an eviction reason from events."""
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_running_not_ready_pod_recovers_eviction(self, mock_list,
+                                                     mock_events):
+        # Pod still reports Running + not-ready; the eviction lives only in the
+        # event.
+        mock_list.return_value = [
+            _make_full_pod('worker-0', 'Running', 'node-1', ready=False),
+        ]
+        mock_events.return_value = [
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage exceeds '
+                'the total limit of containers 1Gi.'),
+        ]
+        result = k8s_instance.query_instances(
+            cluster_name='c',
+            cluster_name_on_cloud='c',
+            provider_config={
+                'namespace': 'default',
+                'context': 'ctx',
+                'services': [],
+            },
+        )
+        reason = result['worker-0'][1]
+        assert 'Evicted' in reason
+        assert 'ephemeral' in reason
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_healthy_pod_skips_event_lookup(self, mock_list, mock_events):
+        mock_list.return_value = [
+            _make_full_pod('worker-0', 'Running', 'node-1', ready=True),
+        ]
+        result = k8s_instance.query_instances(
+            cluster_name='c',
+            cluster_name_on_cloud='c',
+            provider_config={
+                'namespace': 'default',
+                'context': 'ctx',
+                'services': [],
+            },
+        )
+        assert result['worker-0'][1] is None
+        # Healthy pods must not incur an extra events API call.
+        mock_events.assert_not_called()
+
+
+_CLUSTER_LAUNCHED_AT = datetime.datetime(2025,
+                                         1,
+                                         1,
+                                         tzinfo=datetime.timezone.utc)
+
+
+class TestGetClusterFailureReasonFromEvents:
+    """Tests for get_cluster_failure_reason_from_events."""
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_returns_first_evicted(self, mock_events, mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage '
+                'exceeds the total limit of containers 2Gi.'),
+        ]
+        result = k8s_instance.get_cluster_failure_reason_from_events({},
+                                                                     ['pod-0'])
+        assert result is not None
+        assert 'Evicted' in result
+        assert 'ephemeral' in result
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_none_when_no_failure_event(self, mock_events, mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # The derivation of a reason from pod events lives in
+        # kubernetes_utils, which the mock above stands in for; let the real
+        # one run, since it is what the result is being asserted on.
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [_make_event('Scheduled', 'assigned')]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0', 'pod-1']) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_before_the_cluster_are_ignored(self, mock_events,
+                                                        mock_kutils):
+        """Pod names are a function of the cluster name and Kubernetes keeps
+        events for an hour, so what deleted the pods of the cluster that held
+        this name before is still on file. It says nothing about this one."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'], since=_CLUSTER_LAUNCHED_AT) is None
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_events_from_after_the_launch_still_count(self, mock_events,
+                                                      mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/wl',
+                        at=_CLUSTER_LAUNCHED_AT +
+                        datetime.timedelta(minutes=5)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=_CLUSTER_LAUNCHED_AT) == ('Stopped by Kueue: Exceeded the '
+                                            'PodsReady timeout default/wl')
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_without_a_bound_an_older_event_still_counts(
+            self, mock_events, mock_kutils):
+        """Callers that cannot work out when the cluster was launched get the
+        unbounded lookup they had before."""
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.reason_from_pod_events.side_effect = (
+            k8s_utils.reason_from_pod_events)
+        mock_events.return_value = [
+            _make_event('Stopped',
+                        'Exceeded the PodsReady timeout default/old',
+                        at=_CLUSTER_LAUNCHED_AT -
+                        datetime.timedelta(minutes=30)),
+        ]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0'],
+            since=None) == ('Stopped by Kueue: Exceeded the PodsReady '
+                            'timeout default/old')
+
+
+class TestGetClusterFailureReasonFromPods:
+    """Tests for get_cluster_failure_reason_from_pods (durable last_state).
+
+    The condensed-reason derivation itself (incl. OOMKilled recovered from a
+    container's last_state) is covered in test_kubernetes_utils.py; here we
+    cover this helper's control flow: read each pod, return the first that
+    terminated abnormally, never raise on a per-pod read error.
+    """
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_returns_condensed_reason_for_abnormal_pod(self, mock_kutils,
+                                                       mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.pod_terminated_abnormally.return_value = True
+        mock_kutils.get_condensed_pod_reason.return_value = (
+            'OOMKilled (exit code 137)')
+        result = k8s_instance.get_cluster_failure_reason_from_pods({},
+                                                                   ['pod-0'])
+        assert result == 'pod-0 is not ready (OOMKilled (exit code 137))'
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_none_when_no_pod_abnormal(self, mock_kutils, mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        mock_kutils.pod_terminated_abnormally.return_value = False
+        assert k8s_instance.get_cluster_failure_reason_from_pods(
+            {}, ['pod-0', 'pod-1']) is None
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_skips_pod_read_errors(self, mock_kutils, mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
+        # First pod read raises; the second pod is abnormal.
+        mock_core_api.return_value.read_namespaced_pod.side_effect = [
+            Exception('boom'),
+            mock.MagicMock(),
+        ]
+        mock_kutils.pod_terminated_abnormally.return_value = True
+        mock_kutils.get_condensed_pod_reason.return_value = 'OOMKilled'
+        result = k8s_instance.get_cluster_failure_reason_from_pods(
+            {}, ['pod-0', 'pod-1'])
+        assert result == 'pod-1 is not ready (OOMKilled)'
+
+
+class TestPodReasonIdentifiesCause:
+    """A per-pod reason either names the cause, or only says "it is sick".
+
+    The distinction matters because a node that stops heartbeating leaves its
+    pods' status stale: a refresh during the outage can only say "not ready",
+    while a refresh after recovery names the real failure. Only the latter is
+    worth superseding an already-recorded reason with.
+    """
+
+    def test_bare_not_ready_does_not_identify_a_cause(self):
+        # kubelet never updated the pod, so the containers explain nothing.
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (Unknown)')
+
+    def test_not_ready_with_container_detail_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (PodFailed); OOMKilled (exit code 137)')
+
+    def test_bare_termination_fallback_does_not_identify_a_cause(self):
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.')
+
+    def test_termination_with_container_errors_identifies_a_cause(self):
+        # The fallback is only a *prefix* here -- the cause follows it, so a
+        # naive substring test on the fallback would get this backwards.
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.\n'
+            'Container errors: OOMKilled (no memory limit set)')
+
+    def test_kubelet_pod_status_reason_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Evicted: The node was low on resource: memory')
+
+    def test_absent_reason_identifies_nothing(self):
+        assert not k8s_instance.pod_reason_identifies_cause(None)
+        assert not k8s_instance.pod_reason_identifies_cause('')

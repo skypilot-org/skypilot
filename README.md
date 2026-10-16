@@ -1,8 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
-    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
-  </picture>
+  <a href="https://skypilot.ai/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
+      <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+    </picture>
+  </a>
 </p>
 
 <p align="center">
@@ -28,13 +30,6 @@
     Manage all your AI compute
 </h3>
 
-<div align="center">
-
-#### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)
-
-</div>
-
-
 SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastructure.
 
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
@@ -48,15 +43,18 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 -----
 
 :fire: *News* :fire:
+- [Oct 2026] **SkyPilot AI Infra Meetup** with H Company in SF on Oct 8: [**register now**](https://partiful.com/e/kazBr6qiMhabcqdVm4nf)
+- [Sep 2026] **RL is Everything, Everywhere, All at Once**: [**blog**](https://skypilot.ai/blog/rl-everything)
+- [Sep 2026] **SkyPilot Agent Sessions**: Mission Control for Coding Agents, on Your Infrastructure: [**blog**](https://skypilot.ai/blog/agent-sessions)
+- [Jul 2026] **Serving Kimi K3 on your own GPUs with SkyPilot**: [**blog**](https://skypilot.ai/blog/kimi-k3)
+- [Jul 2026] **Run AI workloads on any cloud, store on Hugging Face**, no egress fees to worry about: [**Hugging Face blog**](https://huggingface.co/blog/skypilot-hf-storage)
+- [Jun 2026] **SkyPilot Endpoints**: production-ready inference on every cluster you own: [**blog**](https://skypilot.ai/blog/skypilot-endpoints)
+- [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://skypilot.ai/blog/sandboxes), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
+- [May 2026] **How Multiverse doubled their GPU utilization with SkyPilot**: [**case study**](https://multiversecomputing.com/papers/2x-gpu-utilization-same-hardware-discover-our-efficiency-playbook)
 - [Apr 2026] Introducing **GPU Compass**: One dashboard to browse, compare pricing, and launch across every GPU cloud. Try it at [**gpus.skypilot.co**](https://gpus.skypilot.co).
-- [Apr 2026] **Research-Driven Agents**: Agents read arxiv papers before coding, landed 5 llama.cpp kernel fusions and +15% faster flash attention in ~3 hours for ~$29: [**blog**](https://blog.skypilot.co/research-driven-agents/), [**HackerNews**](https://news.ycombinator.com/item?id=47706141)
-- [Mar 2026] **Scaling Karpathy's Autoresearch**: Autoresearch runs 1 experiment at a time. We gave it 16 GPUs and let it run in parallel: [**blog**](https://blog.skypilot.co/scaling-autoresearch/), [**HackerNews**](https://news.ycombinator.com/item?id=47442435)
+- [Apr 2026] **Research-Driven Agents**: Agents read arxiv papers before coding, landed 5 llama.cpp kernel fusions and +15% faster flash attention in ~3 hours for ~$29: [**blog**](https://skypilot.ai/blog/research-driven-agents), [**HackerNews**](https://news.ycombinator.com/item?id=47706141)
+- [Mar 2026] **Scaling Karpathy's Autoresearch**: Autoresearch runs 1 experiment at a time. We gave it 16 GPUs and let it run in parallel: [**blog**](https://skypilot.ai/blog/scaling-autoresearch), [**HackerNews**](https://news.ycombinator.com/item?id=47442435)
 - [Mar 2026] **How H Company Unlocked Online RL and Unified their AI Platform**: [**case study**](https://hcompany.ai/unlocking-online-rl-skypilot)
-- [Mar 2026] **SkyPilot v0.12** released: Slurm Support, Job Groups for RL, Agent Skill, Recipes, Pool Autoscaling for Batch Inference, 7x Data Mounting, and More: [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.12.0)
-- [Mar 2026] **SkyPilot Agent Skills**: GPU access and job management for AI agents: [**docs**](https://docs.skypilot.co/en/latest/getting-started/skill.html)
-- [Jan 2026] **Shopify case study**: Shopify runs all AI training workloads on SkyPilot: [**case study**](https://shopify.engineering/skypilot)
-- [Dec 2025] **SkyPilot v0.11** released: Multi-Cloud Pools, Fast Managed Jobs, Enterprise-Readiness at Large Scale, Programmability. [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.11.0)
-- [Dec 2025] Train **an agent to use Google Search** as a tool with RL on your Kubernetes or clouds: [**blog**](https://blog.skypilot.co/verl-tool-calling/), [**example**](./llm/verl/)
 
 ## Overview
 
@@ -130,7 +128,7 @@ It turbocharges your existing Kubernetes clusters by **accelerating AI/ML veloci
 - Multi-cluster support: Bring all your clusters under one control plane
 - Multi-cloud support: One consistent interface to manage many providers
 
-See [SkyPilot vs Vanilla Kubernetes](https://docs.skypilot.co/en/latest/reference/kubernetes/skypilot-and-vanilla-k8s.html) and this [blog post](https://blog.skypilot.co/ai-on-kubernetes/) for more details.
+See [SkyPilot vs Vanilla Kubernetes](https://docs.skypilot.co/en/latest/reference/kubernetes/skypilot-and-vanilla-k8s.html) and this [blog post](https://skypilot.ai/blog/ai-on-kubernetes) for more details.
 
 ## SkyPilot in 1 minute
 
@@ -199,18 +197,16 @@ Latest featured examples:
 Source files can be found in [`llm/`](https://github.com/skypilot-org/skypilot/tree/master/llm) and [`examples/`](https://github.com/skypilot-org/skypilot/tree/master/examples).
 
 ## Learn more
-To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
+To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://skypilot.ai/blog).
 
-SkyPilot adopters: [Testimonials and Case Studies](https://blog.skypilot.co/case-studies/)
-
-Partners and integrations: [Community Spotlights](https://blog.skypilot.co/community/)
+SkyPilot adopters: [Testimonials and Case Studies](https://skypilot.ai/case-studies)
 
 Follow updates:
 - [Slack](http://slack.skypilot.co)
 - [X](https://twitter.com/skypilot_org)
 - [LinkedIn](https://www.linkedin.com/company/skypilot-oss/)
 - [YouTube](https://www.youtube.com/@skypilot-org)
-- [SkyPilot Blog](https://blog.skypilot.co/)
+- [SkyPilot Blog](https://skypilot.ai/blog)
 
 ## Questions and feedback
 We are excited to hear your feedback:
@@ -221,3 +217,5 @@ For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.c
 
 ## Contributing
 We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=76c302d0-bd8d-4233-b7df-237d353375cd" />

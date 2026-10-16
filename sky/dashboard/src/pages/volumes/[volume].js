@@ -16,12 +16,13 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatSize,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 
 function useVolumeDetails({ volumeName }) {
   const [volumeData, setVolumeData] = useState(null);
@@ -285,7 +286,25 @@ function VolumeDetailCard({ volumeData }) {
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">Size</div>
-                <div className="text-base mt-1">{volumeData.size || 'N/A'}</div>
+                <div className="text-base mt-1">
+                  {volumeData.size != null
+                    ? formatSize(volumeData.size)
+                    : 'N/A'}
+                  {volumeData.resize_status &&
+                    volumeData.resize_target_size != null && (
+                      <span className="text-gray-500">
+                        {' '}
+                        &rarr; {formatSize(volumeData.resize_target_size)}
+                      </span>
+                    )}
+                </div>
+                {/* The size above is the capacity the volume has now; a
+                    resize only shows up there once it has landed. */}
+                {volumeData.resize_message && (
+                  <div className="text-sm mt-1 text-gray-500">
+                    {volumeData.resize_message}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
@@ -352,6 +371,22 @@ function VolumeDetailCard({ volumeData }) {
                   {volumeData.namespace || 'N/A'}
                 </div>
               </div>
+
+              {/* Why the status is what it is, in the provisioner's own words.
+                  Spans both columns: a CSI error runs long. */}
+              {volumeData.error_message && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    Status Details
+                  </div>
+                  <div
+                    className="text-base mt-1"
+                    style={{ whiteSpace: 'pre-wrap' }}
+                  >
+                    {volumeData.error_message}
+                  </div>
+                </div>
+              )}
 
               {/* Used By - spans both columns */}
               <div className="col-span-2">
@@ -434,11 +469,7 @@ function VolumeDetailCard({ volumeData }) {
                       </div>
 
                       {isYamlExpanded && (
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {formattedYaml}
-                          </YamlHighlighter>
-                        </div>
+                        <YamlCodeBlock value={formattedYaml} readOnly />
                       )}
                     </div>
                   )}

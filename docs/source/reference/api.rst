@@ -96,6 +96,12 @@ Cluster jobs SDK
 .. autofunction:: sky.job_status
   :noindex:
 
+``sky.cluster_job_spec``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: sky.cluster_job_spec
+  :noindex:
+
 
 ``sky.tail_logs``
 ^^^^^^^^^^^^^^^^^
@@ -291,6 +297,18 @@ API server SDK
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_info
+  :noindex:
+
+``sky.set_preferred_workspace``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.set_preferred_workspace
+  :noindex:
+
+``sky.get_user_workspace``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.get_user_workspace
   :noindex:
 
 ``sky.api_start``

@@ -44,13 +44,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock')
+    @mock.patch('sky.skypilot_config.reload_config')
     @mock.patch('sky.skypilot_config.to_dict')
     @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
     def test_internal_update_workspaces_config(self, mock_update_no_lock,
-                                               mock_to_dict, mock_lock_path):
+                                               mock_to_dict, mock_reload,
+                                               mock_lock):
         """Test the internal helper for updating workspaces configuration."""
-        mock_lock_path.return_value = self.config_path + '.lock'
         mock_to_dict.return_value = self.sample_config.copy()
 
         new_workspaces = {
@@ -71,7 +72,10 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Verify the function called the right methods
         mock_to_dict.assert_called_once()
-        mock_lock_path.assert_called_once()
+        # Acquires the distributed config lock and reloads from the backing
+        # store inside it (so a stale in-memory read can't clobber).
+        mock_lock.assert_called_once()
+        mock_reload.assert_called_once()
         mock_update_no_lock.assert_called_once()
 
         # Verify the written config has the updated workspaces
@@ -274,9 +278,8 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_private_changed_to_public(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from private to public."""
-        mock_get_users.side_effect = lambda config: (['user1', 'user2']
-                                                     if config.get('private')
-                                                     else [])
+        mock_get_users.side_effect = lambda config, **_kw: (
+            ['user1', 'user2'] if config.get('private') else [])
         mock_get_users_for_role.return_value = []
         current_config = {
             'private': True,
@@ -305,9 +308,8 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_private_changed_to_private(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from public to private."""
-        mock_get_users.side_effect = lambda config: (['user1', 'user2']
-                                                     if config.get('private')
-                                                     else [])
+        mock_get_users.side_effect = lambda config, **_kw: (
+            ['user1', 'user2'] if config.get('private') else [])
         mock_get_users_for_role.return_value = []
         current_config = {
             'private': False,
@@ -341,7 +343,7 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_allowed_users_changed(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing allowed users without changing private setting."""
-        mock_get_users.side_effect = lambda config: config.get(
+        mock_get_users.side_effect = lambda config, **_kw: config.get(
             'allowed_users', [])
         mock_get_users_for_role.return_value = []
         current_config = {
@@ -403,6 +405,69 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertFalse(result.private_changed)
         self.assertFalse(result.allowed_users_changed)
 
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_compare_workspace_configs_read_access_only(
+            self, mock_get_users, mock_get_users_for_role):
+        """Only read_access changed -> classified as a user-access change.
+
+        read_access is an access-control field like private/allowed_users,
+        so changing it alone must not be treated as an "other" (infra) change
+        that requires the workspace to have no active resources.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+
+        current_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'read_access': 'allowed_users',
+        }
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'read_access': 'all',
+        }
+
+        result = core._compare_workspace_configs(current_config, new_config)
+
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertFalse(result.allowed_users_changed)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_validate_read_access_change_allowed_with_active_resources(
+            self, mock_get_users, mock_get_users_for_role, mock_check_users,
+            mock_check_no_active):
+        """A read_access-only change is allowed even when the workspace
+        has active resources: it removes no member and touches no infra, so it
+        must not reach the strict no-active-resources check.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+        mock_check_users.return_value = ('', [], {})
+        # Simulate active resources: fail loudly if the strict check is reached.
+        mock_check_no_active.side_effect = ValueError('has active resources')
+
+        base = {'private': True, 'allowed_users': ['user1']}
+        # Both directions must be allowed without raising.
+        core._validate_workspace_config_changes('ws', {
+            **base, 'read_access': 'allowed_users'
+        }, {
+            **base, 'read_access': 'all'
+        })
+        core._validate_workspace_config_changes('ws', {
+            **base, 'read_access': 'all'
+        }, {
+            **base, 'read_access': 'allowed_users'
+        })
+        mock_check_no_active.assert_not_called()
+
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_wildcard_users(self, mock_get_users):
         """Test handling wildcard users in allowed_users."""
@@ -412,7 +477,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         new_config = {'private': True, 'allowed_users': ['user1']}
 
         # Mock get_workspace_users to return different values for different configs
-        def mock_get_users_side_effect(config):
+        def mock_get_users_side_effect(config, **_kw):
             if config.get('allowed_users') == ['*']:
                 return ['*']
             else:
@@ -475,7 +540,8 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should call resource checker with new allowed users
         mock_check_resources.assert_called_once_with(['user1', 'user2'],
-                                                     ['test-workspace'])
+                                                     ['test-workspace'],
+                                                     resources=None)
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
@@ -599,7 +665,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Should call resource checker for removed users
-        mock_check_resources.assert_called_once_with([], ['test-workspace'])
+        mock_check_resources.assert_called_once_with([], ['test-workspace'],
+                                                     resources=None)
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
@@ -648,6 +715,215 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should not call resource checker since no users were removed
         mock_check_resources.assert_not_called()
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_allowed_contexts(
+            self, mock_get_users_for_role, mock_get_users):
+        """allowed_contexts-only changes are flagged additive or not."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Sentinel for "allowed_contexts is absent from the kubernetes block".
+        absent = object()
+
+        def k8s_config(allowed_contexts):
+            kubernetes = {}
+            if allowed_contexts is not absent:
+                kubernetes['allowed_contexts'] = allowed_contexts
+            return {'kubernetes': kubernetes}
+
+        # (current_contexts, new_contexts, expected_additive)
+        cases = [
+            (['ctx-a'], ['ctx-a', 'ctx-b'], True),  # append
+            (['ctx-a', 'ctx-b'], ['ctx-a'], False),  # removal
+            # Reorder keeps the same set, so nothing is stranded -> additive.
+            (['ctx-a', 'ctx-b'], ['ctx-b', 'ctx-a'], True),
+            (['ctx-a'], 'all', True),  # broaden to all
+            ('all', ['ctx-a'], False),  # narrow from all
+            (absent, ['ctx-a'], False),  # absent -> list
+            (['ctx-a'], absent, False),  # list -> absent
+        ]
+        for current_contexts, new_contexts, expected in cases:
+            with self.subTest(current=current_contexts, new=new_contexts):
+                result = core._compare_workspace_configs(
+                    k8s_config(current_contexts), k8s_config(new_contexts))
+                self.assertEqual(result.additive_allowed_contexts, expected)
+                # allowed_contexts changed, so this is never user-access-only.
+                self.assertFalse(result.only_user_access_changes)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_contexts_with_other_changes(
+            self, mock_get_users_for_role, mock_get_users):
+        """Additive contexts alongside any other change is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Additive contexts but a sibling kubernetes field also changed.
+        result = core._compare_workspace_configs(
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a'],
+                'namespace': 'n1'
+            }}, {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b'],
+                    'namespace': 'n2'
+                }
+            })
+        self.assertFalse(result.additive_allowed_contexts)
+
+        # Additive contexts but a non-kubernetes field also changed.
+        result = core._compare_workspace_configs(
+            {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a']
+                },
+                'gcp': {
+                    'project_id': 'p1'
+                }
+            }, {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b']
+                },
+                'gcp': {
+                    'project_id': 'p2'
+                }
+            })
+        self.assertFalse(result.additive_allowed_contexts)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_kubernetes_block_is_none(
+            self, mock_get_users_for_role, mock_get_users):
+        """A null kubernetes block must not crash and is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # `kubernetes: null` in YAML parses to None; must not raise TypeError.
+        result = core._compare_workspace_configs(
+            {'kubernetes': None},
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }})
+        self.assertFalse(result.additive_allowed_contexts)
+
+        result = core._compare_workspace_configs(
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }}, {'kubernetes': None})
+        self.assertFalse(result.additive_allowed_contexts)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_added_user_and_additive_contexts(
+            self, mock_get_users_for_role, mock_get_users):
+        """Adding a user and a context together is still flagged additive."""
+        mock_get_users.side_effect = lambda config, **_kw: config.get(
+            'allowed_users', [])
+        mock_get_users_for_role.return_value = []
+
+        current_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }
+        }
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1', 'user2'],
+            'kubernetes': {
+                'allowed_contexts': ['ctx-a', 'ctx-b']
+            }
+        }
+
+        result = core._compare_workspace_configs(current_config, new_config)
+
+        # User-access was stripped before the context comparison, so the added
+        # user does not block additive detection.
+        self.assertTrue(result.additive_allowed_contexts)
+        self.assertFalse(result.only_user_access_changes)
+        self.assertEqual(set(result.added_users), {'user2'})
+        self.assertEqual(result.removed_users, [])
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_additive_contexts(
+            self, mock_compare_configs, mock_check_resources):
+        """Additive allowed_contexts changes skip the teardown check."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            additive_allowed_contexts=True)
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # Additive context changes do not require an empty workspace.
+        mock_check_resources.assert_not_called()
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_added_user_and_additive_contexts(
+            self, mock_compare_configs, mock_check_resources, mock_check_users):
+        """Adding a user and a context together skips all teardown checks."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['user1'],
+            allowed_users_new=['user1', 'user2'],
+            removed_users=[],
+            added_users=['user2'],
+            additive_allowed_contexts=True)
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # No removed users -> no user resource check; additive contexts -> no
+        # workspace teardown check.
+        mock_check_resources.assert_not_called()
+        mock_check_users.assert_not_called()
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_added_user_non_additive_contexts(
+            self, mock_compare_configs, mock_check_resources):
+        """Adding a user with a non-additive context change keeps the guard."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['user1'],
+            allowed_users_new=['user1', 'user2'],
+            removed_users=[],
+            added_users=['user2'],
+            additive_allowed_contexts=False)
+        mock_check_resources.return_value = None
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # Non-additive change -> teardown guard still enforced.
+        mock_check_resources.assert_called_once_with([('test-workspace',
+                                                       'update')])
 
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
@@ -825,6 +1101,44 @@ class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
         }
         with self.assertRaises(exceptions.InvalidWorkspaceNameError):
             core.update_config(new_config)
+
+
+class TestUpdateConfigDoesNotRunCheckInline(unittest.TestCase):
+    """update_config must not call sky.check.check; the API route schedules
+    it as a separate request gated on the save succeeding."""
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    def test_update_config_returns_without_sky_check(
+            self, mock_permission, mock_check_resources, mock_sky_check,
+            mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        del mock_permission
+        mock_to_dict.return_value = {'workspaces': {'default': {}}}
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_check_resources.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+
+        new_config = {'workspaces': {'default': {}}, 'gcp': {'project_id': 'p'}}
+        result = core.update_config(new_config)
+
+        self.assertEqual(result, new_config)
+        mock_update_no_lock.assert_called_once()
+        mock_sky_check.assert_not_called()
 
 
 if __name__ == '__main__':

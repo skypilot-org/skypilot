@@ -62,7 +62,7 @@ state "All States" as AllStates {
     }
 
     InnerLoop -\-> CANCELLING : user cancel request
-    InnerLoop -[dotted]> RECOVERING : HA controller recovery
+    InnerLoop -[dotted]> RECOVERING : HA controller recovery\nor unexpected error
     CANCELLING -> CANCELLED : cluster\ncleaned up
     CANCELLING -[dotted]-> Terminal: job could complete\nbefore we can cancel
 }
@@ -73,6 +73,8 @@ AllStates -\-> FAILED_CONTROLLER : controller failed or\nunexpected state
 -->
 
 Note that ANY status can legally transition to FAILED_CONTROLLER, even another terminal status. This is because we can have a controller failure or other problem after the job has already exited, e.g. when cleaning up the cluster.
+
+RECOVERING covers three causes, recorded as a RecoverySource on the RECOVERING job event (job_events.recovery_source) so consumers can tell them apart: (1) FAILURE — a cluster preemption/failure or user-code failure; (2) EMERGENCY — the controller hit an unexpected internal error (e.g. external mutation of the job state) and retries managing the job in place, bounded by a per-job budget with exponential backoff (see EMERGENCY_RECOVERY_* in sky/jobs/constants.py); when that budget is exhausted the job goes to FAILED_CONTROLLER with full cleanup. An emergency retry always tears down and relaunches the cluster, even if the task was RUNNING when the error hit — the error may be caused by the cluster's own state, and relaunching is always safe (managed jobs are idempotent); (3) RESTART — the controller process restarted (upgrade/rollout; the resume path is historically called "HA recovery" but runs on any controller restart) and forces recovery on resume. Separately from these per-occurrence causes, spot.recovering_from_failure tracks whether the currently open episode carries failure credit — TRUE iff a genuine preemption/failure is involved; a system-driven interruption (emergency or restart) of a failure recovery neither grants nor erases the credit. When the episode completes, recovery_count is incremented only for credited episodes (NULL, from rows written before the column existed, counts as credited), so the user-visible "Recoveries" count reflects genuine failure recoveries rather than system-driven ones.
 
 The schedule_state follows a simpler diagram:
 

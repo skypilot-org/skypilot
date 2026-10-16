@@ -1,21 +1,75 @@
 """Sky logging agents."""
-from typing import Optional
+from typing import Callable, Optional
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.logs.agent import LoggingAgent
 from sky.logs.aws import CloudwatchLoggingAgent
 from sky.logs.gcp import GCPLoggingAgent
+from sky.logs.otlp import OtlpLoggingAgent
+from sky.logs.reader import get_log_reader
+from sky.logs.reader import LogReader
+from sky.logs.reader import register_log_reader
+
+__all__ = [
+    'LoggingAgent',
+    'CloudwatchLoggingAgent',
+    'GCPLoggingAgent',
+    'OtlpLoggingAgent',
+    'LogReader',
+    'get_log_reader',
+    'register_log_reader',
+    'get_logging_agent',
+    'is_logging_agent_configured',
+    'register_logging_agent_provider',
+]
+
+# An optional programmatic override for the logging agent, mirroring the
+# read-side ``LogReader`` registry (``register_log_reader``). When registered,
+# it is consulted before the ``logs.store`` config selection. Returning
+# ``None`` falls back to the config-based selection, so the override never has
+# to reimplement it.
+LoggingAgentProvider = Callable[[], Optional[LoggingAgent]]
+_logging_agent_provider: Optional[LoggingAgentProvider] = None
+
+
+def register_logging_agent_provider(
+        provider: Optional[LoggingAgentProvider]) -> None:
+    """Registers the process-global logging agent provider (None to clear)."""
+    global _logging_agent_provider
+    _logging_agent_provider = provider
 
 
 def get_logging_agent() -> Optional[LoggingAgent]:
+    # Capture into a local so a concurrent register_logging_agent_provider(None)
+    # cannot clear the global between the check and the call.
+    provider = _logging_agent_provider
+    if provider is not None:
+        agent = provider()
+        if agent is not None:
+            return agent
     store = skypilot_config.get_nested(('logs', 'store'), None)
     if store is None:
         return None
+    # The config schema accepts the store name case-insensitively.
+    store = store.lower()
     if store == 'gcp':
         return GCPLoggingAgent(skypilot_config.get_nested(('logs', 'gcp'), {}))
     elif store == 'aws':
         return CloudwatchLoggingAgent(
             skypilot_config.get_nested(('logs', 'aws'), {}))
+    elif store == 'otlp':
+        return OtlpLoggingAgent(skypilot_config.get_nested(('logs', 'otlp'),
+                                                           {}))
     raise exceptions.InvalidSkyPilotConfigError(
         f'Invalid logging store: {store}')
+
+
+def is_logging_agent_configured() -> bool:
+    """Returns whether a logging agent is configured.
+
+    When True, job logs are forwarded to an external store, so callers can
+    stream them on demand and fall back to the registered ``LogReader`` instead
+    of persisting a local copy.
+    """
+    return get_logging_agent() is not None

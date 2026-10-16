@@ -1,12 +1,13 @@
 """Async SDK functions for managed jobs."""
 import asyncio
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import backends
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk_async
+from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk
 from sky.schemas.api import responses
 from sky.skylet import constants
@@ -36,10 +37,18 @@ async def launch(
     _need_confirmation: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    job_group: Union[int, str, None, sdk._AutoJobGroup] = sdk.AUTO_JOB_GROUP,  # pylint: disable=protected-access
+    depends_on: Optional[List[int]] = None,
 ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
-                                         _need_confirmation)
+    request_id = await asyncio.to_thread(sdk.launch,
+                                         task,
+                                         name,
+                                         pool,
+                                         num_jobs,
+                                         job_group=job_group,
+                                         depends_on=depends_on,
+                                         _need_confirmation=_need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -53,13 +62,21 @@ async def queue_v2(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
+    fields: Optional[
+        Sequence[str]] = managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS,
     stream_logs: Optional[
-        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    include_tree: bool = False,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Async version of queue_v2() that gets statuses of managed jobs."""
-    request_id = await asyncio.to_thread(sdk.queue_v2, refresh, skip_finished,
-                                         all_users, job_ids, limit, fields)
+    request_id = await asyncio.to_thread(sdk.queue_v2,
+                                         refresh,
+                                         skip_finished,
+                                         all_users,
+                                         job_ids,
+                                         limit,
+                                         fields,
+                                         include_tree=include_tree)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -135,8 +152,11 @@ async def tail_logs(cluster_name: str,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
+    # mypy cannot pick an overload of sdk.tail_logs when it is passed as a
+    # value to asyncio.to_thread; the runtime call is unambiguous because
+    # preload_content defaults to True.
     return await asyncio.to_thread(
-        sdk.tail_logs,
+        sdk.tail_logs,  # type: ignore[arg-type]
         cluster_name,
         job_id,
         follow,

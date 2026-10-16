@@ -109,8 +109,11 @@ async def get(request_id: str) -> Any:
                     payloads.RequestPayload(**await response.json()))
             elif response.status == 500:
                 try:
+                    # A failed request's payload is nested under 'detail'
+                    # (mirrors the sync sdk.get).
                     request_task = requests_lib.Request.decode(
-                        payloads.RequestPayload(**await response.json()))
+                        payloads.RequestPayload(
+                            **(await response.json()).get('detail')))
                     logger.debug(f'Got request with error: {request_task.name}')
                 except Exception:  # pylint: disable=broad-except
                     request_task = None
@@ -414,16 +417,27 @@ async def launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
     """Async version of launch() that launches a cluster or task."""
     request_id = await asyncio.to_thread(
-        sdk.launch, task, cluster_name, retry_until_up,
-        idle_minutes_to_autostop, wait_for, dryrun, down, backend,
-        optimize_target, no_setup, clone_disk_from, fast, _need_confirmation,
-        _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
-        _disable_controller_check)
+        sdk.launch,
+        task,
+        cluster_name,
+        retry_until_up=retry_until_up,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=wait_for,
+        dryrun=dryrun,
+        down=down,
+        backend=backend,
+        optimize_target=optimize_target,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
+        fast=fast,
+        _need_confirmation=_need_confirmation,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+        _is_launched_by_sky_serve_controller=(
+            _is_launched_by_sky_serve_controller))
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

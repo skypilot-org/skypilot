@@ -1,11 +1,14 @@
 """Instrumentation for the API server."""
 
 import asyncio
+import atexit
+import glob
 import multiprocessing
 import os
+import re
 import threading
 import time
-from typing import List, Optional
+from typing import Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -13,7 +16,7 @@ from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
-import starlette.middleware.base
+import starlette.types
 import uvicorn
 
 from sky import core
@@ -21,13 +24,485 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
+from sky.jobs import stall
 from sky.metrics import utils as metrics_utils
+from sky.server import constants as server_constants
+from sky.server import container_memory
+from sky.server import local_disk
+from sky.server import loop_stall
+from sky.server import middleware_utils
+from sky.skylet import runtime_utils
 from sky.utils import annotations
+from sky.utils import common
+from sky.utils import common_utils
+from sky.utils import perf_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
 _BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
 _COST_TIME_HORIZON_SECONDS = 3600
+
+# Idempotency guard for register_multiproc_cleanup_atexit.
+_multiproc_cleanup_registered = False
+
+
+def register_multiproc_cleanup_atexit() -> None:
+    """Clean up this process's prometheus_client multiproc files on exit.
+
+    Each process that uses pid-labelled multiprocess metrics (uvicorn
+    workers, executor workers) leaves files at
+    ``$PROMETHEUS_MULTIPROC_DIR/<type>_<pid>.db``. The MultiProcessCollector
+    keeps reading those files until ``multiprocess.mark_process_dead(pid)``
+    deletes them. Without this hook, a worker that exits leaves its last
+    written gauge value visible to every future scrape — for ``liveall``
+    gauges this can pin a stale per-pid value indefinitely.
+
+    It also records this process's identity for the reaper (see
+    ``_writer_exited``), and removes the live-gauge files of an earlier
+    writer that held the same pid, except those this process already has
+    open (see ``_open_live_gauge_files``). Call it before the process writes
+    any live gauge.
+
+    Safe to call more than once per process; only the first call registers.
+    Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
+    single-process / unit-test environments.
+    """
+    global _multiproc_cleanup_registered
+    if _multiproc_cleanup_registered:
+        return
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
+        return
+    pid = os.getpid()
+    identity = _process_identity(pid)
+    if identity is not None:
+        try:
+            if _read_writer_identity(multiproc_dir,
+                                     pid) not in (None, identity):
+                open_files = _open_live_gauge_files(pid, multiproc_dir)
+                if open_files is not None:
+                    _remove_live_gauge_files(multiproc_dir, pid, open_files)
+            with open(_writer_identity_path(multiproc_dir, pid),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(identity)
+        except OSError:
+            logger.warning(
+                'Failed to record this process as a prometheus '
+                'multiproc writer.',
+                exc_info=True)
+    atexit.register(_forget_writer, multiproc_dir, pid)
+    _multiproc_cleanup_registered = True
+
+
+_HAS_PROCFS = os.path.isdir('/proc/self')
+
+
+def _process_identity(pid: int) -> Optional[str]:
+    """A value that differs between processes that held the same pid.
+
+    None when no process holds the pid or the holder is a zombie. Raises
+    psutil.Error when the holder cannot be inspected. On Linux it is the
+    start time in clock ticks since boot (/proc/<pid>/stat field 22), which
+    unlike psutil's create_time() does not depend on when the reading
+    process sampled the boot time.
+    """
+    if _HAS_PROCFS:
+        try:
+            with open(f'/proc/{pid}/stat', 'rb') as f:
+                stat = f.read()
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except PermissionError as e:
+            raise psutil.AccessDenied(pid) from e
+        fields = stat[stat.rindex(b')') + 2:].split()
+        return None if fields[0] == b'Z' else fields[19].decode()
+    try:
+        proc = psutil.Process(pid)
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return repr(proc.create_time())
+    except psutil.NoSuchProcess:
+        return None
+
+
+def _writer_identity_path(multiproc_dir: str, pid: int) -> str:
+    return os.path.join(multiproc_dir, f'liveowner_{pid}')
+
+
+def _read_writer_identity(multiproc_dir: str, pid: int) -> Optional[str]:
+    try:
+        with open(_writer_identity_path(multiproc_dir, pid),
+                  'r',
+                  encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def _live_gauge_file_paths(multiproc_dir: str, pid: int) -> Set[str]:
+    return {
+        os.path.realpath(path) for path in glob.glob(
+            os.path.join(multiproc_dir, f'gauge_live*_{pid}.db'))
+    }
+
+
+def _open_live_gauge_files(pid: int, multiproc_dir: str) -> Optional[Set[str]]:
+    """The pid's live-gauge files that the process holding the pid has open.
+
+    None when the holder cannot be inspected. A worker that got a dead
+    writer's pid opens that pid's existing files when it creates its
+    unlabeled gauges at import, before it registers. Unlinking an open file
+    hides everything the process writes to it for the rest of its life.
+    """
+    files = _live_gauge_file_paths(multiproc_dir, pid)
+    try:
+        return {f.path for f in psutil.Process(pid).open_files()} & files
+    except psutil.NoSuchProcess:
+        return set()
+    except psutil.Error:
+        return None
+
+
+def _remove_live_gauge_files(multiproc_dir: str, pid: int,
+                             keep: Set[str]) -> None:
+    for path in _live_gauge_file_paths(multiproc_dir, pid) - keep:
+        os.remove(path)
+
+
+def _forget_writer(multiproc_dir: str, pid: int) -> None:
+    multiprocess.mark_process_dead(pid, multiproc_dir)
+    try:
+        os.remove(_writer_identity_path(multiproc_dir, pid))
+    except OSError:
+        pass
+
+
+# Default reap interval. Tuned to give prompt cleanup of stale per-pid
+# files without measurable overhead: one directory glob + a few /proc reads
+# per unique pid per tick.
+_REAPER_INTERVAL_SECONDS = 60
+# Matches the per-pid live-gauge file names written by
+# ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
+# These are the only files that ``mark_process_dead(pid)`` would remove; the
+# library intentionally preserves counters, histograms, summaries, and
+# non-live gauges so their accumulated values keep contributing to aggregate
+# readings after the writer exits.
+_LIVE_GAUGE_FILE_PID_RE = re.compile(r'^gauge_live[a-z]+_([0-9]+)\.db$')
+
+
+def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
+    """Return pids that own live-gauge files in ``multiproc_dir``.
+
+    Uses the same glob shape that ``mark_process_dead`` would walk, so we
+    do not consider pids whose only on-disk traces are aggregate (counter
+    / histogram / non-live gauge) files — those are intentionally kept.
+    """
+    pattern = os.path.join(multiproc_dir, 'gauge_live*_*.db')
+    pids: Set[int] = set()
+    for path in glob.glob(pattern):
+        m = _LIVE_GAUGE_FILE_PID_RE.match(os.path.basename(path))
+        if m is not None:
+            pids.add(int(m.group(1)))
+    return pids
+
+
+# pid -> identity of the process that held the pid when the reaper first
+# saw the pid's live-gauge files, for writers that did not record their own
+# identity. Only the reaper daemon touches it.
+_live_gauge_writers: Dict[int, str] = {}
+
+_WRITER_IDENTITY_FILE_PID_RE = re.compile(r'^liveowner_([0-9]+)$')
+
+
+def _writer_exited(pid: int, multiproc_dir: str) -> bool:
+    """Whether the process that writes ``pid``'s live-gauge files is gone.
+
+    An existing pid is not enough: the writer may be a zombie its parent
+    has not waited for, or the kernel may have given the pid to another
+    process. The writer's identity is the one it recorded when it
+    registered; for a process that did not register, it is the holder of
+    the pid when the reaper first saw its files. A holder that has one of
+    the files open writes to them, whatever its identity.
+    """
+    if not psutil.pid_exists(pid):
+        return True
+    try:
+        identity = _process_identity(pid)
+    except psutil.Error:
+        return False
+    if identity is None:
+        return True
+    recorded = _read_writer_identity(multiproc_dir, pid)
+    if recorded is None:
+        recorded = _live_gauge_writers.setdefault(pid, identity)
+    return (recorded != identity and
+            _open_live_gauge_files(pid, multiproc_dir) == set())
+
+
+def _reap_stale_multiproc_files() -> int:
+    """Remove prometheus multiproc files of writers that have exited.
+
+    Returns the number of pids reaped.
+    """
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
+        return 0
+    file_pids = _scan_multiproc_pids(multiproc_dir)
+    for pid in set(_live_gauge_writers) - file_pids:
+        del _live_gauge_writers[pid]
+    # Identity files of writers that exited before writing a live gauge.
+    for path in glob.glob(os.path.join(multiproc_dir, 'liveowner_*')):
+        m = _WRITER_IDENTITY_FILE_PID_RE.match(os.path.basename(path))
+        if (m is not None and int(m.group(1)) not in file_pids and
+                _writer_exited(int(m.group(1)), multiproc_dir)):
+            _forget_writer(multiproc_dir, int(m.group(1)))
+    if not file_pids:
+        return 0
+    reaped = 0
+    for pid in file_pids:
+        if not _writer_exited(pid, multiproc_dir):
+            continue
+        _live_gauge_writers.pop(pid, None)
+        try:
+            _forget_writer(multiproc_dir, pid)
+            reaped += 1
+        except Exception:  # pylint: disable=broad-except
+            # Don't let a single bad file or a race with another reaper
+            # tick kill the daemon.
+            logger.warning(
+                f'Failed to reap prometheus multiproc files for pid {pid}.',
+                exc_info=True)
+    return reaped
+
+
+async def multiproc_reaper_daemon(
+        interval_seconds: int = _REAPER_INTERVAL_SECONDS) -> None:
+    """Periodically reap multiproc prometheus files from dead workers.
+
+    Per the prometheus_client multiprocess docs, an exiting writer
+    process should call ``multiprocess.mark_process_dead(pid)`` so its
+    per-pid live-gauge files are removed; otherwise the collector keeps
+    emitting the dead pid's last value on every scrape. ``atexit``-style
+    cleanup inside the worker covers graceful exits, but never fires on
+    SIGKILL / OOM / hard crash — in those cases a recycled worker's last
+    live-gauge value can be served by ``/metrics`` indefinitely (until
+    the API server pod itself restarts and wipes the metrics dir). This
+    daemon scans the multiproc dir from the main API server process and
+    invokes ``mark_process_dead`` on behalf of any writer that has
+    exited.
+
+    Reaps a pid whose live-gauge files are present when no process holds
+    the pid, when the process holding it is a zombie, or when it is not
+    the writer, i.e. the pid was reused (see ``_writer_exited``). The
+    descendant
+    relationship is intentionally not used as the membership signal:
+    writers may not always be direct descendants of the main API server
+    process (e.g. workers reparented to init after an intermediate
+    exits), and a strict descendant filter would leak files from those
+    legitimate writers.
+
+    No-op when ``PROMETHEUS_MULTIPROC_DIR`` is unset.
+    """
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        logger.info(
+            'PROMETHEUS_MULTIPROC_DIR unset; multiproc reaper will not run.')
+        return
+    logger.info(
+        f'Starting prometheus multiproc reaper (interval={interval_seconds}s)')
+    while True:
+        try:
+            reaped = await asyncio.to_thread(_reap_stale_multiproc_files)
+            if reaped:
+                logger.info(
+                    f'Reaped prometheus multiproc files for {reaped} dead '
+                    f'pid(s).')
+        except asyncio.CancelledError:
+            logger.info('Prometheus multiproc reaper cancelled')
+            break
+        except Exception:  # pylint: disable=broad-except
+            logger.warning('Error in prometheus multiproc reaper.',
+                           exc_info=True)
+        await asyncio.sleep(interval_seconds)
+
+
+# How long a ResilientCollector snapshot is considered fresh. A scrape
+# arriving after this triggers a background refresh (at most one in
+# flight per collector).
+_COLLECTOR_REFRESH_TTL_SECONDS = 30
+# How stale a snapshot may get before the collector is reported as
+# inactive via sky_apiserver_metrics_collector_active. Spans a couple of
+# refresh windows so a single slow-but-successful refresh does not flap
+# the gauge.
+_COLLECTOR_MAX_STALENESS_SECONDS = 3 * _COLLECTOR_REFRESH_TTL_SECONDS
+
+
+class ResilientCollector:
+    """Serves scrapes from a snapshot that is refreshed off the scrape path.
+
+    Wraps a Prometheus collector whose ``collect()`` may block on external
+    state (typically the state database). ``collect()`` here never blocks:
+    it returns the last snapshot immediately and, if the snapshot is older
+    than ``ttl_seconds``, kicks off a background refresh — at most one in
+    flight per collector, so a refresh hung on a saturated DB pool never
+    stacks additional threads or queries on top of an ongoing outage.
+
+    There is deliberately no cancellation or restart of a hung refresh: a
+    thread blocked inside a DB driver cannot be killed, and retrying
+    against an unhealthy database only adds load. Instead the collector
+    keeps serving its stale snapshot and ``CollectorHealthCollector``
+    flips ``sky_apiserver_metrics_collector_active`` to 0 once the last
+    successful refresh is older than ``max_staleness_seconds`` — that is
+    the signal operators alert on and intervene.
+    """
+
+    def __init__(
+        self,
+        wrapped,
+        ttl_seconds: float = _COLLECTOR_REFRESH_TTL_SECONDS,
+        max_staleness_seconds: float = (_COLLECTOR_MAX_STALENESS_SECONDS)):
+        self._wrapped = wrapped
+        # Label value for the health meta-metrics. May be suffixed by
+        # _wrap_collector() to stay unique across instances.
+        self.name = type(wrapped).__name__
+        self.max_staleness_seconds = max_staleness_seconds
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._snapshot: List[prom_core.Metric] = []
+        self._last_attempt_time = 0.0
+        self._last_success_time = 0.0
+        self._refresh_in_flight = False
+
+    def describe(self):
+        """Delegates to the wrapped ``describe()`` (never its ``collect()``).
+
+        Having a ``describe()`` — even one that yields nothing — matters:
+        ``prometheus_client`` falls back to calling ``collect()`` at
+        registration time for collectors without one, which would put a
+        potentially-blocking call back on the registration path.
+        """
+        describe = getattr(self._wrapped, 'describe', None)
+        if describe is not None:
+            yield from describe()
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            snapshot = self._snapshot
+            refresh_due = (not self._refresh_in_flight and
+                           now - self._last_attempt_time >= self._ttl)
+            if refresh_due:
+                self._refresh_in_flight = True
+                self._last_attempt_time = now
+        if refresh_due:
+            threading.Thread(target=self._refresh,
+                             name=f'metrics-refresh-{self.name}',
+                             daemon=True).start()
+        yield from snapshot
+
+    def _refresh(self) -> None:
+        try:
+            # Materialize before swapping so a failure mid-iteration
+            # cannot leave a partial snapshot behind.
+            snapshot = list(self._wrapped.collect())
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(
+                'Metrics collector %s failed to refresh; '
+                'serving stale snapshot.', self.name)
+            with self._lock:
+                self._refresh_in_flight = False
+            return
+        with self._lock:
+            self._snapshot = snapshot
+            self._last_success_time = time.time()
+            self._refresh_in_flight = False
+
+    def last_success_time(self) -> float:
+        with self._lock:
+            return self._last_success_time
+
+
+# All ResilientCollector instances, for CollectorHealthCollector. Also
+# gives the health meta-metrics a single emitter: were each wrapper to
+# yield its own copy of the family, the duplicate names would make the
+# exposition invalid (and fail registry duplicate-name checks).
+_resilient_collectors: List[ResilientCollector] = []
+
+_COLLECTOR_ACTIVE_HELP = (
+    '1 if the collector refreshed successfully within its staleness '
+    'bound; 0 means its metrics are being served from a stale snapshot '
+    '(e.g. the refresh is hung on a DB outage) and needs operator '
+    'attention. Also 0 between process start and the first successful '
+    'refresh.')
+_COLLECTOR_LAST_SUCCESS_HELP = (
+    'Unix timestamp of the collector\'s last successful refresh; 0 if it '
+    'has not succeeded since process start.')
+
+
+class CollectorHealthCollector:
+    """Health meta-metrics for every ResilientCollector in this process."""
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+
+    def collect(self):
+        now = time.time()
+        active_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        last_success_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+        for collector in list(_resilient_collectors):
+            last_success = collector.last_success_time()
+            active = now - last_success <= collector.max_staleness_seconds
+            active_family.add_metric([collector.name], 1.0 if active else 0.0)
+            last_success_family.add_metric([collector.name], last_success)
+        yield active_family
+        yield last_success_family
+
+
+def _wrap_collector(collector) -> ResilientCollector:
+    """Wraps a collector in ResilientCollector with a unique health name."""
+    wrapped = ResilientCollector(collector)
+    existing = {c.name for c in _resilient_collectors}
+    if wrapped.name in existing:
+        suffix = 2
+        while f'{wrapped.name}-{suffix}' in existing:
+            suffix += 1
+        wrapped.name = f'{wrapped.name}-{suffix}'
+    _resilient_collectors.append(wrapped)
+    return wrapped
+
+
+_multiproc_collector: Optional[ResilientCollector] = None
+_multiproc_collector_lock = threading.Lock()
+
+
+def _get_multiproc_collector() -> ResilientCollector:
+    """Process-wide wrapper for the multiprocess merge.
+
+    The merge reads every per-pid file under ``PROMETHEUS_MULTIPROC_DIR``
+    and is CPU-bound under the GIL, so wrapping it keeps concurrent
+    scrapes from each running their own copy. Built lazily because
+    ``MultiProcessCollector()`` raises unless that directory is set.
+    """
+    global _multiproc_collector
+    with _multiproc_collector_lock:
+        if _multiproc_collector is None:
+            _multiproc_collector = _wrap_collector(
+                multiprocess.MultiProcessCollector(None))
+        return _multiproc_collector
 
 
 class BurnRateCollector:
@@ -90,22 +565,489 @@ class BurnRateCollector:
         yield metric
 
 
-_BURN_RATE_COLLECTOR = BurnRateCollector()
+_BURN_RATE_COLLECTOR = _wrap_collector(BurnRateCollector())
 
 try:
     prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
 except ValueError:
     pass
 
-# Collectors registered by plugins at runtime.
+# SQLite sidecar files that count toward a database's disk footprint.
+# The -wal file can grow large on its own when checkpoints fall behind;
+# -shm is small but included for completeness.
+_SQLITE_SIDECAR_SUFFIXES = ('-wal', '-shm')
+
+_SQLITE_DB_SIZE_HELP = (
+    'Total on-disk size in bytes (main file plus -wal/-shm sidecars) of '
+    'each SkyPilot SQLite database, by database category. Emitted only '
+    'for databases whose file exists on this host; deployments backed '
+    'by Postgres emit nothing. SQLite files never shrink without a '
+    'VACUUM (row deletion only frees pages for reuse), so expect this '
+    'to be monotone within a process lifetime for append-heavy '
+    'databases.')
+
+
+def _sqlite_db_paths() -> Dict[str, str]:
+    """Returns {db category: absolute path} for SkyPilot SQLite databases.
+
+    Resolved at scrape time rather than import time so that
+    SKY_RUNTIME_DIR / HOME are honored the same way the owning modules
+    resolve their own DB paths (see db_utils.DatabaseManager and
+    server_constants.API_SERVER_REQUEST_DB_PATH).
+    """
+    return {
+        'state': runtime_utils.get_runtime_dir_path('.sky/state.db'),
+        'spot_jobs': runtime_utils.get_runtime_dir_path('.sky/spot_jobs.db'),
+        'serve': runtime_utils.get_runtime_dir_path('.sky/serve/services.db'),
+        'config': runtime_utils.get_runtime_dir_path('.sky/config.db'),
+        'requests': runtime_utils.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH),
+    }
+
+
+class SqliteDBSizeCollector:
+    """Collector for the on-disk size of SkyPilot's SQLite databases.
+
+    Emits ``sky_apiserver_sqlite_db_size_bytes{db}`` for each SkyPilot
+    SQLite database present on this host, where the value is the total
+    disk footprint: the main file plus its ``-wal`` / ``-shm`` sidecars.
+    A series is emitted only when the main database file exists, so
+    deployments backed by Postgres emit nothing.
+
+    Rationale: SQLite files never shrink without a VACUUM — row GC (e.g.
+    the requests retention cleanup) only frees pages for reuse — so on
+    long-lived deployments append-heavy databases like requests.db can
+    grow unbounded within the server's lifetime. This gauge gives
+    operators the visibility to alert on file growth before DB latency
+    degrades.
+
+    A scrape costs only a handful of stat() calls, but the collector is
+    still wrapped in ResilientCollector like the others so a stat() that
+    blocks on a degraded filesystem cannot stall the /metrics scrape.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_sqlite_db_size_bytes',
+                                          _SQLITE_DB_SIZE_HELP,
+                                          labels=['db'])
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily(
+            'sky_apiserver_sqlite_db_size_bytes',
+            _SQLITE_DB_SIZE_HELP,
+            labels=['db'])
+        for db, path in _sqlite_db_paths().items():
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                # Main file missing: this DB is not in use on this host
+                # (e.g. Postgres backend) — skip rather than emit a
+                # misleading 0.
+                continue
+            for suffix in _SQLITE_SIDECAR_SUFFIXES:
+                try:
+                    size += os.path.getsize(path + suffix)
+                except OSError:
+                    pass
+            metric.add_metric([db], size)
+        yield metric
+
+
+_SQLITE_DB_SIZE_COLLECTOR = _wrap_collector(SqliteDBSizeCollector())
+
+try:
+    prom.REGISTRY.register(_SQLITE_DB_SIZE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
+
+_LOCAL_DISK_USED_HELP = (
+    'Disk used by one of the trees the API server writes to its own local '
+    'disk, by root. Counted in allocated blocks with hard links counted '
+    'once, matching what du -- and therefore a container runtime\'s '
+    'ephemeral-storage accounting -- reports. A series appears only for a '
+    'root that exists on this host. Blocks held by a file that was unlinked '
+    'while still open are invisible to a directory walk and so are missing '
+    'from this value.')
+
+_LOCAL_DISK_FILES_HELP = (
+    'Distinct regular files under one of the API server\'s local roots, '
+    'hard links counted once. Worth watching alongside bytes: the cost of '
+    'the periodic du a container runtime runs to account for ephemeral '
+    'storage scales with file count, not with size.')
+
+_LOCAL_DISK_TRUNCATED_HELP = (
+    '1 when the last walk of this root hit its entry or time bound and '
+    'stopped early, making that root\'s reported size and file count lower '
+    'bounds; 0 otherwise.')
+
+_LOCAL_DISK_ROOT_CHARGED_HELP = (
+    '1 when bytes written under this root count against the container\'s own '
+    'ephemeral-storage budget, 0 when the platform charges them elsewhere -- '
+    'a persistent volume or a memory-backed tmpfs mounted into the tree. '
+    'Only the roots marked 1 go into '
+    'sky_apiserver_local_disk_headroom_bytes, so this is what makes that '
+    'number reproducible from the per-root series. A root marked 0 is not '
+    'measured at all -- it reports no size or file count -- because a '
+    'volume is where a network filesystem turns up and walking one is '
+    'prohibitively slow.')
+
+_LOCAL_DISK_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last walk of all local roots took. Runs off the '
+    'scrape path, so this is a cost signal rather than scrape latency.')
+
+_LOCAL_DISK_FS_SIZE_HELP = (
+    'Total size of a filesystem hosting at least one of the API server\'s '
+    'local roots, by mount point.')
+
+_LOCAL_DISK_FS_AVAIL_HELP = (
+    'Space available to a non-root writer on a filesystem hosting at least '
+    'one of the API server\'s local roots, by mount point. On Kubernetes '
+    'the value for the filesystem behind the container\'s writable layer is '
+    'the headroom to the kubelet\'s node-level eviction threshold, which is '
+    'what actually stops the server writing -- unlike the per-container '
+    'budget below, it is exact.')
+
+_LOCAL_DISK_BUDGET_HELP = (
+    'The container\'s own declared ephemeral-storage allowance in bytes, by '
+    'the resource field it came from. source="limit" is enforced -- exceed '
+    'it and the container is stopped. source="request" is not: a platform '
+    'may allow a container past its request, so exceeding it means only that '
+    'the container is over what it declared, and first in line to be stopped '
+    'when the node itself runs out. No series is emitted when neither field '
+    'is exposed, which is the common case: it cannot be read from the '
+    'kernel, since ephemeral-storage is not a cgroup controller, so it has '
+    'to be injected (Kubernetes: a resourceFieldRef env var).')
+
+_LOCAL_DISK_HEADROOM_HELP = (
+    'Bytes left before the budget stops the server writing. Emitted only '
+    'when the budget is an enforced limit: room left against a mere '
+    'scheduling request is not headroom, since the container is allowed '
+    'past it, and the number would reach zero with disk to spare. For the '
+    'boundary that does stop writes without a limit, use '
+    'sky_apiserver_local_disk_fs_avail_bytes. Counts only the roots whose '
+    'sky_apiserver_local_disk_root_charged_to_ephemeral is 1, and is an '
+    'upper bound: those roots cover what the server writes, not every byte '
+    'the platform charges to this container.')
+
+_LOCAL_DISK_UNREADABLE_HELP = (
+    'Entries the last walk of this root could not read, excluding entries '
+    'that had simply gone away -- the request-log GC unlinks constantly and '
+    'those bytes really are gone. Non-zero means a permission or I/O error '
+    'kept part of the tree out of the reported size, so treat it as a lower '
+    'bound.')
+
+
+class LocalDiskUsageCollector:
+    """Collector for the API server's own local disk footprint.
+
+    The trees behind these series grow with traffic and have no size bound
+    of their own, so on a node with finite local disk the server can fill
+    it. Without this, the earliest available signal is a node-level
+    filesystem alert, which cannot say which pod is responsible and has
+    only the gap between its own threshold and the eviction threshold as
+    lead time -- a few percentage points, which at multi-GB-per-minute fill
+    rates is under a minute. Per-root series make the growth attributable
+    and let an alert trigger on rate rather than on level.
+
+    Measurement only: nothing here bounds or refuses writes.
+
+    A walk of a few hundred thousand files costs well under a second on
+    local disk, but the roots are on whatever the deployment mounted, so
+    ResilientCollector keeps it off the scrape path and each root's walk
+    carries its own entry and time bound.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_local_disk_used_bytes',
+                                          _LOCAL_DISK_USED_HELP,
+                                          labels=['root'])
+
+    def collect(self):
+        snapshot = local_disk.scan()
+
+        used = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_used_bytes',
+            _LOCAL_DISK_USED_HELP,
+            labels=['root'])
+        files = prom_core.GaugeMetricFamily('sky_apiserver_local_disk_files',
+                                            _LOCAL_DISK_FILES_HELP,
+                                            labels=['root'])
+        truncated = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_truncated',
+            _LOCAL_DISK_TRUNCATED_HELP,
+            labels=['root'])
+        charged = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_root_charged_to_ephemeral',
+            _LOCAL_DISK_ROOT_CHARGED_HELP,
+            labels=['root'])
+        unreadable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_unreadable_entries',
+            _LOCAL_DISK_UNREADABLE_HELP,
+            labels=['root'])
+        for root, usage in snapshot.roots.items():
+            charged.add_metric(
+                [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
+            if not usage.walked:
+                # A zero here would read as a measurement.
+                continue
+            used.add_metric([root], usage.used_bytes)
+            files.add_metric([root], usage.files)
+            truncated.add_metric([root], 1 if usage.truncated else 0)
+            unreadable.add_metric([root], usage.unreadable)
+        yield used
+        yield files
+        yield truncated
+        yield unreadable
+        yield charged
+
+        fs_size = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_size_bytes',
+            _LOCAL_DISK_FS_SIZE_HELP,
+            labels=['mountpoint'])
+        fs_avail = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_avail_bytes',
+            _LOCAL_DISK_FS_AVAIL_HELP,
+            labels=['mountpoint'])
+        for mountpoint, fs in snapshot.filesystems.items():
+            fs_size.add_metric([mountpoint], fs.size_bytes)
+            fs_avail.add_metric([mountpoint], fs.avail_bytes)
+        yield fs_size
+        yield fs_avail
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_duration_seconds',
+            _LOCAL_DISK_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+        budget = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_budget_bytes',
+            _LOCAL_DISK_BUDGET_HELP,
+            labels=['source'])
+        headroom = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_headroom_bytes',
+            _LOCAL_DISK_HEADROOM_HELP)
+        if snapshot.budget is not None:
+            budget.add_metric([snapshot.budget.source],
+                              snapshot.budget.total_bytes)
+        if snapshot.headroom_bytes is not None:
+            headroom.add_metric([], snapshot.headroom_bytes)
+        yield budget
+        yield headroom
+
+
+_LOCAL_DISK_USAGE_COLLECTOR = _wrap_collector(LocalDiskUsageCollector())
+
+try:
+    prom.REGISTRY.register(_LOCAL_DISK_USAGE_COLLECTOR)  # non-multiprocess
+except ValueError:
+    pass
+
+_CONTAINER_MEMORY_USAGE_HELP = (
+    'Memory charged to the API server container\'s cgroup (memory.current), '
+    'including page cache the kernel can reclaim. See '
+    'sky_apiserver_container_memory_unreclaimable_bytes for the part it '
+    'cannot.')
+
+_CONTAINER_MEMORY_UNRECLAIMABLE_HELP = (
+    'Memory the kernel cannot reclaim from the API server container without '
+    'swap: memory.current minus page cache (memory.stat file) and '
+    'reclaimable slab (slab_reclaimable), plus shmem. '
+    'Compare it with the container\'s memory limit, or with its node\'s '
+    'allocatable memory when there is no limit, to see how close the '
+    'container is to an OOM kill.')
+
+_CONTAINER_MEMORY_STAT_HELP = (
+    'One field of the API server container\'s cgroup memory.stat: anon is '
+    'process memory not backed by files, file is page cache (including '
+    'shmem), kernel is kernel memory charged to the container, shmem is '
+    'tmpfs and shared memory, slab_reclaimable is the part of kernel memory '
+    'the kernel frees under pressure (dentry and inode caches).')
+
+_CONTAINER_MEMORY_LIMIT_HELP = (
+    'The API server container\'s cgroup memory limit (memory.max). No series '
+    'is emitted when the container has no limit, in which case its node\'s '
+    'allocatable memory is the bound.')
+
+_CONTAINER_PROCESSES_HELP = (
+    'Processes in the API server container, by type: main (the server '
+    'process), server (uvicorn workers), worker:<group> (executor workers), '
+    'controller (managed-job controllers), kubectl_exec, '
+    'kubectl_port_forward, kubectl_other, subprocess_daemon, aws (AWS CLI), '
+    'shell (sh/bash), ssh_mux (ssh ControlMaster), ssh_other, '
+    'resource_tracker (multiprocessing), zombie (exited, not yet waited '
+    'for), python_other and other. Every type is always reported.')
+
+_CONTAINER_THREADS_HELP = (
+    'Threads in the API server container\'s processes, by process type.')
+
+_CONTAINER_RSS_ANON_HELP = (
+    'Sum of RssAnon over the API server container\'s processes, by process '
+    'type. Unlike per-process RSS it leaves out file pages, so summed over '
+    'types it is comparable to memory.stat anon.')
+
+_CONTAINER_RSS_HELP = (
+    'Sum of VmRSS (anon, file and shmem pages) over the API server '
+    'container\'s processes, by process type. A page mapped by several '
+    'processes is counted once per process.')
+
+_CONTAINER_MAX_RSS_ANON_HELP = (
+    'RssAnon of the largest process of each type in the API server '
+    'container.')
+
+_CONTAINER_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last read of the container\'s cgroup and '
+    'processes took, including the start of the child process that does '
+    'it. Runs off the scrape path.')
+
+
+class ContainerMemoryCollector:
+    """Collector for the API server container's memory and processes.
+
+    See sky/server/container_memory.py. Emits nothing outside a cgroup v2
+    container. The census runs in a child interpreter so that this process's
+    busy threads cannot slow it down, and ResilientCollector keeps it off the
+    scrape path.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP)
+
+    def collect(self):
+        snapshot = container_memory.scan_in_subprocess()
+        if snapshot is None:
+            return
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_usage_bytes',
+            _CONTAINER_MEMORY_USAGE_HELP,
+            value=snapshot.usage_bytes)
+        unreclaimable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_unreclaimable_bytes',
+            _CONTAINER_MEMORY_UNRECLAIMABLE_HELP)
+        if snapshot.unreclaimable_bytes is not None:
+            unreclaimable.add_metric([], snapshot.unreclaimable_bytes)
+        yield unreclaimable
+        stat = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_stat_bytes',
+            _CONTAINER_MEMORY_STAT_HELP,
+            labels=['stat'])
+        for key, value in snapshot.stat_bytes.items():
+            stat.add_metric([key], value)
+        yield stat
+        limit = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_memory_limit_bytes',
+            _CONTAINER_MEMORY_LIMIT_HELP)
+        if snapshot.limit_bytes is not None:
+            limit.add_metric([], snapshot.limit_bytes)
+        yield limit
+
+        processes = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_processes',
+            _CONTAINER_PROCESSES_HELP,
+            labels=['type'])
+        threads = prom_core.GaugeMetricFamily('sky_apiserver_container_threads',
+                                              _CONTAINER_THREADS_HELP,
+                                              labels=['type'])
+        rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_rss_anon_bytes',
+            _CONTAINER_RSS_ANON_HELP,
+            labels=['type'])
+        max_rss_anon = prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_max_rss_anon_bytes',
+            _CONTAINER_MAX_RSS_ANON_HELP,
+            labels=['type'])
+        rss = prom_core.GaugeMetricFamily('sky_apiserver_container_rss_bytes',
+                                          _CONTAINER_RSS_HELP,
+                                          labels=['type'])
+        for process_type, usage in sorted(snapshot.types.items()):
+            processes.add_metric([process_type], usage.processes)
+            threads.add_metric([process_type], usage.threads)
+            rss_anon.add_metric([process_type], usage.rss_anon_bytes)
+            max_rss_anon.add_metric([process_type], usage.max_rss_anon_bytes)
+            rss.add_metric([process_type], usage.rss_bytes)
+        yield processes
+        yield threads
+        yield rss_anon
+        yield max_rss_anon
+        yield rss
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_container_scan_duration_seconds',
+            _CONTAINER_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+
+_CONTAINER_MEMORY_COLLECTOR = _wrap_collector(ContainerMemoryCollector())
+
+try:
+    prom.REGISTRY.register(_CONTAINER_MEMORY_COLLECTOR)  # non-multiprocess
+except ValueError:
+    pass
+
+_COLLECTOR_HEALTH_COLLECTOR = CollectorHealthCollector()
+
+try:
+    prom.REGISTRY.register(_COLLECTOR_HEALTH_COLLECTOR)
+except ValueError:
+    pass
+
+_START_TIME_HELP = (
+    'Unix timestamp when the API server started. Compute uptime as '
+    'time() - sky_apiserver_start_time_seconds.')
+
+
+class ServerStartTimeCollector:
+    """Exports the API server start time, the uptime source.
+
+    prometheus_client's built-in process_start_time_seconds is unavailable
+    under the multiprocess collector (default collectors are not
+    aggregated). Custom collectors are only scraped from the main server
+    process (the metrics server runs in it), so that process's own creation
+    time is the server boot time. The boot-check request row (which debug
+    dumps use for uptime) is deliberately not used here: the row survives
+    server restarts (schedule_on_boot_check_async ignores
+    RequestAlreadyExistsError), so its created_at reflects the boot that
+    first inserted it, not the current one.
+    """
+
+    def __init__(self):
+        self._start_time = psutil.Process(os.getpid()).create_time()
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                          _START_TIME_HELP)
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                             _START_TIME_HELP)
+        metric.add_metric([], self._start_time)
+        yield metric
+
+
+_SERVER_START_TIME_COLLECTOR = _wrap_collector(ServerStartTimeCollector())
+
+try:
+    prom.REGISTRY.register(_SERVER_START_TIME_COLLECTOR)
+except ValueError:
+    pass
+
+# Collectors registered by plugins at runtime (ResilientCollector-wrapped).
 _plugin_collectors: list = []
 
 
 def register_plugin_collector(collector):
-    """Register a custom Prometheus collector from a plugin."""
-    _plugin_collectors.append(collector)
+    """Register a custom Prometheus collector from a plugin.
+
+    The collector is wrapped in ResilientCollector, so a hung or failing
+    data source degrades its metrics to a stale snapshot (flagged by
+    sky_apiserver_metrics_collector_active) instead of hanging the whole
+    /metrics scrape.
+    """
+    wrapped = _wrap_collector(collector)
+    _plugin_collectors.append(wrapped)
     try:
-        prom.REGISTRY.register(collector)
+        prom.REGISTRY.register(wrapped)
     except ValueError:
         pass
 
@@ -113,30 +1055,119 @@ def register_plugin_collector(collector):
 # Cache TTL shared by all custom collectors.
 _COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
 
+# Label value substituted when a row has NULL in workspace / user_hash / cloud.
+# 'default' for workspace mirrors the convention used elsewhere in the
+# codebase for pre-workspace rows; '' for user/cloud keeps the absence
+# distinct without inventing a label value that could collide with a real
+# one.
+_NULL_WORKSPACE_LABEL = 'default'
+_NULL_LABEL = ''
+
+
+def _label_or_default(value: Optional[str], default: str) -> str:
+    return value if value else default
+
+
+# Hard upper bound on rows emitted by
+# sky_managed_job_emergency_recovery_attempts. Emergencies are rare by
+# construction (a bounded per-job retry budget), but a controller bug
+# hitting many jobs at once could otherwise produce one series per job;
+# capping defends Prometheus's series budget. The query orders by
+# attempt count (highest first, deterministic tiebreak) so the jobs
+# most likely to page survive the cap.
+_EMERGENCY_EPISODES_MAX_SERIES = 100
+
+_RECOVERY_EVENTS_HELP = (
+    'Count of managed-job RECOVERING events currently retained in '
+    'job_events, by recovery source and workspace. NOT monotone: '
+    'job_events has a retention window, so aged-out rows decrease the '
+    'value — use clamp_min(delta(...), 0) for rates, never increase(). '
+    'Events written before recovery_source existed (NULL) are excluded.')
+
+_EMERGENCY_ATTEMPTS_HELP = (
+    'Emergency-recovery attempts used in the managed job\'s current '
+    'episode. The series exists only while the episode is active (last '
+    'attempt within the controller\'s reset window) and the job is '
+    'non-terminal; capped at 100 series, highest attempt counts kept.')
+
 
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
-    Queries the managed jobs DB to produce real-time gauges for
-    job status counts.
+    Emits ``sky_managed_jobs_count{workspace, user, status, cloud}`` for
+    every task — both active (PENDING / LAUNCHING / RUNNING / …) and
+    terminal (SUCCEEDED / FAILED* / CANCELLED). For pre-cloud-assignment
+    statuses (PENDING / LAUNCHING) the ``cloud`` label is the empty
+    string ``""``; operators can ``sum by (workspace, user, status)``
+    for a cloud-agnostic view.
+
+    Caveat: terminal counts grow monotonically as the DB accumulates
+    rows. Reading absolute values gives lifetime totals; for "failures
+    in the last hour" use ``increase(...)`` / ``delta(...)`` over a
+    window. A proper Counter incremented at the state-transition site
+    would be more semantically correct than a gauge here, but is
+    deferred.
+
+    Also emits two recovery-observability gauges:
+
+    * ``sky_managed_job_recovery_events_count{recovery_source,
+      workspace}`` — RECOVERING ``job_events`` rows currently retained,
+      by source (FAILURE / EMERGENCY / RESTART). Not monotone (event
+      retention prunes old rows), so rate queries must use
+      ``clamp_min(delta(...), 0)``, never ``increase(...)``.
+    * ``sky_managed_job_emergency_recovery_attempts{job_id, job_name,
+      workspace}`` — per-job attempts used in the job's current
+      emergency-recovery episode, emitted only while the episode is
+      active and the job is non-terminal, so the series (and any alert
+      on it) self-clears. Capped at ``_EMERGENCY_EPISODES_MAX_SERIES``.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._last_scrape_time = 0.0
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
-        self._cached_status_counts: dict = {}
+        # List of (workspace, user_hash, cloud, status, count) tuples.
+        self._cached_rows: list = []
+        # List of (recovery_source, workspace, count) tuples.
+        self._cached_recovery_rows: list = []
+        # List of (spot_job_id, job_name, workspace, attempts) tuples.
+        self._cached_episode_rows: list = []
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
+        from sky.jobs import constants as managed_job_constants
         from sky.jobs import state as managed_job_state
-        self._cached_status_counts = (managed_job_state.get_status_counts())
+
+        # Query into locals first, then assign: a failure mid-refresh
+        # (collect() logs it and serves the cache) must not leave a
+        # mixed-age cache where some metrics updated and others didn't.
+        rows = (managed_job_state.get_status_counts_by_workspace_user_cloud())
+        recovery_rows = (
+            managed_job_state.get_recovery_event_counts_by_source_workspace())
+        episode_rows = (
+            managed_job_state.get_active_emergency_recovery_episodes(
+                now=time.time(),
+                window_seconds=managed_job_constants.
+                EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS,
+                limit=_EMERGENCY_EPISODES_MAX_SERIES,
+            ))
+        self._cached_rows = rows
+        self._cached_recovery_rows = recovery_rows
+        self._cached_episode_rows = episode_rows
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            'Current count of managed job tasks by status',
-            labels=['status'])
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud.'),
+            labels=['workspace', 'user', 'status', 'cloud'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
 
     def collect(self):
         now = time.time()
@@ -144,21 +1175,476 @@ class ManagedJobsCollector:
             if now - self._last_scrape_time >= self._cache_ttl:
                 try:
                     self._refresh()
-                    self._last_scrape_time = now
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('Failed to collect managed jobs metrics')
-            status_counts = self._cached_status_counts
+                self._last_scrape_time = now
+            rows = self._cached_rows
+            recovery_rows = self._cached_recovery_rows
+            episode_rows = self._cached_episode_rows
 
-        status_metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            'Current count of managed job tasks by status',
-            labels=['status'])
-        for status, count in status_counts.items():
-            status_metric.add_metric([status], count)
-        yield status_metric
+        counts: dict = {}
+        for workspace, user_hash, cloud, status, count in rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            user_label = _label_or_default(user_hash, _NULL_LABEL)
+            cloud_label = _label_or_default(cloud, _NULL_LABEL)
+            key = (ws_label, user_label, status, cloud_label)
+            counts[key] = counts.get(key, 0) + count
+
+        metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud'),
+            labels=['workspace', 'user', 'status', 'cloud'])
+        for (workspace, user, status, cloud), count in counts.items():
+            metric.add_metric([workspace, user, status, cloud], count)
+        yield metric
+
+        recovery_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        for source, workspace, count in recovery_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            recovery_metric.add_metric([source, ws_label], count)
+        yield recovery_metric
+
+        episode_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
+        for job_id, job_name, workspace, attempts in episode_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            name_label = _label_or_default(job_name, _NULL_LABEL)
+            episode_metric.add_metric([str(job_id), name_label, ws_label],
+                                      attempts)
+        yield episode_metric
 
 
-_MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
+_STALL_COUNT_HELP = (
+    'Managed job tasks stalled in a phase: never_claimed (nothing has claimed '
+    'the task) or unattended (something claimed it and stopped driving the '
+    'launch). Age-filtered and suppressed in the API server, so any value '
+    'above zero is already past the phase threshold and not a legitimate '
+    'wait. A phase that ran and found nothing reports 0 under an empty '
+    'workspace label; a phase that could not run reports nothing at all, so '
+    'absence means not measured, never healthy.')
+_STALL_AGE_HELP = (
+    'Age in seconds of the oldest managed job task stalled in a phase, per '
+    'workspace. Zero when the phase ran and found nothing.')
+_STALL_SUPPRESSED_HELP = (
+    '1 when a phase was not measured because no controller process could have '
+    'claimed anything, so its 0 above means "not asked" rather than "nothing '
+    'stalled". Exported rather than folded into the count, on the same '
+    'grounds as the rules refusing `or vector(0)`: a blind spot must not read '
+    'as healthy.')
+
+_STALL_TRUNCATED_HELP = (
+    '1 when a stall scan hit a limit, so the count for that phase is a floor '
+    'rather than a total; 0 when it is a total. Without this a fleet-wide '
+    'stall reads as exactly the cap, which is a number that looks precise and '
+    'is not.')
+_STALL_SCAN_HELP = (
+    'Unix time of the last stall scan that completed for a phase. The '
+    'companion to the count: it is what distinguishes a phase that is '
+    'reporting zero from one that is not reporting.')
+
+# Only ever set on the zero a phase emits when it ran and found nothing. A real
+# row cannot collide with it: those go through _label_or_default, which turns a
+# missing workspace into _NULL_WORKSPACE_LABEL ('default') rather than ''.
+_STALL_NO_ROWS_WORKSPACE = ''
+
+
+class ManagedJobsStallCollector:
+    """Managed job tasks that stopped making progress before they ever ran.
+
+    Separate from ManagedJobsCollector rather than folded into it, for two
+    reasons that the other collector's shape cannot provide:
+
+    * **Isolation from the existing gauges.** Its _refresh is deliberately
+      all-or-nothing, and a ResilientCollector can neither time out nor cancel
+      a refresh in flight. Putting these scans there would let a wedged stall
+      query freeze sky_managed_jobs_count, which an existing page depends on.
+    * **Isolation between the phases.** The two scans read different stores --
+      never_claimed the managed-jobs DB alone, unattended also the cluster
+      state DB and the requests DB -- so they fail in different ways and must
+      be able to go dormant separately. That breaks the "no mixed-age cache"
+      invariant the other collector holds, deliberately: it is replaced by a
+      stronger one, that every cache states its own age and a cache that has
+      never been filled is not exported at all.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        # phase -> (tasks, scanned_at, truncated). A phase absent from this
+        # dict has never completed a scan and is exported as nothing at all.
+        # A phase whose refresh fails keeps its last good entry, and therefore
+        # its old timestamp, which is what the staleness alert reads.
+        self._cache: dict = {}
+
+    def _refresh(self):
+        # One try per phase, not one around both: the whole point of the
+        # separate caches is that either phase can fail without silencing the
+        # other, and a shared try would hand that back.
+        for phase, scan in ((stall.NEVER_CLAIMED, stall.scan_never_claimed),
+                            (stall.UNATTENDED, stall.scan_unattended)):
+            try:
+                result = scan()
+            except Exception:  # pylint: disable=broad-except
+                logger.exception(
+                    'Failed to scan managed jobs stalled in phase %s', phase)
+                continue
+            # Labelled from the result, not from the loop: that is what
+            # StallScan.phase is for, and it is one less place for the two
+            # names to drift apart.
+            self._cache[result.phase] = (result.tasks, time.time(),
+                                         result.truncated, result.suppressed)
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stalled',
+                                          _STALL_COUNT_HELP,
+                                          labels=['phase', 'workspace'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_seconds_max',
+                                          _STALL_AGE_HELP,
+                                          labels=['phase', 'workspace'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_truncated',
+                                          _STALL_TRUNCATED_HELP,
+                                          labels=['phase'])
+        yield prom_core.GaugeMetricFamily('sky_managed_jobs_stall_suppressed',
+                                          _STALL_SUPPRESSED_HELP,
+                                          labels=['phase'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_scan_timestamp_seconds',
+            _STALL_SCAN_HELP,
+            labels=['phase'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._refresh()
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception(
+                        'Failed to collect managed jobs stall metrics')
+                self._last_scrape_time = now
+            cache = dict(self._cache)
+
+        count_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stalled',
+            _STALL_COUNT_HELP,
+            labels=['phase', 'workspace'])
+        age_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_seconds_max',
+            _STALL_AGE_HELP,
+            labels=['phase', 'workspace'])
+        truncated_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_truncated',
+            _STALL_TRUNCATED_HELP,
+            labels=['phase'])
+        suppressed_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_suppressed',
+            _STALL_SUPPRESSED_HELP,
+            labels=['phase'])
+        scan_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_stall_scan_timestamp_seconds',
+            _STALL_SCAN_HELP,
+            labels=['phase'])
+
+        for phase, (tasks, scanned_at, truncated, suppressed) in cache.items():
+            scan_metric.add_metric([phase], scanned_at)
+            truncated_metric.add_metric([phase], 1 if truncated else 0)
+            suppressed_metric.add_metric([phase], 1 if suppressed else 0)
+            if not tasks:
+                # The measurement is "none", and it has to be said: an absent
+                # series would otherwise mean both this and "the scan could
+                # not run", and no rule could tell them apart.
+                count_metric.add_metric([phase, _STALL_NO_ROWS_WORKSPACE], 0)
+                age_metric.add_metric([phase, _STALL_NO_ROWS_WORKSPACE], 0)
+                continue
+            counts: dict = {}
+            oldest: dict = {}
+            for task in tasks:
+                workspace = _label_or_default(task.workspace,
+                                              _NULL_WORKSPACE_LABEL)
+                counts[workspace] = counts.get(workspace, 0) + 1
+                # Age is computed against now at collect time, not cached, so
+                # a stall keeps ageing between refreshes.
+                age = max(0.0, now - task.stalled_since)
+                oldest[workspace] = max(oldest.get(workspace, 0.0), age)
+            for workspace, count in counts.items():
+                count_metric.add_metric([phase, workspace], count)
+            for workspace, age in oldest.items():
+                age_metric.add_metric([phase, workspace], age)
+
+        yield count_metric
+        yield age_metric
+        yield truncated_metric
+        yield suppressed_metric
+        yield scan_metric
+
+
+# Transient statuses we report time-in-state for. UP / STOPPED are steady
+# states by design (no upper bound on residence time, alerting on age is
+# meaningless). PENDING is display-only per status_lib.ClusterStatus.
+_TIME_IN_STATE_STATUSES: Tuple[status_lib.ClusterStatus, ...] = (
+    status_lib.ClusterStatus.INIT,
+    status_lib.ClusterStatus.AUTOSTOPPING,
+)
+
+# Hard upper bound on rows emitted by sky_cluster_time_in_state_seconds.
+# A tenant launching/failing many clusters in tight succession (bug, retry
+# storm, or just heavy churn) can produce many simultaneously-transient
+# cluster_name series; capping defends Prometheus's series budget.
+# Sorting by age first means the clusters most likely to be stuck (and
+# therefore most likely to be alertable) survive the cap.
+_TIME_IN_STATE_MAX_SERIES = 100
+
+
+class WorkspaceUsageCollector:
+    """Per-workspace / per-user cluster usage metrics.
+
+    Walks ``global_user_state.get_clusters()`` once per cache window
+    (30 s) and emits:
+
+      * ``sky_clusters_count{workspace,user,status,cloud,kind}`` —
+        cluster counts. ``kind`` ∈ ``cluster|managed_job|controller``:
+        filter ``kind="cluster"`` to avoid overlap with
+        ``sky_managed_jobs_count`` and the controller; sum across
+        kinds for the all-clusters total.
+      * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type,kind}``
+        — GPU count by accelerator model across ``UP`` clusters,
+        summed over ``launched_nodes``.
+      * ``sky_cluster_time_in_state_seconds{workspace,status,cloud,kind,
+        cluster_name}`` — Seconds in current state, per cluster, for
+        transient statuses (INIT / AUTOSTOPPING). Operators alert on
+        this to catch clusters stuck mid-transition; ``cluster_name``
+        on the label set means the alert series identifies exactly
+        which cluster is stuck. Source of truth is the
+        ``cluster_events`` STATUS_CHANGE log so the timer is not reset
+        by refresh paths that re-write ``cluster.status_updated_at``.
+
+    All gauges share one cache to keep the cost of a scrape bounded to
+    a single ``get_clusters()`` call (the same query
+    ``BurnRateCollector`` already runs).
+
+    The ``user`` label carries ``user_hash`` (immutable, 8-char hex)
+    rather than the display name; operators who want a readable name
+    can join with the ``users`` table or maintain a side-mapping.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        self._cached: dict = {
+            'counts': {},
+            'gpus': {},
+            'time_in_state': {},
+        }
+
+    @staticmethod
+    def _cluster_kind(cluster: dict) -> str:
+        """Classify a cluster for the ``kind`` label.
+
+        - ``controller``: jobs / serve controller (infra), by name prefix.
+        - ``managed_job``: a managed-job backing cluster (``is_managed``).
+        - ``cluster``: a plain cluster (``sky launch``).
+
+        Letting operators filter ``kind="cluster"`` avoids double-counting
+        against ``sky_managed_jobs_count`` / the controller; summing
+        across all kinds still gives full resource coverage.
+
+        We check the name prefix directly instead of going through
+        ``controller_utils.Controllers.from_name``: that helper asserts
+        exact-match against the live ``SERVER_ID`` (and mutates the
+        ``Controllers`` enum singleton on the looser path), which would
+        crash the whole scrape if the DB carries a controller row from
+        a previous server identity (e.g. ephemeral storage wiped
+        ``~/.sky/user_hash`` between restarts).
+        """
+        name = cluster.get('name') or ''
+        if (name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX) or
+                name.startswith(common.JOB_CONTROLLER_PREFIX)):
+            return 'controller'
+        if cluster.get('is_managed'):
+            return 'managed_job'
+        return 'cluster'
+
+    def _compute(self) -> dict:
+        clusters = global_user_state.get_clusters(summary_response=True)
+        counts: dict = {}
+        gpus: dict = {}
+        # Per-transient-status: list of (label_key, cluster_hash). label_key
+        # is (workspace, status, cloud, kind, cluster_name) — the labels
+        # the metric ultimately emits. We resolve the entered-at timestamps
+        # in one batched DB call per status, then emit one gauge row per
+        # cluster (no aggregation at the collector — alerts/dashboards can
+        # max/sum however they want).
+        transient: Dict[str, List[Tuple[Tuple[str, str, str, str, str],
+                                        str]]] = {}
+        transient_statuses = {s.name for s in _TIME_IN_STATE_STATUSES}
+
+        for cluster in clusters:
+            workspace = _label_or_default(cluster.get('workspace'),
+                                          _NULL_WORKSPACE_LABEL)
+            user = _label_or_default(cluster.get('user_hash'), _NULL_LABEL)
+            kind = self._cluster_kind(cluster)
+
+            handle = cluster.get('handle')
+            launched_resources = (getattr(handle, 'launched_resources', None)
+                                  if handle is not None else None)
+            cloud_obj = (getattr(launched_resources, 'cloud', None)
+                         if launched_resources is not None else None)
+            cloud = _label_or_default(
+                str(cloud_obj) if cloud_obj else None, _NULL_LABEL)
+
+            status = cluster.get('status')
+            status_name = getattr(status, 'name', str(status))
+
+            # ── count ──
+            count_key = (workspace, user, status_name, cloud, kind)
+            counts[count_key] = counts.get(count_key, 0) + 1
+
+            # ── time-in-state, transient statuses only ──
+            if status_name in transient_statuses:
+                cluster_hash = cluster.get('cluster_hash')
+                cluster_name = cluster.get('name')
+                if cluster_hash and cluster_name:
+                    label_key = (workspace, status_name, cloud, kind,
+                                 cluster_name)
+                    transient.setdefault(status_name, []).append(
+                        (label_key, cluster_hash))
+
+            # ── GPUs, only for UP clusters ──
+            if status_name != 'UP':
+                continue
+            if launched_resources is None:
+                continue
+            num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
+
+            accelerators = (launched_resources.accelerators or {})
+            for acc_name, acc_count in accelerators.items():
+                gpu_key = (workspace, user, cloud, acc_name, kind)
+                gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
+                                 float(acc_count) * num_nodes)
+
+        # Resolve the entered-at timestamp per cluster. One DB call per
+        # transient status; total cost bounded by # of distinct transient
+        # statuses observed (≤ |_TIME_IN_STATE_STATUSES|).
+        now_seconds = int(time.time())
+        time_in_state: Dict[Tuple[str, str, str, str, str], float] = {}
+        for status_name, entries in transient.items():
+            try:
+                status_enum = status_lib.ClusterStatus[status_name]
+            except KeyError:
+                continue
+            hashes = {h for _, h in entries}
+            entered_at = global_user_state.get_last_status_change_times(
+                hashes, status_enum)
+            for label_key, cluster_hash in entries:
+                ts = entered_at.get(cluster_hash)
+                if ts is None:
+                    # Cluster has no recorded STATUS_CHANGE event for this
+                    # status — typically a launch in the sub-second window
+                    # before the event row is written, or a row written
+                    # before the cluster_events table existed. Either way
+                    # the residence is too short to alert on.
+                    continue
+                time_in_state[label_key] = max(0.0, float(now_seconds - ts))
+
+        if len(time_in_state) > _TIME_IN_STATE_MAX_SERIES:
+            logger.warning(
+                'sky_cluster_time_in_state_seconds: %d transient clusters '
+                'observed; capping to top %d by age. Oldest clusters '
+                'survive the cap so any alertable case is preserved.',
+                len(time_in_state), _TIME_IN_STATE_MAX_SERIES)
+            time_in_state = dict(
+                sorted(time_in_state.items(),
+                       key=lambda kv: kv[1],
+                       reverse=True)[:_TIME_IN_STATE_MAX_SERIES])
+
+        return {
+            'counts': counts,
+            'gpus': gpus,
+            'time_in_state': time_in_state,
+        }
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_clusters_count',
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_clusters_gpus_in_flight',
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_cluster_time_in_state_seconds',
+            'Seconds in current state, per cluster, for transient statuses '
+            '(INIT, AUTOSTOPPING). Source is the cluster_events '
+            'STATUS_CHANGE log; only transient statuses emit, so steady '
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
+            labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._cached = self._compute()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to collect workspace usage')
+                    self._last_scrape_time = now
+            data = self._cached
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_clusters_count',
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
+        for (workspace, user, status, cloud, kind), v in data['counts'].items():
+            m.add_metric([workspace, user, status, cloud, kind], v)
+        yield m
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_clusters_gpus_in_flight',
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        for (workspace, user, cloud, gpu_type, kind), v in data['gpus'].items():
+            m.add_metric([workspace, user, cloud, gpu_type, kind], v)
+        yield m
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_cluster_time_in_state_seconds',
+            'Seconds in current state, per cluster, for transient statuses '
+            '(INIT, AUTOSTOPPING). Source is the cluster_events '
+            'STATUS_CHANGE log; only transient statuses emit, so steady '
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
+            labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
+        for key, v in data['time_in_state'].items():
+            workspace, status, cloud, kind, cluster_name = key
+            m.add_metric([workspace, status, cloud, kind, cluster_name], v)
+        yield m
+
+
+_WORKSPACE_USAGE_COLLECTOR = _wrap_collector(WorkspaceUsageCollector())
+
+try:
+    prom.REGISTRY.register(_WORKSPACE_USAGE_COLLECTOR)
+except ValueError:
+    pass
+
+_MANAGED_JOBS_COLLECTOR: Optional[ResilientCollector] = None
+_MANAGED_JOBS_STALL_COLLECTOR: Optional[ResilientCollector] = None
 
 
 def maybe_register_managed_jobs_collector():
@@ -169,13 +1655,24 @@ def maybe_register_managed_jobs_collector():
     cluster and is not directly accessible.
     """
     global _MANAGED_JOBS_COLLECTOR
+    if _MANAGED_JOBS_COLLECTOR is not None:
+        return
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
     if not managed_job_utils.is_consolidation_mode():
         return
-    _MANAGED_JOBS_COLLECTOR = ManagedJobsCollector()
+    _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
+    except ValueError:
+        pass
+    # Registered alongside rather than inside, so a wedged stall scan cannot
+    # freeze the gauges above it. Same consolidation guard: both read the
+    # managed-jobs database directly.
+    global _MANAGED_JOBS_STALL_COLLECTOR
+    _MANAGED_JOBS_STALL_COLLECTOR = _wrap_collector(ManagedJobsStallCollector())
+    try:
+        prom.REGISTRY.register(_MANAGED_JOBS_STALL_COLLECTOR)
     except ValueError:
         pass
 
@@ -183,18 +1680,29 @@ def maybe_register_managed_jobs_collector():
 metrics_app = fastapi.FastAPI()
 
 
-# Serve /metrics in dedicated thread to avoid blocking the event loop
-# of metrics server.
+# Declared sync on purpose: the collection below is CPU-bound and would
+# stall the event loop of whatever server is running it, so Starlette
+# hands it to a worker thread instead. That makes the scrape latency
+# depend on the serving loop's thread pool, which is why the metrics app
+# gets an event loop to itself -- see start_metrics_server().
 @metrics_app.get('/metrics')
 def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_get_multiproc_collector())
         registry.register(_BURN_RATE_COLLECTOR)
+        registry.register(_SQLITE_DB_SIZE_COLLECTOR)
+        registry.register(_WORKSPACE_USAGE_COLLECTOR)
+        registry.register(_LOCAL_DISK_USAGE_COLLECTOR)
+        registry.register(_CONTAINER_MEMORY_COLLECTOR)
+        registry.register(_COLLECTOR_HEALTH_COLLECTOR)
+        registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        if _MANAGED_JOBS_STALL_COLLECTOR is not None:
+            registry.register(_MANAGED_JOBS_STALL_COLLECTOR)
         for c in _plugin_collectors:
             try:
                 registry.register(c)
@@ -208,21 +1716,186 @@ def metrics() -> fastapi.Response:
                             headers={'Cache-Control': 'no-cache'})
 
 
+class _FederationTargets:
+    """Which clusters a federation scrape covers, resolved off the loop.
+
+    The metrics server serves /metrics, /gpu-metrics and /endpoints-metrics
+    from one event loop, so whatever blocks that loop takes the /metrics
+    scrape down with it -- and the federation routes used to open by
+    reloading the server config (a database read on Postgres-backed
+    deployments), dropping the request-level caches and re-reading the
+    kubeconfig, inline. Exactly the outage those metrics are needed for is
+    the one that makes that work slow.
+
+    So a scrape never does it. A scrape reads ``snapshot()`` and asks for a
+    background refresh with ``start_refresh_if_idle()``; the refresh
+    publishes to the cache for a later scrape. This is the shape the
+    collectors already use (see ResilientCollector) and it is what keeps a
+    slow refresh from costing anything: merely moving the work to a thread
+    the handler awaits would leave the loop free, but every scrape would
+    still wait the full refresh, and one slower than the scrape timeout (45s
+    against a 60s interval for both federation routes) would then be
+    cancelled by Prometheus on every single scrape -- each one starting a
+    fresh attempt that completes just in time to be thrown away, so the
+    routes would federate nothing at all for as long as it lasted, with the
+    cached snapshot never reached because two scrapes never overlap.
+
+    At most one refresh runs at a time, so a refresh hung on an unreachable
+    database cannot accumulate one stuck thread per scrape and starve the
+    executor the port-forwards run in. Like ResilientCollector, a hung
+    refresh is deliberately neither cancelled nor retried: a thread blocked
+    in a DB driver cannot be killed, and retrying only adds load.
+
+    The cost is staleness: the cluster list is up to one refresh old. The
+    refresh is primed at server start (see start_metrics_server) so the
+    first scrape is not the one paying for it, and a refresh that stops
+    completing is reported rather than silent --
+    sky_apiserver_federation_targets_last_success_timestamp_seconds stops
+    advancing, and time() - it is the age of the list being served.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._refreshing = False
+        # (remote contexts, Slurm clusters) of the last successful refresh.
+        self._snapshot: Tuple[List[str], List[str]] = ([], [])
+
+    def _prologue(self) -> Tuple[List[str], List[str]]:
+        """Blocking; runs on the refresh thread.
+
+        The metrics server runs as a daemon thread, not as a normal request
+        handler, so:
+        1. The global config context (allowed_contexts, etc.) is a snapshot
+           from startup. Reload it from the DB to pick up config changes.
+        2. Request-scoped caches (kubernetes API clients, context names) are
+           never cleared automatically. Clear them to pick up new kubeconfigs.
+
+        Both reloads land where the loop thread will see them, which is what
+        makes running them off-thread safe at all: with no request context
+        set (this app installs no middleware) skypilot_config writes its
+        process-global config context, and even with one set,
+        contextvars.copy_context() -- what a worker thread is handed --
+        shares the context object rather than cloning it, so the write still
+        lands on the object the loop reads. The request-level caches are
+        process-global either way. Concurrent readers are safe because
+        _reload_config_as_server() is written for them: it builds the new
+        config fully and swaps it in with a single _set_loaded_config, and
+        says so.
+
+        Contexts that point at the API server's own cluster are dropped: the
+        central Prometheus scrapes the local cluster's exporters directly, so
+        federating them again would only duplicate the raw series under a
+        stamped copy. The dashboard matches the local cluster with cluster=""
+        (see /dashboard_config local_contexts).
+        """
+        skypilot_config.reload_config()
+        annotations.clear_request_level_cache()
+        contexts = core.get_all_contexts()
+        _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
+        # Slurm clusters federate through their login node; only clusters
+        # with a configured prometheus_url participate. Enumeration reads
+        # local config only, and is shared by both routes so the snapshot has
+        # one shape (/endpoints-metrics ignores it).
+        return remote_contexts, metrics_utils.get_slurm_metrics_clusters()
+
+    def _run_refresh(self) -> None:
+        """Refresh thread: publish the new snapshot, then release the guard.
+
+        A failure keeps the previous snapshot rather than publishing an empty
+        one -- every cluster's series vanishing at once is worse than a stale
+        list, and the freshness gauge reports the staleness either way.
+
+        The guard is released in a ``finally``, which is load-bearing rather
+        than tidiness: every path that could leave it set leaves it set for
+        the life of the process, and that is the exact state this class
+        exists to avoid -- every later scrape serving a frozen list and
+        starting nothing. A ``finally`` covers the paths an ``except
+        Exception`` does not, namely a BaseException out of the prologue and
+        a logging call that raises while handling one.
+        """
+        try:
+            snapshot = self._prologue()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Failed to refresh the federation targets; '
+                             'serving the previous cluster list.')
+            return
+        else:
+            with self._lock:
+                self._snapshot = snapshot
+                # Stamped and published together, so a reader cannot see a
+                # new list with the old timestamp or the reverse.
+                metrics_utils.SKY_APISERVER_FEDERATION_TARGETS_LAST_SUCCESS_TIMESTAMP_SECONDS.set(  # pylint: disable=line-too-long
+                    time.time())
+        finally:
+            with self._lock:
+                self._refreshing = False
+
+    def start_refresh_if_idle(self) -> Optional[threading.Thread]:
+        """Starts a refresh unless one is already running.
+
+        Returns the thread so start-up and tests can join it; a scrape fires
+        and forgets. The check and the flip happen together under the lock so
+        two concurrent scrapes cannot both start one.
+        """
+        with self._lock:
+            if self._refreshing:
+                return None
+            self._refreshing = True
+        thread = threading.Thread(target=self._run_refresh,
+                                  name='metrics-federation-targets',
+                                  daemon=True)
+        try:
+            thread.start()
+        except RuntimeError:
+            # Cannot start a thread (the process is out of them). Give the
+            # guard back: holding it would mean no refresh is ever attempted
+            # again, long after the pressure passed.
+            logger.exception('Could not start the federation target '
+                             'refresh; serving the previous cluster list.')
+            with self._lock:
+                self._refreshing = False
+            return None
+        return thread
+
+    def snapshot(self) -> Tuple[List[str], List[str]]:
+        """The cluster list a scrape should federate. A pure read.
+
+        Deliberately does not ask for a refresh: a reader that also mutates
+        needs a warning at every call site, and the callers pair this with an
+        explicit ``start_refresh_if_idle()`` instead.
+        """
+        with self._lock:
+            return self._snapshot
+
+
+_FEDERATION_TARGETS = _FederationTargets()
+
 # Per-context timeout for metrics collection. Must be shorter than the
-# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
-# endpoint responds promptly even when one remote cluster is unreachable.
-# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
-# blocks the entire /gpu-metrics response, causing Prometheus to mark the
-# scrape target as down.
-_PER_CONTEXT_TIMEOUT_SECONDS = 8
+# Prometheus scrape_timeout configured on the upstream Prometheus that
+# scrapes this endpoint so the response arrives before that scrape times
+# out and marks the target down. Operators federating from a Prometheus
+# with a non-default scrape_timeout should adjust both together; see
+# docs/source/reference/api-server/examples/api-server-gpu-metrics-setup.rst.
+#
+# Without a per-context timeout, a single hanging port-forward (e.g. 30s
+# httpx timeout) would block the entire /gpu-metrics response.
+#
+# 30s accommodates large compute clusters where federate latency plus
+# port-forward setup can run 5-10s warm and longer cold.
+_PER_CONTEXT_TIMEOUT_SECONDS = 30
 
 _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
     '/var/skypilot/credentials/kubeconfig/kubeconfig')
 
 
 @metrics_app.get('/debug-gpu-metrics')
-async def gpu_metrics_debug() -> dict:
-    """Debug endpoint for diagnosing GPU metrics collection issues."""
+def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues.
+
+    Declared sync for the same reason /metrics is: every call below blocks
+    (kubeconfig reads, context discovery), and this route shares its event
+    loop with the /metrics scrape. Starlette runs it in a worker thread.
+    """
     kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
     default_path = os.path.expanduser('~/.kube/config')
 
@@ -272,51 +1945,142 @@ async def gpu_metrics_debug() -> dict:
     }
 
 
+def _handle_federation_result(context: str, route: str, result: object,
+                              stats: metrics_utils.FederationStats,
+                              all_metrics: List[str]) -> None:
+    """Classifies one federation task result and records its outcome.
+
+    On success appends the metrics text; on failure logs a readable, per-
+    cluster message that names the context and includes the port-forward vs.
+    /federate timing breakdown (so a timeout shows which phase blew the
+    budget). Records the per-context outcome counter. Re-raises non-Exception
+    BaseExceptions (KeyboardInterrupt/SystemExit) to preserve prior behavior.
+
+    All work here is synchronous and non-blocking — no awaits, no I/O beyond
+    logging — so it cannot hang the gather loop.
+    """
+    # asyncio.TimeoutError is an Exception subclass, so check it first.
+    if isinstance(result, asyncio.TimeoutError):
+        metrics_utils.record_federation_outcome(context, route, 'timeout')
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
+            f'({stats.summary()}); the federation attempt exceeded the '
+            f'per-context budget; series for this cluster are omitted from '
+            f'this scrape')
+        return
+    if isinstance(result, Exception):
+        metrics_utils.record_federation_outcome(context, route, 'error')
+        # format_exception already renders as '<ClassName>: <message>'.
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'{common_utils.format_exception(result)} ({stats.summary()})')
+        return
+    if isinstance(result, BaseException):
+        # Avoid changing behavior for non-Exception BaseExceptions like
+        # KeyboardInterrupt/SystemExit: re-raise them.
+        raise result
+    metrics_utils.record_federation_outcome(context, route, 'success')
+    # debug: one line per context per scrape; the timeout/error paths above
+    # log at error level, and the Prometheus metrics capture this regardless.
+    logger.debug(f'Federated metrics for context {context} (route {route}): '
+                 f'{stats.summary()}')
+    # The three guards above leave only the success case: a metrics-text str.
+    assert isinstance(result, str)
+    all_metrics.append(result)
+
+
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    # The metrics server runs as a daemon thread, not as a normal request
-    # handler, so:
-    # 1. The global config context (allowed_contexts, etc.) is a snapshot
-    #    from startup. Reload it from the DB to pick up config changes.
-    # 2. Request-scoped caches (kubernetes API clients, context names) are
-    #    never cleared automatically. Clear them to pick up new kubeconfigs.
-    skypilot_config.reload_config()
-    annotations.clear_request_level_cache()
-    contexts = core.get_all_contexts()
+    # Served from the last refresh and asking for the next one, both off
+    # this loop; see _FederationTargets for why a scrape may neither do that
+    # work nor wait for it.
+    remote_contexts, slurm_clusters = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
     all_metrics: List[str] = []
-    successful_contexts = 0
-
-    remote_contexts = [
-        context for context in contexts if context != 'in-cluster'
-    ]
+    # One stats record per context, filled in by get_metrics_for_context even
+    # if the task is later cancelled by the wait_for timeout — so the timeout
+    # log can report how far the attempt got (port-forward vs. federate).
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
-                metrics_utils.get_metrics_for_context(context),
+                metrics_utils.get_metrics_for_context(context, stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
-            )) for context in remote_contexts
+            )) for context, stats in zip(remote_contexts, stats_list)
+    ]
+
+    # Slurm clusters (resolved above) federate through their login node (see
+    # get_metrics_for_slurm_cluster). Their series ride the same scrape,
+    # stamped cluster="slurm/<name>", under the same per-context budget:
+    # the budget is passed down so the SSH invocation is hard-killed at
+    # the same instant wait_for() gives up on it. There is no port-forward
+    # phase on this path, so its stats omit that phase.
+    slurm_contexts = [
+        metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
+    ]
+    slurm_stats = [
+        metrics_utils.FederationStats(has_port_forward=False)
+        for _ in slurm_clusters
+    ]
+    tasks += [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_slurm_cluster(
+                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for name, stats in zip(slurm_clusters, slurm_stats)
+    ]
+    result_contexts = remote_contexts + slurm_contexts
+    stats_list = stats_list + slurm_stats
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        _handle_federation_result(result_contexts[i], 'gpu-metrics', result,
+                                  stats_list[i], all_metrics)
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    # Return as plain text for Prometheus compatibility
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
+
+
+@metrics_app.get('/endpoints-metrics')
+async def endpoint_metrics() -> fastapi.Response:
+    """Gets Sky Endpoint serving metrics from multiple external k8s clusters.
+
+    Mirrors /gpu-metrics but federates the serving engines' native series
+    (vllm:* today; future engines append their prefixes) instead of
+    DCGM/node metrics. The cluster= label is injected so the Grafana
+    serving dashboards can filter by cluster.
+    """
+    # Same off-loop refresh as /gpu-metrics, sharing its snapshot; the Slurm
+    # half of it does not apply to this route.
+    remote_contexts, _ = _FEDERATION_TARGETS.snapshot()
+    _FEDERATION_TARGETS.start_refresh_if_idle()
+    all_metrics: List[str] = []
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
+    tasks = [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_endpoint_metrics_for_context(context,
+                                                               stats=stats),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(
-                f'Failed to get metrics for context {remote_contexts[i]}: '
-                f'{result}')
-        elif isinstance(result, BaseException):
-            # Avoid changing behavior for non-Exception BaseExceptions
-            # like KeyboardInterrupt/SystemExit: re-raise them.
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
-            successful_contexts += 1
+        _handle_federation_result(remote_contexts[i], 'endpoints-metrics',
+                                  result, stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
 
-    # Return as plain text for Prometheus compatibility
     return fastapi.Response(
         content=combined_metrics,
         media_type='text/plain; version=0.0.4; charset=utf-8')
@@ -331,6 +2095,97 @@ def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
     return metrics_server_instance
+
+
+def _metrics_loop_lag_observer() -> Callable[[float], None]:
+    """Records the metrics server loop's lag; see loop_stall.start_lag_monitor.
+
+    A closure so the threshold is read once rather than on every tick.
+    """
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+
+    def observe(lag: float) -> None:
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(
+                f'Metrics server event loop lag {lag} seconds exceeds '
+                f'threshold {lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_METRICS_LOOP_LAG_SECONDS.observe(lag)
+
+    return observe
+
+
+# The metrics server, so stop_metrics_server() can reach the instance
+# started on the private thread.
+_metrics_server: Optional[uvicorn.Server] = None
+
+
+def start_metrics_server(host: str, port: int) -> uvicorn.Server:
+    """Serve the metrics app on an event loop of its own, in its own thread.
+
+    The metrics app must not share an event loop with anything else.
+    ``/metrics`` is a sync endpoint, so Starlette runs it through
+    ``anyio.to_thread.run_sync()``, which takes a token from the *default*
+    thread limiter of the loop serving the request -- 40 tokens, one such
+    limiter per loop. Every other coroutine on that loop that fans out
+    ``anyio`` thread work draws from the same 40, and the limiter hands
+    tokens out FIFO, so a scrape that arrives while a background task has
+    thousands of ``anyio.Path`` calls queued up waits behind all of them
+    before it even starts collecting.
+
+    The API server's background loop hosts exactly that kind of task: the
+    request GC unlinks a log file per deleted request, a batch at a time.
+    While one runs, a scrape can take tens of seconds -- past any sane
+    ``scrape_timeout`` -- so the target flaps to ``up == 0`` and every
+    API server metric disappears for the duration, even though the server
+    is otherwise healthy. Isolating the loop removes the coupling: the
+    only thing contending for this loop's thread limiter is the scrape.
+
+    Returns the server, whose ``should_exit`` the caller may set directly;
+    stop_metrics_server() does that for the instance started here.
+    """
+    global _metrics_server
+    server = build_metrics_server(host, port)
+    _metrics_server = server
+
+    # Load the first snapshot now rather than leaving the first scrape to
+    # kick it off and federate nothing while it runs.
+    _FEDERATION_TARGETS.start_refresh_if_idle()
+
+    async def _serve_instrumented() -> None:
+        # Instrument this loop the way the request-serving loops are. It is
+        # the loop everything on this app shares, so its lag is the direct
+        # measure of "something is holding /metrics off"; without it the
+        # only symptom is the scrape target going down, which says nothing
+        # about why.
+        loop_stall.start_lag_monitor(asyncio.get_running_loop(),
+                                     _metrics_loop_lag_observer())
+        await server.serve()
+
+    def _serve() -> None:
+        try:
+            asyncio.run(_serve_instrumented())
+        except SystemExit:
+            # uvicorn calls sys.exit(1) when it cannot bind, and
+            # threading.excepthook drops SystemExit on the floor, so
+            # without this a metrics server that never came up would leave
+            # nothing behind but uvicorn's own bind error -- the scrape
+            # target just looks down, with no hint of why.
+            logger.error('Metrics server failed to start on %s:%s', host, port)
+        except Exception:  # pylint: disable=broad-except
+            # Likewise: an unhandled error here would otherwise only reach
+            # threading.excepthook.
+            logger.exception('Metrics server exited unexpectedly')
+
+    threading.Thread(target=_serve, daemon=True, name='metrics-server').start()
+    return server
+
+
+def stop_metrics_server() -> None:
+    """Ask the metrics server started by start_metrics_server() to exit."""
+    if _metrics_server is not None:
+        _metrics_server.should_exit = True
 
 
 def _get_status_code_group(status_code: int) -> str:
@@ -355,40 +2210,257 @@ def _get_user_label(request: fastapi.Request) -> str:
     return 'anonymous'
 
 
-class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to collect Prometheus metrics for HTTP requests."""
+# Prefixes that bound the `path` label of an unrouted request -- one a
+# middleware answered without the router running; see `_unrouted_path_label`.
+# The prefixes are the routers mounted in sky/server/server.py plus the
+# plugin route root; the `*` form keeps the prefix regexes dashboards and
+# rules already use (e.g. `/api/.*`, `/dashboard/.*`) matching, and a
+# router's bare root (`/users`) folds into the same bucket.
+_UNROUTED_PATH_PREFIXES = (
+    '/api/',
+    '/dashboard/',
+    '/internal/dashboard/',
+    '/plugins/',
+    '/jobs/',
+    '/serve/',
+    '/users/',
+    '/workspaces/',
+    '/volumes/',
+    '/ssh_node_pools/',
+    '/recipes/',
+    '/storage/',
+    '/debug/',
+)
+OTHER_PATH_LABEL = 'other'
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        path = request.url.path
+
+def warn_unless_outermost(app) -> bool:
+    """Warn at startup if this layer is installed but not outermost.
+
+    Returns whether the ordering invariant holds or does not apply. Reads
+    the answer out of the middleware stack rather than from the metrics
+    env-var, because the stack is the thing being judged: a plugin that
+    appends to `user_middleware` directly is invisible to any env-var-based
+    guard, and that is the deployment shape this check exists for.
+
+    Everything this middleware exists to count -- the 401/403/503s an
+    authentication, RBAC, shutdown or plugin middleware answers itself -- is
+    invisible to it from anywhere else in the stack, and the symptom of being
+    wrong is silence: dashboards go quiet exactly as they did during the
+    outage this was written for. The ordering is asserted by a unit test on
+    the plugin-less app, which cannot see a deployment whose plugins register
+    middleware -- and the plugin API appends straight to `user_middleware`,
+    so it bypasses `add_middleware` and raises nothing. This says so in the
+    server's own log instead.
+
+    `user_middleware[0]` is the outermost layer: Starlette wraps the list in
+    reverse, and `add_middleware` inserts at the front.
+    """
+    stack = getattr(app, 'user_middleware', None) or []
+    classes = [m.cls for m in stack]
+    if PrometheusMiddleware not in classes:
+        # Metrics are off, or registration was skipped: nothing to check.
+        return True
+    if classes[0] is PrometheusMiddleware:
+        return True
+    outermost = classes[0]
+    logger.warning(
+        f'{PrometheusMiddleware.__name__} is not the outermost middleware '
+        f'({getattr(outermost, "__name__", outermost)} is). Responses that a '
+        'middleware outside it produces -- authentication and RBAC failures, '
+        'drains -- will not be counted in sky_apiserver_requests_total, so an '
+        'outage on those paths shows up as a drop in successful traffic '
+        'instead of as errors. Middleware order: '
+        f'{[c.__name__ for c in classes]}')
+    return False
+
+
+def _reached_router(request: fastapi.Request) -> bool:
+    """Whether the request got past every middleware to the router.
+
+    Starlette's router stamps itself on the scope when it runs
+    (`scope['router']`); a request a middleware answered itself never gets
+    there. This is what tells a route's own 4xx/5xx (raw path, as before)
+    from a middleware's canned response (bounded path).
+    """
+    return 'router' in request.scope
+
+
+def _literal_route_paths(app) -> FrozenSet[str]:
+    """The registered route paths without path parameters.
+
+    `include_router` expands each sub-route onto `app.routes` with the
+    prefix applied, so the core and plugin routers' own routes are in here
+    too: on the real app, 132 routes of which 126 are parameterless
+    (`/jobs/queue`, `/users/update`, `/volumes/apply`, ...). An unrouted
+    request to any of them keeps its exact path; only a path that matches
+    no route at all falls back to a prefix bucket. Bounded either way --
+    126 literal routes plus 13 buckets plus `other`.
+    """
+    routes = getattr(app, 'routes', None)
+    if not isinstance(routes, (list, tuple)):
+        return frozenset()
+    return frozenset(route.path
+                     for route in routes
+                     if isinstance(getattr(route, 'path', None), str) and
+                     '{' not in route.path)
+
+
+def _unrouted_path_label(path: str, literal_routes: FrozenSet[str]) -> str:
+    """Bounded `path` label for a response a middleware produced.
+
+    The request never reached the router (an authentication 401/503, an
+    RBAC 403, a CORS preflight, a sign-in redirect, ...), and its path is
+    chosen by whoever sent it -- unauthenticated scanners included -- so
+    the raw path cannot be the label value. The raw path is kept only when
+    it is exactly a registered (parameterless) route; anything else is
+    folded into one of the fixed `_UNROUTED_PATH_PREFIXES` buckets, as
+    `<prefix>*`, or into `other`. A request that did reach the router keeps
+    its raw path, 404s included, exactly as before.
+
+    Registered routes include the ones `include_router` expanded (see
+    `_literal_route_paths`), so the buckets catch what matches no route at
+    all: scanner probes, and the concrete values of the parameterised
+    routes (`/dashboard/_next/...`, `/ssh_node_pools/<name>/status`).
+    """
+    if path in literal_routes:
+        return path
+    for prefix in _UNROUTED_PATH_PREFIXES:
+        if path.startswith(prefix) or path == prefix[:-1]:
+            return prefix + '*'
+    return OTHER_PATH_LABEL
+
+
+class PrometheusMiddleware:
+    """Middleware to collect Prometheus metrics for HTTP requests.
+
+    Registered as the OUTERMOST middleware (added last in
+    sky/server/server.py), so it records the response the client actually
+    receives. An authentication, RBAC or shutdown middleware that answers a
+    request itself never calls the next layer; with this middleware inside
+    the stack those responses -- exactly the ones an outage produces -- were
+    never counted, and the only visible symptom was successful traffic
+    dropping.
+
+    The `path` label is read after the inner layers ran, so it is the path
+    the router saw (inner middlewares rewrite `scope['path']` in place, e.g.
+    the internal dashboard prefix): the same value as before. For a response
+    produced by a middleware the path is bounded instead; see
+    `_unrouted_path_label`. When the middleware that answered
+    stamped a reason (`middleware_utils.mark_rejection`), the response is
+    also counted in `sky_apiserver_request_rejections_total`.
+
+    Duration is measured from entry into this layer to the start of the
+    response, i.e. it includes the time the authentication middlewares spend
+    (DB lookups under their deadline) but not the time spent streaming the
+    body: it is the latency until the client sees the response headers.
+
+    WebSocket scopes pass straight through; refused handshakes are counted by
+    `middleware_utils.websocket_aware`.
+    """
+
+    def __init__(self, app: starlette.types.ASGIApp):
+        self.app = app
+        # (route count, literal route paths) of the app, rebuilt if routes
+        # were added since. Routes are all registered before the first
+        # request in practice; the count check keeps the memo honest anyway.
+        self._literal_routes: Optional[Tuple[int, FrozenSet[str]]] = None
+
+    def _literal_route_paths(self, app) -> FrozenSet[str]:
+        routes = getattr(app, 'routes', None)
+        count = len(routes) if isinstance(routes, (list, tuple)) else 0
+        if self._literal_routes is None or self._literal_routes[0] != count:
+            self._literal_routes = (count, _literal_route_paths(app))
+        return self._literal_routes[1]
+
+    async def __call__(self, scope: starlette.types.Scope,
+                       receive: starlette.types.Receive,
+                       send: starlette.types.Send) -> None:
+        if scope['type'] != 'http':
+            await self.app(scope, receive, send)
+            return
+        request = fastapi.Request(scope, receive)
         logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
-        streaming = _is_streaming_api(path)
-        if not streaming:
-            # Exclude streaming APIs, the duration is not meaningful.
-            # TODO(aylei): measure the duration of async execution instead.
-            start_time = time.time()
+        start_time = time.time()
         method = request.method
-        status_code_group = ''
+        recorded = False
 
+        def record(status_code: int) -> None:
+            nonlocal recorded
+            recorded = True
+            # This layer is outermost, so it sees 100% of responses: a
+            # recording fault must not turn a served request into a 500.
+            middleware_utils.record_safely('request', self._record, request,
+                                           method, status_code, start_time)
+
+        async def send_and_record(message: starlette.types.Message) -> None:
+            if message['type'] == 'http.response.start' and not recorded:
+                record(message['status'])
+            await send(message)
+
+        status_code = 0
         try:
-            response = await call_next(request)
-            status_code_group = _get_status_code_group(response.status_code)
+            await self.app(scope, receive, send_and_record)
+            # Returned without starting a response; the server answers 500.
+            status_code = 500
         except Exception:  # pylint: disable=broad-except
-            status_code_group = '5xx'
+            # Escaped every inner layer; Starlette's error handler (outside
+            # us) turns it into a bare 500. Count what the client sees.
+            status_code = 500
             raise
         finally:
-            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
-                path=path, method=method, status=status_code_group).inc()
-            # Record per-user metrics
-            user = _get_user_label(request)
-            metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
-                user=user, method=method, status=status_code_group).inc()
-            if not streaming:
-                duration = time.time() - start_time
-                metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
-                    path=path, method=method,
-                    status=status_code_group).observe(duration)
+            if not recorded:
+                record(status_code)
 
-        return response
+    def _path_label(self, request: fastapi.Request, raw_path: str) -> str:
+        """`path` label, never raising: a fault must not lose the count.
+
+        Labelling an unrouted request reads the app's route table, so it is
+        the one part of recording that depends on state this layer does not
+        own. Falling back to the catch-all bucket keeps the request in
+        `sky_apiserver_requests_total`: mislabelled beats uncounted.
+        """
+        if _reached_router(request):
+            return raw_path
+        try:
+            return _unrouted_path_label(
+                raw_path, self._literal_route_paths(request.scope.get('app')))
+        except Exception as e:  # pylint: disable=broad-except
+            middleware_utils.note_recording_failure('the request path label', e)
+            return OTHER_PATH_LABEL
+
+    def _record(self, request: fastapi.Request, method: str, status_code: int,
+                start_time: float) -> None:
+        # Read after the inner layers ran: the scope dict is shared down the
+        # stack, so this is the (possibly rewritten) path the router saw.
+        raw_path = request.scope.get('path', '')
+        path = self._path_label(request, raw_path)
+        status_code_group = _get_status_code_group(status_code)
+        metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
+            path=path, method=method, status=status_code_group).inc()
+        # Record per-user metrics
+        user = _get_user_label(request)
+        metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
+            user=user, method=method, status=status_code_group).inc()
+        middleware_utils.record_rejection(request.scope, status_code,
+                                          middleware_utils.REJECTION_KIND_HTTP)
+        if _is_streaming_api(raw_path):
+            # Exclude streaming APIs, the duration is not meaningful.
+            # TODO(aylei): measure the duration of async execution instead.
+            return
+        duration = time.time() - start_time
+        metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
+            path=path, method=method,
+            status=status_code_group).observe(duration)
+        # /api/get long-polls until the underlying request is terminal, so its
+        # duration is the client-observed latency of that request type. The
+        # handler stamps request.state.request_name once it knows which
+        # request is being fetched; record it by name so bounded types can be
+        # alerted on separately from unbounded ones (launch/exec/...).
+        request_name = getattr(request.state, 'request_name', None)
+        if request_name is not None:
+            metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
+                name=request_name, status=status_code_group).observe(duration)
 
 
 peak_rss_bytes = 0

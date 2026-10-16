@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/elements/EmptyState';
 
 const Table = React.forwardRef(({ className, ...props }, ref) => (
   <div className="relative w-full overflow-auto">
@@ -81,6 +82,20 @@ const TableCaption = React.forwardRef(({ className, ...props }, ref) => (
 ));
 TableCaption.displayName = 'TableCaption';
 
+// Standardized empty-state row for tables. Renders the shared EmptyState block
+// inside a full-width cell (the header row and pagination stay visible) instead
+// of a thin "No data" strip.
+const EmptyTableState = React.forwardRef(
+  ({ colSpan, className, ...emptyStateProps }, ref) => (
+    <TableRow ref={ref} className="hover:bg-transparent">
+      <TableCell colSpan={colSpan} className={cn('p-0', className)}>
+        <EmptyState {...emptyStateProps} />
+      </TableCell>
+    </TableRow>
+  )
+);
+EmptyTableState.displayName = 'EmptyTableState';
+
 export {
   Table,
   TableHeader,
@@ -90,4 +105,5 @@ export {
   TableRow,
   TableCell,
   TableCaption,
+  EmptyTableState,
 };

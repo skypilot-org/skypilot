@@ -1,5 +1,7 @@
 """Test the controller_utils module."""
+import contextlib
 import importlib
+import io
 import multiprocessing
 import os
 from typing import Any, Dict, Set
@@ -10,9 +12,13 @@ import pytest
 from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
+from sky import skypilot_config
+from sky import task as task_lib
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -42,7 +48,6 @@ _DEFAULT_AUTOSTOP = {
         }),
         ('serve', {}, {
             'cpus': '4+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('serve', {
@@ -50,7 +55,6 @@ _DEFAULT_AUTOSTOP = {
         }, {
             'cpus': '4+',
             'memory': '32+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
     ])
@@ -352,9 +356,10 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
 
-    # Mock dependencies
+    # Mock dependencies. Must match the AZURE_CLI value in
+    # extras_require['azure'], since the code removes it from that list.
     monkeypatch.setattr('sky.utils.controller_utils.dependencies.AZURE_CLI',
-                        'azure-cli>=2.65.0')
+                        'azure-cli>=2.65.0,<2.87.0')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
@@ -1078,3 +1083,251 @@ class TestIsJobsConsolidationMode:
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
             controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
             extra.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# download_and_stream_job_log
+# ---------------------------------------------------------------------------
+
+_MARKER = log_lib.LOG_FILE_START_STREAMING_AT  # 'Waiting for task resources on '
+
+
+def _backend_with_run_log(run_log_bytes: bytes, tmp_path):
+    """Build a fake backend whose sync_down_logs yields a dir with run.log.
+
+    Returns (backend, handle, local_dir). The run.log is written with raw
+    bytes so tests control '\\r' vs '\\n' exactly.
+    """
+    synced_dir = os.path.join(str(tmp_path), 'synced')
+    os.makedirs(synced_dir, exist_ok=True)
+    with open(os.path.join(synced_dir, 'run.log'), 'wb') as f:
+        f.write(run_log_bytes)
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {'cluster': synced_dir}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+    return backend, handle, local_dir
+
+
+def test_download_and_stream_job_log_persists_before_reprint(tmp_path):
+    """on_downloaded must fire with the run.log path BEFORE the log is
+    re-streamed into the controller log.
+
+    The jobs controller uses this callback to persist local_log_file
+    immediately so the dashboard can serve logs without waiting for the
+    (potentially minutes-long) re-stream.
+    """
+    run_log = (b'boilerplate-before-marker\n' + _MARKER.encode() +
+               b'42 nodes.\n'
+               b'REPRINT-CONTENT-SENTINEL\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    seen: Dict[str, Any] = {}
+    captured = io.StringIO()
+
+    def on_downloaded(path: str) -> None:
+        seen['path'] = path
+        # Snapshot what has been written to the controller log so far: the
+        # re-stream must NOT have run yet at callback time.
+        seen['stdout_at_callback'] = captured.getvalue()
+
+    with contextlib.redirect_stdout(captured):
+        result = controller_utils.download_and_stream_job_log(
+            backend, handle, local_dir, on_downloaded=on_downloaded)
+
+    out = captured.getvalue()
+    # Callback fired with the synced run.log path, and that is the return val.
+    assert seen.get('path') is not None
+    assert seen['path'].endswith(os.path.join('synced', 'run.log'))
+    assert result == seen['path']
+    # Callback fired BEFORE the re-stream emitted the post-marker content.
+    assert 'REPRINT-CONTENT-SENTINEL' not in seen['stdout_at_callback']
+    # The re-stream did eventually emit the post-marker content...
+    assert 'REPRINT-CONTENT-SENTINEL' in out
+    # ...but filtered out the pre-marker boilerplate.
+    assert 'boilerplate-before-marker' not in out
+
+
+def test_download_and_stream_job_log_does_not_split_on_carriage_return(
+        tmp_path):
+    r"""Carriage-return progress output must not be split / translated.
+
+    With the universal-newline default, every '\r' is treated as a line
+    boundary, exploding a multi-GB log (e.g. `aws s3 cp` progress) into
+    millions of lines and making the re-stream take minutes. The re-stream
+    opens the log with newline='\n' so it splits only on '\n'.
+    """
+    # One real ('\n') line after the marker, holding 3 '\r' progress updates.
+    run_log = (_MARKER.encode() + b'8 nodes.\n'
+               b'prog-a\rprog-b\rprog-c\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        controller_utils.download_and_stream_job_log(backend, handle, local_dir)
+    out = captured.getvalue()
+
+    # The carriage returns are preserved verbatim. Pre-fix (universal
+    # newlines) this would have been emitted as 'prog-a\nprog-b\nprog-c\n'.
+    assert 'prog-a\rprog-b\rprog-c\n' in out
+
+
+def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
+    """When sync_down_logs finds nothing, return None and never call back."""
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+
+    called = []
+    result = controller_utils.download_and_stream_job_log(
+        backend, handle, local_dir, on_downloaded=lambda p: called.append(p))
+
+    assert result is None
+    assert not called
+
+
+def test_shared_bucket_prefix_scopes_workspace():
+    """Shared-bucket keys include the workspace so IAM can enforce RBAC."""
+    prefix = controller_utils._shared_bucket_workspace_prefix(None, 'team-a')
+    assert prefix == 'workspaces/team-a'
+
+    prefixed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'team_b1')
+    assert prefixed == 'custom/root/workspaces/team_b1'
+
+    trimmed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root/', 'default')
+    assert trimmed == 'custom/root/workspaces/default'
+
+
+def test_shared_bucket_prefix_maps_legacy_workspace_names():
+    """Workspaces that predate the name rule still get their own prefix.
+
+    The segment is a slug plus a hash of the exact name, joined by '.', which
+    no valid name contains, so it is one path segment that collides neither
+    with a valid name nor with another legacy name.
+    """
+    segment = controller_utils._workspace_bucket_segment
+    assert segment('Research') == 'research.979d6300'
+    assert segment('RESEARCH') == 'research.dd7c11fb'
+    # A path separator cannot widen the IAM prefix.
+    assert segment('ml/prod') == 'ml-prod.c0f7bb6f'
+    assert segment('ml.prod') == 'ml-prod.b348490e'
+    assert segment('///') == 'ws.732c4e97'
+    assert segment('A' * 60) == 'a' * 32 + '.' + segment('A' * 60)[-8:]
+
+    assert controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'ml/prod') == 'custom/root/workspaces/ml-prod.c0f7bb6f'
+
+
+def test_shared_bucket_prefix_keeps_valid_workspace_names():
+    """Valid names are used as-is, so the layout for them never changes."""
+    for name in ('default', 'team-a', 'team_b1', 'a', 'x' * 60):
+        assert controller_utils._workspace_bucket_segment(name) == name
+
+
+def test_shared_bucket_upload_paths_are_scoped_per_workspace(
+        tmp_path, monkeypatch):
+    """Workdir, directory, and file uploads use the active workspace prefix.
+
+    Two workspaces sharing one bucket must not produce the same object keys.
+    """
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    (workdir / 'main.py').write_text('print(1)\n')
+    folder = tmp_path / 'folder'
+    folder.mkdir()
+    (folder / 'data.txt').write_text('data\n')
+    one_file = tmp_path / 'one.txt'
+    one_file.write_text('file\n')
+
+    blob = mock.Mock()
+    blob.file_mounts_tmp_dir.return_value = str(tmp_path / 'blob')
+    monkeypatch.setattr(controller_utils.bs, 'get_blob_storage', lambda: blob)
+    monkeypatch.setattr(controller_utils, '_generate_run_uuid',
+                        lambda: 'run12345')
+
+    def _bucket_only(keys, default_value, override_configs=None):
+        del override_configs  # patched get_nested; only the jobs bucket is stubbed
+        if keys == ('jobs', 'bucket'):
+            return 'gs://file-mounts-bucket'
+        return default_value
+
+    monkeypatch.setattr(controller_utils.skypilot_config, 'get_nested',
+                        _bucket_only)
+    monkeypatch.setattr(controller_utils.storage_lib,
+                        'get_cached_enabled_storage_cloud_names_or_refresh',
+                        lambda: ['GCP'])
+
+    class _RecordingStorage:
+        """Stand-in that records the object key and skips the cloud upload."""
+
+        def __init__(self, **kwargs):
+            self.name = kwargs['name']
+            self.source = kwargs['source']
+            self.mode = kwargs['mode']
+            self.persistent = kwargs['persistent']
+            self.force_delete = False
+            self.bucket_sub_path = kwargs['_bucket_sub_path']
+            self.stores = {
+                storage_lib.StoreType.GCS: mock.Mock(spec=storage_lib.GcsStore)
+            }
+
+    monkeypatch.setattr(controller_utils.storage_lib, 'Storage',
+                        _RecordingStorage)
+
+    paths_by_workspace = {}
+    file_urls_by_workspace = {}
+    for workspace in ('team-a', 'team-b'):
+        task = task_lib.Task(
+            workdir=str(workdir),
+            file_mounts={
+                '/remote/folder': str(folder),
+                '/remote/one.txt': str(one_file),
+            },
+        )
+        monkeypatch.setattr(task, 'sync_storage_mounts', lambda: None)
+        with skypilot_config.local_active_workspace_ctx(workspace):
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, 'jobs')
+        mounts = task.storage_mounts
+        paths_by_workspace[workspace] = {
+            path: storage.bucket_sub_path for path, storage in mounts.items()
+        }
+        file_urls_by_workspace[workspace] = task.file_mounts['/remote/one.txt']
+
+    run = 'job-run12345'
+    for workspace, paths in paths_by_workspace.items():
+        prefix = f'workspaces/{workspace}/{run}'
+        assert paths[constants.SKY_REMOTE_WORKDIR] == f'{prefix}/workdir'
+        assert paths['/remote/folder'] == f'{prefix}/local-file-mounts/0'
+        tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format('jobs')
+        assert paths[tmp_dir] == f'{prefix}/tmp-files'
+        assert file_urls_by_workspace[workspace] == (
+            f'gs://file-mounts-bucket/{prefix}/tmp-files/file-0')
+
+    assert paths_by_workspace['team-a'] != paths_by_workspace['team-b']
+
+
+@pytest.mark.parametrize('name', [
+    'sky-jobs-controller-attacker',
+    'sky-serve-controller-attacker',
+    'sky-jobs-controller-a_b',
+])
+def test_rejected_controller_name_does_not_replace_the_real_one(
+        name, monkeypatch):
+    """API-server workers are reused across requests: a rejected name must not
+    become the controller name the next `jobs launch` in that worker uses."""
+    controllers = (controller_utils.Controllers.JOBS_CONTROLLER,
+                   controller_utils.Controllers.SKY_SERVE_CONTROLLER)
+    for controller in controllers:
+        # Restored on teardown even if the guard does overwrite it.
+        monkeypatch.setattr(controller.value, '_cluster_name_from_server',
+                            controller.value._cluster_name_from_server)
+    real_names = [c.value.cluster_name for c in controllers]
+
+    with pytest.raises(exceptions.NotSupportedError, match=name):
+        controller_utils.check_cluster_name_not_controller(name)
+
+    assert [c.value.cluster_name for c in controllers] == real_names

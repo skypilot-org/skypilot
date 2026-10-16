@@ -211,7 +211,9 @@ Following tabs describe how to configure credentials for different clouds on the
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
 
-        .. tip::
+        .. admonition:: Convert an exec-based kubeconfig to a service account kubeconfig
+            :class: tip
+            :name: generate-service-account-kubeconfig
 
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin``, Nebius Managed Kubernetes, OCI, etc.), you will need to generate a kubeconfig with static authentication instead.
             You can use the ``generate_kubeconfig.sh`` script to do this.

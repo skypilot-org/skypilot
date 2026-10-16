@@ -91,6 +91,19 @@ message GetJobTableRequest {
   // Sorting parameters, added in ManagedJobsService v14.
   optional string sort_by = 13;
   optional string sort_order = 14;
+  // Time-range filter on submitted_at (epoch seconds), added in
+  // ManagedJobsService v22.
+  optional double submitted_after = 15;
+  optional double submitted_before = 16;
+  // `--infra` spec to filter on, added in ManagedJobsService v24. A server
+  // that predates it ignores this field, so the response reports back whether
+  // it was honoured rather than leaving the caller to assume it was.
+  optional string infra_match = 17;
+  // With `job_ids`, also return the rest of each job's tree: the jobs
+  // launched under it, at any depth. Added in ManagedJobsService v27. A server
+  // that predates it ignores this field and returns only the requested jobs'
+  // rows, so the response reports whether the field was applied.
+  optional bool include_tree = 18;
 }
 
 message ManagedJobInfo {
@@ -151,6 +164,15 @@ message ManagedJobInfo {
   optional int32 batch_total_batches = 39;
   // Batch progress: number of completed batches (NULL for non-batch jobs).
   optional int32 batch_completed_batches = 40;
+  // Where this job came from, when launched from inside another managed job.
+  // All unset for top-level jobs. root_job_id is the top-level job of the
+  // tree; parent_job_id/parent_task_id is the job and task that launched it.
+  optional int64 parent_job_id = 41;
+  optional int64 parent_task_id = 42;
+  optional int64 root_job_id = 43;
+  // A dynamic task's ordinal within its root's tree (unset for top-level
+  // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
+  optional int64 dynamic_task_index = 44;
 }
 
 // A pair of internal and external IP addresses
@@ -164,6 +186,22 @@ message GetJobTableResponse {
   int32 total = 2;
   int32 total_no_filter = 3;
   map<string, int32> status_counts = 4;
+  // Whether `infra_match` was applied, added in ManagedJobsService v24.
+  // Unlike a filter that merely widens the result when it is dropped, an
+  // ignored infra filter returns jobs on other infra -- an answer that looks
+  // right and is wrong. A server that predates the field leaves it false, so
+  // the caller can tell "filtered to none" from "never filtered".
+  bool infra_match_applied = 5;
+  // The distinct `--infra` specs across the jobs the request's other filters
+  // select, for the dashboard's Infra filter to offer. Added in
+  // ManagedJobsService v24. A server that predates the field leaves it empty,
+  // which is not an error the way a dropped `infra_match` is: the caller falls
+  // back to deriving the options from the rows on the page.
+  repeated string infra_options = 6;
+  // Whether `include_tree` was applied. Added in ManagedJobsService v27. A
+  // server that predates the field leaves it false. The caller needs this
+  // because a root-only answer and a tree answer look alike.
+  bool include_tree_applied = 7;
 }
 
 message GetAllJobIdsByNameRequest {

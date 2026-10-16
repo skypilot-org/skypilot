@@ -13,6 +13,7 @@ class RequestName(str, enum.Enum):
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
     SLURM_NODE_INFO = 'slurm_node_info'
+    SLURM_CLUSTER_NAMES = 'slurm_cluster_names'
     STATUS_KUBERNETES = 'status_kubernetes'
     KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
@@ -28,11 +29,12 @@ class RequestName(str, enum.Enum):
     CLUSTER_START = 'start'
     CLUSTER_AUTOSTOP = 'autostop'
     CLUSTER_QUEUE = 'queue'
+    CLUSTER_JOB_SPEC = 'cluster_job_spec'
     CLUSTER_JOB_STATUS = 'job_status'
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
-    CLUSTER_AUTOSTOP_LOGS = 'autostop_logs'
+    CLUSTER_HOOK_LOGS = 'hook_logs'
     CLUSTER_COST_REPORT = 'cost_report'
     CLUSTER_EVENTS = 'cluster_events'
     # Storage requests
@@ -79,6 +81,8 @@ class RequestName(str, enum.Enum):
     WORKSPACES_DELETE = 'workspaces.delete'
     WORKSPACES_GET_CONFIG = 'workspaces.get_config'
     WORKSPACES_UPDATE_CONFIG = 'workspaces.update_config'
+    WORKSPACES_BATCH_ADD_USERS = 'workspaces.batch_add_users'
+    WORKSPACES_BATCH_REMOVE_USERS = 'workspaces.batch_remove_users'
     # SSH node pools requests
     SSH_NODE_POOLS_UP = 'ssh_node_pools.up'
     SSH_NODE_POOLS_DOWN = 'ssh_node_pools.down'
@@ -97,6 +101,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
     REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
     REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP = 'expired-token-cleanup'
+    REQUEST_DAEMON_LAUNCH_METRICS = 'launch-metrics'
 
     def __repr__(self):
         return self.value

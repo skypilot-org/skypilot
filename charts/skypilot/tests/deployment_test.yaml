@@ -191,6 +191,50 @@ tests:
               fieldRef:
                 fieldPath: metadata.uid
 
+  - it: should honor configurable maxSurge/maxUnavailable including explicit 0
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate.maxSurge: 0
+      apiService.rollingUpdate.maxUnavailable: 1
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 1
+
+  - it: should support percentage strings for maxSurge/maxUnavailable
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate.maxSurge: 25%
+      apiService.rollingUpdate.maxUnavailable: 50%
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 25%
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 50%
+
+  - it: should fall back to defaults when rollingUpdate is null
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate: null
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+
   - it: should fail RollingUpdate strategy without external database
     set:
       apiService.upgradeStrategy: RollingUpdate
@@ -988,6 +1032,39 @@ tests:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .* --foreground"
 
+  - it: should resolve mirror sink regardless of serveServerLog (both branches)
+    asserts:
+      # The runtime check on $SKYPILOT_SERVER_LOG_MIRROR_DIR is emitted in
+      # both serveServerLog=true and =false renders so the mirror feature
+      # works in either mode.
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'if \[ -n "\$\{SKYPILOT_SERVER_LOG_MIRROR_DIR'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "SKYPILOT_LOG_MIRROR_PER_POD_DIR"
+
+  - it: should resolve mirror sink when serveServerLog is false
+    set:
+      apiService.serveServerLog: false
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'if \[ -n "\$\{SKYPILOT_SERVER_LOG_MIRROR_DIR'
+      # Mirror-only branch must still set up the FIFO + tee fan-out (gated
+      # at runtime by $SKYPILOT_LOG_MIRROR_FILE being non-empty).
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'tee -a "\$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .* --foreground"
+      # And the direct-exec path must still be present as the no-mirror
+      # fallback in the same render.
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "else\\s+exec sky api start"
+
   - it: should include logrotate sidecar when serveServerLog is true and retention is enabled
     set:
       apiService.serveServerLog: true
@@ -1226,3 +1303,60 @@ tests:
       - lengthEqual:
           path: spec.template.spec.containers[0].env
           count: 9
+
+  # Test cases for apiService.host (bind interface)
+  - it: should bind 0.0.0.0 by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .*--host=0\\.0\\.0\\.0"
+
+  - it: should pass a custom bind host when apiService.host is set (IPv6)
+    set:
+      apiService.host: "::"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .*--host=::"
+
+  # Test cases for apiService.topologySpreadTopologyKey
+  - it: should not render topologySpreadConstraints by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.topologySpreadConstraints
+
+  - it: should spread API server pods per ReplicaSet when topologySpreadTopologyKey is set
+    set:
+      apiService.topologySpreadTopologyKey: kubernetes.io/hostname
+    capabilities:
+      majorVersion: 1
+      minorVersion: 27
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app: RELEASE-NAME-api
+              matchLabelKeys:
+                - pod-template-hash
+
+  - it: should omit matchLabelKeys from topologySpreadConstraints before Kubernetes 1.27
+    set:
+      apiService.topologySpreadTopologyKey: kubernetes.io/hostname
+    capabilities:
+      majorVersion: 1
+      minorVersion: 26
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app: RELEASE-NAME-api

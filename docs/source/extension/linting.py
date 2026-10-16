@@ -91,6 +91,8 @@ MULTI_WORD_TERMS = {
     'Microsoft Entra ID',
     # Providers/brands
     'Prime Intellect',
+    'Hugging Face',
+    'Hugging Face Hub',
     'Cloudflare Zero Trust',
     'CoreWeave Object Storage',
 }

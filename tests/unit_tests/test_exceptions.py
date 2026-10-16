@@ -34,6 +34,64 @@ def test_resources_unavailable_error():
     assert deserialized.stacktrace == 'test_stacktrace'
 
 
+def test_provision_unsupported_error_is_not_a_capacity_failure():
+    """An unsupportable request must not read as unavailable resources.
+
+    Callers that decide whether to keep waiting for capacity test the
+    failover history for ResourcesUnavailableError -- see
+    sky/jobs/recovery_strategy.py, which fails a job directly when none of
+    the failures were capacity failures, rather than retrying forever.
+    Making ProvisionUnsupportedError a subclass of ResourcesUnavailableError
+    would silently turn every such failure back into "wait for room", so the
+    separation is load-bearing rather than stylistic.
+    """
+    assert not issubclass(exceptions.ProvisionUnsupportedError,
+                          exceptions.ResourcesUnavailableError)
+
+    def has_capacity_failure(history):
+        return any(
+            isinstance(err, exceptions.ResourcesUnavailableError)
+            for err in history)
+
+    assert not has_capacity_failure(
+        [exceptions.ProvisionUnsupportedError('no way to render this')])
+    # Mixed history: something might still free up, so the caller should keep
+    # its retry behaviour.
+    assert has_capacity_failure([
+        exceptions.ProvisionUnsupportedError('no way to render this'),
+        exceptions.ResourcesUnavailableError('out of room'),
+    ])
+
+
+def test_provision_unsupported_error_wrapped_for_an_existing_cluster():
+    """The failover tail is only reachable for a new or INIT cluster.
+
+    An UP/STOPPED cluster never falls through to it -- _yield_zones marks
+    those no_failover, and the tail asserts as much -- so a provisioning
+    failure there has to be wrapped and raised instead of continuing. The
+    wrapper is a ResourcesUnavailableError because that is what callers
+    catch; what tells them this was not a capacity failure is the history it
+    carries, which holds no ResourcesUnavailableError.
+    """
+    original = exceptions.ProvisionUnsupportedError('no way to render this')
+    wrapped = exceptions.ResourcesUnavailableError('no way to render this',
+                                                   no_failover=True,
+                                                   failover_history=[original])
+
+    assert wrapped.no_failover
+    assert not any(
+        isinstance(err, exceptions.ResourcesUnavailableError)
+        for err in wrapped.failover_history)
+
+
+def test_provision_unsupported_error_round_trips():
+    """It crosses the client/server boundary like any other launch error."""
+    e = exceptions.ProvisionUnsupportedError('no way to render this')
+    deserialized = _serialize_deserialize(e)
+    assert isinstance(deserialized, exceptions.ProvisionUnsupportedError)
+    assert str(deserialized) == 'no way to render this'
+
+
 def test_invalid_cloud_configs():
     """Test that exceptions can be serialized and deserialized."""
     e = exceptions.InvalidCloudConfigs('test')
@@ -56,6 +114,22 @@ def test_provision_prechecks_error():
     assert str(deserialized) == ''
     assert str(deserialized.reasons[0]) == 'test1'
     assert str(deserialized.reasons[1]) == 'test2'
+    assert deserialized.stacktrace == 'test_stacktrace'
+
+
+def test_command_failure_exception():
+    """Test that exceptions can be serialized and deserialized."""
+    e = exceptions.CommandFailureException('test_command', 'test_failure',
+                                           'test_error_msg',
+                                           'test_detailed_reason')
+    setattr(e, 'stacktrace', 'test_stacktrace')
+    deserialized = _serialize_deserialize(e)
+    assert isinstance(deserialized, exceptions.CommandFailureException)
+    assert str(deserialized).startswith('Command test_command test_failure.')
+    assert deserialized.command == 'test_command'
+    assert deserialized.failure == 'test_failure'
+    assert deserialized.error_msg == 'test_error_msg'
+    assert deserialized.detailed_reason == 'test_detailed_reason'
     assert deserialized.stacktrace == 'test_stacktrace'
 
 

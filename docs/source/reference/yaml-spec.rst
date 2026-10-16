@@ -25,6 +25,9 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
+  :ref:`job <yaml-spec-job>`:
+    :ref:`wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`: 2h
+
   :ref:`resources <yaml-spec-resources>`:
     # Infra to use. Click to see schema and example values.
     :ref:`infra <yaml-spec-resources-infra>`: aws
@@ -38,7 +41,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
-    :ref:`ephemeral_storage <yaml-spec-resources-ephemeral-storage>`: 50
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
     :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
@@ -51,12 +53,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
-      :ref:`hook <auto-stop-hooks>`: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -200,6 +196,56 @@ A task can set this to a smaller value than the size of a cluster.
   num_nodes: 4
 
 
+.. _yaml-spec-job:
+
+``job``
+~~~~~~~
+
+Lifecycle settings for :ref:`managed jobs <managed-jobs>` (optional).
+
+Only ``sky jobs launch`` reads this section; ``sky launch`` and ``sky exec``
+ignore it. In a :ref:`pipeline <pipeline>` or :ref:`job group <job-groups>`,
+each task can set its own ``job`` section.
+
+.. code-block:: yaml
+
+  job:
+    wait_for_scheduling_timeout: 2h
+
+
+.. _yaml-spec-job-wait-for-scheduling-timeout:
+
+``job.wait_for_scheduling_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cancel the managed job if the task has not started running within this long
+of being submitted (optional; defaults to no limit, i.e. keep retrying until
+resources are found).
+
+Format: a positive duration with an optional unit suffix: ``s`` (seconds),
+``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks), e.g. ``90s``,
+``30m``, ``2h``. A plain integer is treated as seconds.
+
+The clock starts at the task's :code:`SUBMITTED` time and covers launch
+retries, backoff and waiting in a Kubernetes scheduler's queue (e.g., Kueue).
+It is the only bound on a wait for Kueue admission, unless
+:ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>`
+is set explicitly. It covers only the initial wait: once the task has started,
+a later recovery does not re-arm it. In a pipeline or job group, each task has
+its own clock, and any task exceeding its timeout cancels the whole job.
+
+The job then ends :code:`CANCELLED`, as with :code:`sky jobs cancel`, and the
+reason is shown in :code:`sky jobs queue`. The timeout is checked every 30
+seconds, including across controller restarts; when many jobs time out
+together, they are cancelled a few at a time over the next checks. See
+:ref:`jobs-wait-for-scheduling-timeout` for an example.
+
+.. code-block:: yaml
+
+  job:
+    wait_for_scheduling_timeout: 2h
+
+
 .. _yaml-spec-resources:
 
 ``resources``
@@ -285,12 +331,10 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
-  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
-
-  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see :ref:`Lifecycle hooks <lifecycle-hooks>`
+(under ``config.hooks`` with ``events: [stop]`` for autostop, or
+``events: [down]`` for autodown — ``autostop: {down: true}``).
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -337,20 +381,6 @@ OR
     autostop:
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    autostop:
-      idle_minutes: 10
-      hook: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
 
 .. _yaml-spec-resources-accelerators:
@@ -553,9 +583,13 @@ Units supported (case-insensitive):
 - TB (terabytes, 2^40 bytes)
 - PB (petabytes, 2^50 bytes)
 
-.. warning::
+.. note::
 
-   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+   On **Kubernetes**, this sets the ``resources.requests.ephemeral-storage`` field in the pod spec.
+   When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+   ``resources.limits.ephemeral-storage`` using the multiplier defined there.
+
+   With this, the disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
@@ -568,51 +602,6 @@ OR
 
   resources:
     disk_size: 256GB
-
-
-
-.. _yaml-spec-resources-ephemeral-storage:
-
-``resources.ephemeral_storage``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
-
-This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
-When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
-``resources.limits.ephemeral-storage`` using the multiplier defined there.
-
-This field is **only effective on Kubernetes**. It is ignored on other clouds.
-
-Increase this if your tasks download large datasets or produce significant temporary files that
-could exhaust the node's ephemeral storage and trigger pod evictions.
-
-Units supported (case-insensitive):
-
-- KB (kilobytes, 2^10 bytes)
-- MB (megabytes, 2^20 bytes)
-- GB (gigabytes, 2^30 bytes)
-- TB (terabytes, 2^40 bytes)
-- PB (petabytes, 2^50 bytes)
-
-.. warning::
-
-   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50GB
-
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -670,6 +659,7 @@ If ``'best'`` is specified, use the best network tier available on the specified
 - ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 - ``infra: k8s/my-together-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- ``infra: k8s/my-oke-cluster``: Enable RoCEv2 for high-performance GPU communication across pods on Oracle OKE clusters with bare-metal GPU shapes (BM.GPU.*.8) provisioned via dedicated RDMA capacity pools.
 
 **Slurm-based:**
 
@@ -831,6 +821,17 @@ To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/li
 
   resources:
     image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
+
+You can also boot from a private `Shared Image Gallery
+<https://learn.microsoft.com/en-us/azure/virtual-machines/shared-image-galleries>`_
+image by giving its full image-version resource ID. The gallery may live in a
+different subscription than the cluster, as long as your credentials can read
+it:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery>/images/<image>/versions/<version>
 
 **OCI**
 
@@ -1149,7 +1150,8 @@ See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for 
 ``volumes``
 ~~~~~~~~~~~
 
-SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+SkyPilot supports managed persistent and ephemeral volumes on Kubernetes, plus host path bind mounts for Slurm containers.
+Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for managed volume details.
 
 Example:
 
@@ -1161,6 +1163,25 @@ Example:
     # Ephemeral volume
     /mnt/cache:
       size: 100Gi
+
+For Slurm tasks using Pyxis/Enroot, mount an existing absolute host path directly:
+
+.. code-block:: yaml
+
+  resources:
+    cloud: slurm
+    image_id: docker:ubuntu:24.04
+
+  volumes:
+    /data:
+      host_path: /shared/datasets
+      mode: ro  # Optional; defaults to ro. Use rw for a writable mount.
+
+Host and container paths must use safe POSIX path characters.
+Host paths may contain simple environment variable expansions such as ``$SLURM_JOB_ID``.
+
+Administrators can also declare cluster-wide binds applied to every containerized job; see
+:ref:`slurm.container_mounts <config-yaml-slurm-container-mounts>`.
 
 
 .. _yaml-spec-file-mounts:
@@ -1330,6 +1351,16 @@ Example:
       managed_instance_group: ...
     nvidia_gpus:
       disable_ecc: ...
+    hooks:
+      - run: |
+          cd my-code-base
+          git add . && git commit -m "Auto-commit" && git push
+        events: [stop, preemption, down]  # optional; defaults to all three
+        timeout: 300                      # optional; default 3600s
+
+The ``hooks`` field lists scripts to run on the cluster on lifecycle events
+(``stop``, ``preemption``, ``down``). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 .. _service-yaml-spec:
 
@@ -1348,6 +1379,11 @@ Syntax
       :ref:`post_data <yaml-spec-service-readiness-probe-post-data>`: {'model_name': 'model'}
       :ref:`initial_delay_seconds <yaml-spec-service-readiness-probe-initial-delay-seconds>`: 1200
       :ref:`timeout_seconds <yaml-spec-service-readiness-probe-timeout-seconds>`: 15
+      :ref:`endpoint_probe_interval_seconds <yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds>`: 10
+      :ref:`consecutive_failure_threshold_timeout <yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout>`: 180
+
+    :ref:`load_balancer <yaml-spec-service-load-balancer>`:
+      :ref:`stream_timeout_seconds <yaml-spec-service-load-balancer-stream-timeout-seconds>`: 120
 
     :ref:`readiness_probe <yaml-spec-service-readiness-probe>`: /v1/models
 
@@ -1395,6 +1431,11 @@ OR
       post_data: '{"model_name": "my_model"}'
       initial_delay_seconds: 600
       timeout_seconds: 10
+      endpoint_probe_interval_seconds: 10
+      consecutive_failure_threshold_timeout: 180
+
+    load_balancer:
+      stream_timeout_seconds: 120
 
 
 .. _yaml-spec-service-readiness-probe-path:
@@ -1467,6 +1508,74 @@ Note, having a too high timeout will delay the detection of a real failure of yo
     service:
       readiness_probe:
         timeout_seconds: 10
+
+
+.. _yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds:
+
+``service.readiness_probe.endpoint_probe_interval_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        endpoint_probe_interval_seconds: 5
+
+
+.. _yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout:
+
+``service.readiness_probe.consecutive_failure_threshold_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: ``10`` seconds for pools and
+``180`` seconds for regular services.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        consecutive_failure_threshold_timeout: 30
+
+
+.. _yaml-spec-service-load-balancer:
+
+``service.load_balancer``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
+
+
+.. _yaml-spec-service-load-balancer-stream-timeout-seconds:
+
+``service.load_balancer.stream_timeout_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
 
 
 .. _yaml-spec-service-replica-policy:

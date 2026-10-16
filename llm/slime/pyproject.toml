@@ -1,0 +1,27 @@
+[project]
+name = "coding-agent-rl"
+version = "0.1.0"
+description = "Local dev dependencies for the coding-agent-rl example (SkyPilot JobGroups + Sandboxes)"
+requires-python = ">=3.12"
+dependencies = [
+    # Agent harness — used directly (unmodified loop); we subclass its
+    # Environment/Model seams. Brings litellm.
+    "mini-swe-agent>=2.4.5",
+    # slime CPU-path runtime deps (slime itself ships in the slimerl/slime image;
+    # its full requirements.txt pulls CUDA-only packages like ring_flash_attn, so
+    # it isn't installed here).
+    "aiohttp>=3.9",
+    "httpx[http2]",
+    "transformers>=4.44",
+    "torch",
+    "pyyaml",
+    "omegaconf",
+    "numpy",
+    "pillow",  # slime.utils.processing_utils imports PIL
+    # 3b dataset loader
+    "datasets",
+]
+
+# The sky.sandbox SDK (SkyPilot Sandboxes) isn't on PyPI — a Sandboxes-enabled API
+# server ships it to ~/.sky/bin/wheels/, and scripts/trainer-setup.sh installs it
+# from the mounted /wheels dir on the cluster. See README.

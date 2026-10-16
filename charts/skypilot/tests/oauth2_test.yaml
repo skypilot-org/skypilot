@@ -540,3 +540,106 @@ tests:
           value: control-plane
         template: templates/oauth2-proxy-redis.yaml
         documentIndex: 0
+
+  # oauth2-proxy bind interface mirrors apiService.host address family so IPv6
+  # (e.g. "::") deployments are reachable over the pod's IPv6 network.
+  - it: should bind oauth2-proxy to the IPv4 wildcard by default
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--http-address=0.0.0.0:4180"
+
+  - it: should bind oauth2-proxy to the IPv4 wildcard for an IPv4 apiService.host
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      apiService.host: "0.0.0.0"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--http-address=0.0.0.0:4180"
+
+  - it: should bind oauth2-proxy to the IPv6 wildcard for an IPv6 apiService.host
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      apiService.host: "::"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--http-address=[::]:4180"
+
+  # oauth2-proxy and redis Services mirror api-service: dual-stack only when the
+  # apiService.host bind is IPv6, single-stack (no policy) otherwise.
+  - it: should not set ipFamilyPolicy on oauth2 services by default
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    asserts:
+      - notExists:
+          path: spec.ipFamilyPolicy
+        template: templates/oauth2-proxy-service.yaml
+      - notExists:
+          path: spec.ipFamilyPolicy
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 1  # 0 is the Deployment, 1 is the Service
+
+  - it: should not set ipFamilyPolicy on oauth2 services for an IPv4 apiService.host
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      apiService.host: "0.0.0.0"
+    asserts:
+      - notExists:
+          path: spec.ipFamilyPolicy
+        template: templates/oauth2-proxy-service.yaml
+      - notExists:
+          path: spec.ipFamilyPolicy
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 1
+
+  - it: should enable dual-stack on oauth2 services for an IPv6 apiService.host
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      apiService.host: "::"
+    asserts:
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: PreferDualStack
+        template: templates/oauth2-proxy-service.yaml
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: PreferDualStack
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 1

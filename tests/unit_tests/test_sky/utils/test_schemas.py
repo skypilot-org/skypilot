@@ -1,4 +1,5 @@
 """Tests for schemas.py"""
+import os
 import unittest
 from unittest import mock
 
@@ -167,6 +168,40 @@ class TestResourcesSchema(unittest.TestCase):
                     jsonschema.exceptions.ValidationError,
                     msg=f"Expected priority config {config} to be rejected"):
                 jsonschema.validate(instance=config, schema=resources_schema)
+
+
+class TestRbacSchema(unittest.TestCase):
+    """Tests for rbac.restrict_config_to_admins in the config schema."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so additionalProperties is enforced.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
+        self.config_schema = schemas.get_config_schema()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    def test_restrict_config_to_admins_accepts_bool(self):
+        for value in (True, False):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': value
+                }},
+                schema=self.config_schema)
+
+    def test_restrict_config_to_admins_rejects_non_bool(self):
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': 'yes'
+                }},
+                schema=self.config_schema)
 
 
 class TestWorkspaceSchema(unittest.TestCase):
@@ -435,6 +470,267 @@ class TestWorkspaceSchema(unittest.TestCase):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
+    def test_workspace_kubernetes_context_configs_allows_namespace(self):
+        """`workspaces.<ws>.kubernetes.context_configs.<ctx>.namespace` validates."""
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a',
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_context_configs_preserves_kueue_quota(self):
+        """Backward-compat: `kueue` and `quota` still validate alongside `namespace`."""
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a',
+                            'kueue': {
+                                'local_queue_name': 'team-a-queue',
+                            },
+                            'quota': {
+                                'queue': 'team-a-quota',
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_namespace_shorthand_accepted(self):
+        """`workspaces.<ws>.kubernetes.namespace` (no context) validates.
+
+        Mirrors the `kueue`/`quota` shorthand already accepted at the
+        workspace cloud level, and matches layer 2 of the resolver
+        precedence in `get_effective_namespace`.
+        """
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'namespace': 'team-a',
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_namespace_shorthand_coexists(self):
+        """Shorthand `namespace` validates alongside other workspace fields.
+
+        Pins that adding the shorthand does not regress the existing
+        per-context, `allowed_contexts`, `kueue`, or `quota` spellings
+        when they are set in the same workspace block.
+        """
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'namespace': 'team-a',
+                    'allowed_contexts': ['shared-context'],
+                    'kueue': {
+                        'local_queue_name': 'team-a-queue',
+                    },
+                    'quota': {
+                        'queue': 'team-a-quota',
+                    },
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a-shared',
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_namespace_must_be_string(self):
+        """Non-string `namespace` is rejected at every workspace spelling.
+
+        Covers both the shorthand (`workspaces.<ws>.kubernetes.namespace`)
+        and the per-context spelling
+        (`workspaces.<ws>.kubernetes.context_configs.<ctx>.namespace`).
+        """
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'namespace': 123,
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'namespace': ['team-a'],
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'context_configs': {
+                            'shared-context': {
+                                'namespace': 123,
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'context_configs': {
+                            'shared-context': {
+                                'namespace': ['team-a'],
+                            },
+                        },
+                    },
+                },
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Invalid workspace namespace {config!r} should be '
+                    'rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
+    def test_workspace_slurm_sbatch_options(self):
+        config = {
+            'my-workspace': {
+                'slurm': {
+                    'disabled': False,
+                    'allowed_clusters': ['my-cluster'],
+                    'sbatch_options': {
+                        'account': 'workspace-account',
+                    },
+                    'quota': {
+                        'queue': 'workspace-qos',
+                        'account': 'workspace-account',
+                    },
+                    'cluster_configs': {
+                        'my-cluster': {
+                            'sbatch_options': {
+                                'qos': 'workspace-qos',
+                            },
+                            'quota': {
+                                'queue': 'cluster-qos',
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'constraint': 'h100',
+                                    },
+                                    'quota': {
+                                        'queue': 'partition-qos',
+                                        'account': 'partition-account',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=config, schema=self.workspaces_schema)
+
+    def test_slurm_quota_rejects_empty_values(self):
+        """An empty queue/account would become a bare `--qos=` / `--account=`."""
+        for cloud_config in (
+            {
+                'quota': {
+                    'queue': ''
+                }
+            },
+            {
+                'quota': {
+                    'account': ''
+                }
+            },
+            {
+                'cluster_configs': {
+                    'c': {
+                        'partition_configs': {
+                            'p': {
+                                'quota': {
+                                    'queue': ''
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(instance={'slurm': cloud_config},
+                                    schema=schemas.get_config_schema())
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(
+                    instance={'my-workspace': {
+                        'slurm': cloud_config
+                    }},
+                    schema=self.workspaces_schema)
+
+    def test_workspace_slurm_rejects_global_only_properties(self):
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'provision_timeout': 600,
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'workdir': '/shared/workspace',
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'partition_configs': {
+                                    'gpu': {
+                                        'pricing': {
+                                            'on_demand': 1.0,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Unsupported workspace Slurm config {config!r} '
+                    'should be rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
 
 class TestKubernetesSchema(unittest.TestCase):
     """Tests for the kubernetes schema in schemas.py."""
@@ -453,6 +749,64 @@ class TestKubernetesSchema(unittest.TestCase):
             }
         }
         jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
+
+    def test_global_namespace_field(self):
+        """`kubernetes.namespace` validates as a string."""
+        jsonschema.validate(instance={'namespace': 'team-a'},
+                            schema=self.k8s_schema)
+
+    def test_context_configs_allows_namespace(self):
+        """`kubernetes.context_configs.<ctx>.namespace` validates."""
+        jsonschema.validate(
+            instance={
+                'context_configs': {
+                    'my-context': {
+                        'namespace': 'team-a'
+                    }
+                }
+            },
+            schema=self.k8s_schema,
+        )
+
+    def test_namespace_must_be_string(self):
+        """Non-string `namespace` values are rejected."""
+        invalid_instances = [
+            {
+                'namespace': 123
+            },
+            {
+                'namespace': ['team-a']
+            },
+            {
+                'namespace': True
+            },
+            {
+                'context_configs': {
+                    'my-context': {
+                        'namespace': 123
+                    }
+                }
+            },
+        ]
+        for instance in invalid_instances:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Invalid namespace {instance!r} should be rejected'):
+                jsonschema.validate(instance=instance, schema=self.k8s_schema)
+
+    def test_global_namespace_coexists_with_context_override(self):
+        """Global `namespace` plus a per-context override both validate."""
+        jsonschema.validate(
+            instance={
+                'namespace': 'default-team',
+                'context_configs': {
+                    'override-context': {
+                        'namespace': 'override-team',
+                    },
+                },
+            },
+            schema=self.k8s_schema,
+        )
 
 
 class TestSSHSchema(unittest.TestCase):
@@ -838,6 +1192,34 @@ class TestAWSConfigSchema(unittest.TestCase):
         jsonschema.validate(instance=config, schema=self.aws_schema)
 
 
+class TestServiceSchema(unittest.TestCase):
+    """Tests for the service schema in schemas.py."""
+
+    def setUp(self):
+        self.service_schema = schemas.get_service_schema()
+
+    def test_valid_load_balancer_config(self):
+        config = {
+            'readiness_probe': '/',
+            'load_balancer': {
+                'stream_timeout_seconds': 240,
+            },
+        }
+
+        jsonschema.validate(instance=config, schema=self.service_schema)
+
+    def test_rejects_lb_stream_timeout_under_readiness_probe(self):
+        config = {
+            'readiness_probe': {
+                'path': '/health',
+                'lb_stream_timeout_seconds': 240,
+            },
+        }
+
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.service_schema)
+
+
 class TestRegisterKubernetesProperty(unittest.TestCase):
     """Tests for register_kubernetes_property and schema validation."""
 
@@ -877,24 +1259,64 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
 
     def test_client_allows_unknown_k8s_root_property(self):
         """On the client, unknown kubernetes fields pass validation."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         k8s_schema = self._get_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=k8s_schema)
 
     def test_client_allows_unknown_k8s_context_config_property(self):
         """On the client, unknown fields in context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ctx_schema = self._get_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ctx_schema)
 
     def test_client_allows_unknown_workspace_k8s_property(self):
         """On the client, unknown workspace kubernetes fields pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_k8s_schema = self._get_workspace_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_k8s_schema)
 
     def test_client_allows_unknown_workspace_k8s_context_config_property(self):
         """On the client, unknown fields in workspace context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
@@ -1119,6 +1541,135 @@ class TestDashboardSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_url_template_entry(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_mixed_regex_and_url_entries(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                    },
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_entry_with_both_regex_and_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'regex': r'https://example\.com/.*',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': '',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_valid_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                        'scope': ['cluster'],
+                    },
+                    {
+                        'label': 'Experiment Platform',
+                        'url': 'https://exp.internal.example.com/jobs/${job_id}',
+                        'scope': ['jobs'],
+                    },
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                        'scope': ['cluster', 'jobs'],
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_unknown_scope_value(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['clusters'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': [],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_non_array_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': 'cluster',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_duplicate_scope_values(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['cluster', 'cluster'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
 
 class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""
@@ -1147,6 +1698,61 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
                 'external_links': [{
                     'label': 'Good',
                     'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+
+class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
+    """Tests for the url-template validation in skypilot_config."""
+
+    def test_unknown_template_variable_raises_value_error(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${clustername}',
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+                config, 'test_config')
+        self.assertIn('dashboard.external_links[0].url', str(ctx.exception))
+        self.assertIn('clustername', str(ctx.exception))
+        self.assertIn('cluster_name', str(ctx.exception))
+
+    def test_known_template_variables_pass(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        variables = '/'.join(
+            f'${{{v}}}'
+            for v in sorted(skypilot_config.DASHBOARD_LINK_TEMPLATE_VARIABLES))
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'All variables',
+                    'url': f'https://example.com/{variables}',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+    def test_static_url_without_variables_passes(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Static',
+                    'url': 'https://example.com/dashboard',
                 }],
             },
         }

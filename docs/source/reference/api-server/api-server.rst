@@ -117,6 +117,12 @@ To verify that the API server is working, run ``sky api info``:
         ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
         └── User: skypilot-user (xxxxxx)
 
+.. note::
+
+    Set ``SKYPILOT_DISABLE_LOCAL_API_SERVER=1`` to prevent starting a local
+    API server — both the automatic background start and ``sky api start``.
+    Blocked commands error and point to ``sky api login -e <endpoint>``.
+
 
 .. toctree::
    :hidden:

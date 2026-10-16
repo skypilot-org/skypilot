@@ -10,12 +10,24 @@ import {
 import { Card } from '@/components/ui/card';
 
 import { ChevronLeftIcon, ChevronRightIcon } from '@/components/elements/icons';
+import { getPersistedPageSize, persistPageSize } from '@/lib/utils';
 import { formatDateTime } from '../utils';
+
+const EVENTS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const EVENTS_PAGE_SIZE_STORAGE_KEY = 'skypilot-events-page-size';
 
 export function EventTable({ events }) {
   events = events.sort((a, b) => new Date(b.time) - new Date(a.time));
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      EVENTS_PAGE_SIZE_STORAGE_KEY,
+      EVENTS_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   const indexOfLastItem = currentPage * pageSize;
   const indexOfFirstItem = indexOfLastItem - pageSize;
@@ -39,6 +51,8 @@ export function EventTable({ events }) {
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(EVENTS_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 

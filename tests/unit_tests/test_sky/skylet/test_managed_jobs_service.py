@@ -329,6 +329,8 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
+        # The job was never launched (no persisted infra), so the cached
+        # resources fallback does not apply and '-' is shown.
         assert target_job.cluster_resources == '-'
         assert target_job.cluster_resources_full == '-'
         assert target_job.cloud == '-'
@@ -338,7 +340,10 @@ class TestGetJobTable:
         assert target_job.recovery_count == 0
         assert target_job.metadata == {}
         assert target_job.workspace == 'ws1'
-        assert not target_job.HasField('details')
+        # job_id1 is PENDING with schedule_state INACTIVE, so there is no
+        # schedule-state message; _format_job_details surfaces the latest
+        # PENDING event reason (from set_pending) in details instead.
+        assert target_job.details == 'Job submitted to queue'
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
@@ -354,6 +359,48 @@ class TestGetJobTable:
         workspaces = [job.workspace for job in response.jobs]
         assert 'ws1' in workspaces
         assert 'ws2' in workspaces
+
+    def test_get_job_table_include_tree(self):
+        """With include_tree, naming a launched job returns its whole tree,
+        and the response says the flag was honoured."""
+        root = self.job_ids['job_id1']
+        member = state.set_job_info_without_job_id(name='member',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='abcd1234',
+                                                   root_job_id=root,
+                                                   parent_job_id=root,
+                                                   parent_task_id=0)
+        state.set_pending(member,
+                          task_id=0,
+                          task_name='member',
+                          resources_str='{}',
+                          metadata='{}')
+        context_mock = mock.Mock()
+        # Without the flag: the member's own row, as before.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                job_ids=managed_jobsv1_pb2.JobIds(ids=[member])), context_mock)
+        context_mock.abort.assert_not_called()
+        assert [j.job_id for j in response.jobs] == [member]
+        assert response.include_tree_applied is True
+        # With it: the root and the member, keyed on the root.
+        response = self.service.GetJobTable(
+            managed_jobsv1_pb2.GetJobTableRequest(
+                accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                    workspaces=['ws1', 'ws2']),
+                job_ids=managed_jobsv1_pb2.JobIds(ids=[member]),
+                include_tree=True), context_mock)
+        context_mock.abort.assert_not_called()
+        assert sorted(j.job_id for j in response.jobs) == [root, member]
+        assert response.total == 1
+        assert response.include_tree_applied is True
+        member_row = next(j for j in response.jobs if j.job_id == member)
+        assert member_row.root_job_id == root
 
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible
@@ -391,6 +438,8 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
+        # The job was never launched (no persisted infra), so the cached
+        # resources fallback does not apply and '-' is shown.
         assert target_job.cluster_resources == '-'
         assert target_job.cluster_resources_full == '-'
         assert target_job.cloud == '-'
@@ -400,7 +449,10 @@ class TestGetJobTable:
         assert target_job.recovery_count == 0
         assert target_job.metadata == {}
         assert target_job.workspace == 'ws1'
-        assert not target_job.HasField('details')
+        # job_id1 is PENDING with schedule_state INACTIVE, so there is no
+        # schedule-state message; _format_job_details surfaces the latest
+        # PENDING event reason (from set_pending) in details instead.
+        assert target_job.details == 'Job submitted to queue'
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'

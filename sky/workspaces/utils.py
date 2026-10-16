@@ -1,56 +1,97 @@
 """Utils for workspaces."""
-import collections
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
-from sky import global_user_state
-from sky import sky_logging
-
-logger = sky_logging.init_logger(__name__)
+from sky import skypilot_config
+from sky.users import resolver as user_resolver
+from sky.workspaces import constants as workspace_constants
 
 
-def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
-    """Get the users that should have access to a workspace.
+def get_default_read_access() -> str:
+    """The org-wide ``workspace_config.read_access`` default.
 
-    workspace_config is a dict with the following keys:
-    - private: bool
-    - allowed_users: list of user names or IDs
+    Split out so batch callers can look it up once. See the
+    ``default_read_access`` arg of ``is_read_only_for_non_members``.
+    """
+    return skypilot_config.get_nested(
+        ('workspace_config', 'read_access'),
+        default_value=workspace_constants.READ_ACCESS_ALLOWED_USERS)
 
-    This function will automatically resolve the user names to IDs.
+
+def is_read_only_for_non_members(
+        workspace_config: Dict[str, Any],
+        default_read_access: Optional[str] = None) -> bool:
+    """Whether non-members may see this workspace read-only.
+
+    True for a private workspace whose effective ``read_access`` is ``all``.
+    The effective value is the workspace's own ``read_access`` if set,
+    otherwise the org-wide default ``workspace_config.read_access`` (default
+    ``allowed_users``). An open (non-private) workspace is usable by everyone,
+    so the flag is moot there and this returns False.
 
     Args:
-        workspace_config: The configuration of the workspace.
+        workspace_config: The workspace's stored config.
+        default_read_access: The org-wide default, when the caller already has
+            it.
+    """
+    if not workspace_config.get('private', False):
+        return False
+    access = workspace_config.get('read_access')
+    if access is None:
+        access = (default_read_access if default_read_access is not None else
+                  get_default_read_access())
+    return access == workspace_constants.READ_ACCESS_ALL
+
+
+def get_read_only_workspace_names() -> Set[str]:
+    """Names of workspaces that non-members may see read-only.
+
+    Evaluated live from the current config (per-workspace ``read_access``,
+    falling back to the org-wide ``workspace_config.read_access``) at
+    permission-check time -- see ``is_read_only_for_non_members`` -- so changes
+    take effect without a policy re-sync or restart.
+    """
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    # Read the org-wide default ONCE and pass it down
+    default_read_access = get_default_read_access()
+    return {
+        workspace_name
+        for workspace_name, workspace_config in current_workspaces.items()
+        if is_read_only_for_non_members(workspace_config, default_read_access)
+    }
+
+
+def is_read_only_workspace(workspace_name: str) -> bool:
+    """Whether a single workspace is read-only-visible to non-members.
+
+    Live equivalent of ``workspace_name in get_read_only_workspace_names()``
+    that only looks up the one workspace's config.
+    """
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    return is_read_only_for_non_members(
+        current_workspaces.get(workspace_name, {}))
+
+
+def get_workspace_users(
+        workspace_config: Dict[str, Any],
+        resolver: Optional[user_resolver.UserResolver] = None) -> List[str]:
+    """Get the user_ids that should have access to a workspace.
+
+    For private workspaces, resolves ``allowed_users`` (which may contain
+    a mix of user_ids and usernames) to user_ids. For public workspaces,
+    returns ``['*']``.
+
+    Args:
+        workspace_config: Dict with optional ``private: bool`` and
+            ``allowed_users: List[str]`` keys.
+        resolver: Optional ``UserResolver`` so batch callers don't pay a
+            fresh ``get_all_users()`` per workspace. If not provided, a
+            transient resolver is built internally.
 
     Returns:
-        List of user IDs that should have access to the workspace.
-        For private workspaces, returns specific user IDs.
-        For public workspaces, returns ['*'] to indicate all users.
+        List of user IDs. ``['*']`` for public workspaces.
     """
-    if workspace_config.get('private', False):
-        user_ids = []
-        workspace_user_name_or_ids = workspace_config.get('allowed_users', [])
-        all_users = global_user_state.get_all_users()
-        all_user_ids = {user.id for user in all_users}
-        all_user_map = collections.defaultdict(list)
-        for user in all_users:
-            all_user_map[user.name].append(user.id)
-
-        # Resolve user names to IDs
-        for user_name_or_id in workspace_user_name_or_ids:
-            if user_name_or_id in all_user_ids:
-                user_ids.append(user_name_or_id)
-            elif user_name_or_id in all_user_map:
-                if len(all_user_map[user_name_or_id]) > 1:
-                    user_ids_str = ', '.join(all_user_map[user_name_or_id])
-                    raise ValueError(
-                        f'User {user_name_or_id!r} has multiple IDs: '
-                        f'{user_ids_str}. Please specify the user '
-                        f'ID instead.')
-                user_ids.append(all_user_map[user_name_or_id][0])
-            else:
-                logger.warning(
-                    f'User {user_name_or_id!r} not found in all users')
-                continue
-        return user_ids
-    else:
-        # Public workspace - return '*' to indicate all users should have access
-        return ['*']
+    if resolver is None:
+        resolver = user_resolver.UserResolver()
+    return resolver.resolve_workspace_users(workspace_config)

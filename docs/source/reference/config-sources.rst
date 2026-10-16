@@ -169,7 +169,13 @@ Merging rules:
 
 * Lists are overridden by config sources with higher priority.
 
-  * Exception: lists in ``kubernetes.pod_config`` appended to the existing list.
+  * Exception: lists in ``kubernetes.pod_config`` that Kubernetes defines a patch
+    merge key for (e.g. ``containers`` and ``volumes`` by ``name``, ``volumeMounts``
+    by ``mountPath``) are merged item by item on that key: an item whose key
+    matches an existing one is merged into it, and other items are appended.
+    ``args``, ``command`` and ``imagePullSecrets`` are replaced as a whole, so an
+    empty ``imagePullSecrets`` list clears the secrets set by a lower-priority
+    source. Remaining lists are appended to the existing list.
 
 * Dictionaries are merged, with individual keys overridden by config sources with higher priority.
 

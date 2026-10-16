@@ -45,7 +45,7 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 - [Remote API Server Setup]({{BASE_URL}}/reference/api-server/api-server.html.md#sky-api-server-remote): Multi-user team deployment
 - [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment instructions
 - [Multi-tenancy]({{BASE_URL}}/reference/api-server/api-server.html.md#multi-tenancy): Share clusters and jobs securely
-- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Authentication (SSO) and RBAC]({{BASE_URL}}/reference/auth.html.md): User authentication (SSO, basic auth, service accounts) and authorization
 - [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
 
 ## Clusters
@@ -65,7 +65,6 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 ## Model Serving
 
 - [Getting Started]({{BASE_URL}}/serving/sky-serve.html.md): Production-ready model serving with SkyServe
-- [User Guides]({{BASE_URL}}/serving/user-guides.html.md): Comprehensive serving guides
 - [Autoscaling]({{BASE_URL}}/serving/autoscaling.html.md): Scale replicas based on load
 - [Authentication]({{BASE_URL}}/serving/auth.html.md): Secure your serving endpoints
 - [HTTPS Support]({{BASE_URL}}/serving/https.html.md): Enable HTTPS for serving
@@ -101,7 +100,7 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 
 - [API Server Deployment]({{BASE_URL}}/reference/api-server/api-server.html.md): Deploy SkyPilot for teams
 - [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment
-- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Authentication (SSO) and RBAC]({{BASE_URL}}/reference/auth.html.md): User authentication (SSO, basic auth, service accounts) and authorization
 - [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
 - [Cloud Permissions]({{BASE_URL}}/cloud-setup/cloud-permissions/index.html.md): Required IAM permissions
 - [Admin Policies]({{BASE_URL}}/cloud-setup/policy.html.md): Configure cloud policies
@@ -210,7 +209,6 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 - [Release Notes](https://github.com/skypilot-org/skypilot/releases): Version history
 - [Contributing](https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md): Contribution guidelines
 - [Community Slack](https://slack.skypilot.co/): Join the community
-- [Blog](https://blog.skypilot.co/): News, tutorials, and announcements
-- [Community](https://blog.skypilot.co/community/): Community highlights
-- [Case Studies](https://blog.skypilot.co/case-studies/): Real-world usage
+- [Blog](https://skypilot.ai/blog): News, tutorials, and announcements
+- [Case Studies](https://skypilot.ai/case-studies): Real-world usage
 - [GitHub Repository](https://github.com/skypilot-org/skypilot): Source code and issues

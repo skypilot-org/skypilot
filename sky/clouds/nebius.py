@@ -72,7 +72,8 @@ def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
     umask would otherwise lock the other user out.
     """
     uid = os.getuid() if hasattr(os, 'getuid') else 'default'
-    digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
+    digest = hashlib.sha1(value.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()[:16]
     path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
     expected = value + '\n'
     try:
@@ -95,7 +96,7 @@ class Nebius(clouds.Cloud):
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently only supported for '
-             'H100:8 and H200:8 on Nebius.'),
+             'H100:8, H200:8, B200:8 and B300:8 on Nebius.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Nebius.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
@@ -132,10 +133,11 @@ class Nebius(clouds.Cloud):
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
 
-        # Check if the accelerators support InfiniBand (H100 or H200) and 8 GPUs
+        # Check if the accelerators support InfiniBand and come as 8 GPUs
         if resources.accelerators is not None:
             for acc_name, acc_count in resources.accelerators.items():
-                if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
+                if (acc_name.lower() in nebius_constants.INFINIBAND_ACCELERATORS
+                        and acc_count == nebius_constants.INFINIBAND_GPU_COUNT):
                     # Remove CUSTOM_NETWORK_TIER from unsupported features for
                     # InfiniBand-capable accelerators. Refer to:
                     # https://docs.nebius.com/compute/clusters/gpu#fabrics
@@ -313,14 +315,14 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        if (resources.image_id is None or
-                resources.extract_docker_image() is not None):
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is None:
             image_id = default_image_family
         else:
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                image_id = resources.image_id[region.name]
+                image_id = cloud_image_id[region.name]
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
@@ -339,6 +341,11 @@ class Nebius(clouds.Cloud):
 
         use_static_ip_address = skypilot_config.get_nested(
             ('nebius', 'use_static_ip_address'), default_value=False)
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=region.name,
+            keys=('disk_encrypted',),
+            default_value=False)
 
         def _get_disk_tier() -> resources_utils.DiskTier:
             logger.debug(f'Getting disk tier for Nebius {resources.disk_tier}.')
@@ -395,6 +402,7 @@ class Nebius(clouds.Cloud):
             'filesystems': resources_vars_fs,
             'network_tier': resources.network_tier,
             'disk_tier': _get_disk_tier(),
+            'disk_encrypted': disk_encrypted,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group_managed_by_skypilot).lower(),

@@ -85,16 +85,25 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
         """Test using global allowed_contexts=all in config when workspace config is None."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = 'all'
+
+        # get_effective_region_config is called for 'allowed_contexts';
+        # 'all_includes_in_cluster' is read via
+        # get_effective_workspace_region_config and patched separately.
+        def _get_eff(*args, **kwargs):
+            keys = kwargs.get('keys') or (args[1] if len(args) > 1 else None)
+            if keys == ('allowed_contexts',):
+                return 'all'
+            return kwargs.get('default_value')
+
+        mock_get_cloud_config_value.side_effect = _get_eff
 
         result = kubernetes.Kubernetes.existing_allowed_contexts()
 
         self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
-        mock_get_cloud_config_value.assert_called_once_with(
-            cloud='kubernetes',
-            keys=('allowed_contexts',),
-            region=None,
-            default_value=None)
+        mock_get_cloud_config_value.assert_any_call(cloud='kubernetes',
+                                                    keys=('allowed_contexts',),
+                                                    region=None,
+                                                    default_value=None)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -360,6 +369,197 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
             mock_log.assert_called_once_with(('nonexistent-cluster',))
 
 
+class TestKubernetesAllIncludesInCluster(unittest.TestCase):
+    """Tests for the SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER
+    env var that excludes the in-cluster context from the `'all'` expansion.
+    """
+
+    ENV_VAR = 'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER'
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        # Ensure env var leaks from other tests don't influence assertions.
+        self._original_env = os.environ.pop(self.ENV_VAR, None)
+
+    def tearDown(self):
+        if self._original_env is not None:
+            os.environ[self.ENV_VAR] = self._original_env
+        else:
+            os.environ.pop(self.ENV_VAR, None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_default_includes_in_cluster(self, mock_get_region,
+                                         mock_get_workspace,
+                                         mock_get_all_contexts):
+        """Default (env unset): 'all' includes in-cluster (backward compat)."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'ctx-b', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'ctx-b', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_true_includes_in_cluster(self, mock_get_region,
+                                          mock_get_workspace,
+                                          mock_get_all_contexts):
+        """Env var explicitly true: 'all' includes in-cluster."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'true'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_false_excludes_in_cluster(self, mock_get_region,
+                                           mock_get_workspace,
+                                           mock_get_all_contexts):
+        """Env var false: in-cluster is filtered out of the 'all' expansion.
+
+        This is the hosted-product use case.
+        """
+        mock_get_all_contexts.return_value = ['ctx-a', 'ctx-b', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'ctx-b'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_legacy_allow_all_env_respects_filter(self, mock_get_region,
+                                                  mock_get_workspace,
+                                                  mock_get_all_contexts):
+        """`SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS=true` path is symmetric.
+
+        When no `allowed_contexts` is set in config but the legacy
+        allow-all env var is set, the same `'all'` expansion runs and the
+        in-cluster filter env var still applies.
+        """
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = None
+
+        with patch.dict(os.environ, {
+                'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true',
+                self.ENV_VAR: 'false',
+        },
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    def test_explicit_in_cluster_in_list_is_kept(self, mock_get_workspace,
+                                                 mock_get_all_contexts):
+        """Explicit allowed_contexts list is honored even with env var false."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+
+        def _workspace_get(key, default=None):
+            if key == 'allowed_contexts':
+                return ['ctx-a', 'in-cluster']
+            return default
+
+        mock_get_workspace.return_value.get.side_effect = _workspace_get
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.provision.kubernetes.utils.'
+           'get_current_kube_config_context_name')
+    @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_no_kubeconfig_fallback_respects_env(self, mock_in_cluster_name,
+                                                 mock_is_incluster,
+                                                 mock_current, mock_get_nested,
+                                                 mock_get_workspace,
+                                                 mock_get_all_contexts):
+        """The "no kubeconfig -> in-cluster" fallback also honors the filter
+        env var: with it false the in-cluster context is not surfaced, even
+        when it is the only derived context. Without an explicit
+        `allowed_contexts` list the contexts are derived, so the same
+        exclusion that applies to the `'all'` path applies here.
+        """
+        mock_get_all_contexts.return_value = ['in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_nested.return_value = None
+        mock_current.return_value = None
+        mock_is_incluster.return_value = True
+        mock_in_cluster_name.return_value = 'in-cluster'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, [])
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.provision.kubernetes.utils.'
+           'get_current_kube_config_context_name')
+    @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_no_kubeconfig_fallback_default_keeps_in_cluster(
+            self, mock_in_cluster_name, mock_is_incluster, mock_current,
+            mock_get_nested, mock_get_workspace, mock_get_all_contexts):
+        """The fallback keeps in-cluster by default (env unset) so existing
+        single-cluster deployments are unaffected."""
+        mock_get_all_contexts.return_value = ['in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_nested.return_value = None
+        mock_current.return_value = None
+        mock_is_incluster.return_value = True
+        mock_in_cluster_name.return_value = 'in-cluster'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, ['in-cluster'])
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_custom_in_cluster_name_is_filtered(self, mock_in_cluster_name,
+                                                mock_get_region,
+                                                mock_get_workspace,
+                                                mock_get_all_contexts):
+        """Custom in-cluster name (via SKYPILOT_IN_CLUSTER_CONTEXT_NAME) is
+        what gets filtered — not the literal string 'in-cluster'."""
+        mock_in_cluster_name.return_value = 'my-host-cluster'
+        mock_get_all_contexts.return_value = [
+            'ctx-a', 'my-host-cluster', 'in-cluster'
+        ]
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        # 'my-host-cluster' (the configured in-cluster name) is excluded;
+        # the literal string 'in-cluster' here is a regular kubeconfig
+        # context and is kept.
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
+
+
 class TestKubernetesSecurityContextMerging(unittest.TestCase):
     """Test cases for merging user-specified securityContext with IPC_LOCK capability."""
 
@@ -374,6 +574,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.resources.zone = None
         self.resources.cluster_config_overrides = {}
         self.resources.image_id = None  # Set image_id to None to use default
+        self.resources.disk_size = 256  # DEFAULT_DISK_SIZE_GB
+        self.resources.disk_size_specified = False
 
         # Mock the assert_launchable method to return itself
         # Use setattr to avoid the assertion detection issue
@@ -697,6 +899,266 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_neuron_routes_to_neuron_resource_key(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """AWS Neuron (Trainium/Inferentia) routes to aws.amazon.com/neuron."""
+        neuron_resources = mock.MagicMock()
+        neuron_resources.instance_type = '8CPU--32GB--Trainium:16'
+        neuron_resources.accelerators = {'Trainium': 16}
+        neuron_resources.use_spot = False
+        neuron_resources.region = 'eks-context'
+        neuron_resources.zone = None
+        neuron_resources.cluster_config_overrides = {}
+        neuron_resources.image_id = None
+        setattr(neuron_resources, 'assert_launchable', lambda: neuron_resources)
+        neuron_resources.network_tier = resources_utils.NetworkTier.STANDARD
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'eks-context'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        # Karpenter surfaces Neuron via the instance-accelerator-name label
+        # (NOT the TPU label), so routing falls to the Neuron branch.
+        mock_get_accelerator_label_key_values.return_value = (
+            'karpenter.k8s.aws/instance-accelerator-name', ['trainium'
+                                                           ], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-neuron-image:latest'
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=neuron_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name='test-neuron-cluster',
+                name_on_cloud='test-neuron-cluster'),
+            region=mock.MagicMock(name='eks-context'),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['accelerator_count'], '16')
+        self.assertEqual(deploy_vars['k8s_resource_key'],
+                         'aws.amazon.com/neuron')
+        # Neuron is neither GPU nor TPU.
+        self.assertFalse(deploy_vars['tpu_requested'])
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_oci_roce_network_tier_with_gpu_environment_variables(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Test OCI OKE RoCE network tier sets the right deploy vars and envs."""
+
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = "8CPU--32GB--B200:8"
+        gpu_resources.accelerators = {'B200': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = "oci-context"
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.OCI_ROCE, None)
+
+        mock_get_current_context.return_value = "oci-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_accelerator_label_key_values.return_value = (
+            'skypilot.co/accelerator', ['b200'], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-gpu-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=gpu_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-oci-cluster",
+                name_on_cloud="test-oci-cluster"),
+            region=mock.MagicMock(name="oci-context"),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # OCI RoCE requires hostNetwork, privileged, and /dev/infiniband.
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # OCI RoCE forces hostNetwork via the template, so k8s_host_network
+        # must also be True — otherwise the Ray-port/sshd probe machinery is
+        # skipped and inter-node Ray + `ssh <cluster>` break under
+        # hostNetwork (the pod's sshd can't bind host:22).
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        # IPC_LOCK is shared with other high-perf types and stays True.
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+        # Sanity: GPUDirect flags are False for OCI.
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_tcpx'])
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_tcpxo'])
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
+
+        k8s_env_vars = deploy_vars['k8s_env_vars']
+        # The port check is runtime-gated on this one env var (see
+        # instance_setup._host_network_probe_cmd); it must be wired for OCI
+        # RoCE so the check actually runs.
+        self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
+        # And on nothing else. The gate used to also require a ConfigMap name,
+        # with the sshd_config rewrite inside the same shell branch, so a
+        # lingering export would keep a dead requirement alive and a lingering
+        # requirement would silently skip moving sshd off port 22.
+        for stale in ('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                      'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'):
+            self.assertNotIn(stale, k8s_env_vars)
+        self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
+        self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
+        self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
+        self.assertEqual(k8s_env_vars['NCCL_SOCKET_IFNAME'], 'eth0')
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_oci_roce_not_enabled_when_network_tier_standard(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """On STANDARD network tier, OCI RoCE must NOT be enabled even if
+        the cluster carries RDMA labels — protects against silently applying
+        RoCE config to users who didn't opt in."""
+
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = "8CPU--32GB--B200:8"
+        gpu_resources.accelerators = {'B200': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = "oci-context"
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.STANDARD
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+
+        # _detect_network_type short-circuits to NONE when network_tier is
+        # not BEST, regardless of node labels.
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+
+        mock_get_current_context.return_value = "oci-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_accelerator_label_key_values.return_value = (
+            'skypilot.co/accelerator', ['b200'], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-gpu-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=gpu_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-oci-cluster",
+                name_on_cloud="test-oci-cluster"),
+            region=mock.MagicMock(name="oci-context"),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertFalse(deploy_vars['k8s_enable_oci_roce'])
+        self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
+        # No OCI RoCE and no pod_config hostNetwork override -> the pod is
+        # not host-networked, so the probe machinery stays off.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        self.assertNotIn('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                         deploy_vars['k8s_env_vars'])
+        self.assertNotIn('NCCL_IB_GID_INDEX', deploy_vars['k8s_env_vars'])
+
 
 class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     """Test cases for Kubernetes.make_deploy_resources_variables method."""
@@ -818,6 +1280,17 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         # Verify the timeout value is set in deploy vars
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
+
+        # The pod patches Ray from a payload carried in its own spec, because
+        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
+        # the node is whatever `pip install skypilot` resolved to. Assert the
+        # variable is actually produced -- without this, dropping it from
+        # make_deploy_resources_variables leaves the payload tests green while
+        # the template renders an empty command.
+        self.assertIn('ray_patches_cmd', deploy_vars)
+        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
+        self.assertNotIn('from sky.skylet.ray_patches',
+                         deploy_vars['ray_patches_cmd'])
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -1231,13 +1704,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_in_deploy_vars(
+    def test_disk_size_sets_ephemeral_storage_in_deploy_vars(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test that ephemeral_storage is included in deploy_vars."""
+        """Test that non-default disk_size sets ephemeral-storage."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1251,8 +1724,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=False)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1282,13 +1756,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_with_resource_limits(
+    def test_disk_size_with_resource_limits(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test ephemeral_storage limits with set_pod_resource_limits."""
+        """Test disk_size ephemeral-storage limits with set_pod_resource_limits."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1302,8 +1776,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=1.5)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1334,13 +1809,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_no_ephemeral_storage_when_not_set(
+    def test_no_ephemeral_storage_with_default_disk_size(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test no ephemeral-storage in deploy_vars when not specified."""
+        """Test no ephemeral-storage when disk_size is the default."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1354,9 +1829,8 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=True)
 
-        # ephemeral_storage is None (not set)
-        self.resources.ephemeral_storage = None
-
+        # disk_size not explicitly specified — should NOT set ephemeral-storage
+        self.resources.disk_size_specified = False
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
@@ -1690,36 +2164,6 @@ class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
         self.assertIn('dump_apt_log', snippet)
         self.assertIn('exit 1', snippet)
         self.assertLess(snippet.index('dump_apt_log'), snippet.index('exit 1'))
-
-
-class TestEphemeralStorageValidation(unittest.TestCase):
-    """Test that ephemeral_storage is rejected on non-Kubernetes clouds."""
-
-    def test_ephemeral_storage_rejected_on_non_k8s_cloud(self):
-        """Test that ephemeral_storage raises ValueError on non-K8s cloud."""
-        from sky import resources as resources_lib
-        from sky.clouds import aws
-        r = resources_lib.Resources(cloud=aws.AWS(), ephemeral_storage=50)
-        with self.assertRaises(ValueError) as cm:
-            r.validate()
-        self.assertIn('only supported on Kubernetes', str(cm.exception))
-
-    def test_ephemeral_storage_accepted_on_kubernetes(self):
-        """Test that ephemeral_storage is accepted on Kubernetes."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(cloud=kubernetes.Kubernetes(),
-                                    ephemeral_storage=50)
-        # validate() should not raise for Kubernetes
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
-
-    def test_ephemeral_storage_accepted_when_no_cloud(self):
-        """Test that ephemeral_storage is accepted when no cloud specified."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(ephemeral_storage=50)
-        # validate() should not raise when cloud is not specified
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
 
 
 class TestKubernetesSecurityContext(unittest.TestCase):
@@ -2102,7 +2546,7 @@ class TestKubernetesVolumeNameValidation(unittest.TestCase):
             self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
 
     def test_invalid_due_to_length(self):
-        too_long = 'a' * 254  # > 253
+        too_long = 'a' * 254  # > 63, the pod-label cap
         ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
         self.assertFalse(ok)
         self.assertIn('maximum length', reason or '')
@@ -2713,7 +3157,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         """Test that unreachable contexts are excluded."""
         mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
 
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx1':
                 from sky import exceptions as sky_exceptions
                 raise sky_exceptions.KubeAPIUnreachableError('API unreachable')
@@ -2782,7 +3228,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         mock_check_features.side_effect = check_features_side_effect
 
         # ctx3 doesn't have enough resources
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx3':
                 return (False, 'Not enough resources')
             return (True, None)
@@ -2903,6 +3351,48 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.TOGETHER,
              None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_oci_oke_rdma_detection(self, mock_get_nodes):
+        """Test detection of OCI OKE bare-metal GPU nodes via rdma.* labels."""
+        mock_node = self._create_mock_node({
+            'oci.oraclecloud.com/rdma.cluster_id': 'rpqe7pvxukq',
+            'oci.oraclecloud.com/rdma.host_id': 'pniggyfeimq',
+            'oci.oraclecloud.com/host.id': '3699d047506',
+            'node.kubernetes.io/instance-type': 'BM.GPU.B200.8',
+            'kubernetes.io/hostname': 'node-1',
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.OCI_ROCE,
+             None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_oci_oke_without_rdma_labels_not_detected(self, mock_get_nodes):
+        """OCI nodes that only carry non-`rdma.*` `oci.oraclecloud.com/`
+        labels (e.g. regular VMs, non-cluster-network pools) must NOT
+        match — guards against the prefix being too broad."""
+        mock_node = self._create_mock_node({
+            'oci.oraclecloud.com/compartment.id': 'aaaa',
+            'oci.oraclecloud.com/fault-domain': 'FAULT-DOMAIN-1',
+            'oci.oraclecloud.com/host.id': '3699d047506',
+            'node.kubernetes.io/instance-type': 'VM.GPU.A10.1',
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_gke_a3_highgpu_detection(self, mock_get_nodes):
@@ -3687,6 +4177,1034 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
              None))
+
+
+class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
+    """`_check_single_context` forwards the cloud key to `check_credentials`.
+
+    Ensures `sky check` resolves the credential-probe namespace under
+    the calling cloud's config key (``kubernetes`` vs ``ssh``) instead
+    of always querying the kubeconfig context default.
+    """
+
+    @patch('sky.provision.kubernetes.utils.check_credentials')
+    def test_forwards_kubernetes_cloud_key(self, mock_check_credentials):
+        mock_check_credentials.return_value = (True, None)
+        kubernetes.Kubernetes._check_single_context('some-ctx')
+        mock_check_credentials.assert_called_once_with('some-ctx',
+                                                       run_optional_checks=True,
+                                                       cloud='kubernetes')
+
+
+class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
+    """Test fnmatch pattern matching for K8s remote_identity dict.
+
+    Tests exercise the matching logic from sky/clouds/kubernetes.py which
+    uses fnmatch.fnmatchcase(context, str(pattern)) to resolve SA names.
+    """
+
+    def _match_remote_identity(self, remote_identity, context):
+        """Reproduce the production matching logic from kubernetes.py:793."""
+        import fnmatch as fnmatch_mod
+        for pattern, sa_name in remote_identity.items():
+            if fnmatch_mod.fnmatchcase(context, str(pattern)):
+                return sa_name
+        return None
+
+    def test_exact_match(self):
+        result = self._match_remote_identity(
+            {
+                'my-cluster': 'my-sa',
+                'other-cluster': 'other-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'my-sa')
+
+    def test_glob_pattern(self):
+        result = self._match_remote_identity(
+            {
+                '*-prod': 'prod-sa',
+                '*-dev': 'dev-sa'
+            }, 'eks-dev')
+        self.assertEqual(result, 'dev-sa')
+
+    def test_wildcard_fallback(self):
+        result = self._match_remote_identity(
+            {
+                'special-cluster': 'special-sa',
+                '*': 'default-sa'
+            }, 'some-random-cluster')
+        self.assertEqual(result, 'default-sa')
+
+    def test_no_match_returns_none(self):
+        result = self._match_remote_identity(
+            {
+                'prod-*': 'prod-sa',
+                'staging-*': 'staging-sa'
+            }, 'dev-cluster')
+        self.assertIsNone(result)
+
+    def test_first_match_wins(self):
+        result = self._match_remote_identity(
+            {
+                '*-cluster': 'first-sa',
+                '*': 'fallback-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'first-sa')
+
+    def test_non_string_key_coerced(self):
+        """Non-string keys (e.g., YAML int) are coerced via str()."""
+        result = self._match_remote_identity(
+            {
+                12345: 'numeric-sa',
+                '*': 'default-sa'
+            }, '12345')
+        self.assertEqual(result, 'numeric-sa')
+
+
+class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
+    """Scale-from-zero EFA wiring in _detect_network_type.
+
+    On an AWS cluster with GPU pools at min=0, only non-GPU system nodes are up
+    at schedule time, so scanning nodes for vpc.amazonaws.com/efa finds nothing
+    and network_tier: best would omit the EFA request (NCCL -> TCP). The fix
+    falls back to a catalog-derived count. These tests drive
+    _detect_network_type against a cold node set and mock the derivation
+    (_derive_efa_count_from_catalog); the derivation math is covered directly by
+    TestDeriveEfaCountFromCatalog below. Cold cases fail without the fix.
+    """
+
+    # An AWS EKS system node carries the cloud-provider label even with no GPU.
+    _AWS_SYSTEM_NODE_LABELS = {
+        'k8s.io/cloud-provider-aws': 'abc123',
+        'topology.kubernetes.io/zone': 'us-east-2a',
+        'node.kubernetes.io/instance-type': 'm6i.large',
+    }
+
+    def _node(self, labels, allocatable):
+        node = mock.MagicMock()
+        node.metadata.labels = dict(labels)
+        node.status.allocatable = dict(allocatable)
+        return node
+
+    def _cold_aws_nodes(self):
+        # Scale-from-zero: only a non-GPU AWS system node is up.
+        return [self._node(self._AWS_SYSTEM_NODE_LABELS, {'cpu': '2'})]
+
+    def _detect(self,
+                nodes,
+                acc_count,
+                acc_type,
+                derived_efa=None,
+                tier=None,
+                autoscaler='karpenter'):
+        # autoscaler defaults to a configured value: the scale-from-zero EFA
+        # fallback only fires on a cluster that can actually scale up a GPU
+        # node. Pass autoscaler=None to model a static cluster.
+        tier = tier if tier is not None else resources_utils.NetworkTier.BEST
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=nodes), \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=autoscaler), \
+             patch.object(kubernetes.Kubernetes,
+                          '_derive_efa_count_from_catalog',
+                          return_value=derived_efa):
+            return kubernetes.Kubernetes._detect_network_type(
+                'ctx',
+                tier,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=acc_count,
+                acc_type=acc_type)
+
+    def test_cold_aws_node_requests_catalog_derived_efa(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta['efa_count'], 32)
+
+    def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
+        # A static cluster (no autoscaler) with no GPU node can never schedule
+        # the pod, so the fallback must NOT request EFA even if a count is
+        # derivable -- otherwise the pod pends to provision_timeout.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 autoscaler=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_cold_aws_node_no_derivable_count_falls_through(self):
+        # Catalog can't size it (e.g. column absent) -> no EFA metadata,
+        # today's behavior. Safe no-op, no regression.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_warm_node_scan_wins_over_catalog(self):
+        # A running GPU+EFA node advertises the count directly; the live scan
+        # must win and the catalog derivation must not be consulted.
+        warm = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '16',
+            })
+        _net, meta = self._detect([warm], 8, 'H100', derived_efa=999)
+        self.assertEqual(meta['efa_count'], 16)  # from the node, not 999
+
+    def test_non_aws_cold_cluster_gets_no_efa(self):
+        # A cold non-AWS node (no cloud-provider-aws label) must not trigger the
+        # AWS fallback even if a count could be derived.
+        node = self._node({'kubernetes.io/hostname': 'n1'}, {'cpu': '2'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_not_best_tier_returns_none(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 tier=resources_utils.NetworkTier.STANDARD)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+
+class TestDeriveEfaCountFromCatalog(unittest.TestCase):
+    """_derive_efa_count_from_catalog delegates to the AWS catalog sizing
+    helper (which sizes from the lowest EFA-per-accelerator ratio among
+    hosting-capable variants) and degrades to None on any catalog miss. The
+    sizing math itself is covered at the DataFrame level in test_catalog.py."""
+
+    def _derive(self, acc_type, acc_count, efa_count=None, raises=None):
+        with patch('sky.catalog.aws_catalog.get_efa_count_for_accelerator',
+                   side_effect=raises,
+                   return_value=efa_count) as m:
+            result = kubernetes.Kubernetes._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+        return result, m
+
+    def test_passes_through_catalog_count(self):
+        result, m = self._derive('H100', 8, efa_count=32)
+        self.assertEqual(result, 32)
+        m.assert_called_once_with('H100', 8)
+
+    def test_none_when_catalog_returns_none(self):
+        # No hosting-capable EFA variant / no MaximumEfaInterfaces column.
+        result, _ = self._derive('H100', 8, efa_count=None)
+        self.assertIsNone(result)
+
+    def test_degrades_on_catalog_error(self):
+        # A catalog parse/lookup error must degrade to None, not propagate.
+        result, _ = self._derive('H100', 8, raises=KeyError('boom'))
+        self.assertIsNone(result)
+
+
+class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
+    """Multi-node network_tier: best on AWS EFA sets k8s_efa_same_az so the pod
+    template injects a required same-zone podAffinity (EFA is single-AZ).
+    Single-node and non-EFA network types must not set it. Fails without the
+    fix (the deploy var does not exist).
+    """
+
+    def _deploy_vars(self, num_nodes, network_type):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--H100:8'
+        gpu_resources.accelerators = {'H100': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'eks-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        meta = ({
+            'efa_count': 32
+        } if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA else
+                None)
+
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='eks-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['H100'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: {
+                       ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                       ('kubernetes', 'provision_timeout'): 10,
+                       ('kubernetes', 'high_availability',
+                        'storage_class_name'): None,
+                   }.get((cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type, meta)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='eks-context'),
+                zones=None,
+                num_nodes=num_nodes,
+                dryrun=False)
+
+    def test_multinode_aws_efa_best_sets_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertTrue(self._deploy_vars(2, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_single_node_aws_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(1, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_multinode_non_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(2, N.NONE)['k8s_efa_same_az'])
+
+    def _render_same_az_affinity(self, same_az):
+        """Render just the k8s_efa_same_az podAffinity block from the live
+        template, so a wrong label or topologyKey is caught -- not only the
+        deploy var. Keeps the assertion coupled to the real template file."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin_marker = '{% if k8s_efa_same_az %}'
+        end_marker = '{% endif %}'
+        begin = full.index(begin_marker)
+        end = full.index(end_marker, begin) + len(end_marker)
+        snippet = full[begin:end]
+        return jinja2.Template(snippet).render(
+            k8s_efa_same_az=same_az, cluster_name_on_cloud='my-cluster')
+
+    def test_same_az_affinity_renders_cluster_name_label_and_zone(self):
+        # When the flag is set the rendered podAffinity must carry the
+        # (non-deprecated) cluster-name label and the single-AZ topology key.
+        rendered = self._render_same_az_affinity(same_az=True)
+        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution',
+                      rendered)
+        self.assertIn('skypilot-cluster-name: my-cluster', rendered)
+        self.assertIn('topologyKey: topology.kubernetes.io/zone', rendered)
+        # Must not use the deprecated skypilot-cluster label.
+        self.assertNotIn('skypilot-cluster:', rendered)
+
+    def test_same_az_affinity_absent_when_flag_unset(self):
+        # When the flag is unset the same-AZ affinity must not be rendered.
+        rendered = self._render_same_az_affinity(same_az=False)
+        self.assertNotIn('topology.kubernetes.io/zone', rendered)
+        self.assertNotIn('skypilot-cluster-name', rendered)
+
+
+class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
+    """An explicit pod_config `hostNetwork` must win over the OCI RoCE default.
+
+    OCI RoCE turns host networking on by default, but OCI also documents an
+    SR-IOV deployment where pods keep their own netns. Before the fix the two
+    halves disagreed: pod_config switched the pod off host networking while
+    SkyPilot still wired up the Ray-port probe for a host-networked pod. The
+    opt-out must not disturb the device access (privileged + /dev/infiniband),
+    which that deployment still needs.
+    """
+
+    def _deploy_vars(self, network_type, pod_config=None):
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--GB300:4'
+        gpu_resources.accelerators = {'GB300': 4}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'oci-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        region_config = {
+            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+            ('kubernetes', 'provision_timeout'): 10,
+            ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            ('kubernetes', 'pod_config'): pod_config or {},
+        }
+
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='oci-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['GB300'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: region_config.get(
+                       (cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type, None)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='oci-context'),
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    def test_oci_roce_defaults_to_host_network(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(N.OCI_ROCE)
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+
+    def test_explicit_false_opts_out_but_keeps_device_access(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(
+            N.OCI_ROCE, pod_config={'spec': {
+                'hostNetwork': False
+            }})
+        # The fix: the probe machinery must follow the pod, not the cloud.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        # Scoped: privileged + /dev/infiniband are still needed on OCI RoCE
+        # shapes without an RDMA device plugin, so they must be untouched.
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+
+    def test_pod_config_true_on_non_oci_still_host_networked(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(
+            N.NONE, pod_config={'spec': {
+                'hostNetwork': True
+            }})
+        self.assertTrue(deploy_vars['k8s_host_network'])
+
+    def test_non_oci_without_pod_config_is_not_host_networked(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(N.NONE)
+        self.assertFalse(deploy_vars['k8s_host_network'])
+
+    def _render_host_network_block(self, **variables):
+        """Render the hostNetwork block from the live template, so the gate
+        itself is asserted -- not only the deploy var."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index('{% if k8s_host_network %}')
+        end = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:end]).render(**variables)
+
+    def _render_block(self, marker, **variables):
+        """Render one `{% if %}`-delimited block from the live template."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index(marker)
+        end = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:end]).render(**variables)
+
+    def test_opting_out_restores_container_ports(self):
+        """Locks the port list to k8s_host_network, not to the network type.
+
+        Characterization test, not a regression test: it passes before and
+        after the fix, because this gate was always correct -- what was wrong
+        was the value fed to it. It is here to make the blast radius explicit.
+        k8s_host_network gates six sites beyond hostNetwork itself (one-pod-
+        per-node antiAffinity, the Downward-API pod name, the worker's Ray-port
+        handling, and this port list), so an OCI RoCE pod that opted out used
+        to lose its containerPorts while not being host-networked. Fails if
+        anyone re-gates this on k8s_enable_oci_roce.
+        """
+        opted_out = self._render_block('{% if not k8s_host_network %}',
+                                       k8s_host_network=False,
+                                       ray_port=6379,
+                                       ray_dashboard_port=8265)
+        self.assertIn('containerPort: 22', opted_out)
+
+        host_networked = self._render_block('{% if not k8s_host_network %}',
+                                            k8s_host_network=True,
+                                            ray_port=6379,
+                                            ray_dashboard_port=8265)
+        self.assertNotIn('containerPort', host_networked)
+
+    def test_template_gate_follows_host_network_not_oci_roce(self):
+        # The whole point of the fix: OCI RoCE alone must no longer force
+        # hostNetwork onto the pod when the user opted out.
+        opted_out = self._render_host_network_block(k8s_host_network=False,
+                                                    k8s_enable_oci_roce=True)
+        self.assertNotIn('hostNetwork: true', opted_out)
+        self.assertNotIn('ClusterFirstWithHostNet', opted_out)
+
+        default_on = self._render_host_network_block(k8s_host_network=True,
+                                                     k8s_enable_oci_roce=True)
+        self.assertIn('hostNetwork: true', default_on)
+        # dnsPolicy must stay paired with it: under hostNetwork the default
+        # policy cannot resolve in-cluster Service DNS.
+        self.assertIn('dnsPolicy: ClusterFirstWithHostNet', default_on)
+
+
+_UNSET = object()
+
+_OCI_SHAPE_BY_GPU = {'GB300': 'BM.GPU.GB300.4', 'GB200': 'BM.GPU.GB200.4'}
+
+
+class TestKubernetesRdmaMode(unittest.TestCase):
+    """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
+
+    The two models are mutually exclusive and each drives several pod-spec
+    decisions, so one declaration drives them all. Unset must preserve the
+    historical behavior exactly.
+    """
+
+    def _deploy_vars(self,
+                     rdma=None,
+                     pod_config=None,
+                     node_alloc=None,
+                     network_type=None,
+                     nodes=None,
+                     accelerators=_UNSET):
+        if accelerators is _UNSET:
+            accelerators = {'GB300': 4}
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = ('8CPU--32GB--GB300:4'
+                                       if accelerators else '8CPU--32GB')
+        gpu_resources.accelerators = accelerators
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'oci-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        region_config = {
+            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+            ('kubernetes', 'provision_timeout'): 10,
+            ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            ('kubernetes', 'pod_config'): pod_config or {},
+        }
+        for key, value in (rdma or {}).items():
+            region_config[('kubernetes', 'rdma', key)] = value
+
+        specs = nodes if nodes is not None else [
+            ('GB300', node_alloc if node_alloc is not None else {
+                'nvidia.com/gpu': '4',
+                'nvidia.com/mlnxnics': '4',
+            })
+        ]
+        node_mocks = []
+        for label_value, node_resources in specs:
+            alloc = dict(node_resources)
+            alloc.setdefault('cpu', '8')
+            alloc.setdefault('memory', '32Gi')
+            node = mock.MagicMock()
+            node.metadata.labels = {'accelerator': label_value}
+            if label_value in _OCI_SHAPE_BY_GPU:
+                node.metadata.labels['node.kubernetes.io/instance-type'] = (
+                    _OCI_SHAPE_BY_GPU[label_value])
+            node.status.allocatable = alloc
+            # adjust_resources_to_allocatable() reads capacity as well.
+            node.status.capacity = dict(alloc)
+            node_mocks.append(node)
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=node_mocks), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='oci-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['GB300'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: region_config.get(
+                       (cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type or N.OCI_ROCE, None)), \
+             patch('sky.provision.kubernetes.oci_nccl._read_configmap',
+                   return_value=None) as self.mock_read_cm:
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='oci-context'),
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    def test_unset_preserves_historical_behavior(self):
+        deploy_vars = self._deploy_vars()
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+
+    def test_sriov_mode_drops_host_network_and_injects_nics(self):
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            })
+        # One declaration flips host networking off ...
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        # ... and wires the VF resource in, proportional to the GPUs asked
+        # for: 4 of 4 GPUs on a node advertising 4 NICs -> 4.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_resource'],
+                         'nvidia.com/mlnxnics')
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 4)
+        # One Multus attachment per VF.
+        self.assertEqual(deploy_vars['k8s_rdma_networks'],
+                         ','.join(['network-operator/sriov-net'] * 4))
+        # The cluster is still an OCI RoCE cluster ...
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # ... but the bare-metal device access is dropped: an SR-IOV device
+        # plugin with isRdma injects the character devices itself, so a
+        # /dev/infiniband hostPath would shadow them and expose every device
+        # on the node rather than this pod's VFs.
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+        # IPC_LOCK is kept: RDMA memory registration may need the memlock
+        # allowance, and granting an unused capability is the cheap direction.
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+
+    def test_pod_config_alone_does_not_drop_device_access(self):
+        """Opting out of host networking is not opting out of device access.
+
+        Preserves the behavior shipped in the hostNetwork fix: only declaring
+        an rdma mode changes which devices the pod gets.
+        """
+        deploy_vars = self._deploy_vars(
+            pod_config={'spec': {
+                'hostNetwork': False
+            }})
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertTrue(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_cpu_only_task_may_still_ask_for_host_network(self):
+        """The rejection is about virtual functions, so it needs some.
+
+        A CPU-only task requests no VFs, so nothing is unreachable and the
+        task may want host networking for unrelated reasons. Rejecting here
+        would break a launch that works today, and the admin-owned mode gives
+        the task author no way to fix it.
+        """
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+            pod_config={'spec': {
+                'hostNetwork': True
+            }},
+            accelerators=None)
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+
+    def test_sriov_widens_the_hca_list_to_the_vf_family(self):
+        """A VF pod cannot see the host's physical functions.
+
+        The Grace profiles name those PFs exactly, and NCCL answers a list that
+        matches nothing by falling back to TCP -- no error, just a slow job.
+        Oracle makes the same substitution between its two reference manifests
+        for one shape, and it is the only NCCL difference between them.
+        """
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            })
+        self.assertEqual(deploy_vars['k8s_env_vars']['NCCL_IB_HCA'], 'mlx5')
+
+    def test_host_network_keeps_the_exact_hca_list(self):
+        # Control for the test above: sharing the node's namespace is exactly
+        # when the PF names are the right ones to name.
+        deploy_vars = self._deploy_vars()
+        self.assertTrue(
+            deploy_vars['k8s_env_vars']['NCCL_IB_HCA'].startswith('=mlx5_0'))
+
+    def test_node_shape_selects_the_profile(self):
+        # The GB300 node is labelled BM.GPU.GB300.4, so its Oracle set plus
+        # SkyPilot's GDR level, not the generic RoCE profile.
+        env = self._deploy_vars()['k8s_env_vars']
+        self.assertEqual(env['NCCL_NET_PLUGIN'], 'none')
+        self.assertEqual(env['NCCL_NET_GDR_LEVEL'], 'PHB')
+        self.mock_read_cm.assert_called_once()
+
+    def test_non_oci_never_reads_a_configmap(self):
+        self._deploy_vars(network_type=kubernetes_utils.
+                          KubernetesHighPerformanceNetworkType.COREWEAVE)
+        self.mock_read_cm.assert_not_called()
+
+    def test_cpu_only_task_needs_no_virtual_functions(self):
+        """OCI RoCE is detected from node labels, with no GPU request implied.
+
+        A CPU-only task therefore reaches the SR-IOV path with nothing to size
+        VFs against. It should come out an ordinary pod rather than failing on
+        a count it never needed.
+        """
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/mlnxnics',
+            'networks': 'network-operator/sriov-net',
+        },
+                                        accelerators=None)
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_count'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+        # The mode still applies: this cluster is pod-networked, so a CPU pod
+        # on it is not put on the host network either.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_networks_rejects_a_list(self):
+        # The value is repeated once per VF, so a list would yield more
+        # attachments than the resource request -- a CNI-time failure far from
+        # the config that caused it.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(
+                rdma={
+                    'mode': 'sriov',
+                    'resource': 'nvidia.com/mlnxnics',
+                    'networks': 'network-operator/a,network-operator/b',
+                })
+        self.assertIn('single', str(ctx.exception))
+
+    def test_host_network_against_sriov_is_rejected(self):
+        # In the host network namespace the pod's virtual functions are
+        # unreachable, so the combination would run without RDMA -- the one
+        # failure this feature must not produce quietly.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+                              pod_config={'spec': {
+                                  'hostNetwork': True
+                              }})
+        self.assertIn('hostNetwork', str(ctx.exception))
+        self.assertIn('without RDMA', str(ctx.exception))
+
+    def test_nic_count_ignores_other_shapes_sharing_the_label_key(self):
+        """The ratio must come from a node the pod can actually land on.
+
+        Several GPU shapes can share one accelerator label key while
+        advertising different VF-per-GPU ratios. Matching on the key alone
+        would read the ratio off a shape the pod's node affinity excludes --
+        here a 1:1 node listed first, when the requested shape is 2:1 --
+        under-requesting VFs and silently losing bandwidth rather than failing.
+        """
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+            nodes=[
+                # Wrong shape, listed first, enough GPUs to look eligible.
+                ('H100', {
+                    'nvidia.com/gpu': '8',
+                    'nvidia.com/mlnxnics': '8',
+                }),
+                # The requested shape: twice the VFs per GPU.
+                ('GB300', {
+                    'nvidia.com/gpu': '4',
+                    'nvidia.com/mlnxnics': '8',
+                }),
+            ])
+        # 4/4 GPUs on the GB300 node advertising 8 VFs -> 8, not the 4 the
+        # H100 node's 1:1 ratio would have produced.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 8)
+
+    def test_ignored_on_a_network_type_that_delivers_its_own_nics(self):
+        """A tenant-wide rdma block must not leak onto other cloud types.
+
+        CoreWeave/Together/EFA each inject their own NIC resource, so applying
+        this one there would double up. Scoping silently -- rather than
+        raising -- is what lets a tenant-wide `kubernetes.rdma` coexist with a
+        mixed fleet, and matches how every other per-cloud NIC injection is
+        gated.
+        """
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/mlnxnics',
+            'networks': 'network-operator/sriov-net',
+        },
+                                        network_type=N.COREWEAVE)
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_nic_count_scales_with_partial_gpu_request(self):
+        # A dual-port shape: 8 VFs across 8 GPUs, asking for 4 -> 4.
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/rdma-vf',
+            'networks': 'default/rdma-vf',
+        },
+                                        node_alloc={
+                                            'nvidia.com/gpu': '8',
+                                            'nvidia.com/rdma-vf': '16',
+                                        })
+        # 4/8 of a node advertising 16 VFs -> 8, matching Oracle's 2-per-GPU
+        # ratio on dual-port shapes rather than a naive 1:1.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 8)
+
+    def _render_block(self, marker, **variables):
+        """Render one `{% if %}` block from the live template file."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index(marker)
+        stop = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:stop]).render(**variables)
+
+    _ANNOTATION_MARKER = ('{% if k8s_rdma_networks is defined and '
+                          'k8s_rdma_networks is not none %}')
+    _RESOURCE_MARKER = ('{% if k8s_rdma_nic_resource is defined and '
+                        'k8s_rdma_nic_resource is not none %}')
+
+    def test_sriov_renders_annotation_and_resource(self):
+        networks = ','.join(['network-operator/sriov-net'] * 4)
+        annotation = self._render_block(self._ANNOTATION_MARKER,
+                                        k8s_rdma_networks=networks)
+        self.assertIn(f'k8s.v1.cni.cncf.io/networks: {networks}', annotation)
+
+        resource = self._render_block(
+            self._RESOURCE_MARKER,
+            k8s_rdma_nic_resource='nvidia.com/mlnxnics',
+            k8s_rdma_nic_count=4)
+        self.assertIn('nvidia.com/mlnxnics: 4', resource)
+
+    def test_unset_renders_nothing(self):
+        """Guards the undefined-vs-none Jinja trap.
+
+        An *undefined* variable satisfies `is not none`, so the first version
+        of this template emitted a bare `: ` and produced an unparseable
+        manifest for every caller that does not pass these variables -- which
+        includes the snapshot fixtures. Rendering with them absent is what
+        catches that; no deploy-var assertion would.
+        """
+        self.assertEqual(
+            self._render_block(self._ANNOTATION_MARKER).strip(), '')
+        self.assertEqual(self._render_block(self._RESOURCE_MARKER).strip(), '')
+
+    def test_sriov_without_names_fails_loudly(self):
+        # Nothing on the cluster lets us infer either name, and a pod with a
+        # resource but no attachment would run without RDMA rather than fail.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(rdma={'mode': 'sriov'})
+        self.assertIn('rdma.resource', str(ctx.exception))
+        self.assertIn('rdma.networks', str(ctx.exception))
+
+    def test_sriov_fails_when_no_node_advertises_the_resource(self):
+        # Guessing a count risks under-requesting, which loses bandwidth
+        # silently; failing is the loud direction.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(
+                rdma={
+                    'mode': 'sriov',
+                    'resource': 'nvidia.com/absent',
+                    'networks': 'default/rdma-vf',
+                })
+        self.assertIn('nvidia.com/absent', str(ctx.exception))
+
+
+class TestKubernetesSpotLabelContext(unittest.TestCase):
+    """Regression test for TICKET-034.
+
+    make_deploy_resources_variables must pass the provisioning context to
+    get_spot_label(). get_spot_label resolves the autoscaler type per-context
+    (get_effective_region_config keyed on the context name), so without the
+    context argument only a *global* kubernetes.autoscaler is honored and a
+    per-context setting (context_configs.<ctx>.autoscaler: karpenter) never
+    injects the spot node label. This test fails if the call site drops the
+    context (the original bug: get_spot_label() with no args).
+    """
+
+    def setUp(self):
+        self.resources = mock.MagicMock()
+        self.resources.instance_type = "2CPU--4GB"
+        self.resources.accelerators = None
+        self.resources.use_spot = True
+        self.resources.region = "test-context"
+        self.resources.zone = None
+        self.resources.cluster_config_overrides = {}
+        self.resources.image_id = None
+        setattr(self.resources, 'assert_launchable', lambda: self.resources)
+        self.resources.network_tier = resources_utils.NetworkTier.BEST
+        self.cluster_name = "test-cluster"
+        self.region = mock.MagicMock()
+        self.region.name = "test-context"
+
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_spot_label_uses_provisioning_context(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_spot_label):
+        mock_cluster_type = mock.MagicMock()
+        mock_cluster_type.supports_high_performance_networking.return_value = (
+            False)
+        mock_cluster_type.requires_ipc_lock_capability.return_value = False
+        mock_detect_network_type.return_value = (mock_cluster_type, None)
+
+        mock_get_current_context.return_value = "test-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+        # Simulate a Karpenter context: get_spot_label returns the label only
+        # when it can resolve the (per-context) autoscaler.
+        mock_get_spot_label.return_value = ('karpenter.sh/capacity-type',
+                                            'spot')
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # The heart of the regression: NO call to get_spot_label may drop the
+        # provisioning context. get_spot_label runs at more than one site during
+        # deploy-var construction; every one must forward the context, or the
+        # per-context autoscaler config is silently ignored. A bare call()
+        # (the original bug) must never appear.
+        self.assertGreaterEqual(mock_get_spot_label.call_count, 1)
+        self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
+        for call_args in mock_get_spot_label.call_args_list:
+            self.assertEqual(call_args, mock.call('test-context'))
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':

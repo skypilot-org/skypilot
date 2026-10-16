@@ -10,26 +10,37 @@ import urllib
 
 import aiohttp
 import fastapi
-import starlette.middleware.base
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.server import middleware_utils
+from sky.server.auth import db_lookup
 from sky.server.auth import loopback
-from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+HOP_BY_HOP_HEADERS = frozenset({
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+})
+
 
 @middleware_utils.websocket_aware
-class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class OAuth2ProxyMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle authentication by delegating to OAuth2 Proxy."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, app):
+        super().__init__(app)
         self.enabled: bool = (os.getenv(
             server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false') == 'true')
         self.proxy_base: str = ''
@@ -41,16 +52,17 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                  'set')
             self.proxy_base = proxy_base.rstrip('/')
 
-    async def dispatch(self, request: fastapi.Request, call_next):
+    async def on_request(
+            self, request: fastapi.Request) -> Optional[fastapi.Response]:
         if not self.enabled:
-            return await call_next(request)
+            return None
 
         # Forward /oauth2/* to oauth2-proxy, including /oauth2/start and
         # /oauth2/callback.
         if request.url.path.startswith('/oauth2'):
             return await self.forward_to_oauth2_proxy(request)
 
-        return await self.authenticate(request, call_next)
+        return await self.authenticate(request)
 
     async def forward_to_oauth2_proxy(self, request: fastapi.Request):
         """Forward requests to oauth2-proxy service."""
@@ -71,10 +83,15 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
+                    response_headers = {
+                        name: value
+                        for name, value in response.headers.items()
+                        if name.lower() not in HOP_BY_HOP_HEADERS
+                    }
                     fastapi_response = fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
-                        headers=dict(response.headers),
+                        headers=response_headers,
                     )
                     # Forward cookies from OAuth2 proxy response to client
                     for cookie_name, cookie in response.cookies.items():
@@ -91,30 +108,39 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     return fastapi_response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error forwarding to OAuth2 proxy: {e}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
 
-    async def authenticate(self, request: fastapi.Request, call_next):
+    async def authenticate(
+            self, request: fastapi.Request) -> Optional[fastapi.Response]:
+        """A response to answer the request with, or None to let it pass."""
         if request.state.auth_user is not None:
             # Already authenticated
-            return await call_next(request)
+            return None
 
         if loopback.is_loopback_request(request):
-            return await call_next(request)
+            return None
 
         async with aiohttp.ClientSession() as session:
             try:
-                return await self._authenticate(request, call_next, session)
+                return await self._authenticate(request, session)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error communicating with OAuth2 proxy: {e}'
                              f'{traceback.format_exc()}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
 
-    async def _authenticate(self, request: fastapi.Request, call_next,
-                            session: aiohttp.ClientSession):
+    async def _authenticate(
+            self, request: fastapi.Request,
+            session: aiohttp.ClientSession) -> Optional[fastapi.Response]:
         forwarded_headers = {}
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
@@ -135,6 +161,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # User is authenticated, extract user info from headers
                 auth_user = self.get_auth_user(auth_response)
                 if not auth_user:
+                    middleware_utils.mark_rejection(
+                        request,
+                        middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
                     return fastapi.responses.JSONResponse(
                         status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR,
                         content={
@@ -143,12 +172,26 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                 'return user info, check your oauth2-proxy'
                                 'setup.'
                         })
-                newly_added = global_user_state.add_or_update_user(auth_user)
-                if newly_added:
-                    permission.permission_service.add_user_if_not_exists(
-                        auth_user.id)
+                # Bounded and off the loop, matching the same call in
+                # `server.py`'s auth-proxy middleware. It is a database upsert:
+                # run inline, a slow database stalls this worker's event loop
+                # for every request, not just this login.
+                try:
+                    newly_added = await db_lookup.call_with_deadline(
+                        global_user_state.add_or_update_user, auth_user)
+                except asyncio.TimeoutError:
+                    logger.error('oauth2-proxy user upsert timed out')
+                    return db_lookup.db_timeout_response(request)
+                except exceptions.ConcurrentWorkerExhaustedError as e:
+                    logger.error(f'Concurrent worker exhausted during '
+                                 f'oauth2-proxy user upsert: {e}')
+                    return db_lookup.worker_exhausted_response(request)
+                failed = await db_lookup.ensure_role_for_authenticated_user(
+                    auth_user.id, newly_added, request=request)
+                if failed is not None:
+                    return failed
                 request.state.auth_user = auth_user
-                return await call_next(request)
+                return None
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
                 # For /api/health, we should allow unauthenticated requests to
                 # not break healthz check.
@@ -156,14 +199,14 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # in favor of the unified authentication.
                 if request.url.path.startswith('/api/health'):
                     request.state.anonymous_user = True
-                    return await call_next(request)
+                    return None
 
                 # Allow unauthenticated access to the polling auth endpoint.
                 # This endpoint is used by the CLI to poll for auth tokens
                 # during the login flow before authentication is complete.
                 if request.url.path == '/api/v1/auth/token':
                     request.state.anonymous_user = True
-                    return await call_next(request)
+                    return None
 
                 # TODO(aylei): in unified authentication, the redirection
                 # or rejection should be done after all the authentication
@@ -179,6 +222,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             else:
                 logger.error('oauth2-proxy returned unexpected status '
                              f'{auth_response.status}: {auth_response.text}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
                 return fastapi.responses.JSONResponse(
                     status_code=auth_response.status,
                     content={'detail': 'oauth2-proxy error'})
@@ -188,8 +234,11 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """Extract user info from OAuth2 proxy response headers."""
         email_header = response.headers.get('X-Auth-Request-Email')
         if email_header:
-            user_hash = hashlib.md5(email_header.encode()).hexdigest(
-            )[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user id from the (non-secret) SSO
+            # email; auth itself is done by oauth2-proxy. Not a security use.
+            email_hash = hashlib.md5(email_header.encode(),
+                                     usedforsecurity=False).hexdigest()
+            user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
             return models.User(id=user_hash,
                                name=email_header,
                                user_type=models.UserType.SSO.value)
