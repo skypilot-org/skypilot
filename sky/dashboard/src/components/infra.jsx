@@ -1678,7 +1678,7 @@ export function ContextDetails({
                                 </span>
                               )}
                               {taintInfo && (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-content-secondary/20">
                                   {taintInfo}
                                 </span>
                               )}

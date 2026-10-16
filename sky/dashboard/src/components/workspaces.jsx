@@ -814,7 +814,7 @@ export function Workspaces() {
   };
 
   const preStyle = {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'hsl(var(--surface-code))',
     padding: '16px',
     borderRadius: '8px',
     overflowX: 'auto',

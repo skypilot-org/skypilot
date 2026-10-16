@@ -15,15 +15,15 @@ import { getNonce } from '@/utils/csp';
 export const yamlSearchTop = search({ top: true });
 
 export const yamlHighlightStyle = HighlightStyle.define([
-  { tag: t.propertyName, color: '#1E62CC' },
-  { tag: t.string, color: '#188038' },
-  { tag: t.content, color: '#374151' },
-  { tag: t.lineComment, color: '#6b7280', fontStyle: 'italic' },
-  { tag: t.keyword, color: '#188038' },
-  { tag: t.meta, color: '#9ca3af' },
-  { tag: t.brace, color: '#6b7280' },
-  { tag: t.squareBracket, color: '#6b7280' },
-  { tag: t.punctuation, color: '#6b7280' },
+  { tag: t.propertyName, color: 'hsl(var(--brand-bright))' },
+  { tag: t.string, color: 'hsl(var(--code-string))' },
+  { tag: t.content, color: 'hsl(var(--content))' },
+  { tag: t.lineComment, color: 'hsl(var(--content-tertiary))', fontStyle: 'italic' },
+  { tag: t.keyword, color: 'hsl(var(--code-string))' },
+  { tag: t.meta, color: 'hsl(var(--content-faint))' },
+  { tag: t.brace, color: 'hsl(var(--content-tertiary))' },
+  { tag: t.squareBracket, color: 'hsl(var(--content-tertiary))' },
+  { tag: t.punctuation, color: 'hsl(var(--content-tertiary))' },
 ]);
 
 // I-beam over the entire editor box (gutter + content + empty area)
@@ -37,9 +37,9 @@ export const yamlTextCursorTheme = EditorView.theme({
 
 export const yamlGutterTheme = EditorView.theme({
   '.cm-gutters': {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'hsl(var(--surface))',
     border: 'none',
-    color: '#8c959f',
+    color: 'hsl(var(--code-gutter))',
   },
   // Fixed-width line-number column so the gutter doesn't jitter when the
   // line count crosses 1 → 2 → 3 digits. Right-aligned within a 4em box
@@ -62,14 +62,14 @@ export const yamlGutterTheme = EditorView.theme({
 // editor is find-only). Match highlights are also colored to match the UI.
 export const yamlSearchPanelTheme = EditorView.theme({
   '.cm-panels': {
-    backgroundColor: '#ffffff',
-    color: '#374151',
+    backgroundColor: 'hsl(var(--surface))',
+    color: 'hsl(var(--content))',
   },
   '.cm-panels.cm-panels-bottom': {
-    borderTop: '1px solid #e5e7eb',
+    borderTop: '1px solid hsl(var(--line))',
   },
   '.cm-panels.cm-panels-top': {
-    borderBottom: '1px solid #e5e7eb',
+    borderBottom: '1px solid hsl(var(--line))',
   },
   '.cm-panel.cm-search': {
     position: 'relative',
@@ -103,7 +103,7 @@ export const yamlSearchPanelTheme = EditorView.theme({
     borderRadius: 'calc(var(--radius) - 2px)',
     padding: '0 10px',
     fontSize: '13px',
-    backgroundColor: '#ffffff',
+    backgroundColor: 'hsl(var(--surface))',
     outline: 'none',
   },
   // Subtle focus that hugs the field at its own radius (no offset ring): a soft
@@ -121,21 +121,21 @@ export const yamlSearchPanelTheme = EditorView.theme({
     boxSizing: 'border-box',
     margin: '0',
     backgroundImage: 'none',
-    backgroundColor: '#ffffff',
+    backgroundColor: 'hsl(var(--surface))',
     border: '1px solid hsl(var(--input))',
     borderRadius: 'calc(var(--radius) - 2px)',
-    color: '#374151',
+    color: 'hsl(var(--content))',
     padding: '0 12px',
     fontSize: '13px',
     lineHeight: '1',
     cursor: 'pointer',
   },
   '.cm-panel.cm-search button.cm-button:hover': {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'hsl(var(--surface-muted))',
   },
   '.cm-panel.cm-search button.cm-button:active': {
     backgroundImage: 'none',
-    backgroundColor: '#e5e7eb',
+    backgroundColor: 'hsl(var(--line))',
   },
   '.cm-panel.cm-search button.cm-button:focus-visible': {
     outline: 'none',
@@ -151,14 +151,14 @@ export const yamlSearchPanelTheme = EditorView.theme({
     height: '30px',
     margin: '0 0 0 8px',
     fontSize: '13px',
-    color: '#4b5563',
+    color: 'hsl(var(--content-secondary))',
     cursor: 'pointer',
   },
   '.cm-panel.cm-search label input[type="checkbox"]': {
     width: '15px',
     height: '15px',
     margin: '0',
-    accentColor: '#2563eb',
+    accentColor: 'hsl(var(--blue-solid))',
     cursor: 'pointer',
   },
   '.cm-panel.cm-search button[name="close"]': {
@@ -171,13 +171,13 @@ export const yamlSearchPanelTheme = EditorView.theme({
     backgroundColor: 'transparent',
     backgroundImage: 'none',
     border: 'none',
-    color: '#9ca3af',
+    color: 'hsl(var(--content-faint))',
     fontSize: '18px',
     lineHeight: '1',
     cursor: 'pointer',
   },
   '.cm-panel.cm-search button[name="close"]:hover': {
-    color: '#374151',
+    color: 'hsl(var(--content))',
     backgroundColor: 'transparent',
   },
   '.cm-searchMatch': {

@@ -33,14 +33,14 @@ export function EmptyState({
           height: 40,
           marginBottom: 16,
           borderRadius: 9999,
-          backgroundColor: '#f9fafb',
-          border: '1px solid #e5e7eb',
-          color: '#9ca3af',
+          backgroundColor: 'hsl(var(--surface-subtle))',
+          border: '1px solid hsl(var(--line))',
+          color: 'hsl(var(--content-faint))',
         }}
       >
         {icon || <Inbox size={20} strokeWidth={1.75} />}
       </div>
-      <div style={{ fontSize: 16, fontWeight: 500, color: '#111827' }}>
+      <div style={{ fontSize: 16, fontWeight: 500, color: 'hsl(var(--content-strong))' }}>
         {title}
       </div>
       {description ? (
@@ -49,7 +49,7 @@ export function EmptyState({
             marginTop: 6,
             fontSize: 14,
             lineHeight: 1.55,
-            color: '#6b7280',
+            color: 'hsl(var(--content-tertiary))',
             maxWidth: 460,
           }}
         >

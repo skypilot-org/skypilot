@@ -1500,11 +1500,11 @@ function JobDetailsContent({
     const defaultLogsContent = (
       <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-gray-500">
             <span>Waiting for the job to start; refresh in a few moments.</span>
           </div>
         ) : isRecovering ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-gray-500">
             <span>
               Waiting for the job to recover; refresh in a few moments.
             </span>
@@ -1559,7 +1559,7 @@ function JobDetailsContent({
         ref={controllerLogsContainerRef}
       >
         {isPreStart ? (
-          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+          <div className="bg-surface-log flex items-center justify-center py-4 text-gray-500">
             <span>
               Waiting for the job controller process to start; refresh in a few
               moments.

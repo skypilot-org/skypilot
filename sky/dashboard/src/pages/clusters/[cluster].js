@@ -872,7 +872,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
               <span>Loading...</span>
             </div>
           ) : displayLines.length === 0 ? (
-            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <div className="bg-surface-log flex items-center justify-center py-4 text-gray-500">
               <span>No provision logs available.</span>
             </div>
           ) : (

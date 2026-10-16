@@ -210,14 +210,14 @@ export function TourProvider({ children }) {
             border: none !important;
             border-radius: 10px !important;
             z-index: 30000 !important;
-            box-shadow: 0 0 0 1px #d1d5db inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+            box-shadow: 0 0 0 1px hsl(var(--line-strong)) inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
             overflow: visible !important;
             background-clip: padding-box !important;
           }
 
           .shepherd-title {
               font-weight: bold;
-              color: #111827;
+              color: hsl(var(--content-strong));
               margin: 0;
           }
 

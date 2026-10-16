@@ -356,7 +356,7 @@ export function formatLogs(str) {
 
 export const logStyles = `
   .logs-container {
-    background-color: #f7f7f7;
+    background-color: hsl(var(--surface-log));
     padding: 16px;
     max-height: calc(100vh - 300px);
     overflow-y: auto;
@@ -381,46 +381,46 @@ export const logStyles = `
   }
 
   .log-line.INFO .level {
-    color: #2563eb;
+    color: hsl(var(--blue-fg));
   }
 
   .log-line.WARNING .level {
-    color: #d97706;
+    color: hsl(var(--amber-fg));
   }
 
   .log-line.ERROR .level {
-    color: #dc2626;
+    color: hsl(var(--red-fg));
   }
 
   .log-line.DEBUG .level {
-    color: #6b7280;
+    color: hsl(var(--content-tertiary));
   }
 
   .log-line .timestamp {
-    color: #059669;
+    color: hsl(var(--emerald-fg));
     margin-right: 1ch;
     white-space: nowrap;
   }
 
   .log-line .location {
-    color: #6366f1;
+    color: hsl(var(--indigo-fg-soft));
     margin-right: 1ch;
     white-space: nowrap;
   }
 
   .log-line .message {
-    color: #111827;
+    color: hsl(var(--content-strong));
     word-break: break-word;
     white-space: pre-wrap;
   }
 
   .log-line .log-prefix {
-    color: #6366f1;
+    color: hsl(var(--indigo-fg-soft));
     font-weight: 500;
   }
 
   .log-line .log-rest {
-    color: #111827;
+    color: hsl(var(--content-strong));
     word-break: break-word;
     white-space: pre-wrap;
   }
