@@ -10,6 +10,9 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.workspaces import core
 
+# Taken before the store fixture replaces it; runs the save validators first.
+_REAL_SAVE = skypilot_config.update_api_server_config_no_lock
+
 
 @pytest.fixture(name='store')
 def store_fixture(monkeypatch):
@@ -170,6 +173,51 @@ def test_refused_name_leaves_access_unchanged(store):
     assert _workspaces(store)['ws-a']['allowed_users'] == ['alice', 'bob']
 
 
+@pytest.fixture(name='vetoing_store')
+def vetoing_store_fixture(store, monkeypatch):
+    """The store, with a registered save validator that refuses every save."""
+
+    def veto(current, incoming):
+        del current, incoming
+        raise ValueError('vetoed by a save validator')
+
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [veto])
+    monkeypatch.setattr(skypilot_config, 'update_api_server_config_no_lock',
+                        _REAL_SAVE)
+    return store
+
+
+def test_vetoed_update_leaves_access_unchanged(vetoing_store):
+    _workspaces(vetoing_store)['ws-a'] = {
+        'private': True,
+        'allowed_users': ['alice']
+    }
+    before = copy.deepcopy(vetoing_store)
+
+    with pytest.raises(ValueError, match='vetoed'):
+        core.update_workspace('ws-a', {
+            'private': True,
+            'allowed_users': ['alice', 'mallory']
+        })
+
+    service = core.permission.permission_service
+    service.update_workspace_policy.assert_not_called()
+    assert vetoing_store == before
+
+
+def test_vetoed_create_leaves_access_unchanged(vetoing_store):
+    before = copy.deepcopy(vetoing_store)
+
+    with pytest.raises(ValueError, match='vetoed'):
+        core.create_workspace('alpha', {
+            'private': True,
+            'allowed_users': ['alice']
+        })
+
+    core.permission.permission_service.add_workspace_policy.assert_not_called()
+    assert vetoing_store == before
+
+
 def test_legacy_workspaces_original_name_stays_taken(store):
     _workspaces(store).update({'team-a': {}, 'team-b': {}})
     core.update_workspace('team-b', {'name': 'archive'})
@@ -217,6 +265,30 @@ def test_existing_duplicate_does_not_block_unrelated_writes(store):
     core.update_workspace('c', {'private': False})
     with pytest.raises(ValueError, match="'x' already exists"):
         core.update_workspace('c', {'name': 'x'})
+
+
+def test_hand_edited_name_does_not_block_other_writes(store):
+    # Names that the API would refuse, left by a hand-edited config.
+    _workspaces(store).update({
+        'team-a': {
+            'name': 'Team A',
+            'private': True
+        },
+        'default': {
+            'name': 'main',
+            'private': True
+        },
+    })
+
+    core.update_workspace('team-a', {'name': 'Team A', 'private': False})
+    new_config = copy.deepcopy(store)
+    new_config['workspaces']['default']['private'] = False
+    core.update_config(new_config)
+
+    assert not _workspaces(store)['team-a']['private']
+    assert not _workspaces(store)['default']['private']
+    with pytest.raises(exceptions.InvalidWorkspaceNameError):
+        core.update_workspace('team-a', {'name': 'Team B'})
 
 
 def test_default_cannot_be_renamed(store):

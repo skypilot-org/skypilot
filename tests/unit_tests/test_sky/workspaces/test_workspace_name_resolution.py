@@ -1,4 +1,4 @@
-"""Only workspace names a user typed are resolved; ids are used as-is."""
+"""Workspace refs resolve id-first, then by name."""
 
 from unittest import mock
 
@@ -15,8 +15,8 @@ from sky.users import server as users_server
 from sky.utils import config_utils
 from sky.workspaces import core as workspaces_core
 
-# 'team-a' was renamed to 'archive', then a new workspace took the name
-# 'team-a'. Its old name is now another workspace's name.
+# 'team-a' was renamed to 'archive', then a hand edit gave another workspace
+# the name 'team-a' (the API refuses it: a legacy id stays taken).
 _REUSED = {
     'team-a': {
         'name': 'archive'
@@ -43,12 +43,11 @@ def test_current_name_resolves_to_its_id():
                                                  _REUSED) == ('default')
 
 
-def test_old_name_works_until_reused():
+def test_id_wins_over_a_name():
     renamed = {'team-a': {'name': 'archive'}}
     assert skypilot_config.resolve_workspace_ref('team-a', renamed) == 'team-a'
-    # Once reused, the name belongs to the workspace that has it now.
-    assert skypilot_config.resolve_workspace_ref('team-a',
-                                                 _REUSED) == ('ws-0123456789ab')
+    # Even over a hand-edited clash.
+    assert skypilot_config.resolve_workspace_ref('team-a', _REUSED) == 'team-a'
 
 
 def test_workspace_label_carries_name_and_id():
@@ -62,9 +61,9 @@ def test_unknown_ref_is_returned_unchanged():
 
 
 def test_duplicate_names_fail_instead_of_picking_one():
-    workspaces = {'ws-x': {'name': 'ws-y'}, 'ws-y': {}}
-    with pytest.raises(ValueError, match="named 'ws-y'"):
-        skypilot_config.resolve_workspace_ref('ws-y', workspaces)
+    workspaces = {'ws-x': {'name': 'x'}, 'ws-y': {'name': 'x'}}
+    with pytest.raises(ValueError, match="named 'x'"):
+        skypilot_config.resolve_workspace_ref('x', workspaces)
 
 
 def test_typed_active_workspace_becomes_the_id(server_workspaces):
@@ -74,24 +73,17 @@ def test_typed_active_workspace_becomes_the_id(server_workspaces):
             assert skypilot_config.get_active_workspace() == 'team-a'
             resolved = skypilot_config.resolved_config()
     assert resolved['active_workspace'] == 'team-a'
-    # resolved_config() also runs on the client (client-side admin policies),
-    # where the active workspace is still the typed name: it must not claim
-    # an exact id. Controller configs add the marker themselves.
-    assert 'active_workspace_id' not in resolved
 
 
-def test_active_workspace_id_is_exact(server_workspaces):
-    # A recovering job holds the id 'team-a'; the workspace now *named*
-    # 'team-a' must not capture it.
+def test_stored_id_stays_that_id(server_workspaces):
+    # A recovering job holds the id 'team-a'; the workspace a hand edit
+    # *named* 'team-a' must not capture it.
     with server_workspaces(_REUSED):
-        with skypilot_config.override_skypilot_config({
-                'active_workspace': 'team-a',
-                'active_workspace_id': 'team-a'
-        }):
-            assert skypilot_config.get_active_workspace() == 'team-a'
         with skypilot_config.override_skypilot_config(
             {'active_workspace': 'team-a'}):
-            assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
+            assert skypilot_config.get_active_workspace() == 'team-a'
+            assert skypilot_config.resolved_config()['active_workspace'] == (
+                'team-a')
 
 
 def test_server_active_workspace_name_resolves_outside_a_request():
@@ -113,27 +105,15 @@ def test_server_active_workspace_name_resolves_outside_a_request():
             ('allowed_contexts',), None) == ['ctx-a']
 
 
-def test_loaded_config_active_workspace_id_stays_exact():
-    # A consolidated jobs controller loads the job's snapshot as its config
-    # (not as an override): the stored id must not be re-read as a name.
+def test_loaded_snapshot_active_workspace_stays_that_id():
+    # A jobs controller loads the job's snapshot as its config (not as an
+    # override): the stored id must not be re-read as a name.
     snapshot = config_utils.Config({
         'workspaces': _REUSED,
         'active_workspace': 'team-a',
-        'active_workspace_id': 'team-a',
     })
     with skypilot_config.replace_skypilot_config_in_process(snapshot):
         assert skypilot_config.get_active_workspace() == 'team-a'
-
-
-def test_server_config_active_workspace_id_does_not_beat_the_request():
-    server = config_utils.Config({
-        'workspaces': _REUSED,
-        'active_workspace_id': 'team-a'
-    })
-    with skypilot_config.replace_skypilot_config_in_process(server):
-        with skypilot_config.override_skypilot_config(
-            {'active_workspace': 'ws-0123456789ab'}):
-            assert skypilot_config.get_active_workspace() == 'ws-0123456789ab'
 
 
 def test_unknown_active_workspace_still_fails(server_workspaces):
@@ -157,14 +137,13 @@ def test_check_resolves_the_typed_name(server_workspaces):
     assert check.call_args.kwargs['workspace'] == 'team-a'
 
 
-def test_enabled_clouds_resolves_only_the_typed_field(server_workspaces):
+def test_enabled_clouds_resolves_names_and_keeps_ids(server_workspaces):
     with server_workspaces(_REUSED), mock.patch.object(
             core, 'enabled_clouds') as enabled_clouds:
+        core.enabled_clouds_for_request(workspace='archive')
+        assert enabled_clouds.call_args.kwargs['workspace'] == 'team-a'
+        # The dashboard sends the id.
         core.enabled_clouds_for_request(workspace='team-a')
-        assert enabled_clouds.call_args.kwargs['workspace'] == (
-            'ws-0123456789ab')
-        # The dashboard sends the id; it is not resolved as a name.
-        core.enabled_clouds_for_request(workspace_id='team-a')
         assert enabled_clouds.call_args.kwargs['workspace'] == 'team-a'
 
 
@@ -275,9 +254,9 @@ def test_workspace_filter_narrows_by_name(monkeypatch):
     # not the one whose id is 'team-a'.
     assert workspaces_core.filter_workspace_ids_by_name(
         ids, 'TEAM') == ['ws-0123456789ab']
-    # A name wins over an exact id, as for `-w`.
+    # An exact id matches too, even where a hand edit reused it as a name.
     assert workspaces_core.filter_workspace_ids_by_name(
-        ids, 'team-a') == ['ws-0123456789ab']
+        ids, 'team-a') == ['team-a', 'ws-0123456789ab']
     assert workspaces_core.filter_workspace_ids_by_name(ids, 'nope') == []
 
 
@@ -300,8 +279,8 @@ def test_workspace_filter_matches_a_legacy_id_exactly(monkeypatch):
     assert workspaces_core.filter_workspace_ids_by_name(ids, 'ws-0') == []
 
 
-def test_ambiguous_server_active_workspace_falls_back_with_client_overrides():
-    # A client that sends other overrides still gets the server's workspace.
+def test_server_active_workspace_keeps_an_id_over_a_clashing_name():
+    # A hand edit named 'ws-x' after the id of 'ws-y'.
     with skypilot_config.replace_skypilot_config_in_process(
             config_utils.Config({
                 'workspaces': {
@@ -317,11 +296,9 @@ def test_ambiguous_server_active_workspace_falls_back_with_client_overrides():
                 'pod_config': {}
             }}):
             assert skypilot_config.get_active_workspace() == 'ws-y'
-        # A name the user typed is still refused when ambiguous.
-        with pytest.raises(ValueError):
-            with skypilot_config.override_skypilot_config(
-                {'active_workspace': 'ws-y'}):
-                pass
+        with skypilot_config.override_skypilot_config(
+            {'active_workspace': 'ws-y'}):
+            assert skypilot_config.get_active_workspace() == 'ws-y'
 
 
 def test_check_denial_names_the_workspace_as_typed(server_workspaces):
@@ -344,14 +321,21 @@ def test_ambiguous_server_active_workspace_falls_back_to_the_raw_value():
             config_utils.Config({
                 'workspaces': {
                     'ws-x': {
-                        'name': 'ws-y'
+                        'name': 'x'
                     },
-                    'ws-y': {}
+                    'ws-y': {
+                        'name': 'x'
+                    }
                 },
-                'active_workspace': 'ws-y'
+                'active_workspace': 'x'
             })):
         with skypilot_config.override_skypilot_config(None):
-            assert skypilot_config.get_active_workspace() == 'ws-y'
+            assert skypilot_config.get_active_workspace() == 'x'
+        # A name the user typed is refused when ambiguous.
+        with pytest.raises(ValueError, match="named 'x'"):
+            with skypilot_config.override_skypilot_config(
+                {'active_workspace': 'x'}):
+                pass
 
 
 # Two named workspaces the user is a member of, and one the user lost.

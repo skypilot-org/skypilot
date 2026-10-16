@@ -40,6 +40,7 @@ beforeEach(() => {
   mockUpdateWorkspace.mockReset();
   mockUpdateWorkspace.mockResolvedValue({});
   mockInvalidate.mockReset();
+  mockInvalidateFunction.mockReset();
   onRenamed = jest.fn();
 });
 
@@ -103,8 +104,8 @@ test('Enter renames, sending the stored config as expected_config', async () => 
   });
   // The infra page keeps its own context-to-workspace map; it must refresh.
   expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
-  // Cluster and job rows show the name.
-  expect(mockInvalidate).toHaveBeenCalledWith(getClusters);
+  // Cluster and job rows show the name; every cached query of them.
+  expect(mockInvalidateFunction).toHaveBeenCalledWith(getClusters);
   expect(mockInvalidateFunction).toHaveBeenCalledWith(getManagedJobs);
   expect(onRenamed).toHaveBeenCalledWith('ml-v2', renamed);
 });

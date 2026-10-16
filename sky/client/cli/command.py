@@ -2402,11 +2402,12 @@ def status(verbose: bool,
     # to whatever the server resolver said the next request would land
     # on. `_show_enabled_infra` is a pure renderer and only takes the
     # final label.
-    if active_workspace is None and resolved_workspace is not None:
-        # The server answers with an id; show its name.
-        resolved_workspace = skypilot_config.get_workspace_name(
-            resolved_workspace, all_workspaces)
     display_workspace = active_workspace or resolved_workspace
+    if display_workspace is not None:
+        # Either may be an id (a typed name resolves against the client's
+        # own `workspaces:` when it has one); show the name.
+        display_workspace = skypilot_config.get_workspace_name(
+            display_workspace, all_workspaces)
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'

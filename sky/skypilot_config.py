@@ -525,17 +525,18 @@ def workspace_label(workspace_id: str,
 
 def resolve_workspace_ref(ref: str,
                           workspaces: Optional[Dict[str, Any]] = None) -> str:
-    """Maps a workspace a person typed (`-w`, `active_workspace`) to its id.
+    """Maps a workspace reference (an id or a name) to its id.
 
-    Only for fields a person types: ids from records, URLs and stored config
-    must be used as-is, since a renamed workspace's old name can be taken by
-    another workspace. A current name wins; that order only matters for a
-    config edited outside the API, since a name may not equal another
-    workspace's id. An unmatched ref is returned unchanged, so a legacy old
-    name (the id) keeps working and an unknown one fails where it is checked.
+    An id wins: a name may not equal another workspace's id and a legacy id
+    stays taken after a rename, so a stored id never names another workspace
+    (barring a hand-edited config). Otherwise the ref is matched by name. An
+    unmatched ref is returned unchanged, so an unknown one fails where it is
+    checked.
     """
     if workspaces is None:
         workspaces = _loaded_workspaces()
+    if ref == constants.SKYPILOT_DEFAULT_WORKSPACE or ref in workspaces:
+        return ref
     matches = [
         workspace_id for workspace_id in set(workspaces) |
         {constants.SKYPILOT_DEFAULT_WORKSPACE}
@@ -654,14 +655,10 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
         logger.debug(f'No active workspace found, using default workspace: '
                      f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
         active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
-    elif (active_workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and
-          active_workspace not in _loaded_workspaces()):
-        # Not an id: outside a request (e.g. a handler in the main process)
-        # this is the server config's own value, which an admin may write as
-        # a name. Stored ids (request overrides, job snapshots) stay exact.
-        active_workspace = _resolve_server_active_workspace(active_workspace)
-        logger.debug(f'Got active workspace: {active_workspace}')
     else:
+        # Outside a request (e.g. a handler in the main process) this is the
+        # server config's own value, which an admin may write as a name.
+        active_workspace = _resolve_server_active_workspace(active_workspace)
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
 
@@ -1099,21 +1096,13 @@ def override_skypilot_config(
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     workspaces = get_nested(keys=('workspaces',), default_value={})
-    # `active_workspace_id` is set by system callers (job recovery, the
-    # dashboard) and is exact; `active_workspace` is typed by a person. Only
-    # the request's own counts: one in the server config would beat every
-    # client's `-w`.
-    workspace = override_configs.get_nested(keys=('active_workspace_id',),
-                                            default_value=None)
-    if workspace is None:
-        workspace = config.get_nested(keys=('active_workspace',),
-                                      default_value=None)
-        if workspace is not None:
-            if override_configs.get('active_workspace') is not None:
-                workspace = resolve_workspace_ref(workspace, workspaces)
-            else:
-                workspace = _resolve_server_active_workspace(
-                    workspace, workspaces)
+    workspace = config.get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if workspace is not None:
+        if override_configs.get('active_workspace') is not None:
+            workspace = resolve_workspace_ref(workspace, workspaces)
+        else:
+            workspace = _resolve_server_active_workspace(workspace, workspaces)
     if workspace is None:
         workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     else:

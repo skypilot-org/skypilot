@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
 import {
   getEnabledCloudsBatch,
   getWorkspaces,
@@ -110,8 +111,19 @@ export function useWorkspacesConfig() {
           setState((prev) => ({ ...prev, loaded: true }));
         }
       });
+    // The page's own polling refreshes the cached list (background refresh,
+    // or a refetch after an invalidation); follow it so renames show up.
+    const interval = setInterval(() => {
+      const cached = dashboardCache.getCached(getWorkspaces);
+      if (cached) {
+        setState((prev) =>
+          prev.config === cached ? prev : { config: cached, loaded: true }
+        );
+      }
+    }, REFRESH_INTERVALS.REFRESH_INTERVAL);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 

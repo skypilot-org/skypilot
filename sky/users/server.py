@@ -308,8 +308,6 @@ def get_user_workspace(
     # no request body, so the SDK stamps `?requested=` explicitly. We
     # still check the server-side config as a fallback so an admin who
     # set `active_workspace` globally gets honored.
-    if requested is None and skypilot_config.is_active_workspace_set():
-        requested = skypilot_config.get_active_workspace()
     requested_ref = requested
     if requested is not None:
         # The client's `active_workspace` is what a person typed.
@@ -317,6 +315,9 @@ def get_user_workspace(
             requested = skypilot_config.resolve_workspace_ref(requested)
         except ValueError as e:
             raise fastapi.HTTPException(status_code=409, detail=str(e)) from e
+    elif skypilot_config.is_active_workspace_set():
+        # Already an id: the server's own value is resolved when it is read.
+        requested = requested_ref = skypilot_config.get_active_workspace()
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,

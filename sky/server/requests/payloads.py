@@ -235,10 +235,8 @@ class CheckBody(RequestBody):
 
 class EnabledCloudsBody(RequestBody):
     """The request body for the enabled clouds endpoint."""
-    # Typed by a user and resolved by name; `workspace_id` is exact.
     workspace: Optional[str] = None
     expand: bool = False
-    workspace_id: Optional[str] = None
 
 
 class EnabledCloudsBatchBody(RequestBody):

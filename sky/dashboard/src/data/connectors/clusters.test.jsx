@@ -79,7 +79,7 @@ describe('getClusterJobSpec', () => {
     expect(path).toBe('/cluster_job_spec');
     expect(body.cluster_name).toBe('c');
     expect(body.job_id).toBe(3);
-    expect(body.override_skypilot_config.active_workspace).toBe('ws');
+    expect(body.override_skypilot_config).toEqual({ active_workspace: 'ws' });
   });
 
   it('returns null when no spec was recorded', async () => {

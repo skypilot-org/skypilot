@@ -613,27 +613,26 @@ def shared_controller_vars_to_fill(
         # Remove api_server config so that the controller does not try to use
         # a remote API server.
         local_user_config.pop('api_server', None)
+        workspace = local_user_config.get('active_workspace')
+        workspaces = local_user_config.get('workspaces') or {}
+        if workspace is not None:
+            # This config is replayed on recovery; pin the id, which an admin
+            # policy may have set as a name, so it is never re-resolved as a
+            # name another workspace may have taken since.
+            local_user_config['active_workspace'] = (
+                skypilot_config.resolve_workspace_ref(workspace, workspaces))
         if controller.value.controller_type == 'jobs':
             consolidated = is_jobs_consolidation_mode()
         else:
             consolidated = _is_consolidation_mode(pool=False)
-        workspace = local_user_config.get('active_workspace')
-        if consolidated:
-            # Same version as the server. Keeping the names keeps the config
-            # equal to the server's, so its requests raise no override warning.
-            # This config is replayed on recovery; pin the id so it is never
-            # re-resolved as a name another workspace may have taken since.
-            if workspace is not None:
-                local_user_config['active_workspace_id'] = workspace
-        else:
-            # A dedicated controller may run an older wheel that rejects these
-            # keys. Without names, its replayed `active_workspace` (an id)
-            # still resolves exactly.
-            for workspace_config in (local_user_config.get('workspaces') or
-                                     {}).values():
+        if not consolidated:
+            # A dedicated controller may run an older wheel that rejects
+            # workspace names. A consolidated one (same version as the server)
+            # keeps them, so its config matches the server's and its requests
+            # raise no override warning.
+            for workspace_config in workspaces.values():
                 if isinstance(workspace_config, dict):
                     workspace_config.pop('name', None)
-            local_user_config.pop('active_workspace_id', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:

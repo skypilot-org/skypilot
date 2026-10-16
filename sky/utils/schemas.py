@@ -3223,9 +3223,6 @@ def get_config_schema():
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
             'active_workspace': workspace_schema,
-            # Exact workspace id, set by system callers (job recovery, the
-            # dashboard); unlike `active_workspace`, never resolved as a name.
-            'active_workspace_id': workspace_schema,
             'workspaces': workspaces_schema,
             # Org-wide defaults applied to every workspace unless the
             # workspace overrides them under `workspaces.<name>`.

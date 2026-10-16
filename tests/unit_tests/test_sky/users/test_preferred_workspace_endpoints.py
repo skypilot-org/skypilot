@@ -289,6 +289,38 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                                              requested_ref='server-pinned')
         self.assertEqual(resp['workspace'], 'server-pinned')
 
+    def test_server_active_workspace_is_not_resolved_as_a_name(self):
+        """The server's own value is already an id, so a name clash left by
+        a hand-edited config neither remaps it nor fails the request."""
+        fresh = models.User(id='alice', name='alice')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='team-a',
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               return_value=resolution) as resolve_mock, \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_workspace_access_sets',
+                               return_value=({'team-a'}, {'team-a'})), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=True), \
+             mock.patch.object(users_server.skypilot_config,
+                               'get_active_workspace',
+                               return_value='team-a'), \
+             mock.patch.object(users_server.skypilot_config,
+                               'resolve_workspace_ref',
+                               side_effect=ValueError('ambiguous')):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='team-a',
+                                             requested_ref='team-a')
+        self.assertEqual(resp['workspace'], 'team-a')
+
     def test_ambiguous_resolver_surfaces_as_state_coded_source(self):
         """Resolver raises WorkspaceAmbiguousError (multi-ws user, no
         preferred, no 'default' access). The GET handler must NOT dump

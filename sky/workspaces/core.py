@@ -2,6 +2,7 @@
 
 import copy
 from dataclasses import dataclass
+import functools
 import secrets
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -33,6 +34,9 @@ _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
 # Fields whose change touches no infra, so it is allowed while the workspace
 # has active resources. `name` is the user-facing label; the key is the id.
 _ACCESS_AND_NAME_FIELDS = ('private', 'allowed_users', 'read_access', 'name')
+
+# Returned by a workspace modifier; writes the access policies after the save.
+_PolicyWriter = Callable[[], None]
 
 
 @dataclass
@@ -138,16 +142,13 @@ def filter_workspace_ids_by_name(workspace_ids: Iterable[str],
     For a workspace filter a user typed: stored rows and the jobs controller
     only know ids, so callers narrow by id set instead of passing the text.
     An exact id also matches (a legacy id is a renamed workspace's old
-    name), unless a workspace is named exactly that: a name wins, as for `-w`.
+    name).
     """
     workspaces = _load_workspaces()
-    by_id = all(
-        skypilot_config.get_workspace_name(workspace_id, workspaces) !=
-        name_match for workspace_id in workspaces)
     match = name_match.lower()
     return [
         workspace_id for workspace_id in workspace_ids
-        if (by_id and workspace_id == name_match) or match in
+        if workspace_id == name_match or match in
         skypilot_config.get_workspace_name(workspace_id, workspaces).lower()
     ]
 
@@ -203,8 +204,8 @@ def readable_workspace_members_in_memory(user_id: str) -> Optional[Set[str]]:
 
 
 def _update_workspaces_config(
-        workspace_modifier_fn: Callable[[Dict[str, Any]],
-                                        None]) -> Dict[str, Any]:
+    workspace_modifier_fn: Callable[[Dict[str, Any]], Optional[_PolicyWriter]]
+) -> Dict[str, Any]:
     """Update the workspaces configuration in the config file.
 
     This function uses file locking to prevent race conditions when multiple
@@ -213,7 +214,9 @@ def _update_workspaces_config(
     Args:
         workspace_modifier_fn: A function that takes the current workspaces
             dict and modifies it in-place. This ensures all read-modify-write
-            operations happen atomically inside the lock.
+            operations happen atomically inside the lock. It may return a
+            function that writes access policies; it runs after the save,
+            still inside the lock.
 
     Returns:
         The updated workspaces configuration.
@@ -234,7 +237,7 @@ def _update_workspaces_config(
             old_workspaces = copy.deepcopy(current_workspaces)
 
             # Apply the modification inside the lock
-            workspace_modifier_fn(current_workspaces)
+            write_policies = workspace_modifier_fn(current_workspaces)
             _check_workspace_names_unique(old_workspaces, current_workspaces)
 
             # Update the config with the modified workspaces
@@ -242,6 +245,10 @@ def _update_workspaces_config(
 
             # Write the configuration back to the file
             skypilot_config.update_api_server_config_no_lock(current_config)
+            # Policies commit at once, so write them only once the save (and
+            # its validators) went through.
+            if write_policies is not None:
+                write_policies()
             # This request may have read the workspaces before the write (e.g.
             # a permission check); the create-time `sky check` must see them.
             _load_workspaces.cache_clear()
@@ -300,9 +307,13 @@ def _check_workspace_names_unique(old_workspaces: Dict[str, Any],
                     f'{other_name!r}; choose another name.')
 
 
-def _validate_workspace_config(workspace_name: str,
-                               workspace_config: Dict[str, Any]) -> None:
+def _validate_workspace_config(
+        workspace_name: str,
+        workspace_config: Dict[str, Any],
+        current_config: Optional[Dict[str, Any]] = None) -> None:
     """Validate the workspace configuration.
+
+    `current_config` is the stored config this one replaces, if any.
     """
     workspace_schema = schemas.get_config_schema(
     )['properties']['workspaces']['additionalProperties']
@@ -318,7 +329,11 @@ def _validate_workspace_config(workspace_name: str,
         # more user-friendly and b) it will not be caught by the try-except by
         # the caller the may cause confusion.
         raise ValueError(str(e)) from e
-    _validate_workspace_name_field(workspace_name, workspace_config)
+    # Only a changed name is checked, so a hand-edited stored name does not
+    # block membership writes to that workspace.
+    if (current_config is None or
+            current_config.get('name') != workspace_config.get('name')):
+        _validate_workspace_name_field(workspace_name, workspace_config)
 
 
 def _validate_workspace_name_field(workspace_id: str,
@@ -682,8 +697,6 @@ def update_workspace(
         WorkspaceConfigConflictError: If ``expected_config`` is set and the
             workspace was changed since.
     """
-    _validate_workspace_config(workspace_name, config)
-
     if expected_config is not None:
         # This process's config may predate a write handled elsewhere (another
         # worker or server); refresh it so the early conflict check below
@@ -693,6 +706,7 @@ def update_workspace(
     current_workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
     current_config = current_workspaces.get(workspace_name, {})
+    _validate_workspace_config(workspace_name, config, current_config)
 
     # Before the active-resource validation, so an outdated draft is reported
     # as a conflict rather than as a validation error about changes it only
@@ -702,18 +716,14 @@ def update_workspace(
     _validate_workspace_config_changes_with_lock(workspace_name, current_config,
                                                  config)
 
-    def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def update_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to update workspace inside the lock."""
         _check_expected_workspace_config(workspaces, workspace_name,
                                          expected_config)
-        old_workspaces = dict(workspaces)
         workspaces[workspace_name] = config
-        # Before the policy write, which commits at once: a refused name must
-        # leave access unchanged.
-        _check_workspace_names_unique(old_workspaces, workspaces)
         users = workspaces_utils.get_workspace_users(config)
-        permission_service = permission.permission_service
-        permission_service.update_workspace_policy(workspace_name, users)
+        return lambda: permission.permission_service.update_workspace_policy(
+            workspace_name, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(update_workspace_fn)
@@ -776,18 +786,14 @@ def create_workspace(workspace_name: str, config: Dict[str,
     _validate_workspace_config(workspace_name, config)
     created_ids: List[str] = []
 
-    def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def create_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to create workspace inside the lock."""
         workspace_id = _new_workspace_id(workspaces)
-        old_workspaces = dict(workspaces)
         workspaces[workspace_id] = config
-        # Before the policy write, as in update_workspace.
-        _check_workspace_names_unique(old_workspaces, workspaces)
-        # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
-        permission_service = permission.permission_service
-        permission_service.add_workspace_policy(workspace_id, users)
         created_ids.append(workspace_id)
+        return lambda: permission.permission_service.add_workspace_policy(
+            workspace_id, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(create_workspace_fn)
@@ -835,13 +841,13 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
     resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
                                                                 'delete')])
 
-    def delete_workspace_fn(workspaces: Dict[str, Any]) -> None:
+    def delete_workspace_fn(workspaces: Dict[str, Any]) -> _PolicyWriter:
         """Function to delete workspace inside the lock."""
         if workspace_name not in workspaces:
             raise ValueError(f'Workspace {workspace_name!r} does not exist.')
         del workspaces[workspace_name]
-        permission_service = permission.permission_service
-        permission_service.remove_workspace_policy(workspace_name)
+        return lambda: permission.permission_service.remove_workspace_policy(
+            workspace_name)
 
     # Use the internal helper function to save
     return _update_workspaces_config(delete_workspace_fn)
@@ -928,7 +934,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
         # If workspace configuration is changing, validate and mark for checking
         if current_workspace_config != new_workspace_config:
-            _validate_workspace_config(workspace_name, new_workspace_config)
+            _validate_workspace_config(workspace_name, new_workspace_config,
+                                       current_workspace_config)
             _validate_workspace_config_changes_with_lock(
                 workspace_name, current_workspace_config, new_workspace_config)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
@@ -1089,6 +1096,22 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
     return workspace_config.get('private', False)
 
 
+def _write_workspace_policies(policy_users: Dict[str, List[str]],
+                              succeeded: List[str],
+                              failed: List[Dict[str, Any]]) -> None:
+    """Writes the access policies of saved workspaces, one failure each."""
+    for workspace_name, users in policy_users.items():
+        try:
+            permission.permission_service.update_workspace_policy(
+                workspace_name, users)
+            succeeded.append(workspace_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(
+                'Failed to update the access policy of workspace '
+                f'{skypilot_config.workspace_label(workspace_name)}')
+            failed.append({'workspace_name': workspace_name, 'error': str(e)})
+
+
 @usage_lib.entrypoint
 def batch_add_users_to_workspaces(workspace_names: List[str],
                                   user_ids: List[str]) -> Dict[str, Any]:
@@ -1139,9 +1162,9 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
         return {'succeeded': [], 'failed': failed}
 
     succeeded: List[str] = []
-    permission_service = permission.permission_service
+    policy_users: Dict[str, List[str]] = {}
 
-    def modifier(workspaces: Dict[str, Any]) -> None:
+    def modifier(workspaces: Dict[str, Any]) -> _PolicyWriter:
         for workspace_name in workspace_names:
             try:
                 if workspace_name not in workspaces:
@@ -1183,17 +1206,13 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 # _validate_workspace_config_changes is a no-op for pure
                 # adds (it only fires on removed users / private toggles),
                 # so we skip it here.
-                _validate_workspace_config(workspace_name, new_config)
+                _validate_workspace_config(workspace_name, new_config,
+                                           current_config)
                 workspaces[workspace_name] = new_config
-                # Update casbin policy inside the file lock so the config
-                # file and the policy table can't drift out of sync if the
-                # process crashes between the two updates. update_workspace
-                # follows the same pattern. resolved_current is the post-add
-                # user_id set we just computed, so reuse it instead of
-                # re-resolving (which would hit get_all_users() again).
-                permission_service.update_workspace_policy(
-                    workspace_name, list(resolved_current))
-                succeeded.append(workspace_name)
+                # resolved_current is the post-add user_id set we just
+                # computed, so reuse it instead of re-resolving (which would
+                # hit get_all_users() again).
+                policy_users[workspace_name] = list(resolved_current)
             except ValueError as e:
                 failed.append({
                     'workspace_name': workspace_name,
@@ -1207,6 +1226,8 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                     'workspace_name': workspace_name,
                     'error': str(e),
                 })
+        return functools.partial(_write_workspace_policies, policy_users,
+                                 succeeded, failed)
 
     _update_workspaces_config(modifier)
 
@@ -1308,7 +1329,8 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 continue
             new_ws_config = dict(current_ws_config)
             new_ws_config['allowed_users'] = new_allowed
-            _validate_workspace_config(workspace_name, new_ws_config)
+            _validate_workspace_config(workspace_name, new_ws_config,
+                                       current_ws_config)
             _validate_workspace_config_changes_with_lock(workspace_name,
                                                          current_ws_config,
                                                          new_ws_config,
@@ -1332,9 +1354,9 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     if not validated_changes:
         return {'succeeded': succeeded, 'failed': failed}
 
-    permission_service = permission.permission_service
+    policy_users: Dict[str, List[str]] = {}
 
-    def modifier(workspaces: Dict[str, Any]) -> None:
+    def modifier(workspaces: Dict[str, Any]) -> _PolicyWriter:
         for workspace_name in validated_changes:
             try:
                 # Defensive re-check: the workspace might have been deleted
@@ -1363,14 +1385,10 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 new_ws_config = dict(ws_config)
                 new_ws_config['allowed_users'] = new_allowed
                 workspaces[workspace_name] = new_ws_config
-                # Update casbin policy inside the file lock so the config file
-                # and the policy table can't drift out of sync. Resolve from the
-                # fresh config; the resolver's user maps are already built so
-                # this doesn't re-hit get_all_users.
-                permission_service.update_workspace_policy(
-                    workspace_name,
+                # Resolve from the fresh config; the resolver's user maps are
+                # already built so this doesn't re-hit get_all_users.
+                policy_users[workspace_name] = (
                     resolver.resolve_workspace_users(new_ws_config))
-                succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
                     f'Failed to apply removal for workspace '
@@ -1379,6 +1397,8 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                     'workspace_name': workspace_name,
                     'error': str(e),
                 })
+        return functools.partial(_write_workspace_policies, policy_users,
+                                 succeeded, failed)
 
     _update_workspaces_config(modifier)
 

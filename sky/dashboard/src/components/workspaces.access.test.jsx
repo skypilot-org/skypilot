@@ -76,6 +76,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { Workspaces } from '@/components/workspaces';
 import dashboardCache from '@/lib/cache';
 import { getWorkspaceContexts } from '@/data/connectors/infra';
+import { getClusters } from '@/data/connectors/clusters';
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -200,6 +201,7 @@ describe('renaming from the list', () => {
       fireEvent.click(screen.getByTitle('Delete workspace'));
     });
     dashboardCache.invalidate.mockClear();
+    dashboardCache.invalidateFunction.mockClear();
     await act(async () => {
       fireEvent.click(
         within(screen.getByRole('dialog')).getByRole('button', {
@@ -210,5 +212,7 @@ describe('renaming from the list', () => {
     expect(dashboardCache.invalidate).toHaveBeenCalledWith(
       getWorkspaceContexts
     );
+    // Every cached clusters query, not only the no-argument one.
+    expect(dashboardCache.invalidateFunction).toHaveBeenCalledWith(getClusters);
   });
 });

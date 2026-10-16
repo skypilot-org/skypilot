@@ -767,7 +767,7 @@ export function Workspaces() {
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       invalidateWorkspaceCaches();
-      dashboardCache.invalidate(getClusters);
+      dashboardCache.invalidateFunction(getClusters);
       dashboardCache.invalidateFunction(getManagedJobs);
 
       await fetchData({ showLoadingIndicators: true });

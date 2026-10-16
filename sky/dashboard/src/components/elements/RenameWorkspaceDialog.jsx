@@ -86,7 +86,7 @@ export function RenameWorkspaceDialog({
       await updateWorkspace(workspaceId, renamed, storedConfig);
       invalidateWorkspaceCaches();
       // Cluster and job records carry the workspace name.
-      dashboardCache.invalidate(getClusters);
+      dashboardCache.invalidateFunction(getClusters);
       dashboardCache.invalidateFunction(getManagedJobs);
       onRenamed(newName, renamed);
     } catch (err) {

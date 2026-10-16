@@ -312,8 +312,7 @@ export async function streamClusterJobLogs({
         job_id: jobId,
         tail,
         override_skypilot_config: {
-          // The record's workspace id; exact, never resolved as a name.
-          active_workspace_id: workspace || 'default',
+          active_workspace: workspace || 'default',
         },
       },
       onNewLog,
@@ -371,7 +370,7 @@ export async function downloadJobLogs({
       cluster_name: clusterName,
       job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
       override_skypilot_config: {
-        active_workspace_id: workspace || 'default',
+        active_workspace: workspace || 'default',
       },
     });
 
@@ -417,7 +416,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
       cluster_name: clusterName,
       all_users: true,
       override_skypilot_config: {
-        active_workspace_id: workspace,
+        active_workspace: workspace,
       },
     });
 

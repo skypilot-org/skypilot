@@ -111,6 +111,33 @@ def test_workspace_info_prints_names():
     assert "Writable: 'default', 'proj-a'" in result.output
 
 
+def test_status_header_shows_the_client_set_workspace_by_name():
+    # The client resolved its typed name to the id against its own config.
+    shown = []
+
+    def show_enabled_infra(workspace, show_workspace, request_id):
+        del request_id
+        shown.append((workspace, show_workspace))
+        raise RuntimeError('stop')
+
+    with mock.patch.object(skypilot_config, 'is_active_workspace_set',
+                           return_value=True), \
+            mock.patch.object(skypilot_config, 'get_active_workspace',
+                              return_value='team-a'), \
+            mock.patch.object(sdk, 'workspaces', return_value='ws-request'), \
+            mock.patch.object(sdk, 'enabled_clouds'), \
+            mock.patch.object(sdk, 'get', return_value=_WORKSPACES), \
+            mock.patch.object(command,
+                              '_get_cluster_records_and_set_ssh_config',
+                              return_value=[]), \
+            mock.patch.object(command, '_show_enabled_infra',
+                              side_effect=show_enabled_infra):
+        click_testing.CliRunner().invoke(
+            command.status,
+            ['--no-show-managed-jobs', '--no-show-services', '--no-show-pools'])
+    assert shown == [('proj-a', True)]
+
+
 def test_names_only_cover_workspaces_the_user_can_see():
     user = models.User(id='alice', name='alice', preferred_workspace='team-a')
     request = mock.MagicMock(spec=fastapi.Request)

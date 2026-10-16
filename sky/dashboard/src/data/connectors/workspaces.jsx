@@ -196,8 +196,7 @@ export async function getEnabledClouds(workspaceId = null, expand = false) {
     let url = `/enabled_clouds`;
     const params = new URLSearchParams();
     if (workspaceId) {
-      // An id, used as-is (`workspace` would be resolved as a typed name).
-      params.append('workspace_id', workspaceId);
+      params.append('workspace', workspaceId);
     }
     if (expand) {
       params.append('expand', 'true');

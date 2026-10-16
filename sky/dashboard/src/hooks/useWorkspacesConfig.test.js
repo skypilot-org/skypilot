@@ -1,9 +1,16 @@
 jest.mock('@/lib/cache', () => {
-  const cache = { invalidate: jest.fn(), invalidateFunction: jest.fn() };
+  const cache = {
+    invalidate: jest.fn(),
+    invalidateFunction: jest.fn(),
+    get: jest.fn(),
+    getCached: jest.fn(),
+  };
   return { __esModule: true, default: cache };
 });
 
+import { act, renderHook } from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
 import {
   getEnabledCloudsBatch,
   getWorkspaces,
@@ -15,6 +22,7 @@ import {
 import {
   getWorkspaceName,
   invalidateWorkspaceCaches,
+  useWorkspacesConfig,
   workspaceNameError,
 } from '@/hooks/useWorkspacesConfig';
 
@@ -63,5 +71,30 @@ describe('invalidateWorkspaceCaches', () => {
     expect(dashboardCache.invalidate).toHaveBeenCalledWith(
       getWorkspaceInfrastructure
     );
+  });
+});
+
+describe('useWorkspacesConfig', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('follows a refreshed workspace list while mounted', async () => {
+    jest.useFakeTimers();
+    const before = { 'ws-0123456789ab': { name: 'ml' } };
+    const after = { 'ws-0123456789ab': { name: 'ml-v2' } };
+    dashboardCache.getCached.mockReturnValue(before);
+    dashboardCache.get.mockResolvedValue(before);
+
+    const { result } = renderHook(() => useWorkspacesConfig());
+    await act(async () => {});
+    expect(result.current.workspaceName('ws-0123456789ab')).toBe('ml');
+
+    // The page's polling refreshed the cached list in the background.
+    dashboardCache.getCached.mockReturnValue(after);
+    await act(async () => {
+      jest.advanceTimersByTime(REFRESH_INTERVALS.REFRESH_INTERVAL);
+    });
+    expect(result.current.workspaceName('ws-0123456789ab')).toBe('ml-v2');
   });
 });
