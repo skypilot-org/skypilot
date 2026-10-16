@@ -8241,13 +8241,37 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
-@flags.all_users_option('Cancel all requests from all users.')
+@flags.all_users_option('Cancel all requests from all users (admin only; '
+                        'other users cancel only their own).')
 @flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
                yes: bool):
-    """Cancel a request running on SkyPilot API server."""
+    """Cancel a request running on SkyPilot API server.
+
+    A request named by ID is cancelled whoever owns it, if you are allowed
+    to: an admin can cancel any request, other users only their own.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Cancel specific requests.
+      sky api cancel 0d35ffa7 a9d59602
+      \b
+      # Cancel all your requests.
+      sky api cancel --all
+      \b
+      # Cancel all requests from all users (admin only).
+      sky api cancel --all-users
+
+    """
+    if request_ids and (all or all_users):
+        flag = '--all-users' if all_users else '--all'
+        raise click.UsageError(
+            f'Can only specify one of REQUEST_IDS or --all/--all-users. '
+            f'Provided REQUEST_IDS and {flag!r}.')
     if all or all_users:
         if not yes:
             keyword = 'ALL USERS\'' if all_users else 'YOUR'
