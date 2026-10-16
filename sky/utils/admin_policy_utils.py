@@ -215,8 +215,8 @@ def _route_workspace(
             reason = 'a service keeps its workspace on update'
         elif (existing_resource is not None and
               existing_resource[1] != policy_ws):
-            # Never move a request onto or off a resource: one that already
-            # disagrees with the resource still gets the usual mismatch error.
+            # Don't move a request off a resource's workspace, or onto it unless
+            # the policy routes there: a mismatch keeps the usual error.
             resource, resource_ws = existing_resource
             workspace = request_ws
             reason = f'{resource} is in workspace {resource_ws!r}'
