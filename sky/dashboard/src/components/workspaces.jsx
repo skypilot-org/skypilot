@@ -129,7 +129,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 
   if (isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content-tertiary mb-3 italic p-3 bg-sky-tint rounded border border-sky-line">
         Workspace &apos;default&apos; can use all accessible infrastructure.
       </div>
     );
@@ -179,11 +179,11 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 
   if (finalDescriptions.length > 0) {
     return (
-      <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content mb-3 p-3 bg-sky-tint rounded border border-sky-line">
         {finalDescriptions}
-        <p className="mt-2 text-gray-500">
+        <p className="mt-2 text-content-tertiary">
           Other accessible infrastructure are enabled. See{' '}
-          <code className="text-sky-blue">Enabled Infra</code>.
+          <code className="text-brand">Enabled Infra</code>.
         </p>
       </div>
     );
@@ -191,7 +191,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 
   if (!isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content-tertiary mb-3 italic p-3 bg-sky-tint rounded border border-sky-line">
         This workspace has no specific cloud resource configurations and can use
         all accessible infrastructure.
       </div>
@@ -210,12 +210,14 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   return (
     <span className="inline-flex items-center gap-1">
       {isPrivate ? (
-        <span className={`${base} bg-gray-100 text-gray-700 border-gray-300`}>
+        <span
+          className={`${base} bg-surface-muted text-content border-line-strong`}
+        >
           Private
         </span>
       ) : (
         <span
-          className={`${base} bg-green-100 text-green-700 border-green-300`}
+          className={`${base} bg-green-tint-strong text-green-fg-strong border-green-line-strong`}
         >
           Public
         </span>
@@ -226,7 +228,7 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
           className="text-sm text-muted-foreground"
         >
           <span
-            className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
+            className={`${base} whitespace-nowrap bg-blue-tint-strong text-blue-fg-strong border-blue-line-strong`}
           >
             Read-only
           </span>
@@ -244,26 +246,26 @@ const StatsSummary = ({
   managedJobs,
   router,
 }) => (
-  <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
+  <div className="bg-sky-tint p-4 rounded-lg shadow mb-6">
     <div className="flex flex-col sm:flex-row justify-around items-center">
       <div className="p-2">
         <div className="flex items-center">
-          <BookDocIcon className="w-5 h-5 mr-2 text-sky-600" />
-          <span className="text-sm text-gray-600">Workspaces:</span>
-          <span className="ml-1 text-xl font-semibold text-sky-700">
+          <BookDocIcon className="w-5 h-5 mr-2 text-sky-fg" />
+          <span className="text-sm text-content-secondary">Workspaces:</span>
+          <span className="ml-1 text-xl font-semibold text-sky-fg-strong">
             {workspaceCount}
           </span>
         </div>
       </div>
       <div className="p-2">
         <div className="flex items-center">
-          <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
-          <span className="text-sm text-gray-600">
+          <ServerIcon className="w-5 h-5 mr-2 text-sky-fg" />
+          <span className="text-sm text-content-secondary">
             Clusters (Running / Total):
           </span>
           <button
             onClick={() => router.push('/clusters')}
-            className="ml-1 text-xl font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+            className="ml-1 text-xl font-semibold text-blue-fg hover:text-blue-fg-stronger hover:underline cursor-pointer"
           >
             {runningClusters} / {totalClusters}
           </button>
@@ -271,11 +273,11 @@ const StatsSummary = ({
       </div>
       <div className="p-2">
         <div className="flex items-center">
-          <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
-          <span className="text-sm text-gray-600">Managed Jobs:</span>
+          <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-fg" />
+          <span className="text-sm text-content-secondary">Managed Jobs:</span>
           <button
             onClick={() => router.push('/jobs')}
-            className="ml-1 text-xl font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+            className="ml-1 text-xl font-semibold text-blue-fg hover:text-blue-fg-stronger hover:underline cursor-pointer"
           >
             {managedJobs}
           </button>
@@ -827,7 +829,9 @@ export function Workspaces() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading workspaces...</span>
+        <span className="ml-2 text-content-tertiary">
+          Loading workspaces...
+        </span>
       </div>
     );
   }
@@ -837,12 +841,12 @@ export function Workspaces() {
       {/* Error/Success messages positioned at top right, below navigation bar */}
       <div className="fixed top-20 right-4 z-[9999] max-w-md">
         {topLevelSuccess && (
-          <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
+          <div className="bg-green-tint border border-green-line rounded p-4 mb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <svg
-                    className="h-5 w-5 text-green-400"
+                    className="h-5 w-5 text-green-fg-faint"
                     viewBox="0 0 20 20"
                     fill="currentColor"
                   >
@@ -854,7 +858,7 @@ export function Workspaces() {
                   </svg>
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-green-800">
+                  <p className="text-sm font-medium text-green-fg-stronger">
                     {topLevelSuccess}
                   </p>
                 </div>
@@ -863,7 +867,7 @@ export function Workspaces() {
                 <button
                   type="button"
                   onClick={() => setTopLevelSuccess(null)}
-                  className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100"
+                  className="inline-flex rounded-md bg-green-tint p-1.5 text-green-fg-soft hover:bg-green-tint-strong"
                 >
                   <span className="sr-only">Dismiss</span>
                   <svg
@@ -892,13 +896,15 @@ export function Workspaces() {
       {/* Header */}
       <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
-          <span className="text-sky-blue leading-none">Workspaces</span>
+          <span className="text-brand leading-none">Workspaces</span>
         </div>
         <div className="flex items-center">
           {(clustersLoading || jobsLoading) && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-xs">Loading...</span>
+              <span className="ml-2 text-content-tertiary text-xs">
+                Loading...
+              </span>
             </div>
           )}
           {!clustersLoading && !jobsLoading && lastFetchedTime && (
@@ -910,7 +916,7 @@ export function Workspaces() {
           <button
             onClick={handleRefresh}
             disabled={clustersLoading || jobsLoading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-brand hover:text-brand-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
@@ -926,12 +932,12 @@ export function Workspaces() {
             placeholder="Filter workspaces"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-0 focus:outline-none"
+            className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border border-line-strong rounded-md focus:ring-0 focus:outline-none"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-content-faint hover:text-content-secondary"
               title="Clear search"
             >
               <svg
@@ -955,7 +961,7 @@ export function Workspaces() {
         <button
           onClick={handleCreateWorkspace}
           disabled={roleLoading}
-          className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+          className="ml-4 bg-sky-solid hover:bg-sky-solid-hover text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
           title="Create Workspace"
         >
           {roleLoading ? (
@@ -988,19 +994,19 @@ export function Workspaces() {
               <TableHeader>
                 <TableRow>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                     onClick={() => handleSort('displayName')}
                   >
                     Workspace{getSortDirection('displayName')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                     onClick={() => handleSort('runningClusterCount')}
                   >
                     Running Clusters {getSortDirection('runningClusterCount')}
                   </TableHead>
                   <TableHead
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
                     onClick={() => handleSort('managedJobsCount')}
                   >
                     Jobs{getSortDirection('managedJobsCount')}
@@ -1016,7 +1022,7 @@ export function Workspaces() {
                   <TableRow>
                     <TableCell
                       colSpan={5}
-                      className="text-center py-6 text-gray-500"
+                      className="text-center py-6 text-content-tertiary"
                     >
                       <div className="flex justify-center items-center">
                         <CircularProgress size={20} className="mr-2" />
@@ -1039,13 +1045,13 @@ export function Workspaces() {
                     return (
                       <TableRow
                         key={workspace.name}
-                        className="group hover:bg-gray-50"
+                        className="group hover:bg-surface-subtle"
                       >
                         <TableCell className="">
                           <button
                             onClick={() => handleEditWorkspace(workspace.name)}
                             disabled={roleLoading}
-                            className="text-blue-600 hover:text-blue-600 hover:underline text-left"
+                            className="text-blue-fg hover:text-blue-fg hover:underline text-left"
                           >
                             {workspace.displayName}
                           </button>
@@ -1070,9 +1076,9 @@ export function Workspaces() {
                                 query: { workspace: workspace.displayName },
                               });
                             }}
-                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                            className="text-content hover:text-blue-fg hover:underline"
                           >
-                            <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-sm">
+                            <span className="inline-flex items-center px-2 py-0.5 bg-surface-muted text-content rounded text-sm">
                               {clustersLoading ? (
                                 <CircularProgress size={12} />
                               ) : (
@@ -1089,9 +1095,9 @@ export function Workspaces() {
                                 query: { workspace: workspace.displayName },
                               });
                             }}
-                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                            className="text-content hover:text-blue-fg hover:underline"
                           >
-                            <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-sm">
+                            <span className="inline-flex items-center px-2 py-0.5 bg-surface-muted text-content rounded text-sm">
                               {jobsLoading ? (
                                 <CircularProgress size={12} />
                               ) : (
@@ -1110,7 +1116,7 @@ export function Workspaces() {
                                 <span key={cloud}>
                                   <Link
                                     href="/infra"
-                                    className="inline-flex items-center px-2 py-1 rounded text-sm bg-sky-100 text-sky-800 hover:bg-sky-200 hover:text-sky-900 transition-colors duration-200"
+                                    className="inline-flex items-center px-2 py-1 rounded text-sm bg-sky-tint-strong text-sky-fg-stronger hover:bg-sky-line hover:text-sky-fg-strongest transition-colors duration-200"
                                   >
                                     {canonicalCloudName}
                                   </Link>
@@ -1119,7 +1125,9 @@ export function Workspaces() {
                               );
                             })
                           ) : (
-                            <span className="text-gray-500 text-sm">-</span>
+                            <span className="text-content-tertiary text-sm">
+                              -
+                            </span>
                           )}
                         </TableCell>
                         <TableCell>
@@ -1128,7 +1136,7 @@ export function Workspaces() {
                             size="sm"
                             onClick={() => handleEditWorkspace(workspace.name)}
                             disabled={roleLoading}
-                            className="text-gray-600 hover:text-gray-800 mr-1"
+                            className="text-content-secondary hover:text-content-heavy mr-1"
                           >
                             <EditIcon className="w-4 h-4" />
                           </Button>
@@ -1146,7 +1154,7 @@ export function Workspaces() {
                                 ? 'Cannot delete default workspace'
                                 : 'Delete workspace'
                             }
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="text-red-fg hover:text-red-fg-strong hover:bg-red-tint"
                           >
                             <Trash2Icon className="w-4 h-4" />
                           </Button>

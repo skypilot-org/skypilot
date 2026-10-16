@@ -596,12 +596,12 @@
 }
 
 /* Tour code block optimizations */
-.shepherd-element .bg-gray-50 {
+.shepherd-element .bg-surface-subtle {
   padding: 8px 12px !important;
   min-height: auto !important;
 }
 
-.shepherd-element .bg-gray-50 pre {
+.shepherd-element .bg-surface-subtle pre {
   margin: 0 !important;
   padding: 0 !important;
   line-height: 1.4 !important;
@@ -611,7 +611,7 @@
   overflow-x: auto !important;
 }
 
-.shepherd-element .bg-gray-50 code.block {
+.shepherd-element .bg-surface-subtle code.block {
   font-size: 14px !important;
   font-family:
     'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;

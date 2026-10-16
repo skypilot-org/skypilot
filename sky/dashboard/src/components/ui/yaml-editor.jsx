@@ -18,7 +18,11 @@ export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.propertyName, color: 'hsl(var(--brand-bright))' },
   { tag: t.string, color: 'hsl(var(--code-string))' },
   { tag: t.content, color: 'hsl(var(--content))' },
-  { tag: t.lineComment, color: 'hsl(var(--content-tertiary))', fontStyle: 'italic' },
+  {
+    tag: t.lineComment,
+    color: 'hsl(var(--content-tertiary))',
+    fontStyle: 'italic',
+  },
   { tag: t.keyword, color: 'hsl(var(--code-string))' },
   { tag: t.meta, color: 'hsl(var(--content-faint))' },
   { tag: t.brace, color: 'hsl(var(--content-tertiary))' },
@@ -204,7 +208,7 @@ export function YamlEditor({
 }) {
   return (
     <div
-      className={`rounded-md border border-gray-200 overflow-hidden flex flex-col ${className || ''}`}
+      className={`rounded-md border border-line overflow-hidden flex flex-col ${className || ''}`}
       style={{
         width: '100%',
         maxWidth: '100%',

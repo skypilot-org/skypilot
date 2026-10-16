@@ -544,7 +544,7 @@ export function Clusters() {
         <div className="flex items-center gap-2">
           <Link
             href="/clusters"
-            className="text-sky-blue hover:underline leading-none text-base"
+            className="text-brand hover:underline leading-none text-base"
           >
             Sky Clusters
           </Link>
@@ -611,18 +611,18 @@ export function Clusters() {
             !explicitUserFilter &&
             scopedHasRows && (
               <div
-                className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                className="inline-flex items-center gap-2 rounded-full border border-sky-line/70 bg-sky-tint pl-2 pr-2.5 py-0.5 text-xs shrink-0"
                 role="status"
                 aria-live="polite"
               >
-                <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
-                <span className="text-gray-700">
+                <InfoIcon className="h-3 w-3 text-sky-fg shrink-0" />
+                <span className="text-content">
                   Showing your clusters only.
                 </span>
                 <button
                   type="button"
                   onClick={() => selectScope(OWNER_SCOPE_ALL)}
-                  className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                  className="font-medium text-sky-fg-strong transition-colors hover:text-sky-fg-stronger hover:underline"
                 >
                   View all clusters
                 </button>
@@ -649,7 +649,7 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+              <span className="max-lg:hidden ml-2 text-content-tertiary text-sm">
                 Loading...
               </span>
             </div>
@@ -663,7 +663,7 @@ export function Clusters() {
             onClick={handleRefresh}
             disabled={loading}
             title="Refresh"
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+            className="text-brand hover:text-brand-bright flex items-center text-sm"
           >
             <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}
@@ -1105,7 +1105,7 @@ export function ClusterTable({
         <TableCell>
           <Link
             href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
-            className="text-blue-600"
+            className="text-blue-fg"
           >
             {item.cluster || item.name}
           </Link>
@@ -1158,7 +1158,7 @@ export function ClusterTable({
         <TableCell>
           <Link
             href="/workspaces"
-            className="text-gray-700 hover:text-blue-600 hover:underline"
+            className="text-content hover:text-blue-fg hover:underline"
           >
             {item.workspace_name ||
               getWorkspaceName(workspacesConfig, item.workspace)}
@@ -1194,7 +1194,7 @@ export function ClusterTable({
             className="text-sm text-muted-foreground"
           >
             <span>
-              <Link href="/infra" className="text-blue-600 hover:underline">
+              <Link href="/infra" className="text-blue-fg hover:underline">
                 {item.cloud}
               </Link>
               {item.infra.includes('(') && (
@@ -1321,15 +1321,15 @@ export function ClusterTable({
       order: 9,
       header: {
         label: 'Actions',
-        className: 'md:sticky md:right-0 md:bg-white',
+        className: 'md:sticky md:right-0 md:bg-surface',
       },
       renderHeader: () => (
-        <TableHead className="md:sticky md:right-0 md:bg-white">
+        <TableHead className="md:sticky md:right-0 md:bg-surface">
           Actions
         </TableHead>
       ),
       renderCell: (item) => (
-        <TableCell className="text-left md:sticky md:right-0 md:bg-white">
+        <TableCell className="text-left md:sticky md:right-0 md:bg-surface">
           {!item.isHistorical && (
             <Status2Actions
               cluster={item.cluster}
@@ -1411,7 +1411,7 @@ export function ClusterTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-content-tertiary"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -1447,7 +1447,7 @@ export function ClusterTable({
                       variant="outline"
                       size="sm"
                       onClick={onViewAllClusters}
-                      className="text-sky-blue hover:text-sky-blue-bright"
+                      className="text-brand hover:text-brand-bright"
                     >
                       View all clusters
                     </Button>
@@ -1524,8 +1524,8 @@ export const enabledActions = (status) => {
 };
 
 const actionIcons = {
-  connect: <Terminal className="w-4 h-4 text-gray-500 inline-block" />,
-  VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
+  connect: <Terminal className="w-4 h-4 text-content-tertiary inline-block" />,
+  VSCode: <SquareCode className="w-4 h-4 text-content-tertiary inline-block" />,
 };
 
 export function Status2Actions({
@@ -1590,7 +1590,7 @@ export function Status2Actions({
               >
                 <button
                   onClick={() => handleActionClick(actionName)}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                  className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                 >
                   {actionIcon}
                   {!isMobile && <span className="ml-1.5">{label}</span>}
@@ -1770,8 +1770,8 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
-      <div className="border-r border-gray-300 flex-shrink-0">
+    <div className="flex flex-row border border-line-strong rounded-md overflow-visible">
+      <div className="border-r border-line-strong flex-shrink-0">
         <Select onValueChange={setPropertyValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
@@ -1806,7 +1806,7 @@ const FilterDropdown = ({
               setValue('');
               setIsOpen(false);
             }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-content-faint hover:text-content-secondary"
             title="Clear filter"
             tabIndex={-1}
           >
@@ -1828,20 +1828,20 @@ const FilterDropdown = ({
         {isOpen && valueOptions.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            className="absolute z-50 mt-1 w-full bg-surface border border-line rounded-md shadow-lg max-h-60 overflow-y-auto"
             style={{ zIndex: 9999 }}
           >
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-surface-subtle text-sm ${
                   index !== valueOptions.length - 1
-                    ? 'border-b border-gray-100'
+                    ? 'border-b border-line-subtle'
                     : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700">{option}</span>
+                <span className="text-sm text-content">{option}</span>
               </div>
             ))}
           </div>
@@ -1878,7 +1878,7 @@ const Filters = ({ filters = [], setFilters }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-content bg-surface-strong hover:bg-surface-stronger"
               >
                 Clear filters
               </button>
@@ -1893,7 +1893,7 @@ const Filters = ({ filters = [], setFilters }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+      <div className="flex items-center text-blue-fg bg-blue-tint-strong px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
           <span>{`${filter.operator} `}</span>
@@ -1902,7 +1902,7 @@ const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-content-faint hover:text-content-secondary bg-blue-solid-soft hover:bg-blue-solid rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

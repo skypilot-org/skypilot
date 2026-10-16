@@ -17,16 +17,20 @@ export function showToast(message, type = 'info', duration = 5000) {
   // Set styles based on type
   switch (type) {
     case 'success':
-      toast.className += ' bg-green-100 border-green-500 text-green-800';
+      toast.className +=
+        ' bg-green-tint-strong border-green-solid-soft text-green-fg-stronger';
       break;
     case 'error':
-      toast.className += ' bg-red-100 border-red-500 text-red-800';
+      toast.className +=
+        ' bg-red-tint-strong border-red-solid-soft text-red-fg-stronger';
       break;
     case 'warning':
-      toast.className += ' bg-yellow-100 border-yellow-500 text-yellow-800';
+      toast.className +=
+        ' bg-yellow-tint-strong border-yellow-solid-soft text-yellow-fg-stronger';
       break;
     default:
-      toast.className += ' bg-blue-100 border-blue-500 text-blue-800';
+      toast.className +=
+        ' bg-blue-tint-strong border-blue-solid-soft text-blue-fg-stronger';
   }
 
   // Create toast content
@@ -34,7 +38,7 @@ export function showToast(message, type = 'info', duration = 5000) {
       <div class="flex-1 mr-2">
         <p class="text-sm font-medium">${message}</p>
       </div>
-      <button class="text-gray-500 hover:text-gray-700 focus:outline-none" aria-label="Close toast">
+      <button class="text-content-tertiary hover:text-content focus:outline-none" aria-label="Close toast">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>

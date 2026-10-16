@@ -40,7 +40,13 @@ export function EmptyState({
       >
         {icon || <Inbox size={20} strokeWidth={1.75} />}
       </div>
-      <div style={{ fontSize: 16, fontWeight: 500, color: 'hsl(var(--content-strong))' }}>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 500,
+          color: 'hsl(var(--content-strong))',
+        }}
+      >
         {title}
       </div>
       {description ? (

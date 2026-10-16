@@ -24,13 +24,15 @@ export function useTour() {
 // Global function for copying code blocks in tour
 if (typeof window !== 'undefined') {
   window['copyDashboardCodeBlock'] = function (button) {
-    const codeContainer = button.closest('.bg-gray-50').querySelector('pre');
+    const codeContainer = button
+      .closest('.bg-surface-subtle')
+      .querySelector('pre');
     const codeBlock = codeContainer.querySelector('code.block');
     const text = codeBlock.textContent;
     navigator.clipboard.writeText(text).then(() => {
       const originalSvg = button.innerHTML;
       button.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check h-5 w-5 text-green-600"><path d="m9 12 2 2 4-4"/></svg>';
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check h-5 w-5 text-green-fg"><path d="m9 12 2 2 4-4"/></svg>';
       setTimeout(() => {
         button.innerHTML = originalSvg;
       }, 2000);
@@ -98,9 +100,9 @@ export function TourProvider({ children }) {
                   let mobileMenu = null;
                   const selectors = [
                     '.fixed.top-14.left-0.w-64',
-                    'div.fixed.w-64.bg-white.border-r',
+                    'div.fixed.w-64.bg-surface.border-r',
                     '.fixed.w-64.transform',
-                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    '[class*="fixed"][class*="w-64"][class*="bg-surface"]',
                     'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
 
@@ -182,10 +184,10 @@ export function TourProvider({ children }) {
               // Restore mobile menu height
               const mobileMenu =
                 document.querySelector('.fixed.top-14.left-0.w-64') ||
-                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
                 document.querySelector('.fixed.w-64.transform') ||
                 document.querySelector(
-                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                  '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
                 );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
@@ -232,16 +234,16 @@ export function TourProvider({ children }) {
           /* Fix mobile menu gap when tour dialog is present */
           @media (max-width: 767px) {
             /* Very specific selector to override Tailwind's h-[calc(100vh-56px)] class */
-            div.fixed.top-14.left-0.w-64.bg-white.border-r.shadow-lg.z-50.transform,
-            .fixed.top-14.left-0.w-64.bg-white.shadow-lg.z-50,
-            div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"][class*="bg-white"][class*="shadow-lg"][class*="z-50"] {
+            div.fixed.top-14.left-0.w-64.bg-surface.border-r.shadow-lg.z-50.transform,
+            .fixed.top-14.left-0.w-64.bg-surface.shadow-lg.z-50,
+            div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"][class*="bg-surface"][class*="shadow-lg"][class*="z-50"] {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
               max-height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
 
             /* Target the mobile menu by its exact class combination from the HTML */
-            .fixed.w-64.bg-white.border-r.border-gray-200.shadow-lg.z-50.transform,
-            .fixed[class*="w-64"][class*="bg-white"][class*="border-r"][class*="shadow-lg"][class*="z-50"][class*="transform"] {
+            .fixed.w-64.bg-surface.border-r.border-line.shadow-lg.z-50.transform,
+            .fixed[class*="w-64"][class*="bg-surface"][class*="border-r"][class*="shadow-lg"][class*="z-50"][class*="transform"] {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
 
@@ -329,10 +331,10 @@ export function TourProvider({ children }) {
         // Restore mobile menu height
         const mobileMenu =
           document.querySelector('.fixed.top-14.left-0.w-64') ||
-          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+          document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
           document.querySelector('.fixed.w-64.transform') ||
           document.querySelector(
-            '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+            '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
           );
         if (mobileMenu && mobileMenu instanceof HTMLElement) {
           mobileMenu.style.removeProperty('height');
@@ -394,10 +396,10 @@ export function TourProvider({ children }) {
         // Restore mobile menu height
         const mobileMenu =
           document.querySelector('.fixed.top-14.left-0.w-64') ||
-          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+          document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
           document.querySelector('.fixed.w-64.transform') ||
           document.querySelector(
-            '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+            '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
           );
         if (mobileMenu && mobileMenu instanceof HTMLElement) {
           mobileMenu.style.removeProperty('height');
@@ -516,9 +518,9 @@ export function TourProvider({ children }) {
                   let mobileMenu = null;
                   const selectors = [
                     '.fixed.top-14.left-0.w-64',
-                    'div.fixed.w-64.bg-white.border-r',
+                    'div.fixed.w-64.bg-surface.border-r',
                     '.fixed.w-64.transform',
-                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    '[class*="fixed"][class*="w-64"][class*="bg-surface"]',
                     'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
 
@@ -602,10 +604,10 @@ export function TourProvider({ children }) {
               // Restore mobile menu height
               const mobileMenu =
                 document.querySelector('.fixed.top-14.left-0.w-64') ||
-                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
                 document.querySelector('.fixed.w-64.transform') ||
                 document.querySelector(
-                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                  '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
                 );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
@@ -833,9 +835,9 @@ export function TourProvider({ children }) {
                   let mobileMenu = null;
                   const selectors = [
                     '.fixed.top-14.left-0.w-64',
-                    'div.fixed.w-64.bg-white.border-r',
+                    'div.fixed.w-64.bg-surface.border-r',
                     '.fixed.w-64.transform',
-                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    '[class*="fixed"][class*="w-64"][class*="bg-surface"]',
                     'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
 
@@ -955,10 +957,10 @@ export function TourProvider({ children }) {
               // Restore mobile menu height
               const mobileMenu =
                 document.querySelector('.fixed.top-14.left-0.w-64') ||
-                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
                 document.querySelector('.fixed.w-64.transform') ||
                 document.querySelector(
-                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                  '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
                 );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
@@ -1195,9 +1197,9 @@ export function TourProvider({ children }) {
                   let mobileMenu = null;
                   const selectors = [
                     '.fixed.top-14.left-0.w-64',
-                    'div.fixed.w-64.bg-white.border-r',
+                    'div.fixed.w-64.bg-surface.border-r',
                     '.fixed.w-64.transform',
-                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    '[class*="fixed"][class*="w-64"][class*="bg-surface"]',
                     'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
 
@@ -1317,10 +1319,10 @@ export function TourProvider({ children }) {
               // Restore mobile menu height
               const mobileMenu =
                 document.querySelector('.fixed.top-14.left-0.w-64') ||
-                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('div.fixed.w-64.bg-surface.border-r') ||
                 document.querySelector('.fixed.w-64.transform') ||
                 document.querySelector(
-                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                  '[class*="fixed"][class*="w-64"][class*="bg-surface"]'
                 );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
@@ -1357,7 +1359,7 @@ export function TourProvider({ children }) {
           text: `
             <p>Spin up clusters using the Python SDK or the CLI.</p>
             <div class="space-y-2">
-              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-surface-subtle">
                 <div class="flex items-center justify-between">
                   <pre class="text-sm w-full whitespace-pre-wrap">
                     <code class="block">sky launch</code>
@@ -1370,7 +1372,7 @@ export function TourProvider({ children }) {
                   </button>
                 </div>
               </div>
-              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-surface-subtle">
                 <div class="flex items-center justify-between">
                   <pre class="text-sm w-full whitespace-pre-wrap">
                     <code class="block">sky launch --gpus L4:8</code>
@@ -1383,7 +1385,7 @@ export function TourProvider({ children }) {
                   </button>
                 </div>
               </div>
-              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-surface-subtle">
                 <div class="flex items-center justify-between">
                   <pre class="text-sm w-full whitespace-pre-wrap">
                     <code class="block">sky launch --num-nodes 10 --cpus 32+</code>
