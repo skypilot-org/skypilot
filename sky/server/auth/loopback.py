@@ -5,6 +5,7 @@ import ipaddress
 import fastapi
 
 from sky import sky_logging
+from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -24,7 +25,19 @@ def _is_loopback_ip(ip_str: str) -> bool:
 
 
 def is_loopback_request(request: fastapi.Request) -> bool:
-    """Determine if a request is coming from localhost."""
+    """Determine if a request is coming from localhost.
+
+    Callers use this to exempt local traffic from authentication, so the
+    exemption can be turned off with `api_server.trust_loopback: false`.
+    That matters on Kubernetes: `kubectl port-forward` delivers a remote
+    client's traffic to the pod from 127.0.0.1 with no proxy headers, which
+    is indistinguishable here from traffic that never left the host. A
+    deployment that authenticates every caller (e.g. behind oauth2-proxy)
+    can opt out so port-forwarded requests are authenticated like any other.
+    """
+    if not skypilot_config.get_nested(('api_server', 'trust_loopback'), True):
+        return False
+
     if request.client is None:
         return False
 
