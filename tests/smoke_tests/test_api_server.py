@@ -180,7 +180,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 [
                     # Match only the table row: debug log lines can also name the
                     # controller. sky down must refuse because of user1's job.
-                    f'controller=$(sky status -u | grep -m1 -o "^sky-jobs-controller-[0-9a-f]*") && echo "$controller" && '
+                    f'controller=$(sky status -u | awk \'/^sky-jobs-controller-/ {{print $1; exit}}\') && [ -n "$controller" ] && echo "$controller" && '
                     f's=$(echo delete | sky down "$controller" 2>&1) && exit 1; '
                     f'echo "$s" && echo "$s" | grep "In-progress managed jobs found"',
                     f'sky jobs cancel -y -n {name}-3',
