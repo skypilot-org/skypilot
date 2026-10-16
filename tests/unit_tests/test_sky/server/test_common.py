@@ -71,6 +71,90 @@ def test_unhealthy_server(mock_get_status):
         common.check_server_healthy()
 
 
+def _health_response(status_code: int) -> mock.Mock:
+    response = mock.Mock(spec=requests.Response)
+    response.status_code = status_code
+    return response
+
+
+@pytest.fixture
+def clear_health_cache():
+    common.get_api_server_status_response.cache_clear()
+    yield
+    common.get_api_server_status_response.cache_clear()
+
+
+@pytest.mark.parametrize('failure', [
+    requests.exceptions.ConnectionError('connection reset'),
+    _health_response(502),
+    _health_response(504),
+])
+@pytest.mark.usefixtures('clear_health_cache')
+@mock.patch('sky.server.common.time.sleep')
+@mock.patch('sky.server.common.is_api_server_local', return_value=False)
+@mock.patch('sky.server.common.make_authenticated_request')
+def test_health_check_retries_transient_failure_on_remote_server(
+        mock_make_request, unused_mock_is_local, mock_sleep, failure):
+    healthy_response = _health_response(200)
+    mock_make_request.side_effect = [failure, healthy_response]
+
+    response = common.get_api_server_status_response('https://remote.test')
+
+    assert response is healthy_response
+    assert mock_make_request.call_count == 2
+    assert mock_sleep.call_count == 1
+
+
+@pytest.mark.usefixtures('clear_health_cache')
+@mock.patch('sky.server.common.time.sleep')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.make_authenticated_request')
+def test_health_check_does_not_retry_connection_error_on_local_server(
+        mock_make_request, unused_mock_is_local, mock_sleep):
+    """A local server that refuses connections is not running yet."""
+    mock_make_request.side_effect = requests.exceptions.ConnectionError(
+        'connection refused')
+
+    server_info = common.get_api_server_status('http://127.0.0.1:46580')
+
+    assert server_info.status == ApiServerStatus.UNHEALTHY
+    assert server_info.error == 'connection refused'
+    assert mock_make_request.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+@pytest.mark.usefixtures('clear_health_cache')
+@mock.patch('sky.server.common.time.sleep')
+@mock.patch('sky.server.common.is_api_server_local', return_value=False)
+@mock.patch('sky.server.common.make_authenticated_request')
+def test_health_check_gives_up_after_retries(mock_make_request,
+                                             unused_mock_is_local,
+                                             unused_mock_sleep):
+    mock_make_request.return_value = _health_response(502)
+
+    server_info = common.get_api_server_status('https://remote.test')
+
+    assert server_info.status == ApiServerStatus.UNHEALTHY
+    assert server_info.error == 'HTTP 502'
+    assert mock_make_request.call_count == common.RETRY_COUNT_ON_TIMEOUT
+
+
+@mock.patch('sky.server.common.is_api_server_local', return_value=False)
+@mock.patch('sky.server.common.get_api_server_status')
+def test_check_server_healthy_or_start_reports_cause_once(
+        mock_get_status, unused_mock_is_local):
+    mock_get_status.return_value = ApiServerInfo(
+        status=ApiServerStatus.UNHEALTHY, error='HTTP 502')
+
+    with pytest.raises(exceptions.ApiServerConnectionError) as exc_info:
+        common.check_server_healthy_or_start_fn()
+
+    assert '(HTTP 502)' in str(exc_info.value)
+    # Raised once, not re-raised chained to a copy of itself.
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
 @mock.patch('sky.server.common._start_api_server')
 @mock.patch('sky.server.common.set_api_cookie_jar')
 @mock.patch('sky.server.common.versions.check_compatibility_at_client')
