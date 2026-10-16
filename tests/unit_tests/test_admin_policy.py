@@ -1265,6 +1265,28 @@ def test_routing_without_write_access_is_rejected(server_policy, task):
             pytest.fail('the request must not run')
 
 
+def test_validate_routes_without_checking_access(server_policy, task):
+    # The pre-check runs with the identity the client sent; the request itself
+    # is checked with the authenticated user.
+    server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
+    _, config = admin_policy_utils.apply(
+        task, request_name=request_names.AdminPolicyRequestName.VALIDATE)
+    assert config['active_workspace'] == _ROUTED_WS
+    server_policy.check.assert_not_called()
+
+
+def test_validate_keeps_the_workspace_when_the_policy_names_none(
+        server_policy, task):
+    # A controller validates before every relaunch; a policy changed to a
+    # missing workspace must not fail it.
+    server_policy.cls = _PinMissingWorkspacePolicy
+    with skypilot_config.local_active_workspace_ctx('ws-x'):
+        _, config = admin_policy_utils.apply(
+            task, request_name=request_names.AdminPolicyRequestName.VALIDATE)
+    assert config['active_workspace'] == 'ws-x'
+    server_policy.check.assert_not_called()
+
+
 def test_dropped_workspace_is_normalised(server_policy, task):
     server_policy.cls = _DropWorkspacePolicy
     with skypilot_config.local_active_workspace_ctx('ws-x'):

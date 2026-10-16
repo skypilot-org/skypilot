@@ -183,9 +183,19 @@ def _route_workspace(
             exist, or the request would move to a workspace the user cannot
             write to.
     """
+    # /validate is a pre-check: it runs with the identity the client sent, and
+    # controllers call it before every relaunch. It never rejects a route; the
+    # request itself re-checks with the authenticated user.
+    precheck = request_name == request_names.AdminPolicyRequestName.VALIDATE
     request_ws = skypilot_config.get_active_workspace()
     policy_ref = mutated_config.get('active_workspace')
-    policy_ws = _resolve_workspace_ref(policy_ref) if policy_ref else request_ws
+    try:
+        policy_ws = (_resolve_workspace_ref(policy_ref)
+                     if policy_ref else request_ws)
+    except exceptions.UserRequestRejectedByPolicy:
+        if not precheck:
+            raise
+        policy_ws = request_ws
     workspace = policy_ws
     if policy_ws != request_ws:
         cluster_name = (request_options.cluster_name
@@ -212,7 +222,7 @@ def _route_workspace(
             logger.warning(f'The admin policy set workspace {policy_ws!r} for '
                            f'request {request_name}, but it stays in '
                            f'workspace {workspace!r}: {reason}.')
-        if workspace != request_ws:
+        if workspace != request_ws and not precheck:
             # A policy may route a request, but cannot grant access.
             try:
                 workspaces_core.check_workspace_permission(
