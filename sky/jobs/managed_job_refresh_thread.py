@@ -133,9 +133,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             return
 
         try:
-            managed_job_utils.ha_recovery_for_consolidation_mode()
-        finally:
+            managed_job_utils.ha_recovery_for_consolidation_mode(
+                still_leader=self._lock_still_held)
+        except BaseException:
             signal_file.unlink(missing_ok=True)
+            raise
+        # Same as the check above: step down with the gate file left in place.
+        if not self._lock_still_held():
+            self._suicide_on_lock_loss()
+            return
+        signal_file.unlink(missing_ok=True)
 
         # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
         # lock probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.

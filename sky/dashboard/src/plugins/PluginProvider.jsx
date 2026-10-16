@@ -30,6 +30,7 @@ const PluginContext = createContext({
   tableFilters: {},
   dataProviders: {},
   recipeTypes: [],
+  accessChecks: {},
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -72,6 +73,7 @@ const initialState = {
   tableFilters: {}, // Map of table name → array of filter property configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
   recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
+  accessChecks: {}, // Map of action → array of { id, action, check }
 };
 
 const actions = {
@@ -84,6 +86,7 @@ const actions = {
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
   REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
+  REGISTER_ACCESS_CHECK: 'REGISTER_ACCESS_CHECK',
 };
 
 function pluginReducer(state, action) {
@@ -189,6 +192,19 @@ function pluginReducer(state, action) {
         ...state,
         recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
+    case actions.REGISTER_ACCESS_CHECK: {
+      const { action: checkAction } = action.payload;
+      return {
+        ...state,
+        accessChecks: {
+          ...state.accessChecks,
+          [checkAction]: upsertById(
+            state.accessChecks[checkAction] || [],
+            action.payload
+          ),
+        },
+      };
+    }
     default:
       return state;
   }
@@ -850,6 +866,33 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    // Lets a plugin allow a non-admin to do something the dashboard otherwise
+    // reserves for admins. `check(context)` returns (a promise of) a boolean;
+    // the action is allowed if any registered check says yes. This only gates
+    // the UI: the server still authorizes every request.
+    //
+    // Actions:
+    // - `workspaces.detail.open`: open a workspace's page from the Workspaces
+    //   list. Context: { workspaceName }.
+    registerAccessCheck(config) {
+      if (!config?.id || !config.action || typeof config.check !== 'function') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid access check registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        action: String(config.action),
+        check: config.check,
+      };
+      dispatch({
+        type: actions.REGISTER_ACCESS_CHECK,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -1040,6 +1083,65 @@ export function useGroupedNavLinks() {
 export function usePluginRoutes() {
   const { routes } = usePluginState();
   return routes;
+}
+
+export function usePluginAccessChecks(action) {
+  const { accessChecks } = usePluginState();
+  return (accessChecks && accessChecks[action]) || EMPTY_ACCESS_CHECKS;
+}
+
+const EMPTY_ACCESS_CHECKS = [];
+
+// How long one access check may take before it counts as a no.
+export const ACCESS_CHECK_TIMEOUT_MS = 10000;
+
+/**
+ * Whether any of `checks` allows the action for `context`. Resolves `true` as
+ * soon as one check says yes. A check that throws, rejects or takes longer
+ * than ACCESS_CHECK_TIMEOUT_MS counts as a no.
+ */
+export function anyAccessCheckAllows(checks, context) {
+  const list = checks || [];
+  if (list.length === 0) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let pending = list.length;
+    const settle = (allowed) => {
+      if (allowed) {
+        resolve(true);
+      } else if (--pending === 0) {
+        resolve(false);
+      }
+    };
+    list.forEach((entry) => {
+      let timer;
+      const timeout = new Promise((done) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `[SkyDashboardPlugin] Access check ${entry.id} timed out`
+          );
+          done(false);
+        }, ACCESS_CHECK_TIMEOUT_MS);
+      });
+      const result = Promise.resolve()
+        .then(() => entry.check(context))
+        .then(
+          (allowed) => allowed === true,
+          (error) => {
+            console.warn(
+              `[SkyDashboardPlugin] Access check ${entry.id} failed:`,
+              error
+            );
+            return false;
+          }
+        );
+      Promise.race([result, timeout]).then((allowed) => {
+        clearTimeout(timer);
+        settle(allowed);
+      });
+    });
+  });
 }
 
 export function usePluginRecipeTypes() {

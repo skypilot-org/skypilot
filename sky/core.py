@@ -1390,6 +1390,30 @@ def queue(cluster_name: str,
 
 
 @usage_lib.entrypoint
+def cluster_job_spec(cluster_name: str,
+                     job_id: int) -> Optional[Dict[str, Any]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Read from the API server's database, so it does not need the cluster to
+    be UP.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        A dict with 'task_yaml' (str) and 'entrypoint' (str), or None if the
+        cluster does not exist or the job's spec was not recorded (e.g. it was
+        submitted by an older API server version, or to a cluster launched by
+        a jobs or serve controller).
+    """
+    cluster_hash = global_user_state.get_cluster_hash(cluster_name)
+    if cluster_hash is None:
+        return None
+    return global_user_state.get_cluster_job_spec(cluster_hash, job_id)
+
+
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(
     cluster_name: str,

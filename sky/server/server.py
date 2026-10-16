@@ -63,6 +63,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
+from sky.serve import serve_state
 from sky.serve.server import server as serve_rest
 from sky.server import clean_env as clean_env_module
 from sky.server import common
@@ -84,6 +85,7 @@ from sky.server import websocket_utils
 from sky.server.auth import db_lookup
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
+from sky.server.auth import sa_token_cache
 from sky.server.auth import sessions as auth_sessions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
@@ -290,6 +292,7 @@ class RBACMiddleware(middleware_utils.ASGIMiddleware):
                 request, middleware_utils.REJECT_REASON_FORBIDDEN)
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
+        middleware_utils.mark_rbac_allowed(request, auth_user.id)
 
         return None
 
@@ -606,23 +609,28 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
 
             # Look up the token row by its sha256 hash. This is what makes
             # revocation (row deleted) and rotation (row's hash replaced)
-            # take effect at request time -- the JWT alone cannot be revoked.
+            # take effect within the `sa_token_cache` TTL -- the JWT alone
+            # cannot be revoked.
             # We match on hash rather than token_id because rotation updates
             # the row's hash but keeps the original token_id, while the new
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded auth thread executor
-            # under a deadline, so a slow/locked DB cannot stall the request
-            # event loop (this runs on the loop for every
-            # service-account-authenticated request) nor hold executor
-            # threads for as long as the DB layer allows. The auth executor
-            # is kept separate from the request executor so long-lived
-            # streaming requests cannot starve authentication; timeouts and
-            # executor exhaustion are converted to retryable 503s below.
-            token_row = await db_lookup.call_with_deadline(
-                global_user_state.get_service_account_token_by_hash,
-                incoming_hash)
+            cached = sa_token_cache.get(incoming_hash)
+            if cached is None:
+                # Offload the sync DB lookups to the bounded auth thread
+                # executor under a deadline, so a slow/locked DB cannot stall
+                # the request event loop (this runs on the loop for every
+                # service-account-authenticated request) nor hold executor
+                # threads for as long as the DB layer allows. The auth
+                # executor is kept separate from the request executor so
+                # long-lived streaming requests cannot starve authentication;
+                # timeouts and executor exhaustion are converted to retryable
+                # 503s below.
+                token_row, user_info = await db_lookup.call_with_deadline(
+                    sa_token_cache.fetch_token_and_user, incoming_hash, user_id)
+            else:
+                token_row, user_info = cached
             if token_row is None:
                 logger.warning(
                     f'Service account token {token_id} not found in DB '
@@ -639,9 +647,6 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     request, {'detail': 'Service account token has expired'},
                     subject=user_id)
 
-            # Verify user still exists in database
-            user_info = await db_lookup.call_with_deadline(
-                global_user_state.get_user, user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -649,6 +654,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     request,
                     {'detail': 'Service account user no longer exists'},
                     subject=user_id)
+            if cached is None:
+                sa_token_cache.put(incoming_hash, token_row, user_info)
 
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
@@ -663,8 +670,11 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
             # JWT's): after rotation the JWT carries a different token_id
             # than the DB row.
             last_used_at = token_row.get('last_used_at')
-            if (last_used_at is None or time.time() - last_used_at >=
+            now = time.time()
+            if (last_used_at is None or now - last_used_at >=
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
+                # The row may be cached: later hits must see it as fresh.
+                token_row['last_used_at'] = int(now)
                 try:
                     await db_lookup.call_with_deadline(
                         global_user_state.
@@ -826,44 +836,45 @@ async def cleanup_upload_ids():
                     upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+def cleanup_unreferenced_file_mounts_once():
+    """Run one pass of the blob GC: delete blobs nobody references."""
+    storage = bs.get_blob_storage()
+
+    with storage.gc_lock() as should_run:
+        if not should_run:
+            logger.debug('Another server is running blob GC, skipping')
+            return
+
+        # A blob is kept alive by an active API request (e.g. the submit
+        # request that is still running), a non-terminal managed job that
+        # was started from it, or a service/pool that launches replicas
+        # from it.
+        active_blob_ids = (requests_lib.get_active_file_mounts_blob_ids() |
+                           managed_job_state.get_active_file_mounts_blob_ids() |
+                           serve_state.get_active_file_mounts_blob_ids())
+        grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
+
+        for user_id in storage.list_users():
+            try:
+                for blob_id, mtime in storage.list_blob_ids(user_id):
+                    if (blob_id not in active_blob_ids and
+                            mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_id}')
+                        storage.delete_blob(user_id, blob_id)
+                storage.release_stale_uploads(user_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                             f'{common_utils.format_exception(e)}')
+
+
 async def cleanup_unreferenced_file_mounts():
     """Delete file mounts not referenced by any active request."""
-
-    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
-    # blocking the event loop.
-    def _do_cleanup():
-        storage = bs.get_blob_storage()
-
-        with storage.gc_lock() as should_run:
-            if not should_run:
-                logger.debug('Another server is running blob GC, skipping')
-                return
-
-            # A blob is kept alive by either an active API request (e.g. the
-            # submit request that is still running) or a non-terminal managed
-            # job that was started from it.
-            active_blob_ids = (
-                requests_lib.get_active_file_mounts_blob_ids() |
-                managed_job_state.get_active_file_mounts_blob_ids())
-            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
-
-            for user_id in storage.list_users():
-                try:
-                    for blob_id, mtime in storage.list_blob_ids(user_id):
-                        if (blob_id not in active_blob_ids and
-                                mtime < grace_cutoff):
-                            logger.info(f'GC: removing unreferenced blob '
-                                        f'{blob_id} for user {user_id}')
-                            storage.delete_blob(user_id, blob_id)
-                    storage.release_stale_uploads(user_id)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
-                                 f'{common_utils.format_exception(e)}')
-
     while True:
         await asyncio.sleep(3600)  # Run every hour
         try:
-            await asyncio.to_thread(_do_cleanup)
+            # Synced cleanup, run in a thread to avoid blocking the event loop.
+            await asyncio.to_thread(cleanup_unreferenced_file_mounts_once)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_file_mounts: '
                          f'{common_utils.format_exception(e)}')
@@ -2378,6 +2389,21 @@ async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
     """Launches a cluster or task."""
     request_id = request.state.request_id
+    # Only the jobs and serve controllers set these, and they always call a
+    # co-located server over loopback. From anyone else they would let the
+    # caller pick the admin policy request name and the provisioning path.
+    if ((launch_body.is_launched_by_jobs_controller or
+         launch_body.is_launched_by_sky_serve_controller or
+         launch_body.extra_launch_context) and
+            not loopback.is_loopback_request(request)):
+        peer = request.client.host if request.client else None
+        logger.warning(f'Rejected launch request {request_id} for cluster '
+                       f'{launch_body.cluster_name!r} from {peer}: '
+                       'controller-only fields set by a non-loopback caller.')
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='Controller-only launch fields are not accepted from '
+            'remote clients.')
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
@@ -2417,6 +2443,51 @@ async def _reject_cluster_write_for_unauthorized(
         await context_utils.to_thread_with_executor(
             None, workspaces_core.check_cluster_write_permission, auth_user,
             cluster_name)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
+
+
+def _check_workspace_read_permission(auth_user: models.User,
+                                     workspace: str) -> None:
+    """Checks a user may read the jobs and logs of a workspace's clusters.
+
+    Raises:
+        PermissionDeniedError: If the user cannot read the workspace.
+    """
+    try:
+        # Membership does not depend on the config, so members skip the reload.
+        workspaces_core.check_workspace_permission(auth_user, workspace)
+    except exceptions.PermissionDeniedError:
+        # Read-only visibility comes from the workspace config, which this
+        # process does not reload per request.
+        common.refresh_workspace_state_for_sync_handler()
+        workspaces_core.check_workspace_permission(
+            auth_user,
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def _check_cluster_read_permission(auth_user: models.User,
+                                   cluster_name: str) -> None:
+    workspace = global_user_state.get_cluster_workspace(cluster_name)
+    if workspace is not None:
+        _check_workspace_read_permission(auth_user, workspace)
+
+
+async def _reject_cluster_read_for_unauthorized(request: fastapi.Request,
+                                                cluster_name: str) -> None:
+    """Rejects a read of a cluster's jobs or logs the user cannot see.
+
+    The read counterpart of ``_reject_cluster_write_for_unauthorized``. These
+    endpoints report a missing cluster through the request, not as an HTTP
+    error, so there is no not-found response to match and a denial is a 403.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        return
+    try:
+        await context_utils.to_thread_with_executor(
+            None, _check_cluster_read_permission, auth_user, cluster_name)
     except exceptions.PermissionDeniedError as e:
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
 
@@ -2552,6 +2623,8 @@ async def autostop(request: fastapi.Request,
 async def queue(request: fastapi.Request,
                 queue_body: payloads.QueueBody) -> None:
     """Gets the job queue of a cluster."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                queue_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_QUEUE,
@@ -2563,10 +2636,28 @@ async def queue(request: fastapi.Request,
     )
 
 
+@app.post('/cluster_job_spec')
+async def cluster_job_spec(request: fastapi.Request,
+                           body: payloads.ClusterJobSpecBody) -> None:
+    """Gets the task YAML and entrypoint a cluster job was submitted with."""
+    await _reject_cluster_read_for_unauthorized(request, body.cluster_name)
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_JOB_SPEC,
+        request_body=body,
+        func=core.cluster_job_spec,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=body.cluster_name,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/job_status')
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody) -> None:
     """Gets the status of a job."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                job_status_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_JOB_STATUS,
@@ -2604,6 +2695,8 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    await _reject_cluster_read_for_unauthorized(request,
+                                                cluster_job_body.cluster_name)
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
@@ -2631,6 +2724,8 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
+    await _reject_cluster_read_for_unauthorized(request,
+                                                cluster_jobs_body.cluster_name)
     user_hash = download_utils.owner_user_id(request,
                                              cluster_jobs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
@@ -2723,27 +2818,43 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
+def provision_logs(request: fastapi.Request,
+                   provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
     cluster_name = provision_logs_body.cluster_name
     worker = provision_logs_body.worker
+    auth_user = request.state.auth_user
+
+    def _not_found_unless_readable(workspace: Optional[str],
+                                   detail: str) -> None:
+        # Answer as for a cluster with no record, so a cluster the caller
+        # cannot read cannot be told apart from one that does not exist.
+        if auth_user is None or workspace is None:
+            return
+        try:
+            _check_workspace_read_permission(auth_user, workspace)
+        except exceptions.PermissionDeniedError as e:
+            raise fastapi.HTTPException(status_code=404, detail=detail) from e
+
     # stream head node logs
     if worker is None:
+        not_recorded = ('Provision log path is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.')
         # Prefer clusters table first, then cluster_history as fallback.
-        log_path_str = global_user_state.get_cluster_provision_log_path(
-            cluster_name)
+        log_path_str, workspace = (
+            global_user_state.get_cluster_provision_log_info(cluster_name))
         if not log_path_str:
-            log_path_str = (
-                global_user_state.get_cluster_history_provision_log_path(
+            # The history row may be from an earlier cluster of this name, so
+            # check the workspace recorded with the log path it returns.
+            log_path_str, workspace = (
+                global_user_state.get_cluster_history_provision_log_info(
                     cluster_name))
+        _not_found_unless_readable(workspace, not_recorded)
         if not log_path_str:
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=('Provision log path is not recorded for this cluster. '
-                        'Please relaunch to generate provisioning logs.'))
+            raise fastapi.HTTPException(status_code=404, detail=not_recorded)
         log_path = pathlib.Path(log_path_str).expanduser().resolve()
         if not log_path.exists():
             raise fastapi.HTTPException(
@@ -2752,12 +2863,13 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
 
     # stream worker node logs
     else:
+        no_handle = ('Cluster handle is not recorded for this cluster. '
+                     'Please relaunch to generate provisioning logs.')
+        _not_found_unless_readable(
+            global_user_state.get_cluster_workspace(cluster_name), no_handle)
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is None:
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=('Cluster handle is not recorded for this cluster. '
-                        'Please relaunch to generate provisioning logs.'))
+            raise fastapi.HTTPException(status_code=404, detail=no_handle)
         # instance_ids includes head node
         instance_ids = handle.instance_ids
         if instance_ids is None:
@@ -2800,6 +2912,8 @@ async def hook_logs(
 
     If ``event`` is None, auto-selects whichever hook event has fired.
     """
+    await _reject_cluster_read_for_unauthorized(request,
+                                                hook_logs_body.cluster_name)
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,

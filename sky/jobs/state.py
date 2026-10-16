@@ -1724,6 +1724,24 @@ def get_all_task_ids_names_statuses_logs(
                 for row in id_names]
 
 
+def get_submitted_task_ids(job_id: int) -> Set[int]:
+    """Ids of the job's tasks that began launching (have a submitted_at).
+
+    submitted_at is written once, by set_starting_async. A task with no run
+    command is marked SUCCEEDED without it, as it launches no cluster and so
+    has no task logs.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(spot_table.c.task_id).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.submitted_at.is_not(None),
+                ))).fetchall()
+        return {row[0] for row in rows}
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
@@ -4412,7 +4430,7 @@ async def observe_runtime_async(
     *,
     callback_func: AsyncCallbackType,
     infra: Optional[Dict[str, Optional[str]]] = None,
-) -> None:
+) -> Optional[managed_job_runtime.RuntimeCursor]:
     """Persist a monitoring observation, including its placement.
 
     A running observation whose nodes differ from the cursor merges them into
@@ -4420,6 +4438,10 @@ async def observe_runtime_async(
     region and zone recorded with them. callback_func receives RECOVERING,
     STARTED or RECOVERED after commit for each transition this observation
     caused.
+
+    Returns the task's cursor as persisted after this observation, whether
+    or not the observation changed it: what get_runtime_cursor_async would
+    now return. None when the task has no cursor.
     """
     engine = await _db_manager.get_async_engine()
     for _ in range(20):
@@ -4433,7 +4455,9 @@ async def observe_runtime_async(
                                              provisioning=False,
                                              now=time.time())
             if plan is None:
-                return
+                # Also the outcome when a retry finds this observation already
+                # committed, so the row read here is the persisted cursor.
+                return _runtime_cursor_from_metadata(row['metadata'])
             result = await session.execute(
                 _runtime_observation_update(job_id, task_id, row, plan))
             if result.rowcount != 1:
@@ -4447,7 +4471,7 @@ async def observe_runtime_async(
             await session.commit()
         for callback in plan.callbacks:
             await callback_func(callback)
-        return
+        return _runtime_cursor_from_metadata(plan.values['metadata'])
     raise RuntimeError('Concurrent runtime recovery updates did not settle')
 
 
@@ -4707,7 +4731,10 @@ async def get_emergency_recovery_budget_async(
                     job_info_table.c.spot_job_id == job_id))
         row = result.fetchone()
         if row is None:
-            return 0, None
+            # Not a fresh budget: a job with no record cannot have attempts
+            # recorded for it, so the bookkeeping must stop, not start at 1.
+            raise exceptions.ManagedJobRecordMissingError(
+                f'Managed job {job_id} has no job_info record.')
         return (row[0] or 0), row[1]
 
 
@@ -4720,16 +4747,22 @@ async def record_emergency_recovery_attempt_async(job_id: int,
     Writes absolute values rather than incrementing, so that re-running the
     emergency bookkeeping after a transient failure cannot double-spend the
     retry budget.
+
+    Raises ManagedJobRecordMissingError when the write matched no row: the
+    job has no record, so nothing can be recorded for it.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id == job_id).values({
                     job_info_table.c.emergency_recovery_count: attempt_count,
                     job_info_table.c.last_emergency_recovery_at: attempt_time,
                 }))
         await session.commit()
+        if result.rowcount == 0:
+            raise exceptions.ManagedJobRecordMissingError(
+                f'Managed job {job_id} has no job_info record.')
 
 
 @db_retries.retry_async

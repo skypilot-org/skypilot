@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useClusterDetails } from '@/data/connectors/clusters';
+import {
+  useClusterDetails,
+  getClusterJobSpec,
+} from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
@@ -22,6 +25,7 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import { EntrypointAndYaml } from '@/components/elements/EntrypointYaml';
 import {
   LINK_SCOPE_JOBS,
   normalizeUrl,
@@ -99,6 +103,8 @@ export function JobDetailPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+  const [jobSpec, setJobSpec] = useState(null);
+  const [jobSpecRefreshToken, setJobSpecRefreshToken] = useState(0);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -123,6 +129,30 @@ export function JobDetailPage() {
     }),
     [cluster, job, clusterData?.workspace]
   );
+
+  // The spec is read from the API server's database, so it is fetched
+  // separately from the job queue and does not need the cluster to be UP.
+  const clusterLoaded = Boolean(clusterData);
+  const clusterWorkspace = clusterData?.workspace;
+  // Navigating between jobs reuses this page: drop the previous job's spec so
+  // it is never shown under another job's details while the new one loads.
+  useEffect(() => {
+    setJobSpec(null);
+  }, [cluster, job]);
+  useEffect(() => {
+    if (!cluster || !job || !clusterLoaded) return undefined;
+    let cancelled = false;
+    getClusterJobSpec({
+      clusterName: cluster,
+      jobId: job,
+      workspace: clusterWorkspace,
+    }).then((spec) => {
+      if (!cancelled) setJobSpec(spec);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, job, clusterLoaded, clusterWorkspace, jobSpecRefreshToken]);
 
   const handleStreamError = useCallback((error) => {
     console.error('Error streaming cluster logs:', error);
@@ -189,6 +219,7 @@ export function JobDetailPage() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setLogsRefreshToken((token) => token + 1);
+    setJobSpecRefreshToken((token) => token + 1);
     try {
       if (refreshData) {
         await refreshData();
@@ -384,6 +415,10 @@ export function JobDetailPage() {
                         </div>
                       </div>
                     )}
+                    <EntrypointAndYaml
+                      entrypoint={jobSpec?.entrypoint}
+                      taskYaml={jobSpec?.task_yaml}
+                    />
                   </div>
                 </div>
               </Card>

@@ -1,5 +1,6 @@
 """SDK functions for managed jobs."""
 import contextlib
+import copy
 import datetime
 import inspect
 import ipaddress
@@ -45,6 +46,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server import plugin_hooks
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
@@ -1181,6 +1183,11 @@ def _launch(
     # Warn if file mounts may be lost during rolling update
     _warn_file_mounts_rolling_update(dag)
 
+    # Hooks receive the submitted paths before controller staging rewrites them.
+    submitted_dag = None
+    if plugin_hooks.has_managed_job_submitted_hooks():
+        submitted_dag = copy.deepcopy(dag)
+        submitted_dag.pool = pool
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
@@ -1206,6 +1213,10 @@ def _launch(
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
     assert job_ids is not None, 'job_ids is not set'
+    if submitted_dag is not None:
+        plugin_hooks.fire_managed_job_submitted(job_ids, submitted_dag,
+                                                file_mounts_blob_id,
+                                                common_utils.get_user_hash())
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -2272,9 +2283,15 @@ def pool_apply(
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     workers: Optional[int] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, workers, pool_name, mode, pool=True)
+    return impl.apply(task,
+                      workers,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint

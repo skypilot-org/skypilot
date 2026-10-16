@@ -31,6 +31,7 @@ import { apiClient } from '@/data/connectors/client';
 import {
   getClusters,
   getClusterHistory,
+  getClusterJobSpec,
   getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
@@ -55,6 +56,43 @@ describe('getClusters all_users scoping', () => {
     expect(apiClient.fetch).toHaveBeenCalledTimes(1);
     const [, body] = apiClient.fetch.mock.calls[0];
     expect(body.all_users).toBe(false);
+  });
+});
+
+describe('getClusterJobSpec', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('requests one job of one cluster in its workspace', async () => {
+    const spec = { task_yaml: 'run: echo hi\n', entrypoint: 'sky exec c x' };
+    apiClient.fetch.mockResolvedValue(spec);
+
+    const result = await getClusterJobSpec({
+      clusterName: 'c',
+      jobId: '3',
+      workspace: 'ws',
+    });
+
+    expect(result).toEqual(spec);
+    const [path, body] = apiClient.fetch.mock.calls[0];
+    expect(path).toBe('/cluster_job_spec');
+    expect(body.cluster_name).toBe('c');
+    expect(body.job_id).toBe(3);
+    expect(body.override_skypilot_config.active_workspace).toBe('ws');
+  });
+
+  it('returns null when no spec was recorded', async () => {
+    // apiClient.fetch maps a null return value to [].
+    apiClient.fetch.mockResolvedValue([]);
+    expect(await getClusterJobSpec({ clusterName: 'c', jobId: 1 })).toBeNull();
+  });
+
+  it('returns null when the request fails, e.g. on an older server', async () => {
+    apiClient.fetch.mockRejectedValue(new Error('404'));
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await getClusterJobSpec({ clusterName: 'c', jobId: 1 })).toBeNull();
+    errorSpy.mockRestore();
   });
 });
 

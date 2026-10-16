@@ -7,6 +7,7 @@ import enum
 import fnmatch
 import functools
 import hashlib
+import itertools
 import math
 import os
 import pathlib
@@ -120,7 +121,6 @@ _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
                                   re.MULTILINE)
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
-_RAY_HEALTH_CHECK_ATTEMPTS = 12
 _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
     r'(\d+) ray[._]worker[._]reserved')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
@@ -136,6 +136,8 @@ K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
                                         re.IGNORECASE)
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
+
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 5
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
 # check multiple IPs because some IPs may be blocked on certain networks.
@@ -2874,11 +2876,27 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
-            # Ray's GCS needs ~35s to mark a gone node dead (2.56.1:
-            # health_check_initial_delay_ms + period x failure_threshold), so a
-            # shorter budget reports a node that is on its way out as a live
-            # one short of the expected count.
-            for i in range(_RAY_HEALTH_CHECK_ATTEMPTS):
+            timeout = skypilot_config.get_nested(
+                ('provision', 'health_check_timeout'),
+                DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS)
+            if not math.isfinite(timeout):
+                logger.warning('Ignoring non-finite '
+                               f'provision.health_check_timeout: {timeout}')
+                timeout = DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+            # Counted from the first failure, so a probe that hangs until the
+            # SSH connect timeout still gets retried.
+            retry_deadline: Optional[float] = None
+
+            def wait_for_retry() -> bool:
+                nonlocal retry_deadline
+                if retry_deadline is None:
+                    retry_deadline = time.monotonic() + timeout
+                if time.monotonic() >= retry_deadline:
+                    return False
+                time.sleep(1)
+                return True
+
+            for i in itertools.count():
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
@@ -2886,6 +2904,11 @@ def _update_cluster_status(
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
+                        # Retry transient SSH failures; a missing runtime
+                        # will not come back on its own.
+                        if (_RAY_CLUSTER_NOT_FOUND_MESSAGE not in e.error_msg
+                                and wait_for_retry()):
+                            continue
                         # Non-k8s clusters can be manually restarted and:
                         # 1. Get new IP addresses, or
                         # 2. Not have the SkyPilot runtime setup
@@ -2917,8 +2940,9 @@ def _update_cluster_status(
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
-                    time.sleep(1)
-                    continue
+                    if wait_for_retry():
+                        continue
+                    break
                 if ready_head + ready_workers == total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
@@ -2934,7 +2958,8 @@ def _update_cluster_status(
                 #   (not preempted), but
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
-                time.sleep(1)
+                if not wait_for_retry():
+                    break
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')
@@ -4212,8 +4237,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
-        include_credentials: If True, include cluster ssh credentials in the
-            return value.
+        include_credentials: If True, include ssh credentials in the records of
+            the clusters the current user owns.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4283,12 +4308,17 @@ def get_clusters(
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
+        """Add the credentials to the records of clusters the caller owns.
 
         This is useful for the client side to setup the ssh config of the
-        cluster.
+        cluster. The credentials carry the cluster owner's SSH private key, so
+        the records of other users' clusters get none.
         """
-        records_with_handle = _get_records_with_handle(records)
+        caller_user_hash = common_utils.get_current_user().id
+        records_with_handle = [
+            record for record in _get_records_with_handle(records)
+            if record['user_hash'] == caller_user_hash
+        ]
         if len(records_with_handle) == 0:
             return
 

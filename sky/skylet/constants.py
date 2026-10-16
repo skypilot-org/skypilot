@@ -710,9 +710,18 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('api_server',),
     ('allowed_clouds',),
     ('workspaces',),
+    ('workspace_config',),
+    # The admin policy is enforced server-side and can point at an arbitrary
+    # module or URL, so a client must not be able to replace the server's one.
+    (
+        'admin_policy',),
     ('db',),
     ('daemons',),
     ('metrics',),
+    # Logging sinks are server-owned; a client must not redirect where the
+    # server ships its logs.
+    (
+        'logs',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
     # Tests that are affected:
@@ -920,6 +929,14 @@ DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY = 5
 ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
     f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
 DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
+
+# Seconds each API server process reuses a service-account token's DB rows
+# for Bearer auth (`sky.server.auth.sa_token_cache`), which is also how long
+# revoking or rotating a token, or deleting its user, can take to apply. 0
+# disables the cache. Server-side only.
+ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SA_AUTH_CACHE_TTL_SECONDS')
+DEFAULT_SA_AUTH_CACHE_TTL_SECONDS = 10.0
 
 # How long a managed-job task may sit in each of the two stall phases before
 # `sky.jobs.stall` reports it. Overridable so a deployment that disagrees with

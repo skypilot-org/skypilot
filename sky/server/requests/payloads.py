@@ -430,6 +430,12 @@ class QueueBody(RequestBody):
     all_users: bool = False
 
 
+class ClusterJobSpecBody(RequestBody):
+    """The request body for the cluster job spec endpoint."""
+    cluster_name: str
+    job_id: int
+
+
 class CancelBody(RequestBody):
     """The request body for the cancel endpoint."""
     cluster_name: str
@@ -765,6 +771,9 @@ class ServeUpBody(RequestBody):
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
         kwargs['task'] = dag.tasks[0]
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches replicas.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -927,6 +936,9 @@ class JobsPoolApplyBody(RequestBody):
             kwargs['task'] = dag.tasks[0]
         else:
             kwargs['task'] = None
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches workers.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
