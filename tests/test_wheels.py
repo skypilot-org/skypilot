@@ -38,6 +38,35 @@ def test_build_wheels():
     shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
 
 
+def test_unchanged_rebuild_refreshes_cache():
+    """A source mtime bump that leaves the wheel unchanged rebuilds once.
+
+    Creating a ``__pycache__`` directory at runtime (the first import of a
+    module in a package directory) bumps that directory's mtime without
+    changing the wheel. The rebuild it triggers produces the cached hash, and
+    the cache must then count as fresh again.
+    """
+    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+    try:
+        _, wheel_hash = wheel_utils.build_sky_wheel()
+
+        time.sleep(1.1)
+        os.utime(wheel_utils.SKY_PACKAGE_PATH / 'backends')
+
+        with mock.patch.object(wheel_utils,
+                               '_build_sky_wheel',
+                               wraps=wheel_utils._build_sky_wheel) as build:
+            _, rebuilt_hash = wheel_utils.build_sky_wheel()
+            assert build.call_count == 1
+            assert rebuilt_hash == wheel_hash
+
+            for _ in range(2):
+                wheel_utils.build_sky_wheel()
+            assert build.call_count == 1
+    finally:
+        shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+
+
 def test_pip_missing_uv_environment():
     """Test error handling when pip module is not found in UV environment."""
     with mock.patch('subprocess.run') as mock_run:

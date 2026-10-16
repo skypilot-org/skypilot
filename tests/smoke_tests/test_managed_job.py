@@ -2895,6 +2895,65 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # Remote servers run in consolidation mode.
+@pytest.mark.managed_jobs
+def test_managed_job_controller_records_no_cluster_job_spec(generic_cloud: str):
+    """Jobs on the jobs controller cluster get no cluster job spec.
+
+    Every managed job adds a job to its controller cluster. Its spec is never
+    read (the managed job page shows the user's YAML), so recording it would
+    only pile up rows until the controller is torn down.
+    """
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('No controller cluster in consolidation mode.')
+    from sky.client import sdk
+    from sky.utils import common
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    def check_controller_jobs_have_no_spec():
+        records = sdk.stream_and_get(
+            sdk.status(refresh=common.StatusRefreshMode.NONE, all_users=True))
+        controllers = [
+            r['name']
+            for r in records
+            if r['name'].startswith(common.JOB_CONTROLLER_PREFIX)
+        ]
+        assert controllers, f'No jobs controller cluster in {records}'
+        jobs_on_controller = sdk.stream_and_get(
+            sdk.queue(controllers[0], all_users=True))
+        # Non-empty: at least the job this test's managed job added.
+        assert jobs_on_controller, f'No jobs on {controllers[0]}'
+        for job in jobs_on_controller[:20]:
+            spec = sdk.stream_and_get(
+                sdk.cluster_job_spec(controllers[0], job['job_id']))
+            assert spec is None, (
+                f'Controller job {job["job_id"]} on {controllers[0]} got a '
+                f'spec recorded: {spec}')
+
+    test = smoke_tests_utils.Test(
+        'managed_job_controller_records_no_cluster_job_spec',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING,
+                    sky.ManagedJobStatus.RUNNING,
+                    sky.ManagedJobStatus.SUCCEEDED,
+                ],
+                timeout=300),
+            lambda: check_controller_jobs_have_no_spec(),
+        ],
+        teardown=f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency
 @pytest.mark.kubernetes

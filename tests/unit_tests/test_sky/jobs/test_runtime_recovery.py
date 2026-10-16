@@ -68,10 +68,10 @@ def observation(count, **kwargs):
 
 
 async def observe(count, **kwargs):
-    await state.observe_runtime_async(42,
-                                      0,
-                                      observation(count, **kwargs),
-                                      callback_func=mock.AsyncMock())
+    return await state.observe_runtime_async(42,
+                                             0,
+                                             observation(count, **kwargs),
+                                             callback_func=mock.AsyncMock())
 
 
 def provision(count, runtime_id='allocation-a', **kwargs):
@@ -137,6 +137,7 @@ async def test_controller_observes_before_healthy_shortcut_and_refresh(
     observation = runtime.RuntimeObservation('allocation-a', 2,
                                              job_lib.JobStatus.PENDING)
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(runtime, 'observes_recovery', lambda: True)
     observations = [observation, observation, StopMonitoring()]
     if query_error:
         observations.insert(0, RuntimeError('shared storage unavailable'))
@@ -191,6 +192,7 @@ async def test_controller_fast_terminal_does_not_repeat_user_retry(
     handle = mock.MagicMock()
     executor = mock.MagicMock()
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(runtime, 'observes_recovery', lambda: True)
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
         mock.Mock(
@@ -263,6 +265,7 @@ async def test_controller_runtime_failover_cleans_allocation_and_keeps_reason(
     executor = mock.MagicMock()
     executor.recover = mock.AsyncMock(side_effect=StopMonitoring())
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(runtime, 'observes_recovery', lambda: True)
     monkeypatch.setattr(
         runtime, 'get_recovery_status',
         mock.Mock(return_value=runtime.RuntimeObservation(
@@ -589,6 +592,21 @@ async def test_cursor_keeps_last_running_placement(database):
 
 
 @pytest.mark.asyncio
+async def test_observation_returns_the_cursor_it_persisted(database):
+    """The controller keeps its cursor from this return value instead of
+    reading it back, so it must be what get_runtime_cursor_async returns."""
+    persisted = await observe(1, running=True, nodes=['node-a'])
+    assert persisted == runtime.RuntimeCursor('allocation-a', 1, 0, ['node-a'])
+    assert persisted == await state.get_runtime_cursor_async(42, 0)
+    # A repeated observation changes nothing, and still reports the persisted
+    # cursor. A retry that finds its own write committed takes this path.
+    assert await observe(1, running=True, nodes=['node-a']) == persisted
+    assert await state.get_runtime_cursor_async(42, 0) == persisted
+    # So does an observation older than the cursor, which is skipped.
+    assert await observe(0, running=True, nodes=['node-a']) == persisted
+
+
+@pytest.mark.asyncio
 async def test_placement_is_merged_with_accepted_running_observations(database):
     with database.begin() as connection:
         connection.execute(state.job_info_table.insert().values(spot_job_id=42,
@@ -686,6 +704,7 @@ def _monitor_controller(monkeypatch, handle, hook):
     controller._get_cluster_job_exit_codes = mock.AsyncMock(return_value=[7])
     controller.download_log_and_stream = mock.Mock()
     monkeypatch.setattr(runtime, 'is_registered', lambda: True)
+    monkeypatch.setattr(runtime, 'observes_recovery', lambda: True)
     monkeypatch.setattr(runtime, 'get_recovery_status', hook)
     monkeypatch.setattr(runtime, 'on_before_recovery', mock.Mock())
     monkeypatch.setattr(controller_module.global_user_state,
