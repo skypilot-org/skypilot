@@ -470,17 +470,58 @@ def _consolidated_launch(
                                      run_script,
                                      log_path=log_path)
     if returncode != 0:
-        raise exceptions.CommandError(
-            returncode=returncode,
-            command=f'sky.jobs.scheduler[job_ids={job_ids_str}]',
-            error_msg=(
-                f'Managed job submission script failed '
-                f'(returncode={returncode}). The job row is in an incomplete '
-                f'state; cancel it with `sky jobs cancel {job_ids_str}` '
-                f'before retrying. Script log: {log_path}'),
-            detailed_reason='')
+        _cancel_failed_submission(job_ids, returncode, log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
+
+
+def _cancel_failed_submission(job_ids: List[int], returncode: int,
+                              log_path: str) -> None:
+    """Cancels the jobs whose submission script failed, then raises.
+
+    A job whose script failed before scheduler_set_waiting committed stays
+    PENDING+INACTIVE, and nothing ever picks it up: recovery skips INACTIVE
+    jobs. Cancel it so it does not sit in the queue as PENDING. A job whose
+    script failed after the commit is WAITING; set_pending_cancelled claims
+    it away from the scheduler atomically, so it is either cancelled here or
+    already claimed by a controller and will run. The error names any job
+    left uncancelled.
+
+    Raises:
+        exceptions.CommandError: always.
+    """
+    reason = (f'Job submission failed (exit code {returncode}). '
+              f'Submission log: {log_path}')
+    not_cancelled: List[int] = []
+    for job_id in job_ids:
+        try:
+            cancelled = managed_job_state.set_pending_cancelled(job_id,
+                                                                reason=reason)
+        except Exception as e:  # pylint: disable=broad-except
+            # The DB may be the reason the script failed in the first place.
+            logger.warning(f'Failed to cancel job {job_id} after its '
+                           f'submission failed: {e}')
+            cancelled = False
+        if not cancelled:
+            not_cancelled.append(job_id)
+
+    job_ids_str = _job_ids_to_str(job_ids)
+    if not not_cancelled:
+        error_msg = (f'Managed job submission failed; cancelled job(s) '
+                     f'{job_ids_str}, so it is safe to retry.')
+    else:
+        cancel_ids = ' '.join(str(job_id) for job_id in not_cancelled)
+        error_msg = (
+            f'Managed job submission failed; could not cancel job(s) '
+            f'{_job_ids_to_str(not_cancelled)}, which may still run. Check '
+            '`sky jobs queue` before retrying, and cancel them with '
+            f'`sky jobs cancel {cancel_ids}` if needed.')
+    error_msg += f' Submission log: {log_path}'
+    raise exceptions.CommandError(
+        returncode=returncode,
+        command=f'sky.jobs.scheduler[job_ids={job_ids_str}]',
+        error_msg=error_msg,
+        detailed_reason='')
 
 
 def _maybe_submit_job_locally(

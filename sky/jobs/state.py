@@ -1472,7 +1472,8 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_pending_cancelled(job_id: int) -> bool:
+def set_pending_cancelled(job_id: int,
+                          reason: str = 'Job has been cancelled') -> bool:
     """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
 
     This may fail if the job is not PENDING, e.g. another process has changed
@@ -1507,6 +1508,10 @@ def set_pending_cancelled(job_id: int) -> bool:
     while the later ones stay PENDING for the claiming controller to run.
     Before the first insert there are no task rows, so the caller reads no
     status and never gets here; a single-task job is therefore unaffected.
+
+    Args:
+        job_id: The managed job to cancel.
+        reason: The reason recorded on the job's CANCELLED event.
 
     Returns:
         True if the job was cancelled, False otherwise.
@@ -1562,7 +1567,7 @@ def set_pending_cancelled(job_id: int) -> bool:
             spot_job_id=job_id,
             task_id=None,
             new_status=ManagedJobStatus.CANCELLED.value,
-            reason='Job has been cancelled',
+            reason=reason,
             timestamp=datetime.datetime.now(),
         ))
         session.commit()
