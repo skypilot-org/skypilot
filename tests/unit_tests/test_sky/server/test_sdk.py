@@ -1549,37 +1549,59 @@ def _request_entrypoint():
 
 
 class _FakeServer:
-    """Serves /api/stream and /api/get to the real ``stream_and_get``.
+    """Serves /api/stream, /api/get and /api/status to the real SDK.
 
     Every stream replays the same log lines, as the server does when a client
     re-attaches to a finished request; ``streams`` holds the body of each
     stream in turn (the last one is reused). Each ``/api/get`` call takes the
     next entry of ``gets`` (the last one is reused): a ``(status, payload)``
-    pair of what the server answers.
+    pair of what the server answers. ``/api/status`` answers with
+    ``statuses`` the same way, its payload being a list of requests. A POST to
+    ``/logs`` submits a new log tail and streams it like ``/api/stream``.
     """
 
     _MAX_STREAMS = 50
 
-    def __init__(self, streams, gets):
+    def __init__(self, streams, gets, statuses=None):
         self.streams = streams
         self.gets = gets
+        self.statuses = statuses or [(500, None)]
         self.stream_opens = 0
         self.get_calls = 0
+        self.status_calls = 0
+        self.posts = 0
+
+    def _stream(self, header, request_id):
+        # Fail instead of hanging when the client never stops re-attaching.
+        assert self.stream_opens < self._MAX_STREAMS, (
+            'the client kept re-attaching to the request')
+        body = self.streams[min(self.stream_opens, len(self.streams) - 1)]
+        self.stream_opens += 1
+        response = mock.MagicMock()
+        response.status_code = 200
+        response.headers = {header: request_id}
+        response.iter_content.return_value = [body.encode('utf-8')]
+        return response
 
     def request(self, method, path, **kwargs):
         del method, kwargs
-        response = mock.MagicMock()
         if path == '/api/stream':
-            # Fail instead of hanging when the client never stops re-attaching.
-            assert self.stream_opens < self._MAX_STREAMS, (
-                'the client kept re-attaching to the request')
-            body = self.streams[min(self.stream_opens, len(self.streams) - 1)]
-            self.stream_opens += 1
-            response.status_code = 200
-            response.headers = {
-                server_constants.STREAM_REQUEST_HEADER: 'test-request-id'
-            }
-            response.iter_content.return_value = [body.encode('utf-8')]
+            return self._stream(server_constants.STREAM_REQUEST_HEADER,
+                                'test-request-id')
+        if path == '/logs':
+            self.posts += 1
+            return self._stream('X-Skypilot-Request-ID',
+                                f'logs-request-{self.posts}')
+        response = mock.MagicMock()
+        if path == '/api/status':
+            status, payload = self.statuses[min(self.status_calls,
+                                                len(self.statuses) - 1)]
+            self.status_calls += 1
+            response.status_code = status
+            response.json.return_value = payload
+            if status != 200:
+                response.raise_for_status.side_effect = (
+                    requests.exceptions.HTTPError(response=response))
             return response
         assert path.startswith('/api/get'), path
         status, payload = self.gets[min(self.get_calls, len(self.gets) - 1)]
@@ -1591,9 +1613,13 @@ class _FakeServer:
         return response
 
 
-def _request_payload(status, should_retry=False, error=None, return_value=None):
+def _request_payload(status,
+                     should_retry=False,
+                     error=None,
+                     return_value=None,
+                     request_id='test-request-id'):
     """A request as /api/get encodes it."""
-    request = requests_lib.Request(request_id='test-request-id',
+    request = requests_lib.Request(request_id=request_id,
                                    name='test-request',
                                    entrypoint=_request_entrypoint,
                                    request_body=payloads.RequestBody(),
@@ -1616,10 +1642,18 @@ _RETRY = message_utils.encode_payload(
     rich_utils.Control.RETRY.encode('')) + '\n'
 
 
+def _serve(server):
+    """Point the SDK at ``server``, as a running local API server."""
+    return mock.patch.multiple(
+        'sky.server.common',
+        check_server_healthy_or_start_fn=mock.DEFAULT,
+        make_authenticated_request=mock.MagicMock(side_effect=server.request))
+
+
 def _stream_and_get(server):
-    with mock.patch('sky.server.common.check_server_healthy_or_start_fn'), \
-            mock.patch('sky.server.common.make_authenticated_request',
-                       side_effect=server.request), \
+    with _serve(server), \
+            mock.patch('sky.client.sdk._local_api_server_running',
+                       return_value=True), \
             mock.patch('time.sleep'):
         return client_sdk.stream_and_get('test-request-id',
                                          output_stream=io.StringIO())
@@ -1652,33 +1686,94 @@ def test_stream_and_get_stops_on_a_request_a_restart_cancelled():
 
 
 def test_stream_and_get_retries_when_the_stream_asks_for_it():
-    """A RETRY payload in the stream still re-attaches (rolling update)."""
+    """A RETRY for a request that still runs re-attaches (rolling update)."""
+    running = _request_payload(requests_lib.RequestStatus.RUNNING)
     done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
                             return_value='launched')
     server = _FakeServer(streams=['Line 0\n' + _RETRY, _REPLAYED_LOG],
-                         gets=[(200, done)])
+                         gets=[(200, done)],
+                         statuses=[(200, [running])])
+
+    assert _stream_and_get(server) == 'launched'
+    assert server.stream_opens == 2
+    assert server.status_calls == 1
+
+
+def test_stream_and_get_retries_when_the_status_cannot_be_read():
+    """Without a status to go by, a RETRY re-attaches as before.
+
+    A 4xx, so that the failed status read is not itself retried as transient.
+    """
+    done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
+                            return_value='launched')
+    server = _FakeServer(streams=['Line 0\n' + _RETRY, _REPLAYED_LOG],
+                         gets=[(200, done)],
+                         statuses=[(400, None)])
 
     assert _stream_and_get(server) == 'launched'
     assert server.stream_opens == 2
 
 
-def test_stream_and_get_retries_a_request_marked_should_retry():
-    """An interrupted request with ``should_retry`` True is still retried.
+def test_stream_and_get_stops_on_a_retry_for_a_request_to_resubmit():
+    """A RETRY for a request a restart cancelled ends the follow at once.
 
-    The logs requests are interrupted this way: their callers re-submit them
-    on retry, so the error must stay retryable.
+    A graceful restart cancels some requests with ``should_retry`` True (the
+    log tails), and their stream asks the client to retry. The log tails
+    re-submit; ``stream_and_get`` can only re-attach to the same request, which
+    asks for a retry again, and the replayed log counts as progress, so it
+    re-attached for as long as the request existed.
     """
+    cancelled = _request_payload(requests_lib.RequestStatus.CANCELLED,
+                                 should_retry=True)
+    server = _FakeServer(streams=[_REPLAYED_LOG + _RETRY],
+                         gets=[(500, None)],
+                         statuses=[(200, [cancelled])])
+
+    with pytest.raises(exceptions.RequestNotResumedError) as e:
+        _stream_and_get(server)
+
+    assert 'Please re-submit the original request' in str(e.value)
+    assert server.stream_opens == 1
+    assert server.status_calls == 1
+    assert server.get_calls == 0
+
+
+def test_stream_and_get_stops_when_get_reports_a_request_to_resubmit():
+    """Same, when the stream ends and ``get`` raises the stored error."""
     interrupted = _request_payload(
         requests_lib.RequestStatus.CANCELLED,
         should_retry=True,
         error=exceptions.RequestInterruptedError(_INTERRUPTED))
-    done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
-                            return_value='done')
+    cancelled = _request_payload(requests_lib.RequestStatus.CANCELLED,
+                                 should_retry=True)
     server = _FakeServer(streams=[_REPLAYED_LOG],
-                         gets=[(500, interrupted), (200, done)])
+                         gets=[(500, interrupted)],
+                         statuses=[(200, [cancelled])])
 
-    assert _stream_and_get(server) == 'done'
-    assert server.stream_opens == 2
+    with pytest.raises(exceptions.RequestNotResumedError):
+        _stream_and_get(server)
+
+    assert server.stream_opens == 1
+    assert server.get_calls == 1
+
+
+def test_tail_logs_resubmits_after_a_retry():
+    """A log tail asked to retry submits a new request and follows that one."""
+    done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
+                            return_value=0,
+                            request_id='logs-request-2')
+    server = _FakeServer(streams=['Line 0\n' + _RETRY, _REPLAYED_LOG],
+                         gets=[(200, done)])
+
+    with _serve(server), mock.patch('time.sleep'):
+        exit_code = client_sdk.tail_logs('test-cluster',
+                                         job_id=1,
+                                         follow=True,
+                                         output_stream=io.StringIO())
+
+    assert exit_code == 0
+    assert server.posts == 2
+    assert server.status_calls == 0
 
 
 @pytest.mark.parametrize('should_retry,expected', [
