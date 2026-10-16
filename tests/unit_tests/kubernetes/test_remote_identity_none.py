@@ -19,6 +19,7 @@ from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.clouds import kubernetes as kubernetes_cloud
 from sky.provision.azure import config as azure_config
+from sky.provision.gcp import config as gcp_config
 from sky.provision.kubernetes import config as kubernetes_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -645,7 +646,7 @@ class TestSchema:
 
     def test_enum_clouds_do_not(self):
         with pytest.raises(exceptions.InvalidSkyPilotConfigError):
-            common_utils.validate_schema({'gcp': {
+            common_utils.validate_schema({'nebius': {
                 'remote_identity': _NONE
             }}, schemas.get_config_schema(), 'err: ')
 
@@ -653,3 +654,10 @@ class TestSchema:
         # pylint: disable=protected-access
         assert azure_config._resolve_custom_managed_identity(
             _NONE, 'sub', 'rg').endswith('/userAssignedIdentities/NONE')
+
+    def test_gcp_keeps_reading_it_as_a_service_account_name(self):
+        # pylint: disable=protected-access
+        config = mock.MagicMock(provider_config={'remote_identity': _NONE},
+                                node_config={'machineType': 'n2-standard-8'})
+        iam_role = gcp_config._configure_iam_role(config, None, None)
+        assert iam_role['serviceAccounts'][0]['email'] == _NONE
