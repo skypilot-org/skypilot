@@ -1818,8 +1818,13 @@ async def validate(validate_body: payloads.ValidateBody,
         # The id below is stored as a user, so reject a malformed one.
         user_id = validate_body.env_vars.get(constants.USER_ID_ENV_VAR)
         if not common_utils.is_valid_user_hash(user_id):
-            raise exceptions.InvalidUserIdError(
-                f'Invalid user id: {user_id!r}.')
+            e = exceptions.InvalidUserIdError(f'Invalid user id: {user_id!r}.')
+            # Serialize it as the except block below does, so the client
+            # deserializes it to the same error rather than a plain string.
+            requests_lib.set_exception_stacktrace(e)
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=exceptions.serialize_exception(e)) from e
     validate_body.client_api_version = versions.get_remote_api_version()
     validate_body.workspace_access = workspace_access.for_current_request()
     # TODO(aylei): generalize this to all requests without a db record.

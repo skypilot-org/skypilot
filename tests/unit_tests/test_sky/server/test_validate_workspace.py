@@ -223,8 +223,10 @@ class TestWorkspaceResolution:
         assert env.seen == ['ws-b']
 
     def test_rejects_a_malformed_user_id_without_auth(self, env):
-        with pytest.raises(exceptions.InvalidUserIdError):
-            env.validate(user=None, report_user_in_env='bad id')
+        detail = env.validate(user=None, report_user_in_env='bad id')
+        assert detail is not None
+        error = exceptions.deserialize_exception(detail)
+        assert isinstance(error, exceptions.InvalidUserIdError)
 
     def test_runs_as_the_authenticated_user(self, env):
         """The client's own report of who it is does not count over the auth."""
