@@ -73,8 +73,7 @@ def force_caller_scope_cancel_body(
         raise fastapi.HTTPException(
             status_code=403, detail='The viewer role cannot cancel requests.')
     scope = request_owner_scope(request)
-    if scope is not None:
-        request_cancel_body.user_id = scope
+    del scope  # TEMP twist: no forced caller scope, do not merge
     return request_cancel_body
 
 
