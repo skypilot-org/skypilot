@@ -88,6 +88,11 @@ def canonicalize_accelerator_name(accelerator: str,
     if cloud is not None:
         cloud_str = str(cloud)
 
+    # RunPod calls its H200 offering H200-SXM. Keep the provider alias explicit:
+    # suffixes on other devices can denote a different GPU architecture.
+    if cloud_str == 'RunPod' and accelerator.lower() == 'h200':
+        return 'H200-SXM'
+
     # TPU names are always lowercase.
     if accelerator.lower().startswith('tpu-'):
         return accelerator.lower()

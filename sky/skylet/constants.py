@@ -677,6 +677,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('ssh', 'pod_config'),
     ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
+    ('kubernetes', 'namespace'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
@@ -695,6 +696,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
+    ('runpod', 'allowed_cuda_versions'),
+    ('modal', 'deadline'),
     ('slurm', 'sbatch_options'),
     ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),
@@ -986,7 +989,8 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'modal',
+              'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

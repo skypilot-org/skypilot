@@ -136,7 +136,7 @@
                 "requests": {
                   "cpu": 4,
                   "google.com/tpu": 4,
-                  "memory": "16G"
+                  "memory": "16Gi"
                 }
               },
               "volumeMounts": [

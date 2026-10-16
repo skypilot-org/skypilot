@@ -1,9 +1,39 @@
 """Unit tests for sky/client/common.py."""
+import hashlib
 import os
 import re
+import zipfile
+
+import pytest
 
 from sky.client.common import _compute_zip_blob_id
 from sky.data import storage_utils
+
+
+@pytest.mark.parametrize(('left', 'right', 'same'), [
+    ((3, 0o100644), (3, 0o100755), False),
+    ((3, 0o100644), (3, 0o100600), False),
+    ((3, 0o100000), (3, 0), False),
+    ((3, 0), (0, 0), True),
+    ((0, 0o100644), (0, 0o100755), True),
+    ((3, 0o100755), (3, 0o107755), True),
+    ((3, 0o120777), (3, 0o100777), False),
+    ((3, 0o120777), (3, 0o120700), True),
+])
+def test_blob_id_extraction_metadata(tmp_path, left, right, same):
+    hashes = []
+    for index, (creator, mode) in enumerate((left, right)):
+        path = str(tmp_path / f'{index}.zip')
+        member = zipfile.ZipInfo('data',
+                                 date_time=(2026, 1, 1 + index, 0, 0, 0))
+        member.create_system = creator
+        member.external_attr = (mode << 16) | 0x20
+        with zipfile.ZipFile(path, 'w') as bundle:
+            bundle.writestr(member, b'payload')
+        hashes.append(_compute_zip_blob_id(path))
+    assert (hashes[0] == hashes[1]) == same
+    legacy = hashlib.sha256(b'data' + hashlib.sha256(b'payload').digest())
+    assert all(value != legacy.hexdigest() for value in hashes)
 
 
 def test_blob_id_determinism(tmp_path):

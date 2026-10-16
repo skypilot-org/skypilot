@@ -1305,13 +1305,11 @@ def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
     # remote server to one less than THAT requirement (51) so the gate
     # fires; pinning to `API_VERSION - 1` is brittle and silently no-ops
     # if anyone bumps API_VERSION (then API_VERSION - 1 >= 52 and the
-    # decorator passes through, breaking this test). Combine the
-    # function-level monkeypatch (so the decorator sees the pinned
-    # value) with an explicit ContextVar reset in `finally` — the outer
-    # ``check_server_healthy`` decorator runs first and otherwise calls
-    # ``set_remote_api_version`` with a real int that would persist
-    # into subsequent tests in the same xdist worker.
+    # decorator passes through, breaking this test). Stub the outer health
+    # check so reaching the version gate does not require a running server.
     monkeypatch.setattr(versions, 'get_remote_api_version', lambda: 51)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
     try:
         with pytest.raises(exceptions.APINotSupportedError) as excinfo:
             sdk.tail_hook_logs(cluster_name='ignored')

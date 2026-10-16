@@ -1,12 +1,15 @@
 """ RunPod Cloud. """
 
 from importlib import util as import_lib_util
+import math
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import exceptions
+from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -194,7 +197,7 @@ class RunPod(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> Dict[str, Any]:
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
@@ -219,8 +222,6 @@ class RunPod(clouds.Cloud):
 
         instance_type = resources.instance_type
         use_spot = resources.use_spot
-        hourly_cost = self.instance_type_to_hourly_cost(
-            instance_type=instance_type, use_spot=use_spot)
 
         gpu_count = list(acc_dict.values())[0] if acc_dict is not None else 1
 
@@ -229,7 +230,49 @@ class RunPod(clouds.Cloud):
                                       if resources.docker_username_for_runpod
                                       is not None else 'root')
 
+        gpu_requirements = {}
+        if acc_dict:
+            # Keep catalog initialization lazy, as in other cloud adapters.
+            # pylint: disable=import-outside-toplevel
+            from sky.catalog import runpod_catalog
+            cpus, memory_gb = runpod_catalog.get_native_gpu_host_resources(
+                instance_type)
+            if any(value is None or not math.isfinite(value) or value <= 0
+                   for value in (cpus, memory_gb)):
+                raise ValueError(f'RunPod GPU instance {instance_type} must '
+                                 'have known positive CPU and host RAM sizes.')
+            assert cpus is not None and memory_gb is not None
+            # Preserve the provider-native floor. The catalog separately uses
+            # a conservative GiB view when matching Sky memory requirements.
+            gpu_requirements = {
+                'min_vcpu_count': math.ceil(cpus),
+                'min_memory_in_gb': math.ceil(memory_gb),
+                'allowed_cuda_versions': skypilot_config.get_nested(
+                    ('runpod', 'allowed_cuda_versions'),
+                    default_value=None,
+                    override_configs=resources.cluster_config_overrides),
+            }
+            # pylint: disable-next=protected-access
+            hourly_cost = runpod_catalog._current_hourly_cost(
+                instance_type, use_spot, region.name)
+            if (not math.isfinite(hourly_cost) or
+                (resources.max_hourly_cost is not None and
+                 hourly_cost > resources.max_hourly_cost)):
+                raise exceptions.ResourcesUnavailableError(
+                    'No current RunPod host quote meets the '
+                    'selected CPU and memory minima.')
+            # The sized catalog identity retains minima; the provider accepts
+            # the underlying GPU type plus the explicit CPU/RAM floors.
+            instance_type = instance_type.split('--', 1)[0]
+
+        else:
+            hourly_cost = self.instance_type_to_hourly_cost(
+                instance_type=instance_type,
+                use_spot=use_spot,
+                region=region.name)
+
         return {
+            **gpu_requirements,
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
@@ -246,6 +289,18 @@ class RunPod(clouds.Cloud):
         """Returns a list of feasible resources for the given resources."""
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            if '--' in resources.instance_type:
+                # pylint: disable=import-outside-toplevel
+                from sky.catalog import runpod_catalog
+
+                # pylint: disable-next=protected-access
+                price = runpod_catalog._current_hourly_cost(
+                    resources.instance_type, resources.use_spot,
+                    resources.region)
+                if (not math.isfinite(price) or
+                    (resources.max_hourly_cost is not None and
+                     price > resources.max_hourly_cost)):
+                    return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources], [], None)
 
@@ -290,6 +345,7 @@ class RunPod(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             memory=resources.memory,
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,

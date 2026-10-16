@@ -1076,6 +1076,18 @@ tests:
           content:
             name: logrotate
 
+  - it: should make logrotate sidecar exit promptly on pod termination
+    set:
+      apiService.serveServerLog: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[1].args[0]
+          pattern: "trap 'exit 0' TERM INT"
+      - matchRegex:
+          path: spec.template.spec.containers[1].args[0]
+          pattern: 'wait "\$!"'
+
   - it: should not include logrotate sidecar when serveServerLog is false
     set:
       apiService.serveServerLog: false

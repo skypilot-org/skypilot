@@ -100,11 +100,39 @@ def apply_and_use_config_in_current_request(
     original_config = skypilot_config.resolved_config()
     dag, mutated_config = apply(entrypoint, request_name, request_options,
                                 at_client_side)
-    if mutated_config != original_config:
-        with skypilot_config.replace_skypilot_config(mutated_config):
-            yield dag
-    else:
+    with contextlib.ExitStack() as stack:
+        if mutated_config != original_config:
+            stack.enter_context(
+                skypilot_config.replace_skypilot_config(mutated_config))
         yield dag
+
+
+def _validate_task_namespaces(dag: 'dag_lib.Dag', config: config_utils.Config,
+                              has_policy: bool) -> None:
+    # Validate before handing config to controllers, which strip admin_policy.
+    # Use the returned config without changing the caller's loaded config.
+    with skypilot_config.replace_skypilot_config_in_process(config):
+        for task in dag.tasks:
+            for resource in task.resources:
+                namespace = resource.cluster_config_overrides.get(
+                    'kubernetes', {}).get('namespace')
+                if namespace is None:
+                    continue
+                cloud = (repr(resource.cloud).lower()
+                         if resource.cloud is not None else 'unspecified')
+                skypilot_config.get_effective_namespace(
+                    cloud,
+                    region=resource.region,
+                    override_configs=resource.cluster_config_overrides)
+                # Policy-returned namespaces are authoritative even when the
+                # policy kept an existing value. A value comparison cannot
+                # distinguish an intentional pin from an unrelated mutation.
+                pinned = skypilot_config.get_effective_namespace(
+                    'kubernetes', region=resource.region)
+                if has_policy and pinned is not None and namespace != pinned:
+                    raise exceptions.UserRequestRejectedByPolicy(
+                        f'Task Kubernetes namespace {namespace!r} conflicts '
+                        f'with admin policy namespace {pinned!r}.')
 
 
 def apply(
@@ -138,7 +166,9 @@ def apply(
     policy_location = skypilot_config.get_nested(('admin_policy',), None)
     policy = _get_policy_impl(policy_location)
     if policy is None:
-        return dag, skypilot_config.resolved_config()
+        config = skypilot_config.resolved_config()
+        _validate_task_namespaces(dag, config, has_policy=False)
+        return dag, config
 
     user = None
     client_api_version = None
@@ -228,4 +258,5 @@ def apply(
                                 config_utils.redact_sensitive_values(
                                     mutated_user_request.skypilot_config))))
     mutated_dag.policy_applied = True
+    _validate_task_namespaces(mutated_dag, mutated_config, has_policy=True)
     return mutated_dag, mutated_config
