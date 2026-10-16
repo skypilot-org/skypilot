@@ -232,8 +232,11 @@ def _get_kubernetes_hint(reason: str,
     if '{dashboard_url}' in hint:
         try:
             starting_page = (f'infra/{context}' if context else 'infra')
-            dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=starting_page)
+            # Substituted into a user-facing hint, so mask any basic-auth
+            # password in the URL.
+            dashboard_url = server_common.redact_url_password(
+                server_common.get_dashboard_url(server_common.get_server_url(),
+                                                starting_page=starting_page))
         except Exception:  # pylint: disable=broad-except
             dashboard_url = 'the SkyPilot dashboard infra page'
         hint = hint.replace('{dashboard_url}', dashboard_url)
