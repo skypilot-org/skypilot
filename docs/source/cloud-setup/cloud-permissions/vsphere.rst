@@ -21,14 +21,14 @@ The Categories and Tags is needed when using the vSphere provider, please follow
 .. image:: ../../images/screenshots/vsphere/vsphere-catagory-create_navigate.png
     :width: 80%
     :align: center
-    :alt: vSphere Catagory Creation Navigate
+    :alt: vSphere Category Creation Navigate
 
 3. Click **Tags** -> **CATEGORIES** -> **NEW**.
 
 .. image:: ../../images/screenshots/vsphere/vsphere-catagory-create_navigate_new.png
     :width: 80%
     :align: center
-    :alt: vSphere Catagory Creation Navigate New
+    :alt: vSphere Category Creation Navigate New
 
 4. Fill in the **Create Category** form with follow content:
 
@@ -41,7 +41,7 @@ The Categories and Tags is needed when using the vSphere provider, please follow
 .. image:: ../../images/screenshots/vsphere/vsphere-catagory-create.png
     :width: 80%
     :align: center
-    :alt: vSphere Catagory Creation
+    :alt: vSphere Category Creation
 
 5. Click the **CREATE** to finish the creation.
 
@@ -54,14 +54,14 @@ The Categories and Tags is needed when using the vSphere provider, please follow
 .. image:: ../../images/screenshots/vsphere/vsphere-catagory-create_navigate.png
     :width: 80%
     :align: center
-    :alt: vSphere Catagory Creation Navigate
+    :alt: vSphere Category Creation Navigate
 
 3. Click **Tags** -> **TAGS** -> **NEW**.
 
 .. image:: ../../images/screenshots/vsphere/vsphere-tags-create_navigate.png
     :width: 80%
     :align: center
-    :alt: vSphere Catagory Creation Navigate
+    :alt: vSphere Category Creation Navigate
 
 4. Fill in the **Create Tag** form with follow content:
 
