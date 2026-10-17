@@ -123,7 +123,7 @@ def test_multi_tenant(generic_cloud: str):
                 [
                     f'sky down -y -a',
                     # STOPPED or UP based on whether we run the stop_test_cmds.
-                    f'sky status -u | grep {name}-1 | grep "STOPPED\|UP"',
+                    f'sky status -u | grep {name}-1 | grep "STOPPED\\|UP"',
                     # Current user's clusters should be down'ed.
                     f'sky status -u | grep {name}-2 && exit 1 || true',
                     # Explicit cluster name should delete the cluster.
