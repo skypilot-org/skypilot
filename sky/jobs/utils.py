@@ -1610,6 +1610,7 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 # gRPC (the legacy codegen path does the same on the controller itself, keyed
 # on MANAGED_JOBS_VERSION).
 _JOB_FIELDS_BY_MIN_CONTROLLER_VERSION = {
+    34: frozenset({'cluster_name_on_cloud'}),
     41: frozenset({'root_job_id', 'parent_job_id', 'parent_task_id'}),
     42: frozenset({'dynamic_task_index'}),
 }
@@ -4624,6 +4625,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out cluster_name_on_cloud for older controllers (< 16). It
+        # arrived partway through version 15, so drop it for all of 15.
+        if managed_job_version < 16 and _fields is not None:
+            _fields = [f for f in _fields if f != 'cluster_name_on_cloud']
         # Filter out batch fields for older controllers (< 18)
         _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
         if managed_job_version < 18 and _fields is not None:

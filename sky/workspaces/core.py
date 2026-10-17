@@ -50,6 +50,9 @@ class WorkspaceConfigComparison:
         additive_allowed_contexts: True if the only non-user-access change is an
             additive kubernetes.allowed_contexts change (old contexts remain a
             subset of the new contexts)
+        narrowed_allowed_contexts: The new kubernetes.allowed_contexts list if
+            the only non-user-access change drops one or more contexts (list
+            -> smaller list, or 'all' -> list); None otherwise.
     """
     only_user_access_changes: bool
     private_changed: bool
@@ -61,6 +64,7 @@ class WorkspaceConfigComparison:
     removed_users: List[str]
     added_users: List[str]
     additive_allowed_contexts: bool = False
+    narrowed_allowed_contexts: Optional[List[str]] = None
 
 
 # =========================
@@ -267,6 +271,28 @@ def _is_additive_contexts(current_allowed_contexts: Any,
     return False
 
 
+def _narrowed_contexts(current_allowed_contexts: Any,
+                       new_allowed_contexts: Any) -> Optional[List[str]]:
+    """Return the new contexts if allowed_contexts dropped a context.
+
+    Narrowing cases:
+    - list -> list where some old context is missing from the new contexts.
+    - 'all' -> list.
+
+    Changes to or from an absent/None value are not narrowing, since the
+    effective contexts then come from the global config. Returns None when
+    the change is not narrowing.
+    """
+    if not isinstance(new_allowed_contexts, list):
+        return None
+    if current_allowed_contexts == 'all':
+        return list(new_allowed_contexts)
+    if (isinstance(current_allowed_contexts, list) and
+            not set(current_allowed_contexts).issubset(new_allowed_contexts)):
+        return list(new_allowed_contexts)
+    return None
+
+
 def _compare_workspace_configs(
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
@@ -335,9 +361,13 @@ def _compare_workspace_configs(
         _extract_k8s_allowed_contexts(current_without_access))
     new_without_contexts, new_allowed_contexts = (
         _extract_k8s_allowed_contexts(new_without_access))
-    additive_allowed_contexts = (
-        current_without_contexts == new_without_contexts and
-        _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+    only_contexts_changed = current_without_contexts == new_without_contexts
+    additive_allowed_contexts = (only_contexts_changed and
+                                 _is_additive_contexts(current_allowed_contexts,
+                                                       new_allowed_contexts))
+    narrowed_allowed_contexts = (_narrowed_contexts(current_allowed_contexts,
+                                                    new_allowed_contexts)
+                                 if only_contexts_changed else None)
 
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,
@@ -349,7 +379,8 @@ def _compare_workspace_configs(
         allowed_users_new=allowed_users_new,
         removed_users=removed_users,
         added_users=added_users,
-        additive_allowed_contexts=additive_allowed_contexts)
+        additive_allowed_contexts=additive_allowed_contexts,
+        narrowed_allowed_contexts=narrowed_allowed_contexts)
 
 
 def _validate_workspace_config_changes_with_lock(
@@ -388,7 +419,9 @@ def _validate_workspace_config_changes(
 
     This function implements the logic:
     - If only allowed_users or private changed, or the only non-user-access
-      change is an additive kubernetes.allowed_contexts change:
+      change is to kubernetes.allowed_contexts:
+      - If contexts were dropped: check that no active resources run on a
+        dropped context
       - If private changed from true to false: allow it
       - If private changed from false to true: check that all active resources
         belong to allowed_users
@@ -399,6 +432,8 @@ def _validate_workspace_config_changes(
     Additive kubernetes.allowed_contexts changes (old contexts remain a subset
     of the new contexts) are safe because every existing context stays allowed,
     so running clusters and jobs keep resolving to a still-allowed context.
+    Narrowing changes only need the resources on dropped contexts to be gone,
+    so an unused context can be removed while the workspace stays in use.
 
     Args:
         workspace_name: The name of the workspace.
@@ -421,10 +456,18 @@ def _validate_workspace_config_changes(
                                                    resolver=resolver)
 
     if (config_comparison.only_user_access_changes or
-            config_comparison.additive_allowed_contexts):
-        # Only user access settings changed, and/or allowed_contexts grew
-        # additively. Both are safe for active resources; still run the
-        # user-access validation below (a no-op when only contexts changed).
+            config_comparison.additive_allowed_contexts or
+            config_comparison.narrowed_allowed_contexts is not None):
+        # Only user access settings changed, and/or only allowed_contexts
+        # changed. Still run the user-access validation below (a no-op when
+        # only contexts changed).
+        if config_comparison.narrowed_allowed_contexts is not None:
+            logger.info(
+                f'Workspace {workspace_name!r} drops Kubernetes '
+                'allowed_contexts. Checking that no active resources run on '
+                'a dropped context.')
+            resource_checker.check_no_active_resources_outside_contexts(
+                workspace_name, config_comparison.narrowed_allowed_contexts)
         if config_comparison.additive_allowed_contexts:
             logger.info(
                 f'Workspace {workspace_name!r} only adds Kubernetes '

@@ -8,9 +8,19 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
+
+# Managed job statuses whose placement is not settled: the job may still
+# launch, or relaunch, on any context the workspace allows.
+_UNPLACED_JOB_STATUSES = frozenset({
+    managed_job_state.ManagedJobStatus.PENDING,
+    managed_job_state.ManagedJobStatus.DEPRECATED_SUBMITTED,
+    managed_job_state.ManagedJobStatus.STARTING,
+    managed_job_state.ManagedJobStatus.RECOVERING,
+})
 
 
 def check_no_active_resources_for_users(
@@ -58,6 +68,104 @@ def check_no_active_resources_for_workspaces(
                             'workspace')
 
 
+def check_no_active_resources_outside_contexts(
+        workspace_name: str, allowed_contexts: List[str]) -> None:
+    """Check that a workspace has no active resources on dropped contexts.
+
+    Used when a workspace's kubernetes.allowed_contexts is narrowed. Clusters
+    and managed jobs on other clouds, or on a Kubernetes context that stays
+    allowed, do not block the change. Resources whose cloud or context is not
+    settled (e.g. clusters still provisioning, jobs pending, starting or
+    recovering) are treated as blocking, since they may end up on a dropped
+    context. Finished tasks block only while their cluster still exists.
+
+    Args:
+        workspace_name: The workspace being updated.
+        allowed_contexts: The new kubernetes.allowed_contexts list.
+
+    Raises:
+        ValueError: If any active cluster or managed job in the workspace runs,
+            or may run, on a Kubernetes context outside allowed_contexts.
+    """
+    allowed = set(allowed_contexts)
+
+    def may_use_dropped_context(cloud: Optional[str],
+                                region: Optional[str]) -> bool:
+        if cloud is None or cloud in ('', '-'):
+            return True
+        if cloud.lower() != 'kubernetes':
+            return False
+        return region is None or region == '-' or region not in allowed
+
+    blocking_clusters = []
+    for cluster in global_user_state.get_clusters(
+            exclude_managed_clusters=True, workspaces_filter={workspace_name}):
+        # The handle is None while provisioning, and LocalDockerResourceHandle
+        # has no launched_resources.
+        launched = getattr(cluster.get('handle'), 'launched_resources', None)
+        if launched is None:
+            blocking_clusters.append(cluster['name'])
+            continue
+        cloud = str(launched.cloud) if launched.cloud is not None else None
+        if may_use_dropped_context(cloud, launched.region):
+            blocking_clusters.append(cluster['name'])
+
+    blocking_jobs: List[str] = []
+    seen_job_ids: Set[str] = set()
+    for job in _get_active_managed_jobs(fields=[
+            'job_id', 'workspace', 'status', 'cloud', 'region',
+            'cluster_name_on_cloud'
+    ]):
+        if job.get('workspace',
+                   constants.SKYPILOT_DEFAULT_WORKSPACE) != workspace_name:
+            continue
+        job_id = str(job['job_id'])
+        if job_id in seen_job_ids:
+            continue
+        status = job.get('status')
+        if status in _UNPLACED_JOB_STATUSES:
+            # The queue reports the last persisted placement, which says
+            # nothing about where the next launch or recovery lands.
+            blocks = True
+        elif (status is not None and status.is_terminal() and
+              not job.get('cluster_name_on_cloud')):
+            # A partially finished pipeline returns all of its task rows. The
+            # queue only reports a cluster name while the task's cluster
+            # exists, so this finished task no longer runs anywhere.
+            continue
+        else:
+            blocks = may_use_dropped_context(job.get('cloud'),
+                                             job.get('region'))
+        if blocks:
+            seen_job_ids.add(job_id)
+            blocking_jobs.append(job_id)
+
+    if blocking_clusters or blocking_jobs:
+        summary = _summarize_active_resources(blocking_clusters, blocking_jobs)
+        raise ValueError(
+            f'Cannot update workspace {workspace_name!r} because it has '
+            f'{summary} that run, or may run, on a Kubernetes context '
+            f'outside the new allowed_contexts {allowed_contexts!r}. '
+            'Please terminate these resources first.')
+
+
+def _summarize_active_resources(cluster_names: List[str],
+                                job_ids: List[str]) -> str:
+    """Describe active clusters and managed jobs for an error message.
+
+    Returns e.g. '2 active cluster(s): a, b and 1 active managed job(s): 3'.
+    Empty lists are left out.
+    """
+    parts = []
+    if cluster_names:
+        parts.append(f'{len(cluster_names)} active cluster(s): '
+                     f'{", ".join(cluster_names)}')
+    if job_ids:
+        parts.append(f'{len(job_ids)} active managed job(s): '
+                     f'{", ".join(job_ids)}')
+    return ' and '.join(parts)
+
+
 def _check_active_resources(resource_operations: List[Tuple[str, str]],
                             filter_factory: Callable[[str],
                                                      Callable[[Dict[str, Any]],
@@ -95,27 +203,11 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
             job for job in all_managed_jobs if resource_filter(job)
         ]
 
-        # Collect error messages for this resource
-        resource_errors = []
-
-        if resource_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in resource_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            resource_errors.append(
-                f'{len(resource_clusters)} active cluster(s): {cluster_list}')
-
-        if resource_active_jobs:
-            job_names = [str(job['job_id']) for job in resource_active_jobs]
-            job_list = ', '.join(job_names)
-            resource_errors.append(
-                f'{len(resource_active_jobs)} active managed job(s): '
-                f'{job_list}')
-
         # If this resource has issues, add to overall error messages
-        if resource_errors:
-            resource_error_summary = ' and '.join(resource_errors)
+        if resource_clusters or resource_active_jobs:
+            resource_error_summary = _summarize_active_resources(
+                [cluster['name'] for cluster in resource_clusters],
+                [str(job['job_id']) for job in resource_active_jobs])
             if resource_type == 'user':
                 # resource_name is user_id
                 user_info = global_user_state.get_user(resource_name)
@@ -540,18 +632,8 @@ def _get_active_resources(
         return global_user_state.get_clusters(exclude_managed_clusters=True)
 
     def get_all_managed_jobs() -> List[Dict[str, Any]]:
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.server import core as managed_jobs_core
-        try:
-            filtered_jobs, _, _, _, _ = managed_jobs_core.queue_v2(
-                refresh=False,
-                skip_finished=True,
-                all_users=True,
-                fields=['job_id', 'user_hash', 'workspace'])
-            return filtered_jobs
-        except exceptions.ClusterNotUpError:
-            logger.warning('All jobs should be finished.')
-            return []
+        return _get_active_managed_jobs(
+            fields=['job_id', 'user_hash', 'workspace'])
 
     # Fetch both clusters and jobs in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -562,3 +644,18 @@ def _get_active_resources(
         all_managed_jobs = jobs_future.result()
 
     return all_clusters, all_managed_jobs
+
+
+def _get_active_managed_jobs(fields: List[str]) -> List[Dict[str, Any]]:
+    """Get all unfinished managed jobs with the given fields."""
+    # Circular import: sky.jobs.server.core imports sky.workspaces.core,
+    # which imports this module.
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs.server import core as managed_jobs_core
+    try:
+        filtered_jobs, _, _, _, _ = managed_jobs_core.queue_v2(
+            refresh=False, skip_finished=True, all_users=True, fields=fields)
+        return filtered_jobs
+    except exceptions.ClusterNotUpError:
+        logger.warning('All jobs should be finished.')
+        return []
