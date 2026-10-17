@@ -478,7 +478,7 @@ last setting takes precedence.
 ### `sky.cost_report`
 
 ```python
-sky.cost_report(days: Optional[int] = None) -> server_common.RequestId[List[Dict[str, Any]]]
+sky.cost_report(days: Optional[int] = constants.COST_REPORT_DEFAULT_DAYS) -> server_common.RequestId[List[Dict[str, Any]]]
 ```
 
 Gets all cluster cost reports, including those that have been downed.
@@ -492,7 +492,7 @@ autostop/use_spot set or terminated/stopped on the cloud console.
 
 **Args:**
     days: The number of days to get the cost report for. If not provided,
-        the default is 30 days.
+        the default is 30 days. None means no time limit.
 
 **Returns:**
     The request ID of the cost report request.
