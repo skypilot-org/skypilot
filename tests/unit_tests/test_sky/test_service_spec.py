@@ -3,6 +3,7 @@ import pickle
 
 import pytest
 
+from sky.serve import autoscalers
 from sky.serve import constants as serve_constants
 from sky.serve import service_spec
 
@@ -266,3 +267,49 @@ class TestLoadBalancerConfiguration:
         assert (config['readiness_probe']
                 ['consecutive_failure_threshold_timeout'] == 45)
         assert config['load_balancer']['stream_timeout_seconds'] == 240
+
+
+class TestInstanceAwareTargetQps:
+    """Per-accelerator target_qps_per_replica keys."""
+
+    @staticmethod
+    def _config(target_qps):
+        return {
+            'readiness_probe': '/',
+            'replica_policy': {
+                'min_replicas': 1,
+                'max_replicas': 3,
+                'target_qps_per_replica': target_qps,
+            },
+            'load_balancing_policy': 'instance_aware_least_load',
+        }
+
+    @pytest.mark.parametrize('key', [
+        'A100-80GB', 'A100-80GB:1', 'V100-32GB:2', 'A100-80GB-SXM:8', 'H100',
+        'H100:1', 'A10G'
+    ])
+    def test_accelerator_names_accepted(self, key):
+        spec = service_spec.SkyServiceSpec.from_yaml_config(
+            self._config({key: 2.0}))
+        assert spec.target_qps_per_replica == {key: 2.0}
+        round_trip = service_spec.SkyServiceSpec.from_yaml_config(
+            spec.to_yaml_config())
+        assert round_trip.target_qps_per_replica == {key: 2.0}
+
+    @pytest.mark.parametrize('key', ['A100-80GB:', 'A100-80GB:x', '-A100'])
+    def test_malformed_keys_rejected(self, key):
+        with pytest.raises(ValueError):
+            service_spec.SkyServiceSpec.from_yaml_config(
+                self._config({key: 2.0}))
+
+    def test_hyphenated_key_sets_its_target(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config(
+            self._config({
+                'A100-80GB:1': 9.0,
+                'L4:1': 1.0
+            }))
+        scaler = autoscalers.InstanceAwareRequestRateAutoscaler('svc', spec)
+        get_target = scaler._get_target_qps_for_gpu_type  # pylint: disable=protected-access
+        assert get_target('A100-80GB') == 9.0
+        # An unlisted GPU keeps the existing fallback to the smallest target.
+        assert get_target('H100') == 1.0
