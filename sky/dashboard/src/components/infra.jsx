@@ -1302,6 +1302,9 @@ export function ContextDetails({
   // State for filtering controls
   const [availableHosts, setAvailableHosts] = useState([]);
   const [selectedHosts, setSelectedHosts] = useState('$__all');
+  useEffect(() => {
+    setSelectedHosts('$__all');
+  }, [contextName]);
   const [timeRange, setTimeRange] = useState({
     from: 'now-1h',
     to: 'now',
@@ -1714,11 +1717,10 @@ export function ContextDetails({
             </div>
           )}
 
-          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools or Slurm */}
+          {/* GPU Metrics Section - show for Kubernetes contexts and SSH node pools */}
           {isGrafanaAvailable &&
             gpusInContext &&
             gpusInContext.length > 0 &&
-            !isSSHContext &&
             !isSlurm && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
@@ -1916,7 +1918,7 @@ export function ContextDetails({
 }
 
 // SSH Node Pool Details component
-function SSHNodePoolDetails({
+export function SSHNodePoolDetails({
   poolName,
   gpusInContext,
   nodesInContext,
@@ -1924,6 +1926,7 @@ function SSHNodePoolDetails({
   handleEditSSHPool,
   handleDeleteSSHPool,
   poolConfig,
+  gpuMetricsRefreshTrigger = 0,
 }) {
   const [statusData, setStatusData] = useState(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -2336,6 +2339,7 @@ function SSHNodePoolDetails({
         contextName={`ssh-${poolName}`}
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
       />
 
       {/* Confirmation Dialog */}
@@ -3810,6 +3814,7 @@ export function GPUs() {
           handleEditSSHPool={handleEditSSHPool}
           handleDeleteSSHPool={handleDeleteSSHPool}
           poolConfig={sshNodePools[poolName]}
+          gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         />
       );
     }
