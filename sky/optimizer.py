@@ -1134,29 +1134,30 @@ class Optimizer:
                         cloud_launchables[res.cloud].append(res)
 
             if dag.inter_connection is True:
-                # In-group networking is only supported on Kubernetes, so
-                # explicitly requiring it constrains this task's
-                # candidates to Kubernetes before the common-infra
-                # intersection below ever sees other clouds.
-                kubernetes_launchables: _PerCloudCandidates = (
+                # Explicitly requiring in-group networking constrains this
+                # task's candidates to clouds that support it before the
+                # common-infra intersection below ever sees other clouds.
+                supported_launchables: _PerCloudCandidates = (
                     collections.defaultdict(
                         list, {
                             cloud: res_list
                             for cloud, res_list in cloud_launchables.items()
-                            if str(cloud).lower() == 'kubernetes'
+                            if cloud.supports_job_group_networking()
                         }))
-                if not any(kubernetes_launchables.values()):
+                if not any(supported_launchables.values()):
                     # Pure feasibility: user-ask contradictions (pins
-                    # excluding Kubernetes) were already rejected by
-                    # _validate_inter_connection_pins before placement.
+                    # excluding every supported cloud) were already
+                    # rejected by _validate_inter_connection_pins before
+                    # placement.
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             f'Job Group "{dag.name}" sets '
                             '`inter_connection: true`, which requires '
-                            'in-group networking, only supported on '
-                            f'Kubernetes, but job "{task.name}" has no '
-                            'feasible Kubernetes placement.')
-                cloud_launchables = kubernetes_launchables
+                            f'in-group networking, but job "{task.name}" '
+                            'has no feasible placement with in-group '
+                            'networking support (supported on: '
+                            f'{_job_group_networking_clouds_str()}).')
+                cloud_launchables = supported_launchables
 
             task_launchables[task] = cloud_launchables
 
@@ -1194,19 +1195,20 @@ class Optimizer:
             minimize == common.OptimizeTarget.COST)
 
         if (dag.inter_connection is None and
-                str(best_infra[0]).lower() != 'kubernetes'):
-            # In-group networking is only supported on Kubernetes, and the
-            # group is placed elsewhere. Explicit `inter_connection: true`
-            # can never get here (its candidates are filtered to
-            # Kubernetes above); unset degrades to no networking, with a
-            # warning. Persist the degradation so downstream consumers
-            # (the jobs controller) skip all networking machinery.
+                not best_infra[0].supports_job_group_networking()):
+            # The group is placed on a cloud without in-group networking
+            # support. Explicit `inter_connection: true` can never get
+            # here (its candidates are filtered to supported clouds
+            # above); unset degrades to no networking, with a warning.
+            # Persist the degradation so downstream consumers (the jobs
+            # controller) skip all networking machinery.
             logger.warning(
                 f'Job group "{dag.name}" is placed on {best_infra[0]}; '
                 'in-group service discovery (hostname-based networking) '
-                'is only supported on Kubernetes, so tasks cannot reach '
-                'each other by hostname. Set `inter_connection: false` '
-                'to silence this warning.')
+                f'is not supported on {best_infra[0]} (supported on: '
+                f'{_job_group_networking_clouds_str()}), so tasks cannot '
+                'reach each other by hostname. Set `inter_connection: '
+                'false` to silence this warning.')
             dag.inter_connection = False
 
         if not quiet:
@@ -1803,6 +1805,29 @@ def _get_task_pin_sets(
     return cloud_pins, infra_pins
 
 
+def _cloud_name_supports_job_group_networking(cloud_name: str) -> bool:
+    """Whether the cloud named in an infra pin supports in-group networking.
+
+    Unknown names resolve to False.
+    """
+    try:
+        cloud = registry.CLOUD_REGISTRY.from_str(cloud_name)
+    except ValueError:
+        return False
+    if cloud is None:
+        return False
+    return cloud.supports_job_group_networking()
+
+
+def _job_group_networking_clouds_str() -> str:
+    """Comma-separated names of the clouds with in-group networking support."""
+    return ', '.join(
+        sorted(
+            str(cloud)
+            for cloud in registry.CLOUD_REGISTRY.values()
+            if cloud.supports_job_group_networking()))
+
+
 def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
     """Validate a JobGroup's infra pins against its inter_connection.
 
@@ -1812,9 +1837,8 @@ def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
     the common-infra search.
 
     Checks, in order:
-    - `inter_connection: true` + a job whose options pin only
-      non-Kubernetes clouds: contradiction (in-group networking is only
-      supported on Kubernetes) -> error.
+    - `inter_connection: true` + a job whose options pin only clouds
+      without in-group networking support: contradiction -> error.
     - Pinned jobs share no common infra option, at cloud or cloud/region
       granularity: the placement is deliberately cross-infra, so the
       common-infra search can never succeed. Error when networking is
@@ -1826,9 +1850,10 @@ def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
         job must be placed independently; False when the common-infra
         search should run.
     """
-    # Gather everything first -- each job's pins, any job pinned off
-    # Kubernetes, and whether the pins conflict -- then branch on the
-    # inter_connection value exactly once per case below.
+    # Gather everything first -- each job's pins, any job pinned only to
+    # clouds without in-group networking support, and whether the pins
+    # conflict -- then branch on the inter_connection value exactly once
+    # per case below.
     pinned_task_clouds: Dict[str, Set[str]] = {}
     pinned_task_infras: Dict[str, Set[str]] = {}
     for task in dag.tasks:
@@ -1838,12 +1863,14 @@ def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
         if infra_pins is not None:
             pinned_task_infras[str(task.name)] = infra_pins
 
-    # First job whose options pin only non-Kubernetes clouds, if any
-    # (in-group networking is Kubernetes-only).
-    non_k8s_pin: Optional[Tuple[str, Set[str]]] = next(
+    # First job whose options pin only clouds without in-group networking
+    # support, if any.
+    unsupported_pin: Optional[Tuple[str, Set[str]]] = next(
         ((task_name, cloud_pins)
          for task_name, cloud_pins in pinned_task_clouds.items()
-         if not any(cloud.lower() == 'kubernetes' for cloud in cloud_pins)),
+         if not any(
+             _cloud_name_supports_job_group_networking(cloud)
+             for cloud in cloud_pins)),
         None)
 
     clouds_conflict = (len(pinned_task_clouds) > 1 and
@@ -1861,20 +1888,21 @@ def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
                               for name, pins in conflicting_pins.items())
 
     if dag.inter_connection is True:
-        # Explicitly required networking: both a non-Kubernetes pin and
-        # conflicting pins are user-ask contradictions -> error.
-        if non_k8s_pin is not None:
-            task_name, cloud_pins = non_k8s_pin
+        # Explicitly required networking: both an unsupported-cloud pin
+        # and conflicting pins are user-ask contradictions -> error.
+        if unsupported_pin is not None:
+            task_name, cloud_pins = unsupported_pin
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'Job Group "{dag.name}" sets '
                     '`inter_connection: true`, which requires '
-                    'in-group networking, only supported on '
-                    f'Kubernetes, but job "{task_name}" pins '
-                    f'non-Kubernetes infra ({sorted(cloud_pins)}). '
-                    'Remove the non-Kubernetes infra pins, or set '
-                    '`inter_connection: false` if the jobs do not '
-                    'need to reach each other by hostname.')
+                    f'in-group networking, but job "{task_name}" pins '
+                    'infra without in-group networking support '
+                    f'({sorted(cloud_pins)}; supported on: '
+                    f'{_job_group_networking_clouds_str()}). Remove '
+                    'those infra pins, or set `inter_connection: false` '
+                    'if the jobs do not need to reach each other by '
+                    'hostname.')
         if pins_conflict:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(

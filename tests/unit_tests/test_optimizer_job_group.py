@@ -481,6 +481,7 @@ class TestInterConnectionPlacement:
         cloud.__repr__ = MagicMock(return_value='Kubernetes')
         cloud.__hash__ = MagicMock(return_value=hash('Kubernetes'))
         cloud.__eq__ = lambda self, other: str(other) == 'Kubernetes'
+        cloud.supports_job_group_networking.return_value = True
         return cloud
 
     @pytest.fixture
@@ -490,6 +491,18 @@ class TestInterConnectionPlacement:
         cloud.__repr__ = MagicMock(return_value='AWS')
         cloud.__hash__ = MagicMock(return_value=hash('AWS'))
         cloud.__eq__ = lambda self, other: str(other) == 'AWS'
+        cloud.supports_job_group_networking.return_value = True
+        return cloud
+
+    @pytest.fixture
+    def mock_azure_cloud(self):
+        # A cloud without in-group networking support.
+        cloud = MagicMock(spec=clouds.Azure)
+        cloud.__str__ = MagicMock(return_value='Azure')
+        cloud.__repr__ = MagicMock(return_value='Azure')
+        cloud.__hash__ = MagicMock(return_value=hash('Azure'))
+        cloud.__eq__ = lambda self, other: str(other) == 'Azure'
+        cloud.supports_job_group_networking.return_value = False
         return cloud
 
     def _make_resources(self, cloud, region, cost=1.0):
@@ -514,12 +527,40 @@ class TestInterConnectionPlacement:
         task.name = name
         task.resources = resources if resources is not None else []
         task.estimate_runtime = MagicMock(return_value=3600)
+        task.time_estimator_func = MagicMock()
         task.num_nodes = 1
         return task
 
-    def test_required_filters_candidates_to_kubernetes(self, mock_k8s_cloud,
-                                                       mock_aws_cloud):
-        """inter_connection: true places on k8s even when AWS is cheaper."""
+    def test_required_filters_candidates_to_supported_clouds(
+            self, mock_k8s_cloud, mock_azure_cloud):
+        """inter_connection: true places on a cloud with in-group
+        networking support even when an unsupported cloud is cheaper."""
+        k8s_res = self._make_resources(mock_k8s_cloud, 'ctx-a', cost=5.0)
+        azure_res = self._make_resources(mock_azure_cloud, 'eastus', cost=1.0)
+
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [k8s_res, azure_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        # Azure is cheaper but must not be chosen: no networking support.
+        assert task1.best_resources == k8s_res
+        assert task2.best_resources == k8s_res
+
+    def test_required_picks_cheaper_vm_cloud_when_supported(
+            self, mock_k8s_cloud, mock_aws_cloud):
+        """inter_connection: true may land on a VM cloud that supports
+        in-group networking; cost decides between supported clouds."""
         k8s_res = self._make_resources(mock_k8s_cloud, 'ctx-a', cost=5.0)
         aws_res = self._make_resources(mock_aws_cloud, 'us-east-1', cost=1.0)
 
@@ -538,18 +579,19 @@ class TestInterConnectionPlacement:
                 blocked_resources=None,
                 quiet=True)
 
-        # AWS is cheaper but must not be chosen: networking requires k8s.
-        assert task1.best_resources == k8s_res
-        assert task2.best_resources == k8s_res
+        assert task1.best_resources == aws_res
+        assert task2.best_resources == aws_res
+        assert dag.inter_connection is True
 
-    def test_required_no_kubernetes_candidates_raises(self, mock_aws_cloud):
-        """inter_connection: true with no feasible k8s placement errors."""
-        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
+    def test_required_no_supported_candidates_raises(self, mock_azure_cloud):
+        """inter_connection: true with no feasible placement on a cloud
+        with in-group networking support errors."""
+        azure_res = self._make_resources(mock_azure_cloud, 'eastus')
         task = self._make_task('task-1')
         dag = self._make_dag([task], inter_connection=True)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [aws_res]}, None, None, None)
+            return ({'any': [azure_res]}, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -560,21 +602,24 @@ class TestInterConnectionPlacement:
                     minimize=common.OptimizeTarget.COST,
                     blocked_resources=None,
                     quiet=True)
-        assert 'no feasible Kubernetes placement' in str(exc_info.value)
+        assert ('no feasible placement with in-group networking support'
+                in str(exc_info.value))
 
-    def test_required_non_k8s_pin_error_names_pins(self, mock_aws_cloud):
-        """Explicit true + a job pinning only non-k8s infra: rejected by
-        the spec-level pin validation, before any catalog work, with an
-        error naming the contradicting pins."""
-        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
-        task = self._make_task('task-1', [aws_res])
+    def test_required_unsupported_pin_error_names_pins(self,
+                                                       mock_azure_cloud):
+        """Explicit true + a job pinning only infra without in-group
+        networking support: rejected by the spec-level pin validation,
+        before any catalog work, with an error naming the pins."""
+        azure_res = self._make_resources(mock_azure_cloud, 'eastus')
+        task = self._make_task('task-1', [azure_res])
         dag = self._make_dag([task], inter_connection=True)
 
         # No catalog mocking: the contradiction is knowable from the
         # spec alone and must be rejected before placement runs.
         with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'pins non-Kubernetes infra' in str(exc_info.value)
+        assert ('pins infra without in-group networking support'
+                in str(exc_info.value))
         assert 'task-1' in str(exc_info.value)
 
     def test_enabled_no_common_infra_raises(self, mock_k8s_cloud):
@@ -601,13 +646,15 @@ class TestInterConnectionPlacement:
         assert 'No single infrastructure' in str(exc_info.value)
         assert 'inter_connection: false' in str(exc_info.value)
 
-    def test_unset_placed_off_kubernetes_degrades(self, mock_aws_cloud):
-        """Unset group whose best common infra is non-k8s: warn + degrade.
+    def test_unset_placed_on_unsupported_cloud_degrades(self,
+                                                        mock_azure_cloud):
+        """Unset group whose best common infra has no in-group networking
+        support: warn + degrade.
 
         The degradation is persisted on the dag so the controller (which
         reads the serialized dag) skips all networking machinery.
         """
-        res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        res = self._make_resources(mock_azure_cloud, 'eastus')
         task1 = self._make_task('task-1')
         task2 = self._make_task('task-2')
         dag = self._make_dag([task1, task2], inter_connection=None)
@@ -624,6 +671,30 @@ class TestInterConnectionPlacement:
                 quiet=True)
 
         assert dag.inter_connection is False
+        assert task1.best_resources == res
+        assert task2.best_resources == res
+
+    def test_unset_placed_on_supported_vm_cloud_keeps_networking(
+            self, mock_aws_cloud):
+        """Unset group placed on a VM cloud with in-group networking
+        support keeps networking enabled (no degradation)."""
+        res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=None)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert dag.inter_connection is None
         assert task1.best_resources == res
         assert task2.best_resources == res
 
@@ -749,6 +820,14 @@ class TestValidateInterConnectionPins:
         cloud.__str__ = MagicMock(return_value='AWS')
         return cloud
 
+    @pytest.fixture
+    def azure(self):
+        # Pins are validated by cloud name against the real cloud
+        # registry; Azure has no in-group networking support.
+        cloud = MagicMock(spec=clouds.Azure)
+        cloud.__str__ = MagicMock(return_value='Azure')
+        return cloud
+
     def _res(self, cloud, region):
         res = MagicMock(spec=resources_lib.Resources)
         res.cloud = cloud
@@ -776,16 +855,25 @@ class TestValidateInterConnectionPins:
         dag = self._dag({'a': [(None, None)], 'b': [(None, None)]}, None)
         assert self._validate(dag) is False
 
-    def test_true_with_non_k8s_pin_raises(self, aws):
-        dag = self._dag({'a': [(aws, 'us-east-1')]}, True)
-        with pytest.raises(exceptions.ResourcesUnavailableError,
-                           match='pins non-Kubernetes infra'):
+    def test_true_with_unsupported_pin_raises(self, azure):
+        dag = self._dag({'a': [(azure, 'eastus')]}, True)
+        with pytest.raises(
+                exceptions.ResourcesUnavailableError,
+                match='pins infra without in-group networking support'):
             self._validate(dag)
 
-    def test_unset_with_non_k8s_pin_alone_is_fine(self, aws):
-        """A lone non-k8s pin with unset is not a conflict; degradation
-        (if the group lands off k8s) happens later, at placement."""
-        dag = self._dag({'a': [(aws, 'us-east-1')], 'b': [(None, None)]}, None)
+    def test_true_with_aws_pin_is_fine(self, aws):
+        """AWS supports in-group networking, so pinning it with explicit
+        true is not a contradiction."""
+        dag = self._dag({'a': [(aws, 'us-east-1')]}, True)
+        assert self._validate(dag) is False
+        assert dag.inter_connection is True
+
+    def test_unset_with_unsupported_pin_alone_is_fine(self, azure):
+        """A lone unsupported-cloud pin with unset is not a conflict;
+        degradation (if the group lands there) happens later, at
+        placement."""
+        dag = self._dag({'a': [(azure, 'eastus')], 'b': [(None, None)]}, None)
         assert self._validate(dag) is False
         assert dag.inter_connection is None
 

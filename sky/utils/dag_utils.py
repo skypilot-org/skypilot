@@ -645,9 +645,10 @@ def _load_job_group(
                     f'termination_delay must be a string, int, or dict, '
                     f'got {type(termination_delay).__name__}')
 
-    # Parse and validate inter_connection. Semantic validation (e.g.
-    # non-Kubernetes pins contradicting `inter_connection: true`) lives in
-    # the optimizer, the choke point every launch passes through.
+    # Parse and validate inter_connection. Semantic validation (e.g. pins
+    # on infra without in-group networking support contradicting
+    # `inter_connection: true`) lives in the optimizer, the choke point
+    # every launch passes through.
     inter_connection = header.get('inter_connection')
     if inter_connection is not None:
         if not isinstance(inter_connection, bool):
