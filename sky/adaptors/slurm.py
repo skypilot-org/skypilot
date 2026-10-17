@@ -31,6 +31,9 @@ _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
 _BATCH_OUTPUT_HEADER = 'SKYPILOT_SLURM_BATCH\n'
+# Printed ahead of each login-node command so that whatever the login shell
+# prints first (profile.d banners, module-system notices) can be dropped.
+_OUTPUT_START_MARKER = 'SKYPILOT_SLURM_OUTPUT_START'
 _JOB_STEP_ID_REGEX = re.compile(r'(?:^|\s)StepId=(\S+)')
 _JOB_STEP_NAME_REGEX = re.compile(r'(?:^|\s)Name=(\S+)')
 _JOB_STEP_NOT_FOUND_REGEX = re.compile(
@@ -308,6 +311,8 @@ class SlurmClient:
         self.ssh_proxy_jump = ssh_proxy_jump
 
         self._runner: command_runner.CommandRunner
+        # Only the SSH runner goes through a login shell.
+        self._strip_login_shell_output = not is_inside_slurm_cluster
 
         if is_inside_slurm_cluster:
             # Local execution mode - for running on the Slurm cluster itself
@@ -360,18 +365,32 @@ class SlurmClient:
     def _run_slurm_cmd(self,
                        cmd: Union[str, List[str]],
                        timeout: Optional[int] = None) -> Tuple[int, str, str]:
+        if self._strip_login_shell_output:
+            # The login shell may print to stdout before the command runs
+            # (profile.d banners, module-system notices), which would be
+            # parsed as command output. Print a marker first and drop
+            # everything up to it.
+            if isinstance(cmd, list):
+                cmd = self._command_as_user(cmd)
+            cmd = f'echo {_OUTPUT_START_MARKER}\n{cmd}'
         # Forward `timeout` only when set so the existing callers keep the
         # runner's default (unbounded) invocation unchanged.
         if timeout is None:
-            return self._runner.run(cmd,
-                                    require_outputs=True,
-                                    separate_stderr=True,
-                                    stream_logs=False)
-        return self._runner.run(cmd,
-                                require_outputs=True,
-                                separate_stderr=True,
-                                stream_logs=False,
-                                timeout=timeout)
+            rc, stdout, stderr = self._runner.run(cmd,
+                                                  require_outputs=True,
+                                                  separate_stderr=True,
+                                                  stream_logs=False)
+        else:
+            rc, stdout, stderr = self._runner.run(cmd,
+                                                  require_outputs=True,
+                                                  separate_stderr=True,
+                                                  stream_logs=False,
+                                                  timeout=timeout)
+        if self._strip_login_shell_output:
+            _, found, rest = stdout.partition(_OUTPUT_START_MARKER + '\n')
+            if found:
+                stdout = rest
+        return rc, stdout, stderr
 
     def _run_slurm_cmds(
             self,
