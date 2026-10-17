@@ -22,6 +22,7 @@ from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.skylet import constants as skylet_constants
 
 
 def dummy():
@@ -2485,3 +2486,25 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_by_id_cancels_system_request(isolated_database):
+    """An admin's cancel of a named request (user_id=None) reaches one the
+    server scheduled itself; a user scope does not."""
+    await requests.create_if_not_exists_async(
+        requests.Request(request_id='kill-system-1',
+                         name='sky.launch',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=0.0,
+                         pid=None,
+                         user_id=skylet_constants.SKYPILOT_SYSTEM_USER_ID))
+    assert requests.kill_requests(request_ids=['kill-system-1'],
+                                  user_id='alice') == []
+    assert requests.get_request('kill-system-1').status == RequestStatus.RUNNING
+    assert requests.kill_requests(request_ids=['kill-system-1'],
+                                  user_id=None) == ['kill-system-1']
+    assert requests.get_request(
+        'kill-system-1').status == RequestStatus.CANCELLED
