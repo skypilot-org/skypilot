@@ -1047,3 +1047,80 @@ class TestProvisionExistingClusterError:
                 self._provision(status_lib.ClusterStatus.INIT, **error)
         optimize.assert_called_once()
         assert not e.value.no_failover
+
+
+class TestRetryZonesPriorRecord:
+    """_retry_zones tells bulk_provision whether the record existed before.
+
+    The record itself is written on every attempt, before bulk_provision
+    runs, so only the status read before this launch can say whether an
+    earlier launch may have left resources under the same name.
+    """
+
+    @pytest.mark.parametrize('prev_status',
+                             [None, status_lib.ClusterStatus.INIT])
+    def test_passes_prev_cluster_exists(self, monkeypatch, tmp_path,
+                                        prev_status):
+        retrying = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
+        retrying.log_dir = str(tmp_path)
+        retrying._blocked_resources = set()  # pylint: disable=protected-access
+        retrying._local_wheel_path = '/fake/wheel'  # pylint: disable=protected-access
+        retrying._wheel_hash = 'hash'  # pylint: disable=protected-access
+        retrying._extra_launch_context = None  # pylint: disable=protected-access
+        retrying._is_launched_by_jobs_controller = False  # pylint: disable=protected-access
+        retrying._is_managed = False  # pylint: disable=protected-access
+        monkeypatch.setattr(retrying, '_yield_zones',
+                            lambda *args, **kwargs: iter([None]))
+
+        to_provision = MagicMock()
+        # `assert_*` names are reserved on a plain MagicMock.
+        setattr(to_provision, 'assert_launchable', lambda: to_provision)
+        to_provision.region = 'r'
+        cloud = to_provision.cloud
+        cloud.PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+        cloud.OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
+        cloud.yield_cloud_specific_failover_overrides.return_value = [None]
+
+        monkeypatch.setattr(cloud_vm_ray_backend.provision_lib,
+                            'get_registered_provisioner', lambda _: None)
+        monkeypatch.setattr(cloud_vm_ray_backend,
+                            '_get_cluster_config_template', lambda _: 't.j2')
+        monkeypatch.setattr(
+            backend_utils, 'write_cluster_config',
+            MagicMock(
+                return_value={
+                    'ray': str(tmp_path / 'c.yml'),
+                    'cluster_name_on_cloud': 'c-on-cloud',
+                }))
+        monkeypatch.setattr(cloud_vm_ray_backend, 'CloudVmRayResourceHandle',
+                            MagicMock())
+        for name in ('add_or_update_cluster', 'add_cluster_event',
+                     'set_owner_identity_for_cluster'):
+            monkeypatch.setattr(cloud_vm_ray_backend.global_user_state, name,
+                                MagicMock())
+        monkeypatch.setattr(cloud_vm_ray_backend.CloudVmRayBackend,
+                            'post_teardown_cleanup', MagicMock())
+        refused = exceptions.ProvisionUnsupportedError('refused')
+        bulk_provision = MagicMock(side_effect=refused)
+        monkeypatch.setattr(cloud_vm_ray_backend.provisioner, 'bulk_provision',
+                            bulk_provision)
+
+        with pytest.raises(exceptions.ProvisionUnsupportedError):
+            retrying._retry_zones(  # pylint: disable=protected-access
+                to_provision,
+                1,
+                requested_resources=set(),
+                dryrun=False,
+                stream_logs=False,
+                cluster_name='c1',
+                cloud_user_identity=None,
+                prev_cluster_status=prev_status,
+                prev_handle=None,
+                prev_cluster_ever_up=False,
+                skip_if_config_hash_matches=None,
+                volume_mounts=None,
+                task=MagicMock())
+
+        bulk_provision.assert_called_once()
+        assert bulk_provision.call_args.kwargs['prev_cluster_exists'] is (
+            prev_status is not None)

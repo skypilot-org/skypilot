@@ -48,6 +48,29 @@ def test_terminate_cluster_retry_on_value_error(mock_set_internal,
     assert mock_set_internal.call_count == 3
 
 
+@mock.patch('sky.jobs.utils.time.sleep')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_failure_names_the_cause(mock_set_internal,
+                                                   mock_sky_down,
+                                                   mock_sleep) -> None:
+    """The final error says why the teardown failed, not only that it did."""
+    del mock_set_internal, mock_sleep
+    # Command errors color their text for terminals; the job's failure reason
+    # should not carry the escape codes.
+    cause = RuntimeError('\x1b[31mFailed to query Slurm jobs.\x1b[0m\n'
+                         'sudo: a password is required')
+    mock_sky_down.side_effect = cause
+
+    with pytest.raises(RuntimeError) as e:
+        utils.terminate_cluster('test-cluster', max_retry=2)
+
+    assert str(e.value) == ('Failed to terminate the cluster test-cluster: '
+                            'RuntimeError: Failed to query Slurm jobs.\n'
+                            'sudo: a password is required')
+    assert e.value.__cause__ is cause
+
+
 @mock.patch('sky.core.down')
 @mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
 def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,

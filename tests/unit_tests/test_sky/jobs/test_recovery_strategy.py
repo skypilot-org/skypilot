@@ -1234,3 +1234,26 @@ def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
         with metrics_utils._launch_retry_kinds_lock:
             metrics_utils._launch_retry_kinds.clear()
             metrics_utils._launch_retry_kinds.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_refused_launch_fails_prechecks_on_first_launch(monkeypatch):
+    """A history with only non-capacity failures fails the job at once.
+
+    Pins existing behavior that the Slurm submit-account refusal relies on: the
+    refusal is recorded as a ProvisionUnsupportedError, and with no capacity
+    failure in the history the first launch ends FAILED_PRECHECKS with the
+    provider's reason instead of retrying.
+    """
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    refused = exceptions.ProvisionUnsupportedError(
+        "Cannot submit to Slurm cluster 'c' as Unix user 'alice'. "
+        'sudo: a password is required')
+    unavailable = exceptions.ResourcesUnavailableError(
+        'all failed', failover_history=[refused])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[unavailable])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None, raise_on_failure=True)
+    assert list(e.value.reasons) == [refused]
