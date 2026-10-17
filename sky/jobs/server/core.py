@@ -963,6 +963,46 @@ def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
 
 
 @timeline.event
+
+def _check_job_group_networking_placement(dag: 'sky.Dag') -> None:
+    """Post-optimization invariant for Job Groups with networking enabled.
+
+    A group that still has in-group networking enabled (inter_connection
+    unset or true) was placed by the same-infra path, which pins every
+    job to one cloud that supports in-group networking: unset degrades to
+    False in the optimizer when placed on an unsupported cloud, and
+    explicit true only ever gets supported candidates. Heterogeneous
+    placements only arise via independent placement, which always
+    carries inter_connection == False.
+
+    Raises:
+        RuntimeError: if the placement violates the invariant.
+    """
+    if dag.inter_connection is False:
+        return
+    best_clouds = {
+        task_.best_resources.cloud
+        for task_ in dag.tasks
+        if task_.best_resources is not None and
+        task_.best_resources.cloud is not None
+    }
+    best_cloud_names = sorted(str(cloud) for cloud in best_clouds)
+    if (len(best_cloud_names) > 1 or
+            not all(cloud.supports_job_group_networking()
+                    for cloud in best_clouds)):
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Internal error: Job Group {dag.name!r} requires '
+                'in-group networking (inter_connection is enabled), '
+                'which requires all jobs on a single infrastructure that '
+                'supports in-group networking, but the optimizer placed '
+                f'it on {best_cloud_names}. This is likely a SkyPilot '
+                'bug; please report it at '
+                'https://github.com/skypilot-org/skypilot/issues. '
+                'Set \'inter_connection: false\' '
+                'in the job group header if the jobs do not need '
+                'to reach each other by hostname.')
+
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -1109,35 +1149,7 @@ def _launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
-        # Post-optimization invariant: a group that still has in-group
-        # networking enabled (inter_connection unset or true) was placed
-        # by the same-infra path, which pins every job to one cloud (and
-        # to Kubernetes: unset degrades to False in the optimizer when
-        # placed elsewhere, and explicit true only ever gets Kubernetes
-        # candidates). Heterogeneous placements only arise via
-        # independent placement, which always carries
-        # inter_connection == False.
-        if dag.inter_connection is not False:
-            best_clouds = {
-                str(task_.best_resources.cloud)
-                for task_ in dag.tasks
-                if task_.best_resources is not None and
-                task_.best_resources.cloud is not None
-            }
-            if (len(best_clouds) > 1 or not all(cloud.lower() == 'kubernetes'
-                                                for cloud in best_clouds)):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Internal error: Job Group {dag.name!r} requires '
-                        'in-group networking (inter_connection is enabled), '
-                        'which is only supported on a single Kubernetes '
-                        'cluster, but the optimizer placed it on '
-                        f'{sorted(best_clouds)}. This is likely a SkyPilot '
-                        'bug; please report it at '
-                        'https://github.com/skypilot-org/skypilot/issues. '
-                        'Set \'inter_connection: false\' '
-                        'in the job group header if the jobs do not need '
-                        'to reach each other by hostname.')
+        _check_job_group_networking_placement(dag)
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this

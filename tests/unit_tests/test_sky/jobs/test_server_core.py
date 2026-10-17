@@ -333,3 +333,51 @@ class TestCancelTaskArgument:
             with pytest.raises(jobs_core.exceptions.NotSupportedError,
                                match='consolidation mode'):
                 jobs_core.cancel(job_ids=[39], task=2)
+
+
+class TestJobGroupNetworkingInvariant:
+    """_check_job_group_networking_placement: a group with in-group
+    networking enabled must sit on a single cloud that supports it."""
+
+    def _cloud(self, name, supports):
+        cloud = mock.MagicMock()
+        cloud.__str__ = mock.MagicMock(return_value=name)
+        cloud.supports_job_group_networking.return_value = supports
+        return cloud
+
+    def _dag(self, clouds_, inter_connection):
+        dag = mock.MagicMock()
+        dag.name = 'g'
+        dag.inter_connection = inter_connection
+        tasks = []
+        for cloud in clouds_:
+            task = mock.MagicMock()
+            task.best_resources = mock.MagicMock()
+            task.best_resources.cloud = cloud
+            tasks.append(task)
+        dag.tasks = tasks
+        return dag
+
+    def test_accepts_single_supported_cloud(self):
+        aws = self._cloud('AWS', True)
+        jobs_core._check_job_group_networking_placement(
+            self._dag([aws, aws], None))
+
+    def test_rejects_unsupported_cloud(self):
+        azure = self._cloud('Azure', False)
+        with pytest.raises(RuntimeError, match='Internal error'):
+            jobs_core._check_job_group_networking_placement(
+                self._dag([azure, azure], True))
+
+    def test_rejects_mixed_clouds(self):
+        aws = self._cloud('AWS', True)
+        k8s = self._cloud('Kubernetes', True)
+        with pytest.raises(RuntimeError, match='Internal error'):
+            jobs_core._check_job_group_networking_placement(
+                self._dag([aws, k8s], None))
+
+    def test_skips_when_inter_connection_false(self):
+        azure = self._cloud('Azure', False)
+        k8s = self._cloud('Kubernetes', True)
+        jobs_core._check_job_group_networking_placement(
+            self._dag([azure, k8s], False))
