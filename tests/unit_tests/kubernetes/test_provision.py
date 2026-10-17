@@ -1096,6 +1096,38 @@ def test_get_pvc_binding_status_pending_pvc(monkeypatch):
     assert 'test-namespace' in result
 
 
+def test_raise_pod_scheduling_errors_real_pod(monkeypatch):
+    """Generated models must preserve the scheduler's failure reason."""
+    pod = k8s_client.V1Pod(
+        metadata=k8s_client.V1ObjectMeta(name='pending-pod'),
+        spec=k8s_client.V1PodSpec(
+            containers=[k8s_client.V1Container(name='main', image='busybox')]),
+        status=k8s_client.V1PodStatus(phase='Pending'))
+    event_message = '0/1 nodes are available: 1 Insufficient nvidia.com/gpu.'
+    event = k8s_client.CoreV1Event(metadata=k8s_client.V1ObjectMeta(
+        name='scheduling-event',
+        creation_timestamp=datetime.datetime.now(datetime.timezone.utc)),
+                                   involved_object=k8s_client.V1ObjectReference(
+                                       name='pending-pod', kind='Pod'),
+                                   reason='FailedScheduling',
+                                   message=event_message)
+    core_api = mock.Mock()
+    core_api.read_namespaced_pod.return_value = pod
+    core_api.list_namespaced_event.return_value = k8s_client.CoreV1EventList(
+        items=[event])
+    monkeypatch.setattr(kubernetes, 'core_api', lambda *a, **k: core_api)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+
+    with pytest.raises(config_lib.KubernetesError,
+                       match='Insufficient nvidia.com/gpu'):
+        instance._raise_pod_scheduling_errors('default', 'test-context', [pod])
+
+    assert core_api.list_namespaced_event.call_args.kwargs[
+        'field_selector'] == (
+            'involvedObject.name=pending-pod,involvedObject.kind=Pod')
+
+
 def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
     """Test that _raise_pod_scheduling_errors surfaces PVC binding issues."""
     error_message = '0/3 nodes are available: 3 pod has unbound immediate PersistentVolumeClaims.'

@@ -811,7 +811,7 @@ def _raise_pod_scheduling_errors(
         # the error message from the pod that is already scheduled.
         if pod_status != 'Pending':
             continue
-        pod_name = pod._metadata._name  # pylint: disable=protected-access
+        pod_name = pod.metadata.name
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'
