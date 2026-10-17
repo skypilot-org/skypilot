@@ -33,6 +33,8 @@ class Shadeform(clouds.Cloud):
     multiple cloud providers.
     """
 
+    _REPR = 'Shadeform'
+
     # Shadeform doesn't have explicit cluster name limits, but conservative
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
 
