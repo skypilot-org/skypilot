@@ -281,6 +281,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
+    'ionet': [],  # No dependencies needed for ionet
 }
 
 # Calculate which clouds should be included in the [all] installation.

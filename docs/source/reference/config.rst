@@ -277,6 +277,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
       env: "-e YOUR_CUSTOM=YOUR_VAL"
 
+  :ref:`ionet <config-yaml-ionet>`:
+    :ref:`duration_hours <config-yaml-ionet-duration-hours>`: 1
+
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
 
@@ -3323,6 +3326,27 @@ Example using a Vast template:
     create_instance_kwargs:
       template_hash_id: "abc123def456"
       price: 0.50
+
+.. _config-yaml-ionet:
+
+``ionet``
+~~~~~~~~~
+
+io.net configuration.
+
+.. _config-yaml-ionet-duration-hours:
+
+``ionet.duration_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Lifetime of each io.net VM in hours (positive integer, required to launch on
+io.net). io.net bills the VM for this duration, and the VM expires at the end
+of it. SkyPilot does not extend the reservation.
+
+.. code-block:: yaml
+
+  ionet:
+    duration_hours: 1
 
 .. _config-yaml-rbac:
 

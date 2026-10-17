@@ -1319,6 +1319,76 @@ Cudo Compute |community-badge|
 
 If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
+.. _ionet-setup:
+
+io.net |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+`io.net <https://io.net/>`_ provides GPU virtual machines through the `VMaaS API <https://io.net/docs/reference/vmaas/get-started-with-vmaas-api>`_. SkyPilot launches a single GPU VM with SSH access; stop/resume, autostop/autodown, multi-node clusters, and custom ports are not supported. Use ``sky down`` to release the VM. To configure io.net access:
+
+Install the necessary dependencies for io.net.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[ionet]"
+      # From nightly build
+      uv pip install "skypilot-nightly[ionet]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[ionet]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[ionet]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[ionet]"
+      # From nightly build
+      pip install "skypilot-nightly[ionet]"
+      # From source
+      pip install -e ".[ionet]"
+
+Create an API key in the `io.net Cloud <https://cloud.io.net/>`_ console (associated with the **IO Cloud** project) and make sure the account has sufficient credits. Then save it to :code:`~/.ionet/api_key`:
+
+.. code-block:: shell
+
+  mkdir -p ~/.ionet
+  echo "<your_api_key_here>" > ~/.ionet/api_key
+  chmod 600 ~/.ionet/api_key
+
+Alternatively, set the :code:`IONET_API_KEY` environment variable. Managed jobs and SkyServe need :code:`~/.ionet/api_key`, because only that file is uploaded to the controllers.
+
+io.net VMs are billed for a fixed lifetime. Set the number of hours in :code:`~/.sky/config.yaml` (see :ref:`config-yaml-ionet`):
+
+.. code-block:: yaml
+
+  ionet:
+    duration_hours: 1
+
+The VM expires when the duration ends, and SkyPilot does not extend the reservation.
+
+Verify that SkyPilot can access io.net:
+
+.. code-block:: shell
+
+  sky check ionet
+
 Shadeform |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

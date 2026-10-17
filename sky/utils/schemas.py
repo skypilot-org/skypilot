@@ -2508,7 +2508,18 @@ def get_config_schema():
                     }
                 }
             },
-        }
+        },
+        'ionet': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'duration_hours': {
+                    'type': 'integer',
+                    'minimum': 1,
+                },
+            },
+        },
     }
 
     admin_policy_schema = {
