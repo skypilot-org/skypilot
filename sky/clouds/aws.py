@@ -303,6 +303,7 @@ class AWS(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+    _SUPPORTS_JOB_GROUP_NETWORKING = True
 
     _regions: List[clouds.Region] = []
 
