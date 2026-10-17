@@ -326,3 +326,68 @@ class TestInjectEtcHosts:
         assert len(failures) == 1
         assert failures[0].task_name == 'job-a'
         assert 'command runners' in failures[0].reason
+
+
+class TestSshHostsInjection:
+    """SSH-cloud /etc/hosts injection is idempotent: every entry carries a
+    per-group marker, and a re-push (e.g. after recovery gave a peer a new
+    internal IP) replaces the group's previous entries instead of
+    appending a second, stale-first entry for the same hostname."""
+
+    def _mk_task(self, name):
+        task = MagicMock()
+        task.name = name
+        return task
+
+    def _mk_ssh_handle(self, ips):
+        handle = MagicMock()
+        handle.launched_resources.cloud.is_same_cloud.return_value = False
+        handle.stable_internal_external_ips = [(ip, f'pub-{ip}') for ip in ips]
+        return handle
+
+    def test_hosts_entries_carry_marker_per_line(self):
+        marker = job_group_networking._hosts_entry_marker('grp')
+        k8s_handle = MagicMock()
+        k8s_handle.launched_resources.cloud.is_same_cloud.return_value = True
+        content = job_group_networking._generate_hosts_entries(
+            'grp', [
+                (self._mk_task('a'), self._mk_ssh_handle(['10.0.0.1'])),
+                (self._mk_task('b'),
+                 self._mk_ssh_handle(['10.0.0.2', '10.0.0.3'])),
+                (self._mk_task('c'), k8s_handle),
+            ])
+        lines = [line for line in content.splitlines() if line.strip()]
+        assert len(lines) == 3
+        assert all(line.endswith(marker) for line in lines)
+        assert lines[0].startswith('10.0.0.1 a-0.grp')
+        assert lines[1].startswith('10.0.0.2 b-0.grp')
+        assert lines[2].startswith('10.0.0.3 b-1.grp')
+        assert 'c-0' not in content
+
+    def test_no_ssh_nodes_yields_empty_content(self):
+        k8s_handle = MagicMock()
+        k8s_handle.launched_resources.cloud.is_same_cloud.return_value = True
+        assert job_group_networking._generate_hosts_entries(
+            'grp', [(self._mk_task('c'), k8s_handle)]) == ''
+
+    @pytest.mark.asyncio
+    async def test_inject_command_replaces_previous_group_entries(self):
+        runner = MagicMock()
+        runner.run.return_value = (0, '', '')
+        marker = job_group_networking._hosts_entry_marker('grp')
+        ok = await job_group_networking._inject_hosts_on_node(
+            runner, f'10.0.0.9 a-0.grp  {marker}', 'grp')
+        assert ok is True
+        cmd = runner.run.call_args[0][0]
+        assert 'grep -v' in cmd and marker in cmd
+        assert 'tee /etc/hosts' in cmd
+        assert 'tee -a' not in cmd
+        assert job_group_networking.get_network_ready_marker_path('grp') in cmd
+
+    @pytest.mark.asyncio
+    async def test_inject_reports_failure_on_nonzero_exit(self):
+        runner = MagicMock()
+        runner.run.return_value = (1, '', 'boom')
+        ok = await job_group_networking._inject_hosts_on_node(
+            runner, '10.0.0.9 a-0.grp', 'grp')
+        assert ok is False

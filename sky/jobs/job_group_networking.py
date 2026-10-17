@@ -288,6 +288,17 @@ def generate_inline_networking_setup_script(
         """).strip()
 
 
+def _hosts_entry_marker(job_group_name: str) -> str:
+    """Trailing comment that tags every /etc/hosts entry of a JobGroup.
+
+    A re-push strips lines carrying this marker before writing the new
+    entries, so /etc/hosts never holds a stale IP ahead of the current one
+    for the same hostname (glibc returns the first match).
+    """
+    # job_group_name is validated at YAML load time to be shell-safe.
+    return f'# SkyPilot JobGroup {job_group_name}'
+
+
 def _generate_hosts_entries(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
@@ -302,9 +313,11 @@ def _generate_hosts_entries(
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
 
     Returns:
-        String containing /etc/hosts entries, one per line.
+        String containing /etc/hosts entries, one per line, each tagged
+        with the group's marker; empty when there are no SSH nodes.
     """
-    entries = [f'# JobGroup: {job_group_name}']
+    marker = _hosts_entry_marker(job_group_name)
+    entries = []
 
     for task, handle in tasks_handles:
         if handle is None:
@@ -322,7 +335,7 @@ def _generate_hosts_entries(
         for node_idx, (internal_ip,
                        _) in enumerate(handle.stable_internal_external_ips):
             hostname = f'{task_name}-{node_idx}.{job_group_name}'
-            entries.append(f'{internal_ip} {hostname}')
+            entries.append(f'{internal_ip} {hostname}  {marker}')
             logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
     return '\n'.join(entries)
@@ -335,11 +348,16 @@ async def _inject_hosts_on_node(
 ) -> bool:
     """Inject /etc/hosts entries on a single node.
 
-    Also creates a marker file to signal that networking setup is complete.
+    Idempotent: lines carrying this group's marker (from a previous push,
+    e.g. before a peer was recovered onto a new IP) are removed before the
+    new entries are written, so each hostname resolves to exactly one,
+    current IP. Also creates a marker file to signal that networking
+    setup is complete.
 
     Args:
         runner: CommandRunner for the target node.
-        hosts_content: Content to append to /etc/hosts.
+        hosts_content: Marker-tagged entries to write to /etc/hosts (see
+            _generate_hosts_entries); may be empty.
         job_group_name: Name of the JobGroup (for marker file).
 
     Returns:
@@ -347,13 +365,17 @@ async def _inject_hosts_on_node(
     """
     # pylint: disable=invalid-string-quote
     escaped_content = hosts_content.replace("'", "'\\''")  # noqa: Q000
+    marker = _hosts_entry_marker(job_group_name)
     marker_file = get_network_ready_marker_path(job_group_name)
     # Use ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD to handle containers without sudo
-    # but running as root (e.g., pytorch/pytorch images)
+    # but running as root (e.g., pytorch/pytorch images). /etc/hosts is
+    # rewritten in place with tee (never mv) so this also works where it
+    # is a bind mount. `grep -v` exits 1 when nothing is left, hence `|| true`.
     cmd = (
         f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
-        f"echo '{escaped_content}' | "  # noqa: Q000
-        f'sudo tee -a /etc/hosts > /dev/null && touch {marker_file}')
+        f"existing=$(sudo grep -v '{marker}' /etc/hosts || true) && "  # noqa: Q000
+        f"printf '%s\\n%s\\n' \"$existing\" '{escaped_content}' | "  # noqa: Q000
+        f'sudo tee /etc/hosts > /dev/null && touch {marker_file}')
     # pylint: enable=invalid-string-quote
 
     try:
@@ -704,8 +726,6 @@ class NetworkConfigurator:
                                        node_label=node_label,
                                        setup_type='K8s DNS updater'))
                 else:
-                    # ssh_hosts_content is always truthy (has header comment)
-                    assert ssh_hosts_content, 'unreachable'
                     setup_specs.append(
                         _NodeSetupSpec(make_attempt=functools.partial(
                             _inject_hosts_on_node, runner, ssh_hosts_content,
