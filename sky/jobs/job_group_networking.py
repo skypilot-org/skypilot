@@ -44,6 +44,13 @@ logger = sky_logging.init_logger(__name__)
 # retries independently (no barrier between nodes), so one flaky SSH
 # connection or slow node never blocks -- or fails -- the whole group.
 _SETUP_MAX_ATTEMPTS = 3
+# How long a task waits on its node for the controller's networking push
+# (Phase 3) before failing. The push happens only once every cluster in the
+# group is UP, and a peer on a VM cloud can sit in capacity retries for a
+# long time, so this is a generous backstop against a dead controller
+# rather than a tight deadline: the controller fails the group itself when
+# the push fails.
+NETWORK_MARKER_WAIT_SECONDS = 2 * 60 * 60
 _SETUP_ATTEMPT_TIMEOUT_SECONDS = 60.0
 _SETUP_RETRY_INITIAL_BACKOFF_SECONDS = 5.0
 
@@ -370,10 +377,12 @@ async def _inject_hosts_on_node(
     # Use ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD to handle containers without sudo
     # but running as root (e.g., pytorch/pytorch images). /etc/hosts is
     # rewritten in place with tee (never mv) so this also works where it
-    # is a bind mount. `grep -v` exits 1 when nothing is left, hence `|| true`.
+    # is a bind mount. `grep -v` exits 1 when no line is left, which is
+    # fine; exit 2 (unreadable file) must fail the push so it is retried or
+    # reported instead of rewriting /etc/hosts with only the group entries.
     strip_cmd = (
         f"existing=$(sudo grep -v '{marker}' "  # noqa: Q000
-        '/etc/hosts || true)')
+        '/etc/hosts || [ $? -eq 1 ])')
     write_cmd = (
         f"printf '%s\\n%s\\n' \"$existing\" "  # noqa: Q000
         f"'{escaped_content}' | "  # noqa: Q000
@@ -858,7 +867,7 @@ def generate_wait_for_networking_script(job_group_name: str,
         # Phase 1: Wait for networking setup to be initiated by controller
         # This marker file is created after Phase 3 sets up /etc/hosts
         MARKER_FILE="{marker_file}"
-        MARKER_WAIT=600  # 10 minutes to wait for Phase 3 to start
+        MARKER_WAIT={NETWORK_MARKER_WAIT_SECONDS}  # wait for Phase 3 to start
         MARKER_ELAPSED=0
         echo "[SkyPilot] Waiting for networking initialization marker..."
         while [ ! -f "$MARKER_FILE" ]; do

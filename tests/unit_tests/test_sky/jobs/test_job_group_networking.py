@@ -1,5 +1,8 @@
 """Unit tests for JobGroup networking script generation and setup."""
 import asyncio
+import os
+import subprocess
+import tempfile
 from unittest import mock
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -391,3 +394,72 @@ class TestSshHostsInjection:
         ok = await job_group_networking._inject_hosts_on_node(
             runner, '10.0.0.9 a-0.grp', 'grp')
         assert ok is False
+
+
+class TestSshHostsRewriteInBash:
+    """Execute the generated /etc/hosts rewrite under real bash, with
+    /etc/hosts redirected to a temp file and sudo stripped."""
+
+    def _runner_for(self, hosts_path):
+        marker_file = job_group_networking.get_network_ready_marker_path('grp')
+
+        def run(cmd, **kwargs):
+            del kwargs
+            cmd = (cmd.replace('/etc/hosts',
+                               hosts_path).replace('sudo ', '').replace(
+                                   marker_file, hosts_path + '.ready'))
+            proc = subprocess.run(['bash', '-c', cmd],
+                                  capture_output=True,
+                                  text=True,
+                                  check=False)
+            return proc.returncode, proc.stdout, proc.stderr
+
+        runner = MagicMock()
+        runner.run.side_effect = run
+        return runner
+
+    def _entry(self, ip):
+        marker = job_group_networking._hosts_entry_marker('grp')
+        return f'{ip} a-0.grp  {marker}'
+
+    @pytest.mark.asyncio
+    async def test_rewrite_replaces_stale_entry_and_keeps_other_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts = os.path.join(tmp, 'hosts')
+            with open(hosts, 'w', encoding='utf-8') as f:
+                f.write('127.0.0.1 localhost\n')
+            runner = self._runner_for(hosts)
+            assert await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.1'), 'grp')
+            assert await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.2'), 'grp')
+            with open(hosts, encoding='utf-8') as f:
+                lines = [l for l in f.read().splitlines() if l.strip()]
+            assert lines == ['127.0.0.1 localhost', self._entry('10.0.0.2')]
+            assert os.path.exists(hosts + '.ready')
+
+    @pytest.mark.asyncio
+    async def test_unreadable_hosts_fails_instead_of_clobbering(self):
+        # grep exits 2 when /etc/hosts cannot be read; that must fail the
+        # push (so it is retried/reported), never write a file that only
+        # holds the group entries.
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts = os.path.join(tmp, 'missing-hosts')
+            runner = self._runner_for(hosts)
+            assert not await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.1'), 'grp')
+            assert not os.path.exists(hosts)
+            assert not os.path.exists(hosts + '.ready')
+
+
+class TestMarkerWait:
+    """The on-node wait for the controller's networking push must outlast
+    VM provisioning retries of peer tasks (capacity retries routinely
+    exceed 10 minutes on VM clouds)."""
+
+    def test_marker_wait_covers_long_provisioning(self):
+        script = job_group_networking.generate_wait_for_networking_script(
+            'grp', ['peer'])
+        wait = job_group_networking.NETWORK_MARKER_WAIT_SECONDS
+        assert wait >= 3600
+        assert f'MARKER_WAIT={wait}' in script

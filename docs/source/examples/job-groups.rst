@@ -212,6 +212,13 @@ proceed without networking and emit a warning.
    ``ports`` unset for traffic that stays within the job group; it is
    only needed to expose a task publicly.
 
+   The cloud-side reachability above relies on SkyPilot-managed network
+   rules. With a custom ``aws.security_group_name`` or a custom
+   ``gcp.vpc_name`` (with subnets outside ``10.128.0.0/9``), make sure
+   your own rules allow internal traffic between the VMs; SkyPilot only
+   checks that peer hostnames resolve, so a missing rule surfaces as a
+   connection failure in the task itself.
+
 Set ``inter_connection: false`` in the header for tasks that do not need to
 reach each other by hostname (e.g., components that coordinate through an
 external endpoint or a shared object store):

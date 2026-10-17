@@ -4,14 +4,18 @@ import pytest
 from sky import clouds
 
 
-@pytest.mark.parametrize('cloud_cls,expected', [
-    (clouds.Kubernetes, True),
-    (clouds.AWS, True),
-    (clouds.GCP, True),
-    (clouds.Azure, False),
-    (clouds.Lambda, False),
-    (clouds.RunPod, False),
-])
+@pytest.mark.parametrize(
+    'cloud_cls,expected',
+    [
+        (clouds.Kubernetes, True),
+        (clouds.AWS, True),
+        (clouds.GCP, True),
+        (clouds.Azure, False),
+        # SSH node pools inherit from Kubernetes but are not enabled yet.
+        (clouds.SSH, False),
+        (clouds.Lambda, False),
+        (clouds.RunPod, False),
+    ])
 def test_supports_job_group_networking(cloud_cls, expected):
     assert cloud_cls.supports_job_group_networking() is expected
 
