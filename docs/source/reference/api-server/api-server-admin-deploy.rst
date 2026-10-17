@@ -1186,6 +1186,46 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set vastdataCredentials.enabled=true
 
+    .. tab-item:: Akave
+        :sync: akave-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`Akave Object Storage installation <akave-installation>` to authenticate with Akave Object Storage.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic akave-credentials \
+              --namespace $NAMESPACE \
+              --from-file=akave.config=$HOME/.akave/akave.config \
+              --from-file=akave.credentials=$HOME/.akave/akave.credentials
+
+        Mount the secret at ``/root/.akave`` on the API server using the chart's ``apiService.extraVolumes`` and ``apiService.extraVolumeMounts`` values:
+
+        .. code-block:: bash
+
+            cat <<EOF > akave-values.yaml
+            apiService:
+              extraVolumes:
+                - name: akave-credentials
+                  secret:
+                    secretName: akave-credentials
+              extraVolumeMounts:
+                - name: akave-credentials
+                  mountPath: /root/.akave
+                  readOnly: true
+            EOF
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              -f akave-values.yaml
+
+        .. note::
+
+            If you already set ``apiService.extraVolumes`` or ``apiService.extraVolumeMounts``, add the entries above to your existing lists instead, as the values file replaces them.
+
     .. tab-item:: DigitalOcean
         :sync: digitalocean-creds-tab
 

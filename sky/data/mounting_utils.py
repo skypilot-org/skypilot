@@ -124,7 +124,7 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
 
     Uses goofys by default (x86_64) and rclone for ARM64. Handles both
     native AWS S3 and third-party S3-compatible providers (R2, Nebius,
-    CoreWeave, VastData, etc.).
+    CoreWeave, VastData, Akave, etc.).
 
     Args:
         bucket_name: Name of the bucket to mount.
@@ -291,6 +291,36 @@ def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                                         _bucket_sub_path=_bucket_sub_path,
                                         endpoint_url=endpoint_url,
                                         cred_env=cred_env,
+                                        read_only=read_only)
+
+
+def get_akave_mount_cmd(akave_credentials_path: str,
+                        akave_profile_name: str,
+                        bucket_name: str,
+                        endpoint_url: str,
+                        mount_path: str,
+                        _bucket_sub_path: Optional[str] = None,
+                        read_only: bool = False) -> str:
+    """Returns a command to mount Akave bucket.
+
+    rclone (used on ARM64) ignores AWS_SHARED_CREDENTIALS_FILE/AWS_PROFILE
+    unless env auth is enabled, and would otherwise send unsigned requests.
+
+    Akave returns 500 for multipart UploadPart requests that goofys's AWS SDK
+    sends with aws-chunked encoding and a trailing checksum (its default), so
+    any write larger than one part (~5MB) fails. AWS_REQUEST_CHECKSUM_
+    CALCULATION=when_required disables it so parts are sent as plain PUTs.
+    """
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={akave_credentials_path} '
+                f'AWS_PROFILE={akave_profile_name} '
+                'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
+                'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required')
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        endpoint_url=endpoint_url,
+                                        cred_env=cred_env,
+                                        rclone_extra_flags='--s3-env-auth=true',
                                         read_only=read_only)
 
 
