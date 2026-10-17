@@ -22,24 +22,41 @@ def test_task_fits():
     assert serve_utils._task_fits(task_resources, free_resources) is True
 
     # Test less CPUs than free.
-    task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
-    free_resources = Resources(cpus=2, memory=1, cloud=clouds.AWS())
+    task_resources = Resources(cpus=3, memory=1, cloud=clouds.AWS())
+    free_resources = Resources(cpus=16, memory=1, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is True
 
     # Test more CPUs than free.
-    task_resources = Resources(cpus=2, memory=1, cloud=clouds.AWS())
-    free_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
+    task_resources = Resources(cpus=12, memory=1, cloud=clouds.AWS())
+    free_resources = Resources(cpus=9, memory=1, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is False
 
     # Test less  memory than free.
-    task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
-    free_resources = Resources(cpus=1, memory=2, cloud=clouds.AWS())
+    task_resources = Resources(cpus=1, memory=3, cloud=clouds.AWS())
+    free_resources = Resources(cpus=1, memory=16, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is True
 
     # Test more memory than free.
-    task_resources = Resources(cpus=1, memory=2, cloud=clouds.AWS())
-    free_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
+    task_resources = Resources(cpus=1, memory=12, cloud=clouds.AWS())
+    free_resources = Resources(cpus=1, memory=9, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is False
+
+    task_resources = Resources(cpus=3, memory='3x', cloud=clouds.AWS())
+    free_resources = Resources(cpus=16, memory=9, cloud=clouds.AWS())
+    assert serve_utils._task_fits(task_resources, free_resources) is True
+
+    free_resources = Resources(cpus=16, memory=8, cloud=clouds.AWS())
+    assert serve_utils._task_fits(task_resources, free_resources) is False
+
+    task_resources = Resources(cpus='nan', cloud=clouds.AWS())
+    free_resources = Resources(cpus=1, cloud=clouds.AWS())
+    assert serve_utils._task_fits(task_resources, free_resources) is False
+    assert serve_utils._task_fits(free_resources, task_resources) is False
+
+    task_resources = Resources(memory='nan', cloud=clouds.AWS())
+    free_resources = Resources(memory=1, cloud=clouds.AWS())
+    assert serve_utils._task_fits(task_resources, free_resources) is False
+    assert serve_utils._task_fits(free_resources, task_resources) is False
 
     # Test GPU exact fit.
     task_resources = Resources(accelerators='A10:1', cloud=clouds.AWS())
