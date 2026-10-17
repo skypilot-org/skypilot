@@ -296,7 +296,9 @@ class TestInstanceAwareTargetQps:
             spec.to_yaml_config())
         assert round_trip.target_qps_per_replica == {key: 2.0}
 
-    @pytest.mark.parametrize('key', ['A100-80GB:', 'A100-80GB:x', '-A100'])
+    @pytest.mark.parametrize(
+        'key',
+        ['A100-80GB:', 'A100-80GB:x', '-A100', 'A100-80GB-', 'A100--80GB'])
     def test_malformed_keys_rejected(self, key):
         with pytest.raises(ValueError):
             service_spec.SkyServiceSpec.from_yaml_config(

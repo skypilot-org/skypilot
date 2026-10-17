@@ -1036,7 +1036,7 @@ def get_service_schema():
                                 'patternProperties': {
                                     # Pattern for accelerator types like
                                     # "H100:1", "A100-80GB:1", "H100", "A100"
-                                    '^[A-Z0-9][A-Z0-9-]*(?::[0-9]+)?$': {
+                                    '^[A-Z0-9]+(?:-[A-Z0-9]+)*(?::[0-9]+)?$': {
                                         'type': 'number',
                                         'minimum': 0,
                                     }
