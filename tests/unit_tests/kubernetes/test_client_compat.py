@@ -379,6 +379,125 @@ def test_normalize_emptydir_size_limit(quantity: Any, expected: Any) -> None:
     assert spec == expected_spec
 
 
+@pytest.mark.parametrize(('quantity', 'expected'), [
+    (1, '1'),
+    (0.5, '0.5'),
+    ('1m', '1m'),
+    (None, None),
+    (True, True),
+])
+def test_normalize_overhead_and_divisors(quantity: Any, expected: Any) -> None:
+
+    def make_spec(value):
+        selector = {'resource': 'limits.cpu', 'divisor': value}
+        spec = {
+            'overhead': {
+                'cpu': value
+            },
+            'volumes': [
+                {
+                    'name': 'downward',
+                    'downwardAPI': {
+                        'items': [{
+                            'path': 'cpu',
+                            'mode': 420,
+                            'resourceFieldRef': copy.deepcopy(selector),
+                        }]
+                    }
+                },
+                {
+                    'name': 'projected',
+                    'projected': {
+                        'sources': [
+                            {
+                                'downwardAPI': {
+                                    'items': [{
+                                        'path': 'cpu',
+                                        'resourceFieldRef':
+                                            copy.deepcopy(selector),
+                                    }]
+                                }
+                            },
+                            {
+                                'secret': {
+                                    'name': 'secret'
+                                }
+                            },
+                        ]
+                    }
+                },
+            ],
+        }
+        for field in ('containers', 'initContainers', 'ephemeralContainers'):
+            spec[field] = [{
+                'name': 'main',
+                'env': [
+                    {
+                        'name': 'CPU',
+                        'valueFrom': {
+                            'resourceFieldRef': copy.deepcopy(selector)
+                        }
+                    },
+                    {
+                        'name': 'UNCHANGED',
+                        'value': 5
+                    },
+                    {
+                        'name': 'UNSET',
+                        'valueFrom': None
+                    },
+                ],
+                'ports': [{
+                    'containerPort': 8080
+                }],
+            }, {
+                'name': 'no-env',
+                'env': None
+            }]
+        return spec
+
+    spec = make_spec(quantity)
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == make_spec(expected)
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == make_spec(expected)
+
+
+def test_normalize_null_downward_api_fields() -> None:
+    spec = {
+        'overhead': None,
+        'volumes': [
+            {
+                'downwardAPI': None,
+                'projected': None
+            },
+            {
+                'downwardAPI': {
+                    'items': None
+                },
+                'projected': {
+                    'sources': None
+                }
+            },
+            {
+                'downwardAPI': {
+                    'items': [{
+                        'resourceFieldRef': None
+                    }]
+                },
+                'projected': {
+                    'sources': [{
+                        'downwardAPI': None
+                    }]
+                }
+            },
+        ],
+    }
+    original = copy.deepcopy(spec)
+    utils.normalize_pod_resource_quantities(spec)
+    assert spec == original
+
+
 def _assert_request_bearer_token(api_client: client.ApiClient,
                                  expected_token: str) -> None:
     # Exercise generated request authentication, not just auth_settings().

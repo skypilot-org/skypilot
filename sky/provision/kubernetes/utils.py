@@ -4770,10 +4770,38 @@ def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
     request bodies with Pydantic and requires strings. Keep the internal
     provisioning config numeric; normalize only the final outgoing pod spec.
     """
+
+    def normalize_quantity_map(quantities):
+        for name, value in quantities.items():
+            # Do not turn invalid null/bool values into strings.
+            if type(value) in (int, float):
+                quantities[name] = str(value)
+
+    def normalize_resource_field_ref(owner):
+        selector = owner.get('resourceFieldRef') or {}
+        divisor = selector.get('divisor')
+        if type(divisor) in (int, float):
+            selector['divisor'] = str(divisor)
+
+    normalize_quantity_map(pod_spec.get('overhead') or {})
     resource_owners = [pod_spec]
     for field in ('containers', 'initContainers', 'ephemeralContainers'):
-        resource_owners.extend(pod_spec.get(field) or [])
+        containers = pod_spec.get(field) or []
+        resource_owners.extend(containers)
+        for container in containers:
+            for env in container.get('env') or []:
+                normalize_resource_field_ref(env.get('valueFrom') or {})
     for volume in pod_spec.get('volumes') or []:
+        # Downward API resource selectors can appear in standalone volumes or
+        # within projected volumes, as well as in container environment vars.
+        downward_apis = [volume.get('downwardAPI') or {}]
+        projected = volume.get('projected') or {}
+        downward_apis.extend(
+            source.get('downwardAPI') or {}
+            for source in projected.get('sources') or [])
+        for downward_api in downward_apis:
+            for item in downward_api.get('items') or []:
+                normalize_resource_field_ref(item)
         empty_dir = volume.get('emptyDir')
         if empty_dir is not None:
             size_limit = empty_dir.get('sizeLimit')
@@ -4787,11 +4815,7 @@ def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
     for owner in resource_owners:
         resources = owner.get('resources') or {}
         for field in ('requests', 'limits'):
-            quantities = resources.get(field) or {}
-            for name, value in quantities.items():
-                # Do not turn invalid null/bool values into strings.
-                if type(value) in (int, float):
-                    quantities[name] = str(value)
+            normalize_quantity_map(resources.get(field) or {})
 
 
 def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:

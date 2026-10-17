@@ -136,7 +136,8 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
 
 
 @pytest.mark.parametrize('deployment', [False, True])
-@pytest.mark.parametrize('volume_type', [None, 'ephemeral', 'emptyDir'])
+@pytest.mark.parametrize(
+    'volume_type', [None, 'ephemeral', 'emptyDir', 'downwardAPI', 'projected'])
 def test_create_pods_normalizes_quantities_before_api_validation(
         monkeypatch: pytest.MonkeyPatch, deployment: bool,
         volume_type: Optional[str]) -> None:
@@ -181,6 +182,17 @@ def test_create_pods_normalizes_quantities_before_api_validation(
             }
         },
     }]
+    config.node_config['spec']['overhead'] = {'cpu': 0.1}
+    for field in ('containers', 'initContainers'):
+        config.node_config['spec'][field][0]['env'] = [{
+            'name': 'CPU_LIMIT',
+            'valueFrom': {
+                'resourceFieldRef': {
+                    'resource': 'limits.cpu',
+                    'divisor': 1
+                }
+            },
+        }]
     if volume_type == 'ephemeral':
         config.node_config['spec']['volumes'] = [{
             'name': 'scratch',
@@ -204,6 +216,22 @@ def test_create_pods_normalizes_quantities_before_api_validation(
                 'sizeLimit': 1073741824
             },
         }]
+    elif volume_type in ('downwardAPI', 'projected'):
+        source = {
+            'downwardAPI': {
+                'items': [{
+                    'path': 'cpu',
+                    'resourceFieldRef': {
+                        'containerName': 'main',
+                        'resource': 'limits.cpu',
+                        'divisor': 1
+                    },
+                }]
+            }
+        }
+        if volume_type == 'projected':
+            source = {'projected': {'sources': [source]}}
+        config.node_config['spec']['volumes'] = [dict(name='scratch', **source)]
     if volume_type is not None:
         config.node_config['spec']['containers'][0]['volumeMounts'] = [{
             'name': 'scratch',
@@ -255,6 +283,10 @@ def test_create_pods_normalizes_quantities_before_api_validation(
         assert spec['initContainers'][0]['resources']['requests'][
             'cpu'] == '0.1'
         assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
+        assert spec['overhead'] == {'cpu': '0.1'}
+        for field in ('containers', 'initContainers'):
+            selector = spec[field][0]['env'][0]['valueFrom']['resourceFieldRef']
+            assert selector['divisor'] == '1'
         if volume_type == 'ephemeral':
             claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
                 'spec']
@@ -262,6 +294,12 @@ def test_create_pods_normalizes_quantities_before_api_validation(
                 'storage'] == '1073741824'
         elif volume_type == 'emptyDir':
             assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
+        elif volume_type in ('downwardAPI', 'projected'):
+            source = spec['volumes'][0]
+            if volume_type == 'projected':
+                source = source['projected']['sources'][0]
+            selector = source['downwardAPI']['items'][0]['resourceFieldRef']
+            assert selector['divisor'] == '1'
     # In particular, accelerator counts must stay numeric in stored configs:
     # _create_pods compares them to zero to select runtime classes/tolerations.
     assert config.node_config == original
