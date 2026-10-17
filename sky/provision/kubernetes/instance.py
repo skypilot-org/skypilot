@@ -2115,6 +2115,57 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+# How long pod creation keeps retrying while an admission webhook on the
+# cluster cannot be called. A webhook whose service has no ready endpoints
+# (e.g. its controller is restarting) fails every pod create with a 500, and
+# such outages are often intermittent.
+_WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
+_WEBHOOK_UNAVAILABLE_PATTERN = re.compile(r'failed calling webhook "([^"]+)"')
+
+
+def _create_namespaced_pod_retrying_webhook_errors(
+        namespace: str, pod_spec: dict, context: Optional[str]) -> Any:
+    """Creates a Pod, retrying while an admission webhook cannot be called.
+
+    Raises:
+        config_lib.KubernetesError: an admission webhook still could not be
+            called after _WEBHOOK_UNAVAILABLE_RETRY_SECONDS.
+        kubernetes.api_exception(): any other pod creation error.
+    """
+    deadline = time.time() + _WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+    backoff = common_utils.Backoff(initial_backoff=2, max_backoff_factor=5)
+    while True:
+        try:
+            return kubernetes.core_api(context).create_namespaced_pod(
+                namespace, pod_spec)
+        except kubernetes.api_exception() as e:
+            if e.status != 500:
+                raise
+            try:
+                error_message = json.loads(e.body).get('message', '')
+            except json.JSONDecodeError:
+                error_message = str(e.body)
+            match = _WEBHOOK_UNAVAILABLE_PATTERN.search(error_message)
+            if match is None:
+                raise
+            webhook = match.group(1)
+            sleep_seconds = backoff.current_backoff()
+            if time.time() + sleep_seconds > deadline:
+                raise config_lib.KubernetesError(
+                    f'Pod creation in context {context!r} was rejected '
+                    f'because admission webhook {webhook!r} could not be '
+                    f'called (retried for up to '
+                    f'{_WEBHOOK_UNAVAILABLE_RETRY_SECONDS}s). This is a '
+                    'problem with the webhook\'s service on the cluster, not '
+                    'a lack of resources: check that the pods serving the '
+                    f'webhook are running and ready. Details: {error_message}'
+                ) from e
+            logger.warning(f'Admission webhook {webhook!r} could not be '
+                           'called while creating a pod in context '
+                           f'{context!r}; retrying in {sleep_seconds:.1f}s.')
+            time.sleep(sleep_seconds)
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
@@ -2123,13 +2174,15 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.
     See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+    An admission webhook that cannot be called is retried for a while and then
+    raised as a KubernetesError naming the webhook.
 
     Returns: The created Pod object.
     """
     try:
         # Attempt to create the Pod with the AppArmor annotation
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod = _create_namespaced_pod_retrying_webhook_errors(
+            namespace, pod_spec, context)
         return pod
     except kubernetes.api_exception() as e:
         try:
