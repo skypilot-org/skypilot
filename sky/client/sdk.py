@@ -2520,6 +2520,13 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
+        if (isinstance(error_obj, exceptions.RequestInterruptedError) and
+                not request_task.should_retry):
+            # The server cancelled this request while shutting down and said
+            # a retry cannot help (`should_retry` is False): it will not run
+            # the request again. Raise the error as the one subclass that
+            # `rest.retry_transient_errors` does not retry.
+            error_obj = exceptions.RequestNotResumedError(str(error_obj))
         _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
@@ -2638,12 +2645,44 @@ def stream_and_get(
         if request_id is None:
             return None
         return get(request_id)
-    return stream_response(request_id,
-                           response,
-                           output_stream,
-                           resumable=True,
-                           get_result=follow,
-                           relay_rich_status=relay_rich_status)
+    try:
+        return stream_response(request_id,
+                               response,
+                               output_stream,
+                               resumable=True,
+                               get_result=follow,
+                               relay_rich_status=relay_rich_status)
+    except exceptions.RequestNotResumedError:
+        raise
+    except exceptions.RequestInterruptedError:
+        # The stream asked for a retry, or `get` raised a stored interruption.
+        # Following the same request again resumes it if it still runs, but not
+        # if a restart cancelled it for its client to re-submit: the stream
+        # asks for a retry again, and the replayed log counts as progress, so
+        # the retries never end. Only the code that submitted the request can
+        # re-submit it, as the log tails do.
+        if request_id is not None and _cancelled_for_resubmission(request_id):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.RequestNotResumedError(
+                    f'Request {request_id!r} was interrupted by an API server '
+                    'restart and will not be resumed. Please re-submit the '
+                    'original request.') from None
+        raise
+
+
+def _cancelled_for_resubmission(request_id: str) -> bool:
+    """Whether a server restart cancelled the request for re-submission.
+
+    That is, the request is CANCELLED with ``should_retry`` set. False when the
+    status cannot be read, so the caller keeps retrying.
+    """
+    try:
+        request_payloads = api_status(request_ids=[request_id])
+    except Exception:  # pylint: disable=broad-except
+        return False
+    return any(payload.request_id == request_id and payload.should_retry and
+               payload.status == requests_lib.RequestStatus.CANCELLED.value
+               for payload in request_payloads)
 
 
 @usage_lib.entrypoint
