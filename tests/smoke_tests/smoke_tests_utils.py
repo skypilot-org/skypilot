@@ -16,6 +16,7 @@ from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
 from unittest.mock import patch
+import urllib.parse
 import uuid
 
 import colorama
@@ -25,6 +26,7 @@ from smoke_tests.docker import docker_utils
 
 import sky
 from sky import clouds
+from sky import jobs
 from sky import serve
 from sky import skypilot_config
 from sky.client import sdk
@@ -614,6 +616,35 @@ def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
         cluster_name, sky.GCP.max_cluster_name_length())
 
 
+def get_managed_job_cluster_name_prefix_on_gcp(job_name: str) -> str:
+    """Prefix of a managed job's GCP cluster name that is safe to filter on.
+
+    The jobs controller names a job's cluster
+    ``<job_name[:JOBS_CLUSTER_NAME_PREFIX_LENGTH]>-<job_id>`` and the GCP
+    provisioner then applies ``make_cluster_name_on_cloud`` with GCP's 35-char
+    limit, which truncates the display name and appends
+    ``-<2-char hash>-<8-char user hash>``. The 24- to 25-char names that
+    ``get_cluster_name`` produces no longer fit, so the job id and the tail of
+    the name are cut off and a ``labels.ray-cluster-name:<full name>`` filter
+    never matches. Only the leading ``35 - 2 - 1 - 9 = 23`` characters are
+    guaranteed to survive, so return those. gcloud's ``:`` operator is a
+    word-prefix match, so the prefix also matches when nothing was truncated.
+    Matching on ~23 chars keeps the first two chars of ``test_id``, the same
+    entropy the filter had before ``test_id`` grew to four chars.
+    """
+    display_name_prefix = common_utils.make_cluster_name_on_cloud(
+        job_name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    # '-<user hash>' is appended after the cluster name hash.
+    user_hash_length = common_utils.USER_HASH_LENGTH + 1
+    max_length = sky.GCP.max_cluster_name_length()
+    assert max_length is not None
+    keep = (max_length - common_utils.CLUSTER_NAME_HASH_LENGTH - 1 -
+            user_hash_length)
+    # A cut can land on a separator; a trailing '-' would make the gcloud
+    # ':' pattern end in an empty word.
+    return display_name_prefix[:keep].rstrip('-')
+
+
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     name_on_cloud = get_replica_cluster_name_on_gcp(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
@@ -690,6 +721,11 @@ def override_sky_config(
         )
     if is_grpc_enabled_test():
         env_overrides[env_options.Options.ENABLE_GRPC.env_key] = '1'
+    if is_remote_identity_none_test():
+        # After the shallow update above, which would replace a test's whole
+        # `kubernetes` dict.
+        override_sky_config_dict.set_nested(('kubernetes', 'remote_identity'),
+                                            'NONE')
 
     if not override_sky_config_dict:
         yield None
@@ -1141,9 +1177,11 @@ def launch_cluster_for_cloud_cmd(cloud: str,
         # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
-        return (
-            f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
-        )
+        # The helper's kubectl needs its pod's token, which NONE removes.
+        identity = (' --config kubernetes.remote_identity=SERVICE_ACCOUNT'
+                    if is_remote_identity_none_test() else '')
+        return (f'sky launch -y -c {cluster_name} --infra {cloud} '
+                f'{LOW_RESOURCE_ARG} --async{identity}')
 
 
 def k8s_landed_context_file(name: str) -> str:
@@ -1374,6 +1412,11 @@ def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
+def is_remote_identity_none_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_IDENTITY_NONE',
+                          None) is not None
+
+
 def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
 
@@ -1412,6 +1455,33 @@ def get_api_server_url() -> str:
                 return endpoint
         return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
+
+
+def endpoint_url_has_credentials() -> bool:
+    """Whether the API server endpoint URL embeds basic-auth credentials.
+
+    TEMPORARY. This exists to work around a known gap in OSS auth and every
+    caller must be removed once that gap is fixed.
+
+    A URL of the form ``https://user:pw@host`` is the documented login for the
+    helm chart's basic-auth ingress. A job launched with ``api_server_access``
+    gets that URL copied into its pod next to a service-account token. When
+    the pod's client sends a request, ``requests`` builds a Basic header from
+    the URL credentials and overwrites the ``Authorization: Bearer`` header
+    the token was set on (``PreparedRequest.prepare_auth``; reproduced on
+    requests 2.34.2). The ingress validates Basic and strips the header, so
+    the API server gets no credential and records the job under the pod's
+    self-generated user id instead of the launching user's.
+
+    A test that expects the launching user to see a job launched from a task
+    cannot pass under this condition. Callers relax to all-users queries when
+    this returns True and stay strict everywhere else. Returns False when the
+    endpoint URL cannot be parsed.
+    """
+    try:
+        return urllib.parse.urlsplit(get_api_server_url()).username is not None
+    except ValueError:
+        return False
 
 
 def get_metrics_server_url() -> str:
@@ -1487,6 +1557,56 @@ def get_response_from_request_id_dashboard(request_id: str) -> Any:
 def with_config(cmd: str, config_path: str) -> str:
     return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
             f'{cmd}')
+
+
+def write_api_server_config(config: Optional[Dict[str, Any]] = None) -> str:
+    """Writes the local API server's config, plus `config`, to a new file.
+
+    For keys the server ignores in a client's config, such as `logs`, which a
+    test can only set by restarting the server with them (see
+    restart_api_server_with_config). Starts from the server's default config
+    file, without its `logs`, so the restarted server keeps its other settings.
+
+    The file is not deleted when the test exits: the server reads it on every
+    request, and a test that fails under --no-terminate-on-failure skips the
+    teardown that restores the server. The caller removes it once the test
+    passes.
+
+    Returns:
+        The path of the written file.
+    """
+    path = os.path.expanduser(skypilot_config.get_user_config_path())
+    base = (skypilot_config.parse_and_validate_config_file(path)
+            if os.path.exists(path) else config_utils.Config())
+    base.pop('logs', None)
+    if config is not None:
+        base = skypilot_config.overlay_skypilot_config(
+            base, config_utils.Config(config))
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False) as f:
+        # An empty config is left empty rather than dumped as '{}', so that a
+        # test can append further top-level keys to the file.
+        if base:
+            f.write(yaml_utils.dump_yaml_str(dict(base)))
+        return f.name
+
+
+def restart_api_server_with_config(config_path: str) -> str:
+    """Restarts the local API server with the config at `config_path`.
+
+    Tests using this must be marked no_remote_server, and restore the server
+    with RESTORE_API_SERVER_CONFIG in their teardown.
+    """
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path} && '
+            f'{SKY_API_RESTART}')
+
+
+# Restarts the local API server with its default config file.
+RESTORE_API_SERVER_CONFIG = (
+    f'unset {skypilot_config.ENV_VAR_GLOBAL_CONFIG} && '
+    f'{SKY_API_RESTART}')
 
 
 def _get_controller_pod_name(controller_name: str) -> str:
@@ -1654,8 +1774,12 @@ def write_blob(file: BinaryIO, total_size: int):
 def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
                                     target_statuses: Optional[list] = None,
                                     timeout: int = 360,
-                                    job_id: Optional[int] = None) -> dict:
+                                    job_id: Optional[int] = None,
+                                    all_users: bool = False) -> dict:
     """Wait for a managed job to reach one of the target statuses.
+
+    ``all_users`` widens the query past the calling user. Only pass it when
+    the job under test is known to belong to someone else.
 
     Identify the job by ``job_id`` where possible: job names are not unique,
     so on a long-lived API server a name-based wait can match a terminal
@@ -1672,6 +1796,7 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
     while time.time() - start_time < timeout:
         jobs_list = sky.get(
             sky.jobs.queue_v2(refresh=False,
+                              all_users=all_users,
                               job_ids=None if job_id is None else [job_id],
                               fields=['job_id', 'job_name', 'status']))[0]
         if job_id is None:

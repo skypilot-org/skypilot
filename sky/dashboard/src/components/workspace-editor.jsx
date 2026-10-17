@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
@@ -13,6 +13,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import Link from 'next/link';
 import Head from 'next/head';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,7 +46,7 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
-import { getUsers } from '@/data/connectors/users';
+import { getUserRole, getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
 
@@ -257,11 +258,25 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   );
 };
 
-// Detailed allowed users component for workspace editor
-const DetailedAllowedUsers = ({
+// Detailed allowed users component for workspace editor.
+//
+// Plugin slots:
+// - `workspaces.detail.allowedUser.role` replaces the role badge on each row.
+//   Context: { workspaceName, entry, isAdmin, onChanged }, where `entry` is the
+//   allowed_users entry (a username or user id) and `isAdmin` is true for
+//   users with the global admin role.
+// - `workspaces.detail.allowedUsers.actions` renders below the list.
+//   Context: { workspaceName, allowedUsers, onChanged }, where
+//   `allowedUsers` is the workspace's own `allowed_users` (usernames or user
+//   ids), not the displayed list, which also shows every global admin.
+// Plugins call `onChanged()` after changing the workspace so the page reloads
+// its config.
+export const DetailedAllowedUsers = ({
+  workspaceName,
   workspaceConfig,
   allUsers,
   writable = true,
+  onChanged = () => {},
 }) => {
   if (!workspaceConfig.private) return null;
   // Non-member (read-only-visible) view: the server strips allowed_users from
@@ -275,11 +290,28 @@ const DetailedAllowedUsers = ({
   // Get all admin users
   const adminUsers = (allUsers || []).filter((user) => user.role === 'admin');
   const adminUsernames = adminUsers.map((user) => user.username);
+  // allowed_users entries may be usernames or user ids.
+  const adminIdentities = new Set([
+    ...adminUsernames,
+    ...adminUsers.map((user) => user.userId),
+  ]);
 
   // Combine allowed users and admin users, remove duplicates
   const allAllowedUsers = [
     ...new Set([...allowedUsersFromConfig, ...adminUsernames]),
   ];
+
+  const actionsSlot = (
+    <PluginSlot
+      name="workspaces.detail.allowedUsers.actions"
+      context={{
+        workspaceName,
+        allowedUsers: allowedUsersFromConfig,
+        onChanged,
+      }}
+      wrapperClassName="mt-2"
+    />
+  );
 
   if (allAllowedUsers.length === 0) {
     return (
@@ -290,6 +322,7 @@ const DetailedAllowedUsers = ({
         <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
           No users configured (workspace may be inaccessible)
         </div>
+        {actionsSlot}
       </div>
     );
   }
@@ -301,28 +334,36 @@ const DetailedAllowedUsers = ({
       </h4>
       <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
         {allAllowedUsers.map((username) => {
-          const isAdmin = adminUsernames.includes(username);
+          const isAdmin = adminIdentities.has(username);
           return (
             <div
               key={username}
               className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
             >
               <span className="font-medium text-gray-700">{username}</span>
-              {isAdmin ? (
-                <span className="inline-flex items-center text-blue-600">
-                  <StarIcon className="w-3 h-3 mr-1" />
-                  Admin
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-gray-600">
-                  <User className="w-3 h-3 mr-1" />
-                  User
-                </span>
-              )}
+              <PluginSlot
+                name="workspaces.detail.allowedUser.role"
+                context={{ workspaceName, entry: username, isAdmin, onChanged }}
+                wrapperClassName="contents"
+                fallback={
+                  isAdmin ? (
+                    <span className="inline-flex items-center text-blue-600">
+                      <StarIcon className="w-3 h-3 mr-1" />
+                      Admin
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center text-gray-600">
+                      <User className="w-3 h-3 mr-1" />
+                      User
+                    </span>
+                  )
+                }
+              />
             </div>
           );
         })}
       </div>
+      {actionsSlot}
     </div>
   );
 };
@@ -342,10 +383,26 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  // The editor text as last loaded from the server, and as it is now. A draft
+  // is any difference, including comment-only or not-yet-valid edits that
+  // leave the parsed config unchanged. Refs so fetchWorkspaceConfig can read
+  // them without depending on them.
+  const serverYamlRef = useRef('');
+  const draftYamlRef = useRef('');
+  // The server config the editor text was based on, sent with Apply as
+  // `expected_config`. If the workspace changed while the draft was open
+  // (another admin, another tab, a change made from this page), the server
+  // refuses the write and Apply asks before overwriting it.
+  const baseConfigRef = useRef({});
+  const [conflict, setConflict] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
+  // Only admins can change a workspace's config or delete it (the server
+  // enforces this); everyone else gets a read-only view. Null until known, so
+  // the admin controls don't flash for a non-admin.
+  const [isAdmin, setIsAdmin] = useState(isNewWorkspace ? true : null);
 
   // Delete state
   const [deleteState, setDeleteState] = useState({
@@ -363,8 +420,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // `keepDraft`: refresh the server snapshot (roster, badges) but leave
+  // unsaved YAML edits in place. Used when a plugin changes the workspace.
   const fetchWorkspaceConfig = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, { keepDraft = false } = {}) => {
       if (showLoading) {
         setLoading(true);
       }
@@ -384,11 +443,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           read_only: readOnly,
           ...config
         } = allWorkspaces[workspaceName] || {};
-        setWorkspaceConfig(config);
         setOriginalConfig(config);
         setIsReadOnlyVisible(readOnly === true);
         setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
+        if (keepDraft && draftYamlRef.current !== serverYamlRef.current) {
+          return;
+        }
+        setWorkspaceConfig(config);
+        baseConfigRef.current = config;
 
         // Format as YAML with workspace name as top-level key
         const fullConfig = { [workspaceName]: config };
@@ -404,6 +467,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             flowLevel: -1,
           });
         }
+        serverYamlRef.current = yamlOutput;
+        draftYamlRef.current = yamlOutput;
         setYamlValue(yamlOutput);
       } catch (err) {
         console.error('Error fetching workspace config:', err);
@@ -417,69 +482,112 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     [workspaceName]
   );
 
-  const fetchWorkspaceStats = useCallback(async () => {
-    if (isNewWorkspace) return;
+  // Stats requests are numbered; a result is dropped only once a newer one
+  // has been shown, so a slow earlier request can't overwrite newer numbers
+  // and a failed newer one doesn't discard an earlier success.
+  const statsRequestRef = useRef(0);
+  const statsShownRef = useRef(0);
+  // A result for a workspace the page no longer shows is always dropped.
+  const currentWorkspaceRef = useRef(workspaceName);
+  currentWorkspaceRef.current = workspaceName;
+  // `fresh`: drop the cached entries first, so this fetches from the server
+  // and the cache holds the new numbers for the next visit (Refresh).
+  const fetchWorkspaceStats = useCallback(
+    async ({ fresh = false } = {}) => {
+      if (isNewWorkspace) return;
 
-    setStatsLoading(true);
-    try {
-      const [clustersResponse, managedJobsResponse, enabledClouds] =
-        await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              workspaceMatch: workspaceName,
-              fields: ['workspace', 'status'],
-            },
-          ]),
-          dashboardCache.get(getEnabledClouds, [workspaceName, true]),
-        ]);
-
-      // Filter clusters for this workspace
-      const workspaceClusters = clustersResponse.filter(
-        (cluster) => (cluster.workspace || 'default') === workspaceName
-      );
-
-      // Count running clusters
-      const runningClusters = workspaceClusters.filter(
-        (cluster) =>
-          cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
-      );
-
-      // Map cluster names to workspace for job filtering
-      const clusterNameToWorkspace = {};
-      clustersResponse.forEach((c) => {
-        clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
-      });
-
-      // Count managed jobs for this workspace
-      const jobs = managedJobsResponse.jobs || [];
-      const activeJobStatuses = new Set(statusGroups.active);
-      let managedJobsCount = 0;
-
-      jobs.forEach((job) => {
+      const request = ++statsRequestRef.current;
+      const load = (fn, args = []) => {
+        if (fresh) dashboardCache.invalidate(fn, args);
+        return dashboardCache.get(fn, args);
+      };
+      setStatsLoading(true);
+      try {
+        const [clustersResponse, managedJobsResponse, enabledClouds] =
+          await Promise.all([
+            load(getClusters),
+            load(getManagedJobs, [
+              {
+                allUsers: true,
+                skipFinished: true,
+                workspaceMatch: workspaceName,
+                fields: ['workspace', 'status'],
+              },
+            ]),
+            load(getEnabledClouds, [workspaceName, true]),
+          ]);
         if (
-          job.workspace === workspaceName &&
-          activeJobStatuses.has(job.status)
+          request < statsShownRef.current ||
+          workspaceName !== currentWorkspaceRef.current
         ) {
-          managedJobsCount++;
+          return;
         }
-      });
+        statsShownRef.current = request;
 
-      setWorkspaceStats({
-        totalClusterCount: workspaceClusters.length,
-        runningClusterCount: runningClusters.length,
-        managedJobsCount: managedJobsCount,
-        clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
+        // Filter clusters for this workspace
+        const workspaceClusters = clustersResponse.filter(
+          (cluster) => (cluster.workspace || 'default') === workspaceName
+        );
+
+        // Count running clusters
+        const runningClusters = workspaceClusters.filter(
+          (cluster) =>
+            cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
+        );
+
+        // Map cluster names to workspace for job filtering
+        const clusterNameToWorkspace = {};
+        clustersResponse.forEach((c) => {
+          clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
+        });
+
+        // Count managed jobs for this workspace
+        const jobs = managedJobsResponse.jobs || [];
+        const activeJobStatuses = new Set(statusGroups.active);
+        let managedJobsCount = 0;
+
+        jobs.forEach((job) => {
+          if (
+            job.workspace === workspaceName &&
+            activeJobStatuses.has(job.status)
+          ) {
+            managedJobsCount++;
+          }
+        });
+
+        setWorkspaceStats({
+          totalClusterCount: workspaceClusters.length,
+          runningClusterCount: runningClusters.length,
+          managedJobsCount: managedJobsCount,
+          clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
+        });
+      } catch (err) {
+        console.error('Failed to fetch workspace stats:', err);
+        // Don't show error to user for stats, just log it
+      } finally {
+        if (request === statsRequestRef.current) setStatsLoading(false);
+      }
+    },
+    [workspaceName, isNewWorkspace]
+  );
+
+  useEffect(() => {
+    if (isNewWorkspace) return undefined;
+    let cancelled = false;
+    getUserRole()
+      .then((data) => {
+        if (!cancelled) setIsAdmin(data?.role === 'admin');
+      })
+      .catch((err) => {
+        console.error('Failed to fetch user role:', err);
+        if (!cancelled) setIsAdmin(false);
       });
-    } catch (err) {
-      console.error('Failed to fetch workspace stats:', err);
-      // Don't show error to user for stats, just log it
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [workspaceName, isNewWorkspace]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isNewWorkspace]);
+
+  const canEdit = isAdmin === true;
 
   useEffect(() => {
     if (!isNewWorkspace) {
@@ -506,6 +614,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   }, [workspaceConfig, originalConfig]);
 
   const handleYamlChange = (value) => {
+    draftYamlRef.current = value;
     setYamlValue(value);
     setYamlError(null);
 
@@ -538,10 +647,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async ({ force = false } = {}) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    // The text being saved. Typing that happens during the request stays a
+    // draft, so only this snapshot becomes the new server baseline.
+    const savedYaml = yamlValue;
 
     try {
       // Validate YAML
@@ -566,15 +678,28 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           router.push(`/workspaces/${workspaceName}`);
         }, 1500);
       } else {
-        await updateWorkspace(workspaceName, workspaceConfig);
+        await updateWorkspace(
+          workspaceName,
+          workspaceConfig,
+          force ? undefined : baseConfigRef.current
+        );
         setSuccess('Workspace updated successfully!');
         setOriginalConfig(workspaceConfig);
+        serverYamlRef.current = savedYaml;
+        // The server stores the config as sent, so that is the new baseline.
+        // Not re-read: a change landing after this save must still show up
+        // as a conflict on the next Apply, not become the baseline.
+        baseConfigRef.current = workspaceConfig;
         // Refresh stats after successful save
         fetchWorkspaceStats();
       }
     } catch (err) {
-      console.error('Error saving workspace:', err);
-      setError(err);
+      if (err?.type === 'WorkspaceConfigConflictError') {
+        setConflict(true);
+      } else {
+        console.error('Error saving workspace:', err);
+        setError(err);
+      }
     } finally {
       setSaving(false);
     }
@@ -618,6 +743,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
+    baseConfigRef.current = originalConfig;
 
     // Reset YAML value to original
     const fullConfig = { [workspaceName]: originalConfig };
@@ -633,6 +759,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         flowLevel: -1,
       });
     }
+    serverYamlRef.current = yamlOutput;
+    draftYamlRef.current = yamlOutput;
     setYamlValue(yamlOutput);
 
     // Clear any errors
@@ -641,13 +769,38 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setSuccess(null);
   };
 
-  const handleRefresh = async () => {
-    setLoading(true);
+  // Admins also re-check the infra and then refetch the stats it affects.
+  // That runs alongside the reload, so a slow check or role lookup never holds
+  // the page's data back. The role may still be loading, so ask for it rather
+  // than skip an admin's check.
+  const recheckInfra = async () => {
+    const admin =
+      isAdmin !== null
+        ? isAdmin
+        : await getUserRole().then(
+            (data) => data?.role === 'admin',
+            () => false
+          );
+    if (!admin) return;
     try {
       await apiClient.fetch('/check', {}, 'POST');
-      await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
     } catch (error) {
       console.error('Error during sky check refresh:', error);
+      return;
+    }
+    await fetchWorkspaceStats({ fresh: true });
+  };
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    void recheckInfra();
+    try {
+      await Promise.all([
+        fetchWorkspaceConfig(false),
+        fetchWorkspaceStats({ fresh: true }),
+      ]);
+    } catch (error) {
+      console.error('Error refreshing workspace:', error);
     } finally {
       setLoading(false);
     }
@@ -713,7 +866,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 </button>
               )}
 
-              {!isNewWorkspace && workspaceName !== 'default' && (
+              {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
                 <button
                   onClick={() =>
                     setDeleteState({ ...deleteState, showDialog: true })
@@ -828,9 +981,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                       {/* Detailed allowed users for private workspaces */}
                       <DetailedAllowedUsers
+                        workspaceName={workspaceName}
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
                         writable={isWritable}
+                        onChanged={() =>
+                          fetchWorkspaceConfig(false, { keepDraft: true })
+                        }
                       />
                     </div>
                   </Card>
@@ -846,7 +1003,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     <CardTitle className="text-base font-normal">
                       {isNewWorkspace
                         ? 'New Workspace YAML'
-                        : 'Edit Workspace YAML'}
+                        : canEdit
+                          ? 'Edit Workspace YAML'
+                          : 'Workspace YAML'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
@@ -858,6 +1017,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         />
                       )}
                       <div className="flex-1 flex flex-col">
+                        {!isNewWorkspace && isAdmin === false && (
+                          <p className="text-sm text-gray-600 mb-3">
+                            Only admins can change this configuration.
+                          </p>
+                        )}
                         <p className="text-sm text-gray-600 mb-3">
                           Configure infra-specific settings for this workspace.
                           Leave empty to use all accessible infrastructure.
@@ -901,19 +1065,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           value={yamlValue}
                           onChange={(val) => handleYamlChange(val)}
                           height="400px"
+                          disabled={!canEdit}
                         />
 
                         {/* Action buttons */}
-                        <div className="flex justify-end space-x-3 pt-3 border-gray-200">
-                          <Button
-                            onClick={handleSave}
-                            disabled={saving || yamlError || loading}
-                            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
-                          >
-                            <SaveIcon className="w-4 h-4 mr-1.5" />
-                            {saving ? 'Applying...' : 'Apply'}
-                          </Button>
-                        </div>
+                        {canEdit && (
+                          <div className="flex justify-end space-x-3 pt-3 border-gray-200">
+                            <Button
+                              onClick={() => handleSave()}
+                              disabled={saving || yamlError || loading}
+                              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+                            >
+                              <SaveIcon className="w-4 h-4 mr-1.5" />
+                              {saving ? 'Applying...' : 'Apply'}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -924,6 +1091,50 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         )}
 
         {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={conflict}
+          onOpenChange={(open) => {
+            if (!open) setConflict(false);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="">
+              <DialogTitle>
+                Workspace changed since you started editing
+              </DialogTitle>
+              <DialogDescription>
+                Workspace &quot;{workspaceName}&quot; was changed after you
+                started editing, for example by another admin or in another tab.
+                Applying replaces its whole configuration with your YAML and
+                would undo those changes.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="">
+              <Button variant="outline" onClick={() => setConflict(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConflict(false);
+                  fetchWorkspaceConfig(false);
+                }}
+              >
+                Reload latest
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConflict(false);
+                  handleSave({ force: true });
+                }}
+              >
+                Apply anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="">

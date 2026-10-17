@@ -704,22 +704,25 @@ file_mounts:
 
 ### Job stuck in PENDING
 
-**Symptom**: `sky jobs queue` shows a job stuck in PENDING.
+**Symptom**: `sky jobs queue` shows a job stuck in PENDING or STARTING.
 
-**Causes**:
-- The jobs controller is still being provisioned. The first managed job launch creates a controller VM.
-- Insufficient quota for both the controller and the job's requested resources.
+**Diagnose first**: read `details` and `schedule_state` from
+`sky jobs queue -v -o json` (`-v` adds those fields).
 
-**Solutions**:
+| `details` / evidence | Cause | Solution |
+|----------------------|-------|----------|
+| `Waiting for other jobs to launch` | Controller launch-concurrency limit | Nothing to fix; it will start when a slot frees |
+| `Waiting for higher priority jobs to launch` | Higher-priority jobs are ahead | Raise `priority` in the task YAML if needed |
+| `In backoff, waiting for resources` | Provisioning keeps failing | `sky jobs logs <job_id> --controller --no-follow` shows the last error |
+| STARTING with no cluster events, first job ever | Jobs controller itself is being provisioned | Wait; `sky status -o json` shows the controller cluster |
+| `Launching (pending: <reason>; partition: <p>)` in `details` | Slurm has not allocated nodes (quota, capacity, dependency, held) | See [Job Investigation](job-investigation.md#slurm-pending-reasons) |
 
 ```bash
-# Check controller status
-sky status -o json
+sky jobs queue -v -o json
+sky jobs queue -v -o json
+sky jobs logs <job_id> --controller --no-follow
 
-# View controller provisioning logs
-sky jobs logs --controller <job_id>
-
-# If controller is stuck, tear it down and retry
+# Only if the controller itself is wedged (status INIT for a long time):
 sky down sky-jobs-controller-<user_hash> -p -y
 sky jobs launch myjob.yaml
 ```

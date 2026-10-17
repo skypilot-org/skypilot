@@ -2,12 +2,12 @@
 # pylint: disable=line-too-long
 import base64
 import concurrent.futures as cf
+import ipaddress
 import os
 import re
 import shlex
 import shutil
 import tempfile
-import textwrap
 from typing import List, Optional
 
 import colorama
@@ -128,6 +128,9 @@ def deploy_multiple_clusters(
                     f'{colorama.Fore.RED}Error: No valid hosts found '
                     f'for cluster {cluster_name!r}. Skipping.{RESET_ALL}')
                 continue
+            # Fail before any remote work, naming the host.
+            for host in hosts_info:
+                _check_sudo_password(host['password'], host['ip'])
 
             context_name = f'ssh-{cluster_name}'
 
@@ -140,7 +143,9 @@ def deploy_multiple_clusters(
             if os.path.exists(history_yaml_file):
                 logger.debug(f'Loading history from {history_yaml_file}')
                 with open(history_yaml_file, 'r', encoding='utf-8') as f:
-                    history = yaml.safe_load(f)
+                    # Same loader as the pools file, so a password reads the
+                    # same from both (master wrote `password: 123456`).
+                    history = yaml.load(f, Loader=ssh_utils.UniqueKeySafeLoader)
             else:
                 logger.debug(f'No history found for {context_name}.')
 
@@ -152,10 +157,11 @@ def deploy_multiple_clusters(
                 for key in ['user', 'identity_file', 'password']:
                     if not cleanup and history.get(key) != cluster_config.get(
                             key):
-                        raise ValueError(
-                            f'Cluster configuration has changed for field {key!r}. '
-                            f'Previous value: {history.get(key)}, '
-                            f'Current value: {cluster_config.get(key)}')
+                        values = ('' if key == 'password' else
+                                  f' Previous value: {history.get(key)}, '
+                                  f'Current value: {cluster_config.get(key)}')
+                        raise ValueError('Cluster configuration has changed '
+                                         f'for field {key!r}.{values}')
                 history_hosts_info = ssh_utils.prepare_hosts_info(
                     cluster_name, history)
 
@@ -184,11 +190,15 @@ def deploy_multiple_clusters(
                         if history_hosts_info[i] != hosts_info[i]:
                             role = ('server'
                                     if current_ha and i > 0 else 'head')
+                            # Field names only: the values hold passwords.
+                            old, new = history_hosts_info[i], hosts_info[i]
+                            changed = sorted(k for k in set(old) | set(new)
+                                             if old.get(k) != new.get(k))
                             raise ValueError(
                                 f'Cluster configuration has changed for '
-                                f'{role} node (host {i}). '
-                                f'Previous: {history_hosts_info[i]}, '
-                                f'Current: {hosts_info[i]}. '
+                                f'{role} node (host {i}, '
+                                f'{new.get("ip", old.get("ip"))}): '
+                                f'{", ".join(changed)}. '
                                 f'Run `sky ssh down` first to '
                                 f'reconfigure server nodes.')
 
@@ -303,10 +313,6 @@ def deploy_single_cluster(cluster_name,
     num_total_nodes = 1 + len(worker_nodes)
     ha_enabled = num_total_nodes >= 3
 
-    # Token for k3s
-    # TODO (kyuds): make this configurable?
-    k3s_token = constants.K3S_TOKEN
-
     # Pre-flight checks
     logger.info(f'Checking SSH connection to head node ({head_node})...')
     result = deploy_utils.run_remote(
@@ -360,6 +366,7 @@ def deploy_single_cluster(cluster_name,
             os.remove(tunnel_log_file_path)
 
     # If --cleanup flag is set, uninstall k3s and exit
+    cleanup_failed = []
     if cleanup:
         # Pickup all nodes
         worker_nodes_to_cleanup.clear()
@@ -379,23 +386,37 @@ def deploy_single_cluster(cluster_name,
                 ))
 
         # Clean up head node
-        cleanup_node(head_node,
-                     ssh_user,
-                     ssh_key,
-                     askpass_block,
-                     use_ssh_config=head_use_ssh_config,
-                     is_worker=False)
+        if not cleanup_node(head_node,
+                            ssh_user,
+                            ssh_key,
+                            askpass_block,
+                            use_ssh_config=head_use_ssh_config,
+                            is_worker=False):
+            cleanup_failed.append(head_node)
     # Clean up worker nodes
     force_update_status(f'Cleaning up worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
-        executor.map(lambda kwargs: cleanup_node(**kwargs),
-                     worker_nodes_to_cleanup)
+        worker_ok = list(
+            executor.map(lambda kwargs: cleanup_node(**kwargs),
+                         worker_nodes_to_cleanup))
+    if cleanup:
+        cleanup_failed += [
+            kwargs['node']
+            for kwargs, ok in zip(worker_nodes_to_cleanup, worker_ok)
+            if not ok
+        ]
 
     with cf.ThreadPoolExecutor() as executor:
         executor.map(lambda cmd: deploy_utils.run_command(cmd, shell=True),
                      remove_worker_cmds)
 
     if cleanup:
+        if cleanup_failed:
+            # Keep the local state so `sky ssh down` can be run again.
+            raise RuntimeError(
+                f'Failed to uninstall k3s on {", ".join(cleanup_failed)}. '
+                'Fix the host (or remove it from the pool config) and run '
+                '`sky ssh down` again.')
         # Remove the context from local kubeconfig if it exists
         if os.path.isfile(kubeconfig_path):
             logger.debug(
@@ -447,20 +468,12 @@ def deploy_single_cluster(cluster_name,
         return []
 
     logger.debug('Checking TCP Forwarding Options...')
-    cmd = (
-        'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
-        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
-        'else '
-        'sudo sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
-        '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
-        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
-        'fi')
+    cmd = _tcp_forwarding_cmd(askpass_block, head_node)
     result = deploy_utils.run_remote(head_node,
-                                     shlex.quote(cmd),
+                                     cmd,
                                      ssh_user,
                                      ssh_key,
-                                     use_ssh_config=head_use_ssh_config,
-                                     use_shell=True)
+                                     use_ssh_config=head_use_ssh_config)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -510,7 +523,7 @@ def deploy_single_cluster(cluster_name,
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
@@ -561,7 +574,33 @@ def deploy_single_cluster(cluster_name,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
+    # The head reports this address and it goes into the join commands, so
+    # accept only an IP address. Only joins use it.
+    if worker_nodes:
+        try:
+            master_addr = str(ipaddress.ip_address(master_addr))
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to get the internal IP address of the head node '
+                    f'({head_node}).') from None
     logger.debug(f'Master node internal IP: {master_addr}')
+
+    # No token is passed to the head install: k3s generates a random one on
+    # first start and keeps it on every later start, so pools deployed
+    # before keep theirs and their nodes stay joinable.
+    k3s_token = _read_join_token(head_node,
+                                 ssh_user,
+                                 ssh_key,
+                                 askpass_block,
+                                 use_ssh_config=head_use_ssh_config)
+    if k3s_token.endswith(f'::server:{_LEGACY_K3S_TOKEN}'):
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Node Pool `{cluster_name}` still uses the '
+            f'shared k3s join token {_LEGACY_K3S_TOKEN!r} from older SkyPilot '
+            'versions, so anyone who can reach port 6443 on its head node can '
+            'join it. Rebuild the pool (`sky ssh down`, then `sky ssh up`) to '
+            f'give it a random token.{RESET_ALL}')
 
     # Step 1.5: Join additional server nodes for HA
     if ha_enabled:
@@ -918,30 +957,7 @@ def deploy_single_cluster(cluster_name,
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
         force_update_status(f'Configuring NVIDIA GPUs [{cluster_name}]')
-        cmd = f"""
-            {askpass_block}
-            curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
-            chmod 700 get_helm.sh &&
-            ./get_helm.sh &&
-            helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
-            kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
-            sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
-            helm install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
-            --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
-            --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
-            --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \\
-            --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \\
-            --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
-            --set 'toolkit.env[2].value=nvidia' \\
-            --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
-            --set 'devicePlugin.env[0].value=all' &&
-            echo 'Waiting for GPU operator installation...' &&
-            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
-                echo 'Waiting for GPU operator...'
-                sleep 5
-            done
-            echo 'GPU operator installed successfully.'
-        """
+        cmd = _gpu_operator_install_cmd(askpass_block)
         result = deploy_utils.run_remote(head_node,
                                          cmd,
                                          ssh_user,
@@ -953,59 +969,9 @@ def deploy_single_cluster(cluster_name,
         else:
             success_message('GPU Operator installed.')
 
-        # Create a Kubernetes Service for dcgm-exporter with Prometheus
-        # scrape annotations. The GPU Operator deploys dcgm-exporter but
-        # does not add these annotations by default, so Prometheus cannot
-        # discover and scrape GPU metrics without this Service.
-        # We dynamically discover the pod labels from the actual
-        # dcgm-exporter DaemonSet rather than hardcoding a selector, since
-        # the GPU Operator may change labels across versions.
-        logger.debug('Setting up Prometheus Service.')
-
-        # Step 1: Get the selector labels from the dcgm-exporter DaemonSet
-        get_selector_cmd = f"""
-            {askpass_block}
-            for i in $(seq 1 30); do
-                DCGM_DS=$(kubectl --kubeconfig ~/.kube/config get daemonset -n gpu-operator -o name 2>/dev/null | grep dcgm-exporter) && break
-                echo 'Waiting for dcgm-exporter DaemonSet...' >&2
-                sleep 10
-            done
-            if [ -z "$DCGM_DS" ]; then
-                echo 'dcgm-exporter DaemonSet not found.' >&2
-                exit 1
-            fi
-            kubectl --kubeconfig ~/.kube/config get $DCGM_DS -n gpu-operator -o json | \
-                python3 -c 'import sys,json; labels=json.load(sys.stdin)["spec"]["selector"]["matchLabels"]; print(chr(10).join(k+": "+v for k,v in labels.items()))'
-        """
-        selector = deploy_utils.run_remote(head_node,
-                                           get_selector_cmd,
-                                           ssh_user,
-                                           ssh_key,
-                                           use_ssh_config=head_use_ssh_config,
-                                           print_output=True)
-
-        if selector is None:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to get dcgm-exporter '
-                f'selector labels. Skipping Service creation.{RESET_ALL}')
-        else:
-            # Step 2: Create the Service with the discovered selector
-            logger.debug(f'Found selector: <{selector}>.')
-            create_svc_cmd = _dcgm_exporter_service_cmd(askpass_block, selector)
-            svc_result = deploy_utils.run_remote(
-                head_node,
-                create_svc_cmd,
-                ssh_user,
-                ssh_key,
-                use_ssh_config=head_use_ssh_config,
-                print_output=True)
-            if svc_result is None:
-                logger.error(
-                    f'{colorama.Fore.RED}Failed to create dcgm-exporter '
-                    f'Service with Prometheus annotations.{RESET_ALL}')
-            else:
-                success_message('dcgm-exporter Service created with '
-                                'Prometheus annotations.')
+        # Prometheus scrapes dcgm-exporter through the GPU Operator's own
+        # `nvidia-dcgm-exporter` Service, which carries the
+        # `prometheus.io/scrape` annotation; no extra Service is needed.
     else:
         logger.debug('No GPUs detected. Skipping GPU Operator installation.')
 
@@ -1051,40 +1017,63 @@ def deploy_single_cluster(cluster_name,
     return unsuccessful_workers
 
 
-def _dcgm_exporter_service_cmd(askpass_block: str, selector: str) -> str:
-    """Create a command to apply a dcgm-exporter Service with Prometheus annotations.
+# get-helm-3 copies the binary with a plain `sudo`, which ignores
+# SUDO_ASKPASS without a terminal, so run the whole script as root.
+_GET_HELM = 'sudo -A -E bash ./get_helm.sh'
+# Pools deployed before the GPU Operator's own annotated Service was relied on
+# also have this one, so every GPU was scraped twice.
+_DELETE_LEGACY_DCGM_SERVICE = (
+    'kubectl --kubeconfig ~/.kube/config delete service dcgm-exporter '
+    '-n gpu-operator --ignore-not-found')
 
-    The GPU Operator deploys dcgm-exporter but does not add Prometheus
-    scrape annotations by default, so this Service is needed for
-    Prometheus to discover and scrape GPU metrics.
+
+def _tcp_forwarding_cmd(askpass_block: str, head_node: str) -> str:
+    """Command that enables AllowTcpForwarding in sshd on the head node.
+
+    Uses the askpass block and `sudo -A` like the other sudo commands, so
+    hosts that need a sudo password work too.
     """
-    indented_selector = selector.replace('\n', '\n    ')
-    svc_yaml = textwrap.dedent(f"""\
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: dcgm-exporter
-          namespace: gpu-operator
-          labels:
-            app: dcgm-exporter
-          annotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "9400"
-            prometheus.io/path: "/metrics"
-        spec:
-          selector:
-            {indented_selector}
-          ports:
-          - name: metrics
-            port: 9400
-            targetPort: 9400
-            protocol: TCP
-          type: ClusterIP
-    """)
+    return (
+        f'{askpass_block}\n'
+        'if [ "$(sudo -A sshd -T | grep allowtcpforwarding)" = '
+        '"allowtcpforwarding yes" ]; then '
+        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
+        'else '
+        'sudo -A sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
+        '/etc/ssh/sshd_config && sudo -A systemctl restart sshd && '
+        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
+        'fi')
+
+
+def _gpu_operator_install_cmd(askpass_block: str) -> str:
+    """Build the shell command that installs the GPU Operator via helm.
+
+    `helm upgrade --install` so a retry or redeploy re-runs this step instead
+    of failing on the existing release.
+    """
     return f"""{askpass_block}
-cat <<'DCGM_SVC' | kubectl --kubeconfig ~/.kube/config apply -f -
-{svc_yaml}
-DCGM_SVC
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
+chmod 700 get_helm.sh &&
+{_GET_HELM} &&
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update && helm repo update &&
+{{ kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true; }} &&
+{{ sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true; }} &&
+helm upgrade --install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
+    --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
+    --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
+    --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \\
+    --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \\
+    --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
+    --set 'toolkit.env[2].value=nvidia' \\
+    --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
+    --set 'devicePlugin.env[0].value=all' &&
+echo 'Waiting for GPU operator installation...' &&
+while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
+    echo 'Waiting for GPU operator...'
+    sleep 5
+done &&
+echo 'GPU operator installed successfully.' &&
+{{ {_DELETE_LEGACY_DCGM_SERVICE} || true; }}
 """
 
 
@@ -1110,7 +1099,7 @@ def _prometheus_install_cmd(askpass_block: str) -> str:
 if ! command -v helm &> /dev/null; then
     curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
     chmod 700 get_helm.sh &&
-    ./get_helm.sh &&
+    {_GET_HELM} &&
     rm get_helm.sh
 fi
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
@@ -1146,23 +1135,63 @@ exit $HELM_RET
 """
 
 
+def _check_sudo_password(password, host=None):
+    # sudo reads one line; a newline could also end the askpass heredoc early.
+    if password and ('\n' in password or '\r' in password):
+        where = f'Host {host}: the' if host else 'The'
+        raise ValueError(
+            f'{where} sudo password must not contain a line break.')
+
+
 def create_askpass_script(password):
     """Create an askpass script block for sudo with password."""
     if not password:
         return ''
+    _check_sudo_password(password)
 
     return f"""
 # Create temporary askpass script
 ASKPASS_SCRIPT=$(mktemp)
 trap 'rm -f $ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > $ASKPASS_SCRIPT << EOF
+cat > $ASKPASS_SCRIPT << '{deploy_utils.ASKPASS_EOF}'
 #!/bin/bash
-echo {password}
-EOF
+printf '%s\\n' {shlex.quote(password)}
+{deploy_utils.ASKPASS_EOF}
 chmod 700 $ASKPASS_SCRIPT
 # Use askpass
 export SUDO_ASKPASS=$ASKPASS_SCRIPT
 """
+
+
+_K3S_BIN = '/usr/local/bin'
+_K3S_NODE_TOKEN = '/var/lib/rancher/k3s/server/node-token'
+# The join token every pool used before tokens were generated per pool.
+_LEGACY_K3S_TOKEN = 'mytoken'
+# Secure format: the CA hash lets a joining node verify the head.
+_JOIN_TOKEN_RE = re.compile(r'K10[0-9a-f]+::server:\S+')
+
+
+def _read_join_token(head_node,
+                     ssh_user,
+                     ssh_key,
+                     askpass_block,
+                     use_ssh_config=False) -> str:
+    """Read the k3s join token from the head node."""
+    cmd = f"""
+        {askpass_block}
+        sudo -A cat {_K3S_NODE_TOKEN}
+    """
+    result = deploy_utils.run_remote(head_node,
+                                     cmd,
+                                     ssh_user,
+                                     ssh_key,
+                                     use_ssh_config=use_ssh_config)
+    if result is None or not _JOIN_TOKEN_RE.fullmatch(result):
+        # Never include `result`: it may be the token.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to read the k3s join token from the '
+                               f'head node ({head_node}).')
+    return result
 
 
 def cleanup_node(node,
@@ -1174,11 +1203,14 @@ def cleanup_node(node,
     """Uninstall k3s and clean up the state on a node."""
     ntype = 'worker' if is_worker else 'head'
     force_update_status(f'Cleaning up {ntype} node ({node})...')
-    script = f'k3s{"-agent" if is_worker else ""}-uninstall.sh'
+    # Run whichever uninstall script the host has: the role in the config may
+    # not match what was installed (e.g. an HA config after a non-HA deploy).
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
-        sudo -A /usr/local/bin/{script} || true &&
+        {{ for s in k3s-uninstall.sh k3s-agent-uninstall.sh; do
+            if [ -x {_K3S_BIN}/$s ]; then sudo -A {_K3S_BIN}/$s || exit 1; fi
+        done; true; }} &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     result = deploy_utils.run_remote(node,
@@ -1189,8 +1221,9 @@ def cleanup_node(node,
     if result is None:
         logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
                      f'node ({node}).{RESET_ALL}')
-    else:
-        success_message(f'Node {node} cleaned up successfully.')
+        return False
+    success_message(f'Node {node} cleaned up successfully.')
+    return True
 
 
 def start_server_node(node,
@@ -1210,7 +1243,7 @@ def start_server_node(node,
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} \
                 INSTALL_K3S_EXEC='server {tls_sans} --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 \
-                K3S_TOKEN={k3s_token} sudo -E -A sh -
+                K3S_TOKEN={shlex.quote(k3s_token)} sudo -E -A sh -
         """
     result = deploy_utils.run_remote(node,
                                      cmd,
@@ -1246,7 +1279,7 @@ def start_agent_node(node,
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
-                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
+                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={shlex.quote(k3s_token)} sudo -E -A sh -
         """
     result = deploy_utils.run_remote(node,
                                      cmd,

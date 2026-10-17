@@ -10,9 +10,10 @@ import concurrent.futures
 import contextlib
 import logging
 import os
+import re
 import traceback
 import typing
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 from sky import backends
 from sky import dag as dag_lib
@@ -27,6 +28,8 @@ from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_utils
+from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
@@ -81,7 +84,10 @@ _OOM_FAILURE_SIGNATURES = ('oomkilled', 'out of memory', 'out-of-memory')
 
 def _is_oom_failure(exception: Exception) -> bool:
     """Whether `exception` indicates an out-of-memory pod termination."""
-    message = common_utils.format_exception(exception).lower()
+    message = common_utils.format_exception(exception)
+    # The container's own output follows the marker; it is the workload's
+    # text, not a termination reason.
+    message = message.split(constants.CONTAINER_OUTPUT_MARKER, 1)[0].lower()
     return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
 
 
@@ -140,6 +146,69 @@ _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=controller_utils.MAX_JOBS_PER_WORKER + 8,
     thread_name_prefix='launch-request-stream')
 
+# Kinds for the launch-retry paths that carry no exception to classify. Spelled
+# without a colon so they are exempt from the metric's open-family cap.
+_KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
+_KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
+_KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
+
+# Why _wait_until_job_starts_on_cluster gave up. Without these the whole
+# family is one opaque bucket: the loop swallows three different exceptions
+# and leaves two non-exception ways out, and by the time the caller sees None
+# they are indistinguishable.
+#
+# A reason is the whole suffix, separator included, because the separator is
+# what decides how the metric treats it: the cap reads any colon as "open
+# family". These three are fixed at compile time, so they join with '_' and
+# cost nothing from a budget meant for names that can actually grow; the
+# exception-derived reasons join with ':' because they are open and should be
+# capped. Keeping the separator in the value is what stops the caller
+# reintroducing a colon by concatenating, which is how it was got wrong once.
+#
+# So the composed codes are, exactly:
+#   launch_retry:job_submit_failed_cluster_preempted
+#   launch_retry:job_submit_failed_status_transient
+#   launch_retry:job_submit_failed_checks_exhausted
+#   launch_retry:job_submit_failed:<kind>     e.g. ...:kubernetes:ApiException
+_SUBMIT_CLUSTER_PREEMPTED = '_cluster_preempted'
+_SUBMIT_STATUS_TRANSIENT = '_status_transient'
+_SUBMIT_CHECKS_EXHAUSTED = '_checks_exhausted'
+
+# job_events.code values. The retry prefix keeps the kinds in one namespace so
+# an inventory can select them with a single LIKE. The kind may itself contain
+# a colon (`kubernetes:ApiException`), so recover it by splitting once, not by
+# taking the last field.
+_CODE_LAUNCH_RETRY_PREFIX = 'launch_retry:'
+_CODE_LAUNCH_PARKED = 'launch_parked'
+
+# A leading token shaped like an exception class, in the message of a bare
+# Exception. See _error_kind for why this is parsed and why it is this narrow.
+_OPAQUE_CLASS = re.compile(r'^([A-Z][A-Za-z0-9_]*(?:Error|Exception)):')
+
+
+def _error_kind(e: BaseException) -> str:
+    """A bounded, structural name for an error out of the launch path.
+
+    Not `type(e).__name__`: most errors here were raised on the API server and
+    rebuilt by `exceptions.deserialize_exception`, which only resolves names
+    from `builtins` and `sky/exceptions.py`. Anything else arrives either
+    wrapped in `CloudError` (a Kubernetes ApiException, say) or as a bare
+    `Exception`, so the plain class name collapses whole families together.
+    """
+    if isinstance(e, exceptions.CloudError):
+        # wrap_exception kept the original class name in error_type.
+        return f'{e.cloud_provider}:{e.error_type}'
+    if type(e) is Exception:  # pylint: disable=unidiomatic-typecheck
+        # Two different things arrive as a bare Exception and they are not
+        # distinguishable: deserialize_exception's fallback, which prefixes
+        # the message with the original class name, and a plain
+        # `raise Exception(msg)`, whose message is untouched. Requiring a
+        # class-shaped token keeps the second from minting label values like
+        # 'Unauthorized' out of an arbitrary error string.
+        match = _OPAQUE_CLASS.match(str(e))
+        return f'opaque:{match.group(1)}' if match else 'opaque:unparsed'
+    return type(e).__name__
+
 
 def _consume_task_exception(task: 'asyncio.Future') -> None:
     """Consume a finished task's exception to avoid asyncio warnings."""
@@ -170,14 +239,14 @@ class _LaunchRequestParked(Exception):
 
     Raised while supervising the inner sky.launch request when the request is
     set to WAITING by the API server, i.e. the launch is waiting on some
-    external condition (e.g. admission to a queue) and has yielded its
-    executor worker. We mirror that at the job scheduling layer: exit the
-    scheduled_launch context so the job releases its launch slot instead of
-    holding it for the entire wait.
+    external condition (e.g. a cluster lock held by another operation) and has
+    yielded its executor worker. We mirror that at the job scheduling layer:
+    exit the scheduled_launch context so the job releases its launch slot
+    instead of holding it for the entire wait.
 
     Notably, this must not tear down the partially provisioned cluster: a
-    parked launch keeps its resources (e.g. its position in an admission
-    queue) and will reuse them on resume.
+    parked launch keeps any resources it already has and will reuse them on
+    resume.
     """
 
     def __init__(self, request_id: str, status_msg: Optional[str]):
@@ -223,8 +292,9 @@ class StrategyExecutor:
             file_mounts_blob_id: If set, the content-addressed blob id
                 associated with this job's uploaded file mounts. It is
                 forwarded to the inner ``sdk.launch`` so that whichever API
-                server replica executes the launch can resolve the blob to
-                its own extraction cache (critical under HA failover).
+                server process executes the launch can resolve the blob to
+                its own extraction cache (critical when that process runs on
+                a different host from the one that received the upload).
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -242,6 +312,7 @@ class StrategyExecutor:
         self.task_id = task_id
         self.pool = pool
         self.restart_cnt_on_failure = 0
+        self.runtime_restart_cnt_on_failure = 0
         self.job_id_on_pool_cluster: Optional[int] = None
         self.starting = starting
         self.starting_lock = starting_lock
@@ -272,6 +343,12 @@ class StrategyExecutor:
         """
         return {}
 
+    def _observation_context(self) -> Dict[str, Any]:
+        """Route provisioning-time runtime observations to this task."""
+        target = state.provisioning_observation_target(self.job_id,
+                                                       self.task_id)
+        return {provision_observation.LAUNCH_CONTEXT_KEY: target}
+
     def task_specs(self) -> Dict[str, Any]:
         """Return strategy-specific keys for the persisted task specs.
 
@@ -285,7 +362,9 @@ class StrategyExecutor:
 
         Subclasses use this to rehydrate state from persisted handles.
         """
-        return None
+        self.runtime_restart_cnt_on_failure = (
+            await state.get_runtime_user_restarts_async(self.job_id,
+                                                        self.task_id))
 
     async def monitor_task(  # pylint: disable=unused-argument
         self,
@@ -298,8 +377,16 @@ class StrategyExecutor:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        emergency_reattach: bool = False,
     ) -> Optional[bool]:
         """Strategy-owned monitoring loop override.
+
+        ``emergency_reattach``: the task kept its cluster through an
+        emergency and its latest job event is EMERGENCY-sourced. A strategy
+        that owns the loop must close that episode the way
+        ``JobController._monitor_one_task`` does: call
+        ``state.record_emergency_reattached_async`` once, on the first
+        status poll the job answers with a non-terminal status.
 
         # TODO(kevin): The default monitor (JobController._monitor_one_task)
         # bakes in cluster-level detection logic (skylet polling, cluster
@@ -315,6 +402,12 @@ class StrategyExecutor:
         FAILED_SETUP with the exception message and return False. Letting
         it escape gets swallowed into the group's monitor results with no
         terminal state set for the task.
+
+        A strategy that checks the network before each poll should call
+        ``sky.jobs.controller.check_network_connection()`` rather than
+        ``backend_utils.async_check_network_connection()``: it shares one
+        check across every monitor loop in the controller process, where the
+        latter sends one request per job per poll.
 
         Returns:
             None: fall back to OSS default monitor.
@@ -480,49 +573,78 @@ class StrategyExecutor:
                         'remaining job process interferes with recovery.')
             await asyncio.to_thread(self._cleanup_cluster)
 
-    async def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
+    async def _wait_until_job_starts_on_cluster(
+            self) -> Tuple[Optional[float], Optional[str]]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
 
         Returns:
-            The timestamp of when the job is submitted, or None if failed to
-            submit.
+            (timestamp, reason). The timestamp of when the job is submitted,
+            or None if it failed to submit -- in which case reason says why
+            the last attempt gave up, so the caller can attribute the retry
+            rather than record an opaque failure.
         """
         assert self.cluster_name is not None
         status = None
+        reason: Optional[str] = None
         job_checking_retry_cnt = 0
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
+            runtime_status = None
+            handle = None
             try:
-                cluster_status, _ = (await asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    self.cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
+                if managed_job_runtime.is_registered():
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        self.cluster_name)
+                    runtime_status = await asyncio.to_thread(
+                        managed_job_runtime.get_job_status, handle,
+                        self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
-                # If any unexpected error happens, retry the job checking
-                # loop.
-                # TODO(zhwu): log the unexpected error to usage collection
-                # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'refresh the cluster status. Retrying.')
+                reason = f':{_error_kind(e)}'
+                logger.info('Unexpected exception during fetching job status: '
+                            f'{common_utils.format_exception(e)}')
                 continue
-            if cluster_status not in (status_lib.ClusterStatus.UP,
-                                      status_lib.ClusterStatus.AUTOSTOPPING):
-                # The cluster can be preempted before the job is
-                # launched.
-                # Break to let the retry launch kick in.
-                logger.info('The cluster is preempted before the job '
-                            'is submitted.')
-                # TODO(zhwu): we should recover the preemption with the
-                # recovery strategy instead of the current while loop.
-                break
-
-            try:
-                status, transient_error_reason = (
-                    await managed_job_utils.get_job_status(
-                        self.backend,
+            # A submitted runtime job can requeue or finish before launch
+            # returns. Its owner determines whether submission succeeded.
+            if runtime_status is None:
+                try:
+                    cluster_status, _ = (await asyncio.to_thread(
+                        backend_utils.refresh_cluster_status_handle,
                         self.cluster_name,
-                        job_id=self.job_id_on_pool_cluster))
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                except Exception as e:  # pylint: disable=broad-except
+                    # If any unexpected error happens, retry the job checking
+                    # loop.
+                    # TODO(zhwu): log the unexpected error to usage collection
+                    # for future debugging.
+                    reason = f':{_error_kind(e)}'
+                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                                'refresh the cluster status. Retrying.')
+                    continue
+                if cluster_status not in (
+                        status_lib.ClusterStatus.UP,
+                        status_lib.ClusterStatus.AUTOSTOPPING):
+                    # The cluster can be preempted before the job is
+                    # launched.
+                    # Break to let the retry launch kick in.
+                    logger.info('The cluster is preempted before the job '
+                                'is submitted.')
+                    # TODO(zhwu): we should recover the preemption with the
+                    # recovery strategy instead of the current while loop.
+                    reason = _SUBMIT_CLUSTER_PREEMPTED
+                    break
+            try:
+                if runtime_status is not None:
+                    status, transient_error_reason = runtime_status
+                else:
+                    status, transient_error_reason = (
+                        await managed_job_utils.get_job_status(
+                            self.backend,
+                            self.cluster_name,
+                            job_id=self.job_id_on_pool_cluster,
+                            handle=handle,
+                            runtime_checked=True))
             except Exception as e:  # pylint: disable=broad-except
                 transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
@@ -531,25 +653,29 @@ class StrategyExecutor:
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
+                reason = f':{_error_kind(e)}'
                 logger.info('Unexpected exception during fetching job status: '
                             f'{common_utils.format_exception(e)}')
                 continue
             if transient_error_reason is not None:
+                reason = _SUBMIT_STATUS_TRANSIENT
                 logger.info('Transient error when fetching the job status: '
                             f'{transient_error_reason}')
                 continue
+            # This poll came back clean, so an anomaly from an earlier one is
+            # history rather than why the wait ends. Without this, a blip on
+            # the first poll would be reported for a wait that actually timed
+            # out with the job sitting in INIT.
+            reason = None
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 if managed_job_runtime.is_registered():
-                    handle = await asyncio.to_thread(
-                        global_user_state.get_handle_from_cluster_name,
-                        self.cluster_name)
                     runtime_submitted_at = await asyncio.to_thread(
                         managed_job_runtime.get_job_submitted_at, handle,
                         self.cluster_name)
                     if runtime_submitted_at is not None:
-                        return runtime_submitted_at
+                        return runtime_submitted_at, None
                 try:
                     job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
@@ -557,17 +683,20 @@ class StrategyExecutor:
                         self.cluster_name,
                         self.job_id_on_pool_cluster,
                         get_end_time=False)
-                    return job_submitted_at
+                    return job_submitted_at, None
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry
                     # job checking loop.
+                    reason = f':{_error_kind(e)}'
                     logger.info(f'Unexpected Exception: {e}\nFailed to get '
                                 'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
             await asyncio.sleep(
                 managed_job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-        return None
+        # Ran out of checks without any attempt saying why: distinct from the
+        # reasons above, and from a NULL, which means a path was missed.
+        return None, reason or _SUBMIT_CHECKS_EXHAUSTED
 
     def _cleanup_cluster(self) -> None:
         if self.cluster_name is None:
@@ -702,8 +831,8 @@ class StrategyExecutor:
         While waiting on the request's log stream (started by
         _start_stream_task), periodically poll the request's status: if the
         API server has parked the request as WAITING (the request yielded its
-        executor worker to wait for some external condition, e.g. admission
-        to a queue), raise _LaunchRequestParked so that the caller can
+        executor worker to wait for some external condition, e.g. a cluster
+        lock), raise _LaunchRequestParked so that the caller can
         release this job's launch slot for the duration of the wait.
 
         The stream task is deliberately left running when parking: the
@@ -880,6 +1009,11 @@ class StrategyExecutor:
         parked_reason: Optional[str] = None
         while True:
             retry_cnt += 1
+            # Why this attempt failed, for the backoff event below. Reset every
+            # iteration: the write happens in the NoClusterLaunchedError
+            # handler, by which point the exception is long gone, and a value
+            # left over from the previous attempt would misreport this one.
+            retry_code: Optional[str] = None
             # Whether this iteration is resuming from a park, i.e. the
             # top-of-loop block below runs and sets the task back to
             # PENDING. Reset every iteration; distinct from
@@ -898,7 +1032,10 @@ class StrategyExecutor:
                         # PENDING (with the park reason) while we wait for
                         # the request to resume.
                         await state.set_backoff_pending_async(
-                            self.job_id, self.task_id, reason=parked_reason)
+                            self.job_id,
+                            self.task_id,
+                            reason=parked_reason,
+                            code=_CODE_LAUNCH_PARKED)
                         parked_reason = None
                     resumed_request_id = await self._wait_for_parked_request(
                         parked_request_id)
@@ -943,6 +1080,7 @@ class StrategyExecutor:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
+                            blob_id = self.file_mounts_blob_id
 
                             if reattach_request_id is None:
                                 # sdk.launch will implicitly start the API
@@ -970,19 +1108,46 @@ class StrategyExecutor:
                                                          f'{env_var}: {value}')
                                             os.environ[env_var] = value
 
-                                # HA failover may land the controller on new
-                                # hosts, ensure blob extraction on the current
-                                # host
-                                if self.file_mounts_blob_id is not None:
+                                # The blob holds the original upload. Once
+                                # submit has rewritten the task to cloud URLs,
+                                # the retry reads the bucket and the local
+                                # directory is unused.
+                                if (blob_id is not None and not server_common.
+                                        dag_requires_local_file_mounts(
+                                            self.dag)):
+                                    logger.info(
+                                        'Skipping local file-mounts blob '
+                                        f'{blob_id}: task sources are cloud '
+                                        'URLs.')
+                                    blob_id = None
+                                # The controller may now run on a different
+                                # host than the upload landed on (e.g. after
+                                # an API server restart), so ensure blob
+                                # extraction on the current host.
+                                if blob_id is not None:
                                     await asyncio.to_thread(
-                                        server_common.resolve_blob_dir,
-                                        self.file_mounts_blob_id,
+                                        server_common.resolve_blob_dir, blob_id,
                                         common_utils.get_user_hash())
 
                             request_id: Optional[str] = None
                             try:
                                 if reattach_request_id is None:
                                     extra_ctx = self.extra_launch_context()
+                                    runtime_restarts = await (
+                                        state.get_runtime_user_restarts_async(
+                                            self.job_id, self.task_id))
+                                    self.runtime_restart_cnt_on_failure = (
+                                        runtime_restarts)
+                                    extra_ctx.update(
+                                        self._observation_context())
+                                    extra_ctx['managed_job_recovery'] = {
+                                        'max_restarts_on_errors': max(
+                                            0, self.max_restarts_on_errors -
+                                            self.restart_cnt_on_failure -
+                                            runtime_restarts),
+                                        'recover_on_exit_codes':
+                                            self.recover_on_exit_codes,
+                                    }
                                     request_id = await asyncio.to_thread(
                                         sdk.launch,
                                         self.dag,
@@ -996,8 +1161,7 @@ class StrategyExecutor:
                                             _AUTODOWN_MINUTES),
                                         down=True,
                                         _is_launched_by_jobs_controller=True,
-                                        _file_mounts_blob_id=(
-                                            self.file_mounts_blob_id),
+                                        _file_mounts_blob_id=blob_id,
                                         _extra_launch_context=(
                                             extra_ctx if extra_ctx else None),
                                     )
@@ -1099,6 +1263,13 @@ class StrategyExecutor:
                                 serve_utils.get_next_cluster_name, self.pool,
                                 self.job_id, task_resources))
                             if self.cluster_name is None:
+                                # Classified here rather than by the broad
+                                # except below: that would call the commonest
+                                # benign state in the system an unknown error,
+                                # once a second per waiting pool job. Doing it
+                                # by class instead would mislabel a real
+                                # NoClusterLaunchedError from the provisioner.
+                                retry_code = _KIND_POOL_NO_CLUSTER
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
                             request_id = None
@@ -1177,6 +1348,7 @@ class StrategyExecutor:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None
+                        retry_code = _KIND_RESOURCES_UNAVAILABLE
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
@@ -1193,6 +1365,11 @@ class StrategyExecutor:
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ClusterSetUpError(
                                     str(e)) from e
+                        if retry_code is None:
+                            # None unless a raise site above already said what
+                            # this is (see the pool case), which is more
+                            # precise than anything the class can tell us.
+                            retry_code = _error_kind(e)
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                         with ux_utils.enable_traceback():
@@ -1248,7 +1425,7 @@ class StrategyExecutor:
                             else:
                                 logger.debug('Not populating instance links '
                                              'since the cluster name is None')
-                        job_submitted_at = await (
+                        job_submitted_at, submit_reason = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
                             return job_submitted_at
@@ -1256,6 +1433,12 @@ class StrategyExecutor:
                         # launch.
                         # TODO(zhwu): log the unexpected error to usage
                         # collection for future debugging.
+                        # Attribute the give-up reason: the three swallowed
+                        # exceptions and the two quiet exits above all reach
+                        # here the same way, and only this tells them apart.
+                        retry_code = (f'{_KIND_JOB_SUBMIT_FAILED}'
+                                      f'{submit_reason}' if submit_reason else
+                                      _KIND_JOB_SUBMIT_FAILED)
                         logger.info(
                             'Failed to successfully submit the job to the '
                             'launched cluster, due to unexpected submission '
@@ -1285,15 +1468,14 @@ class StrategyExecutor:
 
             except _LaunchRequestParked as e:
                 # The underlying launch request yielded its executor worker
-                # and is waiting to resume (e.g. waiting for admission to a
-                # queue). Mirror it at this layer: we have exited the
+                # and is waiting to resume (e.g. waiting on a cluster lock).
+                # Mirror it at this layer: we have exited the
                 # scheduled_launch context above, releasing this job's launch
                 # slot, so that other jobs (including higher-priority ones)
                 # can launch while this job waits. This mirrors the
                 # retry-backoff path below, except that:
                 # - the cluster is NOT torn down: the parked launch keeps its
-                #   partially provisioned resources (e.g. its position in an
-                #   admission queue), and
+                #   partially provisioned resources, and
                 # - we wait for the request to resume instead of sleeping a
                 #   fixed backoff, and then re-attach to the same request.
                 # The waiting itself happens at the top of the next loop
@@ -1331,7 +1513,16 @@ class StrategyExecutor:
                 raise
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
-                await state.set_backoff_pending_async(self.job_id, self.task_id)
+                # retry_code is None only if a path reached here without
+                # saying why; leave the column NULL and count nothing rather
+                # than inventing a kind, so that case stays visible.
+                code = (None if retry_code is None else
+                        f'{_CODE_LAUNCH_RETRY_PREFIX}{retry_code}')
+                await state.set_backoff_pending_async(self.job_id,
+                                                      self.task_id,
+                                                      code=code)
+                if retry_code is not None:
+                    metrics_utils.count_launch_retry(retry_code)
                 # Calculate the backoff time and sleep.
                 gap_seconds = (backoff.current_backoff()
                                if self.pool is None else 1)
@@ -1392,9 +1583,11 @@ class StrategyExecutor:
 
         # Otherwise, check the max_restarts_on_errors counter
         self.restart_cnt_on_failure += 1
-        if self.restart_cnt_on_failure > self.max_restarts_on_errors:
+        restart_count = (self.restart_cnt_on_failure +
+                         self.runtime_restart_cnt_on_failure)
+        if restart_count > self.max_restarts_on_errors:
             return False
-        logger.info(f'Restart count {self.restart_cnt_on_failure} '
+        logger.info(f'Restart count {restart_count} '
                     'is less than max_restarts_on_errors, '
                     'restarting job')
         return True

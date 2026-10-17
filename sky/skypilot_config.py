@@ -134,6 +134,7 @@ config_yaml_table = sqlalchemy.Table(
 
 
 class ConfigContext:
+    """The loaded config for one request context (or the process)."""
 
     def __init__(self,
                  config: config_utils.Config = config_utils.Config(),
@@ -142,6 +143,10 @@ class ConfigContext:
         self.config = config
         self.config_path = config_path
         self.config_overridden = config_overridden
+        # While a request overrides the config: the server's own config, before
+        # the client's layer was merged in. Settings the client must not
+        # weaken are read from here.
+        self.server_config: Optional[config_utils.Config] = None
 
 
 # The global loaded config.
@@ -416,6 +421,40 @@ def get_effective_workspace_region_config(
         return workspaced_config_value
     return get_effective_region_config(cloud, keys, region, default_value,
                                        override_configs)
+
+
+def get_server_workspace_region_config(cloud: str,
+                                       keys: Tuple[str, ...],
+                                       region: Optional[str] = None,
+                                       default_value: Optional[Any] = None,
+                                       workspace: Optional[str] = None) -> Any:
+    """Like get_effective_workspace_region_config, from server layers only.
+
+    Ignores the client config a request merged in and any task override, so a
+    setting an administrator made cannot be undone by the requester.
+    """
+    ctx = _get_config_context()
+    config = (ctx.server_config
+              if ctx.server_config is not None else ctx.config)
+    if workspace is None:
+        workspace = get_active_workspace()
+    workspace_config = config.get_nested(keys=('workspaces', workspace),
+                                         default_value=None)
+    if workspace_config is not None:
+        value = config_utils.get_cloud_config_value_from_dict(
+            dict_config=workspace_config,
+            cloud=cloud,
+            keys=keys,
+            region=region,
+            default_value=None)
+        if value is not None:
+            return value
+    return config_utils.get_cloud_config_value_from_dict(
+        dict_config=config,
+        cloud=cloud,
+        keys=keys,
+        region=region,
+        default_value=default_value)
 
 
 def get_effective_region_config(cloud: str,
@@ -703,10 +742,10 @@ def safe_reload_config() -> None:
     Best-effort refresh with a bounded lock wait: a reload is a *read*, so on a
     lock timeout we log and proceed with the currently loaded config rather than
     block the caller indefinitely behind a wedged lock holder (the historical
-    ``timeout=None`` could hang every reloader across replicas forever).
+    ``timeout=None`` could hang every reloader across processes forever).
 
     Uses a *shared* lock so concurrent reloads (this is a hot path: every
-    sync-handler config refresh, login-time role seed, per-replica reconcile)
+    sync-handler config refresh, login-time role seed, periodic reconcile)
     don't serialize against each other; a writer's exclusive lock still blocks
     reloads mid-write for torn-read safety. Safe against concurrent reloads
     within a single process because `reload_config` swaps the new config in
@@ -919,7 +958,7 @@ def override_skypilot_config(
         override_config_path_serialized: Optional[str] = None
 ) -> Iterator[None]:
     """Overrides the user configurations."""
-    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
+    # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.
@@ -927,6 +966,8 @@ def override_skypilot_config(
         return
     original_config = _get_loaded_config()
     original_config_path = loaded_config_path_serialized()
+    # Nested overrides keep the outermost server config.
+    outer_server_config = _get_config_context().server_config
     override_configs = config_utils.Config(override_configs)
     if override_config_path_serialized is None:
         override_config_path = []
@@ -986,6 +1027,9 @@ def override_skypilot_config(
             'Error: ',
             skip_none=False)
         _set_config_overridden(True)
+        _get_config_context().server_config = (outer_server_config
+                                               if outer_server_config
+                                               is not None else original_config)
         _set_loaded_config(config)
         _set_loaded_config_path(_get_loaded_config_path() +
                                 override_config_path)
@@ -1001,9 +1045,32 @@ def override_skypilot_config(
                 f'{config_utils.dump_redacted_yaml(override_configs)}\n'
                 f'Details: {e}') from e
     finally:
+        _get_config_context().server_config = outer_server_config
         _set_loaded_config(original_config)
         _set_config_overridden(False)
         _set_loaded_config_path_serialized(original_config_path)
+
+
+@contextlib.contextmanager
+def replace_skypilot_config_in_process(
+        new_configs: config_utils.Config) -> Iterator[None]:
+    """Replaces the loaded config for the current process or context only.
+
+    Unlike :func:`replace_skypilot_config`, no temporary config file is
+    written and ``SKYPILOT_CONFIG`` is left untouched, so subprocesses
+    spawned inside the block keep seeing the original config. Use it when
+    only in-process readers need the replacement, e.g. a per-launch default
+    consumed by the provisioner.
+    """
+    original_config = _get_loaded_config()
+    if new_configs == original_config:
+        yield
+        return
+    _set_loaded_config(new_configs)
+    try:
+        yield
+    finally:
+        _set_loaded_config(original_config)
 
 
 @contextlib.contextmanager
@@ -1067,11 +1134,14 @@ _SLURM_ACCOUNT_KEYS: List[Tuple[str, ...]] = [('quota', 'account')]
 
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
 
+_QUEUE_ADMISSION_TIMEOUT_KEYS: List[Tuple[str, ...]] = [
+    ('kueue', 'admission_timeout'),
+]
+
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
-# new config has been persisted and reloaded in-process. Plugins use this to
-# invalidate caches that were derived from the config (e.g. a request that
-# memoized the result of `get_nested(...)` for a TTL). Registered at server
-# startup during single-threaded plugin loading, so no lock is needed.
+# new config has been persisted and reloaded in-process, e.g. to invalidate
+# state derived from the config. Registered at server startup during
+# single-threaded plugin loading, so no lock is needed.
 _CONFIG_UPDATE_HOOKS: List[Callable[[], None]] = []
 
 
@@ -1299,6 +1369,75 @@ def get_effective_slurm_account(
                                               workspace=workspace,
                                               override_configs=override_configs,
                                               partition=partition)
+
+
+def get_effective_slurm_quota_value(
+        key: str,
+        cluster: Optional[str] = None,
+        partition: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns a ``slurm.quota.<key>`` value, scope-resolved.
+
+    The ``slurm.quota`` block is deliberately permissive
+    (``additionalProperties: True``) so that consumers can carry
+    scheduler-specific sub-fields beyond the ``queue`` and ``account`` that
+    :func:`get_effective_queue_name` and :func:`get_effective_slurm_account`
+    read. This is the generic counterpart to those two: it resolves any such
+    sub-field over the same scopes -- workspace > global, and within each,
+    partition > cluster > cloud -- so a consumer does not have to reimplement
+    the walk and risk resolving its own field differently from ``queue``.
+
+    Returns ``Any`` rather than ``Optional[str]``, unlike the two named
+    getters: their fields are declared ``{'type': 'string'}`` and so are
+    validated as strings before they get here, while ``additionalProperties``
+    constrains nothing, so a sub-field can hold a number, a bool, a list or a
+    mapping. Narrowing the annotation would let a caller run string
+    operations on a value the schema never promised was a string. Validating
+    the type is the caller's job, the same split the ``slurm.quota`` schema
+    comment already describes.
+
+    Args:
+        key: The sub-field under ``slurm.quota`` to read.
+        cluster: Slurm cluster, selecting the ``cluster_configs`` level.
+        partition: Partition, selecting the ``partition_configs`` level.
+        workspace: Workspace to read first; defaults to the active one.
+        override_configs: Task-level ``config`` overrides.
+
+    Returns:
+        The resolved value as configured, or None if the field is unset at
+        every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='slurm',
+                                              property_keys=[('quota', key)],
+                                              region=cluster,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
+
+
+def get_effective_queue_admission_timeout(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """Returns the effective ``kueue.admission_timeout``, or None if unset.
+
+    Bound, in seconds, on how long a launch waits for pods held by a
+    scheduling gate to be admitted; ``-1`` waits indefinitely. Resolved with
+    the same scope precedence as :func:`get_effective_queue_name` (workspace
+    over global, context over cloud), with ``override_configs`` (a task's
+    ``config`` block) merged in at every scope.
+    """
+    value = _get_effective_scoped_config_value(
+        cloud=cloud,
+        property_keys=_QUEUE_ADMISSION_TIMEOUT_KEYS,
+        region=region,
+        workspace=workspace,
+        override_configs=override_configs)
+    if value is None:
+        return None
+    return int(value)
 
 
 def get_effective_namespace(

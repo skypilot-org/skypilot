@@ -32,9 +32,10 @@ jest.mock('@/components/elements/sidebar', () => ({
   __esModule: true,
   useSidebar: () => ({ isCollapsed: false, state: 'expanded', open: true }),
 }));
+// Render the fallback, matching the default behavior.
 jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
-  PluginSlot: () => null,
+  PluginSlot: ({ fallback = null }) => fallback,
 }));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,

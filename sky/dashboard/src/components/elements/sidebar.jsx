@@ -616,7 +616,7 @@ export function TopBar() {
                 {/* Ungrouped plugin links - positioned on the right */}
                 {ungrouped.map((link) => renderDesktopPluginNavLink(link))}
 
-                {/* Grouped dropdown menus (e.g., Enterprise) - positioned on the right */}
+                {/* Grouped dropdown menus - positioned on the right */}
                 {Object.entries(groups).map(([groupName, links]) =>
                   renderDesktopDropdownMenu(groupName, links)
                 )}

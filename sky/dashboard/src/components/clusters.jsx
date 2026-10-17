@@ -130,9 +130,10 @@ const CLUSTER_VIEW_SCHEMA = [
   },
 ];
 
-const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: multi ?? false,
 }));
 
 // Properties whose values are alternatives rather than extra conditions. Only
@@ -522,6 +523,18 @@ export function Clusters() {
     });
   };
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={optionValues}
+      setFilters={setFilters}
+      placeholder="Filter clusters"
+      filters={filters}
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
@@ -534,22 +547,34 @@ export function Clusters() {
           </Link>
         </div>
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            placeholder="Filter clusters"
-            filters={filters}
+          <PluginSlot
+            name="clusters.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList: optionValues,
+              placeholder: 'Filter clusters',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <PluginSlot
+        name="clusters.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
 
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
-          box. Refresh/last-updated sit on the right of the same row. */}
-      <div className="flex items-center justify-between mb-4">
+          box. Refresh/last-updated sit on the right of the same row; below
+          lg the timestamp hides and Refresh stays level with the first
+          toggle row when the toggles wrap. */}
+      <div className="flex justify-between mb-4 max-lg:items-start lg:items-center">
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedToggle
             ariaLabel="Filter clusters by activity"
@@ -601,7 +626,7 @@ export function Clusters() {
               </div>
             )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
+        <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
           {showHistory && (
             <Select
               value={historyDays.toString()}
@@ -621,18 +646,23 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            <div className="max-lg:hidden lg:flex lg:items-center">
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            </div>
           )}
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            title="Refresh"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
@@ -1124,8 +1154,13 @@ export function ClusterTable({
           Infra{getSortDirection('infra')}
         </TableHead>
       ),
-      renderCell: (item) => (
-        <TableCell>
+      renderCell: (item) => {
+        // The default rendering, also handed to the plugin slot below as
+        // `defaultContent`: a plugin that only wants to change how *some*
+        // clusters read can return it unchanged for the rest, instead of
+        // reimplementing this markup. `fallback` keeps the no-plugin case
+        // byte-identical.
+        const infraContent = (
           <NonCapitalizedTooltip
             content={item.full_infra || item.infra}
             className="text-sm text-muted-foreground"
@@ -1141,8 +1176,17 @@ export function ClusterTable({
               )}
             </span>
           </NonCapitalizedTooltip>
-        </TableCell>
-      ),
+        );
+        return (
+          <TableCell>
+            <PluginSlot
+              name="clusters.table.infra"
+              context={{ cluster: item, defaultContent: infraContent }}
+              fallback={infraContent}
+            />
+          </TableCell>
+        );
+      },
     },
     {
       id: 'resources',

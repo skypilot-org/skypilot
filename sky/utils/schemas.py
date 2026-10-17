@@ -1177,6 +1177,26 @@ def _task_config_schema():
     }
 
 
+def get_task_job_schema():
+    """Schema for the task's `job:` section: managed-job lifecycle settings."""
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'wait_for_scheduling_timeout': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN_SECONDS,
+                }, {
+                    'type': 'integer',
+                    'minimum': 1,
+                }],
+            },
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1210,6 +1230,7 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'job': get_task_job_schema(),
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
@@ -1444,6 +1465,8 @@ class RemoteIdentityOptions(enum.Enum):
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
     NO_UPLOAD = 'NO_UPLOAD'
+    # Kubernetes only: the pod gets no API credentials at all.
+    NONE = 'NONE'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -1467,7 +1490,9 @@ _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-            option.value for option in RemoteIdentityOptions
+            option.value
+            for option in RemoteIdentityOptions
+            if option is not RemoteIdentityOptions.NONE
         ]
     }
 }
@@ -1511,8 +1536,8 @@ _SBATCH_OPTIONS_SCHEMA = {
 
 # `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
 # `quota.account` the account it is charged to (`sbatch --account`), mirroring
-# `kubernetes.quota.queue`. Permissive so external schedulers (registered via
-# plugins) can layer their own sub-fields under `quota`.
+# `kubernetes.quota.queue`. Permissive so plugins can layer their own
+# sub-fields under `quota`.
 _SLURM_QUOTA_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1632,6 +1657,15 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # Per context because the constraint it satisfies is per cluster: the
+    # range has to sit outside the node's ephemeral port pool, and that
+    # pool's floor is a per-node sysctl. Measured 32768 on GKE and OCI,
+    # 10240 on CoreWeave -- so one value cannot serve a deployment that
+    # spans them.
+    'host_network_port_range': {
+        'type': 'string',
+        'pattern': r'^\d+-\d+$',
+    },
     'allowed_nodes': {
         'type': 'object',
         'required': [],
@@ -1736,10 +1770,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set. Permissive so external schedulers (registered
-    # via plugins) can layer their own sub-fields under `quota` without
-    # requiring per-key OSS schema updates; sub-field validation is the
-    # consumer's responsibility.
+    # when both are set. Permissive so plugins can layer their own
+    # sub-fields under `quota` without requiring per-key OSS schema
+    # updates; sub-field validation is the consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
@@ -1872,7 +1905,7 @@ _SLURM_USERNAME_MAP_SCHEMA = {
     },
     'additionalProperties': {
         'type': 'string',
-        'pattern': '^[a-z_][a-z0-9_.-]*$'
+        'pattern': '^[a-z_][a-z0-9_.+-]*$'
     }
 }
 
@@ -2595,6 +2628,9 @@ def get_config_schema():
             'cluster_terminal_event_retention_hours': {
                 'type': 'number',
             },
+            'launch_attempt_retention_hours': {
+                'type': 'number',
+            },
             'daemon_log_max_bytes': {
                 'type': 'integer',
                 'minimum': 0,
@@ -2919,6 +2955,25 @@ def get_config_schema():
             'install_conda': {
                 'type': 'boolean',
             },
+            # Wall-clock bound (seconds) for a single provisioning-phase
+            # remote command: setup commands, ray start, skylet start. A
+            # non-positive value disables the bound. See
+            # skypilot-org/skypilot#10167 for why an unbounded command can
+            # wedge `sky launch` forever.
+            'setup_command_timeout': {
+                'type': 'integer',
+            },
+            # Wall-clock bound (seconds) applied to each remote operation of
+            # an internal file mount -- the mkdir and the rsync of
+            # ~/.sky/.runtime_files are bounded separately, so a single mount
+            # can take up to twice this value.
+            'file_mount_timeout': {
+                'type': 'integer',
+            },
+            'health_check_timeout': {
+                'type': 'number',
+                'minimum': 0,
+            },
         }
     }
 
@@ -2926,10 +2981,21 @@ def get_config_schema():
         'type': 'object',
         'required': ['store'],
         'additionalProperties': False,
+        # The OTLP store has no default endpoint, so its block is required.
+        'if': {
+            'properties': {
+                'store': {
+                    'case_insensitive_enum': ['otlp'],
+                },
+            },
+        },
+        'then': {
+            'required': ['otlp'],
+        },
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp', 'aws'],
+                'case_insensitive_enum': ['gcp', 'aws', 'otlp'],
             },
             'gcp': {
                 'type': 'object',
@@ -2967,6 +3033,48 @@ def get_config_schema():
                         'type': 'boolean',
                     },
                     'additional_tags': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'otlp': {
+                'type': 'object',
+                'required': ['endpoint'],
+                'additionalProperties': False,
+                'properties': {
+                    'endpoint': {
+                        'type': 'string',
+                    },
+                    'protocol': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['http/protobuf', 'grpc'],
+                    },
+                    'headers': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'headers_file': {
+                        'type': 'string',
+                    },
+                    'compression': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['none', 'gzip'],
+                    },
+                    'tls': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'insecure_skip_verify': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'resource_attributes': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',

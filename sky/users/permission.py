@@ -72,8 +72,8 @@ _DENIED_LOG_TTL_SECONDS = 300
 _PROBE_DUTY_CYCLE = 0.1
 
 # Cap on repairs queued but not yet run. The per-principal claim bounds the
-# rate; this bounds a burst, so one SCIM push that strands hundreds cannot grow
-# an unbounded queue behind a single worker thread.
+# rate; this bounds a burst, so one bulk change that strands hundreds cannot
+# grow an unbounded queue behind a single worker thread.
 _REPAIR_MAX_IN_FLIGHT = 64
 
 # Materialized once: the role set is a static enum, and this is consulted on
@@ -375,7 +375,7 @@ class PermissionService:
 
         # The model was loaded by the enforcer's constructor, before the lock
         # was acquired -- and waiting for it can take seconds. Anything another
-        # replica wrote in that window is missing here, so this method would
+        # process wrote in that window is missing here, so this method would
         # consider it redundant and delete it.
         self._load_policy_no_lock()
 
@@ -481,7 +481,18 @@ class PermissionService:
             # Deliberately here rather than in the callee, which
             # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
-            self._add_user_if_not_exists_no_lock(user_id, role)
+            if self._add_user_if_not_exists_no_lock(user_id, role):
+                # As in `update_role`: a first role can grant workspace access
+                # that was denied and cached while the user had none. Clear
+                # after the write so a reader cannot re-cache the old answer.
+                # The role is already saved, so a failed clear must not fail
+                # the caller; a stale entry expires with the cache TTL.
+                try:
+                    self.invalidate_user_permission_cache(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to clear cached workspace permissions for '
+                        f'user {user_id}: {common_utils.format_exception(e)}')
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
@@ -636,6 +647,21 @@ class PermissionService:
         readable = writable | self._read_only_visible(workspace_names)
         return readable, writable
 
+    def get_readable_workspace_names(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return workspace names the user can read, or None if unrestricted.
+
+        Same as `get_accessible_workspace_names` with ``action='read'``, except
+        that server-off and admin return None instead of ``workspace_names``.
+        For filtering records that outlive their workspace, such as cluster
+        history, which an admin must still see after the workspace is deleted.
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            return None
+        return writable | self._read_only_visible(workspace_names)
+
     def _writable_workspace_names(
             self, user_id: str,
             workspace_names: Set[str]) -> Optional[Set[str]]:
@@ -656,14 +682,54 @@ class PermissionService:
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
             return None
-        enforcer = self._ensure_enforcer()
-        writable = set()
-        for rule in enforcer.get_policy():
-            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
-                                                      rule[0] == '*'):
-                if rule[1] in workspace_names:
-                    writable.add(rule[1])
-        return writable
+        return self._writable(self._workspace_members(workspace_names), user_id)
+
+    def readable_workspace_members_in_memory(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Return the user plus the members of every workspace they can read.
+
+        Returns None if a readable workspace is public, as everyone is its
+        member. The readable set is the non-admin one from
+        `get_readable_workspace_names`. A workspace that is readable only
+        because of ``read_access: all`` adds its members, not everyone.
+
+        Reads this process's policy without reloading it, so the caller must
+        reload first, and must handle admins itself.
+        """
+        members = self._workspace_members(workspace_names)
+        readable = (self._writable(members, user_id) |
+                    self._read_only_visible(workspace_names))
+        result = {user_id}
+        for workspace_name in readable:
+            workspace_members = members.get(workspace_name, set())
+            if '*' in workspace_members:
+                return None
+            result |= workspace_members
+        return result
+
+    def _workspace_members(self,
+                           workspace_names: Set[str]) -> Dict[str, Set[str]]:
+        """Each requested workspace's members, from the policy in memory.
+
+        A member is a direct (user_id, workspace, '*') grant, or '*' for the
+        wildcard ('*', workspace, '*') grant of a public workspace.
+        """
+        members: Dict[str, Set[str]] = {}
+        for rule in self._ensure_enforcer().get_policy():
+            if (len(rule) >= 3 and rule[2] == '*' and
+                    rule[1] in workspace_names):
+                members.setdefault(rule[1], set()).add(rule[0])
+        return members
+
+    @staticmethod
+    def _writable(members: Dict[str, Set[str]], user_id: str) -> Set[str]:
+        """Workspaces in ``members`` that the user, or everyone, belongs to."""
+        return {
+            workspace_name
+            for workspace_name, workspace_members in members.items()
+            if user_id in workspace_members or '*' in workspace_members
+        }
 
     @staticmethod
     def _read_only_visible(workspace_names: Set[str]) -> Set[str]:
@@ -1261,7 +1327,7 @@ class PermissionService:
 
         Idempotent and concurrency-safe: policy writes are guarded by the
         distributed policy lock and ``add_policy`` skips duplicates, so
-        concurrent replicas / workers converge on the same result.
+        concurrent server processes converge on the same result.
 
         Lock ordering matters: a workspace update (`update_workspace_fn`)
         takes the config lock exclusively, then the policy lock nested
