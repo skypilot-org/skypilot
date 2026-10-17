@@ -2657,8 +2657,11 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
 
     Args:
         request_ids: The request ID(s) to abort. Can be a single string or a
-            list of strings.
-        all_users: Whether to abort all requests from all users.
+            list of strings. Named requests are cancelled whoever owns them,
+            subject to the server's permission check: an admin can cancel any
+            request, other users only their own.
+        all_users: Whether to abort all requests from all users. Only used
+            when request_ids is not given.
         silent: Whether to suppress the output.
 
     Returns:
@@ -2672,25 +2675,31 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
             all_users is not set.
     """
     echo = logger.info if not silent else logger.debug
-    user_id = None
-    if not all_users:
-        user_id = common_utils.get_user_hash()
 
     # Convert single request ID to list if needed
     if isinstance(request_ids, str):
         request_ids = [request_ids]
 
+    # Named requests are not scoped to the caller's user hash: the server
+    # decides who may cancel what, so an admin can cancel another user's (or
+    # the system's) request by id, while a non-admin is still limited to
+    # their own. Servers that predate that check never applied the user scope
+    # to an explicit id list, so this grants nothing new there either.
+    user_id = None
+    if request_ids is None and not all_users:
+        user_id = common_utils.get_user_hash()
+
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
-    if all_users:
-        echo('Cancelling all users\' requests...')
-    elif request_ids is None:
-        echo(f'Cancelling all requests for user {user_id!r}...')
-    else:
+    if request_ids is not None:
         request_id_str = ', '.join(
             repr(request_id) for request_id in request_ids)
         plural = 's' if len(request_ids) > 1 else ''
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
+    elif all_users:
+        echo('Cancelling all users\' requests...')
+    else:
+        echo(f'Cancelling all requests for user {user_id!r}...')
 
     response = server_common.make_authenticated_request(
         'POST',

@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from typing import Dict, Generator, List, Optional, Tuple, TypeVar
+import uuid
 
 import pytest
 import requests
@@ -347,6 +348,124 @@ def test_retry_until_up_waiting_request_is_reexecuted(generic_cloud: str):
                   f'sky api cancel -y "$req" 2>/dev/null || true; '
                   f'sky down -y {name} 2>/dev/null || true; '
                   f'rm -f {req_file}'),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
+# ---- Test cancelling another user's request by id -----
+# `sky api cancel <id>` used to send the caller's user hash, so the server's
+# owner scope kept an admin from cancelling another user's request, and
+# `-u <id>` dropped the id and cancelled every request on the server. A named
+# id must reach any owner's request for an admin and only the caller's own for
+# anyone else. Real identities need service-account tokens (the loopback
+# server skips basic auth, and SKYPILOT_USER_ID alone is not an identity), so
+# the server is restarted with them enabled; the request to cancel is a
+# --retry-until-up launch of 100 nodes, which stays active until cancelled.
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server  # Restarts the API server.
+@pytest.mark.no_dependency  # Restarts the API server.
+def test_api_cancel_other_users_request(generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Restarts the local API server with service accounts '
+                    'enabled; skipped against a remote endpoint.')
+    name = smoke_tests_utils.get_cluster_name()
+    suffix = uuid.uuid4().hex[:8]
+    state_dir = tempfile.mkdtemp(prefix=f'{name}-')
+    req_file = f'{state_dir}/req'
+    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
+    restart_with_service_accounts = (
+        f'export {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}=true && '
+        f'{smoke_tests_utils.SKY_API_RESTART}')
+
+    def mint_tokens() -> Generator[str, None, None]:
+        # The first user to reach the server through the auth-proxy header
+        # gets the default (admin) role and mints a token per test identity.
+        headers = {'X-Auth-Request-Email': f'cancel-admin-{suffix}@example.com'}
+        role = requests.get(f'{base_url}/users/role',
+                            headers=headers,
+                            timeout=30).json().get('role')
+        assert role == 'admin', f'Expected the minting user to be admin: {role}'
+        for identity, sa_role in [('admin', 'admin'), ('owner', 'user'),
+                                  ('other', 'user')]:
+            resp = requests.post(
+                f'{base_url}/users/service-account-tokens',
+                headers=headers,
+                json={
+                    'token_name': f'cancel_{identity}_{suffix}',
+                    'role': sa_role,
+                    'expires_in_days': 1,
+                },
+                timeout=30)
+            assert resp.status_code == 200, resp.text
+            token = resp.json()
+            pathlib.Path(f'{state_dir}/{identity}.token').write_text(
+                token['token'], encoding='utf-8')
+            pathlib.Path(f'{state_dir}/{identity}.id').write_text(
+                token['service_account_user_id'], encoding='utf-8')
+            yield (f'Minted a {sa_role} token for {identity}: '
+                   f'{token["service_account_user_id"]}')
+
+    def as_(identity: str) -> str:
+        # `sky api login --token` records the account id as the local user
+        # hash; mirror that so client-side identity matches the token.
+        return (f'export {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR}='
+                f'$(cat {state_dir}/{identity}.token); '
+                f'export {constants.USER_ID_ENV_VAR}='
+                f'$(cat {state_dir}/{identity}.id); ')
+
+    def assert_status(status: str) -> str:
+        return (f'{as_("admin")}s=$(sky api status -a "$(cat {req_file})"); '
+                f'echo "$s"; echo "$s" | grep -w {status}')
+
+    wait_cancelled = (f'{as_("admin")}req=$(cat {req_file}); start=$SECONDS; '
+                      f'until sky api status -a "$req" | grep -qw CANCELLED; '
+                      f'do '
+                      f'  if [ $((SECONDS - start)) -gt 120 ]; then '
+                      f'    echo "timed out waiting for cancellation"; '
+                      f'    sky api status -a "$req"; exit 1; '
+                      f'  fi; '
+                      f'  sleep 2; '
+                      f'done; echo "request cancelled"')
+
+    test = smoke_tests_utils.Test(
+        'test_api_cancel_other_users_request',
+        [
+            restart_with_service_accounts,
+            mint_tokens,
+            f'{as_("admin")}sky check kubernetes',
+            # A non-admin starts a request that stays active until cancelled.
+            (f'{as_("owner")}req=$(sky launch -c {name} --infra kubernetes '
+             f'--cpus 1 --num-nodes 100 --retry-until-up -y --async '
+             f'"echo cancel-me" | grep -oE \'request: [0-9a-f-]+\' | '
+             f'head -1 | awk \'{{print $2}}\'); '
+             f'echo "captured request id: $req"; test -n "$req"; '
+             f'echo "$req" > {req_file}'),
+            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            # Another non-admin cannot cancel it by id.
+            (f'{as_("other")}s=$(sky api cancel -y "$(cat {req_file})" 2>&1);'
+             f' echo "$s"; echo "$s" | grep "No requests need to be cancelled"'
+            ),
+            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            # -u with ids is refused instead of cancelling every request.
+            (f'{as_("other")}s=$(sky api cancel -y -u "$(cat {req_file})" '
+             f'2>&1) && exit 1; echo "$s"; '
+             f'echo "$s" | grep "Can only specify one of REQUEST_IDS"'),
+            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            # An admin cancels it by id.
+            (f'{as_("admin")}s=$(sky api cancel -y "$(cat {req_file})" 2>&1);'
+             f' echo "$s"; echo "$s" | grep "Cancelled 1 request"'),
+            wait_cancelled,
+        ],
+        teardown=(f'{as_("admin")}sky api cancel -y "$(cat {req_file})" '
+                  f'2>/dev/null || true; '
+                  f'{as_("admin")}sky down -y {name} 2>/dev/null || true; '
+                  f'unset {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR} '
+                  f'{constants.USER_ID_ENV_VAR} '
+                  f'{constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}; '
+                  f'{smoke_tests_utils.SKY_API_RESTART}; '
+                  f'rm -rf {state_dir}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
