@@ -1671,37 +1671,56 @@ class TestRootJobIdEnvMarker:
 class TestJobGroupNetworkingInjectionGate:
     """Networking wait/updater scripts are only injected when the group
     requires in-group networking (inter_connection enabled) and the task
-    runs on Kubernetes."""
+    runs on a cloud that supports it."""
 
-    def _make_task(self, cloud_str):
+    def _make_task(self, cloud_str, supports=True, ports=None):
         task = MagicMock()
         task.name = 'job-a'
         task.envs = {}
         task.run = 'echo hi'
         resource = MagicMock()
+        resource.ports = ports
         if cloud_str is None:
             resource.cloud = None
         else:
             cloud = MagicMock()
             cloud.__str__ = MagicMock(return_value=cloud_str)
+            cloud.supports_job_group_networking.return_value = supports
             resource.cloud = cloud
         task.resources = [resource]
         return task
 
-    def test_task_uses_kubernetes(self):
+    def test_task_supports_in_group_networking(self):
         from sky.jobs import controller as controller_lib
-        assert controller_lib._task_uses_kubernetes(
+        assert controller_lib._task_supports_in_group_networking(
             self._make_task('Kubernetes'))
-        assert not controller_lib._task_uses_kubernetes(self._make_task('AWS'))
-        assert not controller_lib._task_uses_kubernetes(self._make_task(None))
+        assert controller_lib._task_supports_in_group_networking(
+            self._make_task('AWS'))
+        assert not controller_lib._task_supports_in_group_networking(
+            self._make_task('Azure', supports=False))
+        assert not controller_lib._task_supports_in_group_networking(
+            self._make_task(None))
 
-    async def _prepare(self, inter_connection_enabled, cloud_str):
+    def test_ports_isolation_warning_only_for_aws_with_ports(self):
+        from sky.jobs import controller as controller_lib
+        warning = controller_lib._ports_isolation_warning(
+            self._make_task('AWS', ports=['8080']))
+        assert warning is not None
+        assert 'port 22' in warning
+        assert 'job-a' in warning
+        assert controller_lib._ports_isolation_warning(
+            self._make_task('AWS')) is None
+        assert controller_lib._ports_isolation_warning(
+            self._make_task('GCP', ports=['8080'])) is None
+
+    async def _prepare(self, inter_connection_enabled, cloud_str,
+                       supports=True):
         controller = MagicMock(spec=JobController)
         controller._job_id = 1
         controller._dag = MagicMock()
         controller._dag.inter_connection_enabled = MagicMock(
             return_value=inter_connection_enabled)
-        task = self._make_task(cloud_str)
+        task = self._make_task(cloud_str, supports=supports)
         controller._dag.tasks = [task]
         controller._backend = MagicMock()
         controller._backend.run_timestamp = 'run-ts'
@@ -1741,9 +1760,17 @@ class TestJobGroupNetworkingInjectionGate:
         net.generate_wait_for_networking_script.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_skips_injection_for_non_kubernetes_task(self):
+    async def test_injects_wait_for_aws_task(self):
         task, net = await self._prepare(inter_connection_enabled=True,
                                         cloud_str='AWS')
+        assert task.run.startswith('WAIT')
+        net.generate_wait_for_networking_script.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_injection_for_unsupported_cloud_task(self):
+        task, net = await self._prepare(inter_connection_enabled=True,
+                                        cloud_str='Azure',
+                                        supports=False)
         assert task.run == 'echo hi'
         net.generate_wait_for_networking_script.assert_not_called()
 

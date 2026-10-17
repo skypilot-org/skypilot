@@ -276,18 +276,38 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     task.set_resources(new_resources_list)
 
 
-def _task_uses_kubernetes(task: 'sky.Task') -> bool:
-    """Whether any of the task's resources target Kubernetes.
+def _task_supports_in_group_networking(task: 'sky.Task') -> bool:
+    """Whether any of the task's resources target a cloud with in-group
+    networking support (see Cloud.supports_job_group_networking).
 
     JobGroup tasks are pinned to a single cloud by the optimizer before
     reaching the controller, so checking all resource candidates is
-    equivalent to checking the pinned cloud. In-group networking (hostname
-    discovery) is only supported on Kubernetes.
+    equivalent to checking the pinned cloud.
     """
     for res in task.resources:
-        if res.cloud is not None and str(res.cloud).lower() == 'kubernetes':
+        if (res.cloud is not None and
+                res.cloud.supports_job_group_networking()):
             return True
     return False
+
+
+def _ports_isolation_warning(task: 'sky.Task') -> Optional[str]:
+    """Warning for a JobGroup task whose opened ports isolate it from peers.
+
+    On AWS, a cluster that opens ports gets a dedicated security group
+    instead of the shared default one, so peers can reach it only on the
+    opened ports and it can reach peers only on port 22. Returns None when
+    the task does not hit this case.
+    """
+    for res in task.resources:
+        if (res.cloud is not None and str(res.cloud).lower() == 'aws' and
+                res.ports):
+            return (f'Job {task.name!r} opens ports ({res.ports}) on AWS, '
+                    'which places it in a dedicated security group: peers '
+                    'can reach it on those ports, but it can only reach '
+                    'peers on port 22. Drop \'ports\' if the traffic is '
+                    'in-group only.')
+    return None
 
 
 def _deadline_specs(task: 'sky.Task') -> Dict[str, Optional[int]]:
@@ -2213,11 +2233,14 @@ class JobController:
 
         # In-group networking machinery is only set up when the group
         # requires it (inter_connection enabled, the default) and the task
-        # runs on Kubernetes — the only infra with in-group networking
-        # support. Otherwise no wait/updater is injected: the task starts
-        # immediately and peers are not reachable by hostname.
+        # runs on a cloud with in-group networking support. Otherwise no
+        # wait/updater is injected: the task starts immediately and peers
+        # are not reachable by hostname.
         if (self._dag.inter_connection_enabled() and
-                _task_uses_kubernetes(task)):
+                _task_supports_in_group_networking(task)):
+            ports_warning = _ports_isolation_warning(task)
+            if ports_warning is not None:
+                logger.warning(ports_warning)
             # Inject wait script to ensure networking is ready before task
             # runs. We inject this into task.run (not task.setup) because:
             # - setup runs during cluster provisioning (Phase 1)
