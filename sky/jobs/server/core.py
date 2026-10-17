@@ -53,6 +53,7 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
@@ -1021,21 +1022,44 @@ def launch(
     workspace_ctx = (skypilot_config.local_active_workspace_ctx(workspace)
                      if workspace is not None else contextlib.nullcontext())
     with workspace_ctx:
-        dependencies = _check_job_dependencies(depends_on)
-        return _launch(task,
-                       name=name,
-                       pool=pool,
-                       num_jobs=num_jobs,
-                       stream_logs=stream_logs,
-                       file_mounts_blob_id=file_mounts_blob_id,
-                       parent_job_id=parent_job_id,
-                       parent_task_id=parent_task_id,
-                       root_job_id=root_job_id,
-                       depends_on=dependencies)
+        # An attached job stays in its group's workspace, whatever the policy.
+        existing_resource = None
+        if parent_job_id is not None:
+            # _check_job_group_attachment above already rejected a missing one.
+            parent = managed_job_state.get_job_info_row(parent_job_id)
+            if parent is not None:
+                existing_resource = (f'parent job {parent_job_id}',
+                                     parent.workspace)
+        # Always apply the policy again here, even though it might have been
+        # applied in the CLI. This is to ensure that we apply the policy to the
+        # final DAG and get the mutated config.
+        dag, mutated_user_config = admin_policy_utils.apply(
+            dag_utils.convert_entrypoint_to_dag(task),
+            request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
+            existing_resource=existing_resource)
+        # The rest of the launch runs in the workspace the policy routed it
+        # to; only the controller snapshot gets the rest of the mutated config.
+        with admin_policy_utils.use_policy_workspace(
+                mutated_user_config['active_workspace']):
+            dependencies = _check_job_dependencies(depends_on)
+            return _launch(task,
+                           dag,
+                           mutated_user_config,
+                           name=name,
+                           pool=pool,
+                           num_jobs=num_jobs,
+                           stream_logs=stream_logs,
+                           file_mounts_blob_id=file_mounts_blob_id,
+                           parent_job_id=parent_job_id,
+                           parent_task_id=parent_task_id,
+                           root_job_id=root_job_id,
+                           depends_on=dependencies)
 
 
 def _launch(
     task: Union['sky.Task', 'sky.Dag'],
+    dag: 'sky.Dag',
+    mutated_user_config: config_utils.Config,
     name: Optional[str],
     pool: Optional[str],
     num_jobs: Optional[int],
@@ -1046,9 +1070,9 @@ def _launch(
     root_job_id: Optional[int],
     depends_on: List[int],
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
-    """``launch`` after the attachment and dependencies are resolved; ids are
+    """``launch`` after the attachment and dependencies are resolved and the
+    admin policy is applied (``dag``, ``mutated_user_config``); ids are
     recorded as-is."""
-    entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
         metadata = task.metadata
@@ -1062,13 +1086,6 @@ def _launch(
             metadata = {}
 
     dag_uuid = str(uuid.uuid4().hex[:4])
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(
-        dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
