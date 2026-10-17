@@ -111,15 +111,16 @@ The header document supports the following fields:
    * - ``inter_connection``
      - ``None``
      - Whether tasks need to reach each other by hostname.
-       ``true``: place all tasks on a single Kubernetes cluster and set
-       up hostname connectivity between them; hard-fail if either is not
-       possible. ``false``: deliberately skip all networking setup; tasks
-       still prefer co-location but may land on separate clusters.
-       Unset (default): assumes ``true`` — co-locate all tasks on a
-       single Kubernetes cluster and set up networking, unless the tasks
-       request non-Kubernetes infrastructure or pin infrastructures that
-       cannot be co-located, in which case it degrades to ``false`` with
-       a warning and skips networking setup.
+       ``true``: place all tasks on a single infrastructure that supports
+       in-group networking (one Kubernetes cluster, or one AWS or GCP
+       region) and set up hostname connectivity between them; hard-fail
+       if either is not possible. ``false``: deliberately skip all
+       networking setup; tasks still prefer co-location but may land on
+       separate infrastructures. Unset (default): assumes ``true`` —
+       co-locate all tasks and set up networking, unless the tasks
+       request infrastructure without in-group networking support or pin
+       infrastructures that cannot be co-located, in which case it
+       degrades to ``false`` with a warning and skips networking setup.
        See :ref:`job-groups-inter-connection`.
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
@@ -184,18 +185,32 @@ Example usage in a task:
 Requiring or skipping in-group networking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In-group service discovery is supported on Kubernetes. By default,
-in-group networking is enabled: SkyPilot places all tasks in a job group
-on a single Kubernetes cluster, and tasks wait for peer hostnames to
-become resolvable before running. If networking cannot be initialized,
-the job fails with a clear error rather than running without
-connectivity.
+In-group service discovery is supported on Kubernetes, AWS and GCP. By
+default, in-group networking is enabled: SkyPilot places all tasks in a
+job group on a single infrastructure — one Kubernetes cluster, or one
+AWS or GCP region — and tasks wait for peer hostnames to become
+resolvable before running. If networking cannot be initialized, the job
+fails with a clear error rather than running without connectivity.
+
+On Kubernetes, hostnames resolve through the cluster's service DNS. On
+AWS and GCP, each task's VMs get the peers' internal (VPC) IPs written to
+``/etc/hosts``; VMs launched in the same region share SkyPilot's default
+security group / firewall rules, which allow internal traffic between
+them.
 
 Explicitly setting ``inter_connection: true`` is stricter than leaving it
-unset: placements where in-group networking cannot exist (non-Kubernetes
-infra, or infra pins with no common option) are rejected with an error,
-whereas with the field unset such placements proceed without networking
-and emit a warning.
+unset: placements where in-group networking cannot exist (infra without
+in-group networking support, or infra pins with no common option) are
+rejected with an error, whereas with the field unset such placements
+proceed without networking and emit a warning.
+
+.. note::
+
+   On AWS, a task that sets ``ports`` is launched in a dedicated security
+   group instead of the shared default one. Peers can still reach it on
+   the opened ports, but it can only reach peers on port 22. Leave
+   ``ports`` unset for traffic that stays within the job group; it is
+   only needed to expose a task publicly.
 
 Set ``inter_connection: false`` in the header for tasks that do not need to
 reach each other by hostname (e.g., components that coordinate through an
@@ -213,17 +228,18 @@ With ``inter_connection: false``:
 
 - No in-group networking is set up, and tasks start immediately without
   waiting for peers.
-- Tasks may be placed on **different Kubernetes clusters** when no single
-  cluster can host the whole group (e.g., the required GPU types live in
-  different clusters), or on non-Kubernetes infrastructure.
-- Tasks can also pin different clusters explicitly, via per-task
-  ``infra: k8s/<context>``.
+- Tasks may be placed on **different infrastructures** when no single
+  one can host the whole group (e.g., the required GPU types live in
+  different Kubernetes clusters), or on infrastructure without in-group
+  networking support.
+- Tasks can also pin different infrastructures explicitly, via per-task
+  ``infra: k8s/<context>`` or ``infra: <cloud>/<region>``.
 
 .. note::
 
-   Hostname-based service discovery across clusters is not yet
-   supported: tasks placed on different clusters cannot reach each other
-   via in-group hostnames.
+   Hostname-based service discovery across infrastructures is not yet
+   supported: tasks placed on different clusters or regions cannot reach
+   each other via in-group hostnames.
 
 
 Viewing logs
@@ -536,10 +552,11 @@ Current limitations
 -------------------
 
 - **Networking**: Service discovery (hostname-based communication between
-  tasks) requires all tasks to run on a single Kubernetes cluster
-  (``inter_connection`` ``true`` or unset). A Job Group can span Kubernetes
-  clusters or run on other infrastructure with ``inter_connection: false``;
-  its tasks then run in parallel without in-group networking. See
+  tasks) requires all tasks to run on a single Kubernetes cluster or a
+  single AWS or GCP region (``inter_connection`` ``true`` or unset); other
+  clouds are not yet supported. A Job Group can span infrastructures or
+  run on other clouds with ``inter_connection: false``; its tasks then run
+  in parallel without in-group networking. See
   :ref:`job-groups-inter-connection`.
 
 .. note::

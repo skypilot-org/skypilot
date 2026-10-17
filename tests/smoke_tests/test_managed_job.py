@@ -3119,20 +3119,20 @@ def test_job_group_inter_connection_false(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
-def test_job_group_inter_connection_non_k8s_pin_error(generic_cloud: str):
-    """inter_connection: true + a non-Kubernetes infra pin fails at
-    submission with an error naming the contradicting job, without
-    launching anything."""
+def test_job_group_inter_connection_unsupported_pin_error(generic_cloud: str):
+    """inter_connection: true + a pin on infra without in-group
+    networking support fails at submission with an error naming the
+    contradicting job, without launching anything."""
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = _render_job_group_yaml(
         'tests/test_job_groups/smoke_inter_connection_pin_error.yaml', name,
         generic_cloud)
 
     test = smoke_tests_utils.Test(
-        'job_group_inter_connection_non_k8s_pin_error',
+        'job_group_inter_connection_unsupported_pin_error',
         [
             f'sky jobs launch {yaml_path} -y 2>&1 | '
-            f'grep "pins non-Kubernetes infra"',
+            f'grep "pins infra without in-group networking support"',
             # Nothing was submitted.
             f'! sky jobs queue | grep {name}',
         ],
@@ -3182,13 +3182,11 @@ def test_job_group_cancelled_logs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.managed_jobs
-@pytest.mark.kubernetes
-def test_job_group_networking(generic_cloud: str):
-    """Test JobGroup cross-job networking via hostname resolution."""
+def _run_job_group_networking_test(cloud: str) -> None:
+    """JobGroup cross-job networking via hostname resolution on `cloud`."""
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = _render_job_group_yaml(
-        'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
+        'tests/test_job_groups/smoke_networking.yaml', name, cloud)
 
     # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
     # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
@@ -3212,6 +3210,29 @@ def test_job_group_networking(generic_cloud: str):
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking(generic_cloud: str):
+    """Test JobGroup cross-job networking via hostname resolution."""
+    _run_job_group_networking_test(generic_cloud)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.aws
+def test_job_group_networking_aws():
+    """In-group networking on AWS VMs: peers in the same region reach
+    each other via /etc/hosts entries with internal IPs."""
+    _run_job_group_networking_test('aws')
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.gcp
+def test_job_group_networking_gcp():
+    """In-group networking on GCP VMs: peers in the same region reach
+    each other via /etc/hosts entries with internal IPs."""
+    _run_job_group_networking_test('gcp')
 
 
 @pytest.mark.managed_jobs

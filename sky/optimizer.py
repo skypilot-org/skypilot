@@ -1870,8 +1870,7 @@ def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
          for task_name, cloud_pins in pinned_task_clouds.items()
          if not any(
              _cloud_name_supports_job_group_networking(cloud)
-             for cloud in cloud_pins)),
-        None)
+             for cloud in cloud_pins)), None)
 
     clouds_conflict = (len(pinned_task_clouds) > 1 and
                        not set.intersection(*pinned_task_clouds.values()))

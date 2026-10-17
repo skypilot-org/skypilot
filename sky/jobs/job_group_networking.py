@@ -371,11 +371,15 @@ async def _inject_hosts_on_node(
     # but running as root (e.g., pytorch/pytorch images). /etc/hosts is
     # rewritten in place with tee (never mv) so this also works where it
     # is a bind mount. `grep -v` exits 1 when nothing is left, hence `|| true`.
-    cmd = (
-        f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
-        f"existing=$(sudo grep -v '{marker}' /etc/hosts || true) && "  # noqa: Q000
-        f"printf '%s\\n%s\\n' \"$existing\" '{escaped_content}' | "  # noqa: Q000
-        f'sudo tee /etc/hosts > /dev/null && touch {marker_file}')
+    strip_cmd = (
+        f"existing=$(sudo grep -v '{marker}' "  # noqa: Q000
+        '/etc/hosts || true)')
+    write_cmd = (
+        f"printf '%s\\n%s\\n' \"$existing\" "  # noqa: Q000
+        f"'{escaped_content}' | "  # noqa: Q000
+        'sudo tee /etc/hosts > /dev/null')
+    cmd = (f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
+           f'{strip_cmd} && {write_cmd} && touch {marker_file}')
     # pylint: enable=invalid-string-quote
 
     try:

@@ -605,8 +605,7 @@ class TestInterConnectionPlacement:
         assert ('no feasible placement with in-group networking support'
                 in str(exc_info.value))
 
-    def test_required_unsupported_pin_error_names_pins(self,
-                                                       mock_azure_cloud):
+    def test_required_unsupported_pin_error_names_pins(self, mock_azure_cloud):
         """Explicit true + a job pinning only infra without in-group
         networking support: rejected by the spec-level pin validation,
         before any catalog work, with an error naming the pins."""
@@ -646,8 +645,7 @@ class TestInterConnectionPlacement:
         assert 'No single infrastructure' in str(exc_info.value)
         assert 'inter_connection: false' in str(exc_info.value)
 
-    def test_unset_placed_on_unsupported_cloud_degrades(self,
-                                                        mock_azure_cloud):
+    def test_unset_placed_on_unsupported_cloud_degrades(self, mock_azure_cloud):
         """Unset group whose best common infra has no in-group networking
         support: warn + degrade.
 

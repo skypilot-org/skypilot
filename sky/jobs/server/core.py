@@ -963,7 +963,6 @@ def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
 
 
 @timeline.event
-
 def _check_job_group_networking_placement(dag: 'sky.Dag') -> None:
     """Post-optimization invariant for Job Groups with networking enabled.
 
@@ -1002,6 +1001,7 @@ def _check_job_group_networking_placement(dag: 'sky.Dag') -> None:
                 'Set \'inter_connection: false\' '
                 'in the job group header if the jobs do not need '
                 'to reach each other by hostname.')
+
 
 @usage_lib.entrypoint
 def launch(

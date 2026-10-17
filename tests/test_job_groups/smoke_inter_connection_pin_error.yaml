@@ -1,14 +1,15 @@
-# JobGroup contradiction: inter_connection: true requires Kubernetes, but
-# a job pins non-Kubernetes infra. Submission must fail fast.
+# JobGroup contradiction: inter_connection: true requires infra with
+# in-group networking support, but a job pins infra without it. Submission
+# must fail fast.
 ---
 name: {{name}}
 execution: parallel
 inter_connection: true
 ---
-name: pinned-aws
+name: pinned-azure
 resources:
   cpus: 2
-  infra: aws
+  infra: azure
 run: echo hi
 ---
 name: flexible

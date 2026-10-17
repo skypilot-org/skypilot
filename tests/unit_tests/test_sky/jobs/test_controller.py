@@ -1713,7 +1713,9 @@ class TestJobGroupNetworkingInjectionGate:
         assert controller_lib._ports_isolation_warning(
             self._make_task('GCP', ports=['8080'])) is None
 
-    async def _prepare(self, inter_connection_enabled, cloud_str,
+    async def _prepare(self,
+                       inter_connection_enabled,
+                       cloud_str,
                        supports=True):
         controller = MagicMock(spec=JobController)
         controller._job_id = 1
