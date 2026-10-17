@@ -1714,11 +1714,10 @@ export function ContextDetails({
             </div>
           )}
 
-          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools or Slurm */}
+          {/* GPU Metrics Section - show for Kubernetes contexts and SSH node pools */}
           {isGrafanaAvailable &&
             gpusInContext &&
             gpusInContext.length > 0 &&
-            !isSSHContext &&
             !isSlurm && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
