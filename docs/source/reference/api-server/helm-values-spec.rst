@@ -2579,6 +2579,24 @@ Default: ``false``
   prometheus:
     enabled: false
 
+.. _helm-values-prometheus-preservePodScrapeAnnotations:
+
+``prometheus.preservePodScrapeAnnotations``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Keep the legacy ``prometheus.io/*`` annotations on the API server Pod in
+addition to the Service annotations. This supports manually managed
+Pod-based scrapers, but can create duplicate targets when a scraper also
+discovers the annotated Service. Dedicated scrape mode uses only
+``skypilot.co/*`` annotations.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  prometheus:
+    preservePodScrapeAnnotations: false
+
 .. _helm-values-grafana:
 
 ``grafana``
