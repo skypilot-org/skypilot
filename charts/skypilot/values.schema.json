@@ -292,6 +292,9 @@
                         },
                         "jwtIdentityClaim": {
                             "type": "string"
+                        },
+                        "requireIdentity": {
+                            "type": "boolean"
                         }
                     }
                 },
