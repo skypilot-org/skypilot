@@ -673,7 +673,7 @@ Cancel a request running on SkyPilot API server.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `REQUEST_IDS` — text
 - `--all`, `-a` — Cancel all your requests.
-- `--all-users`, `-u` — Cancel all requests from all users.
+- `--all-users`, `-u` — Cancel all requests from all users (admin only; other users cancel only their own).
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky api info`
