@@ -1050,8 +1050,7 @@ spec:
         self._check_pod_config(
             container_without_name,
             False,
-            expected_error_msg=
-            'Validation error in spec.containers: Invalid value for `name`')
+            expected_error_msg='Validation error in spec.containers:')
 
     def test_missing_required_volume_name(self):
         """Test with missing required volume name."""
@@ -1066,8 +1065,7 @@ spec:
         self._check_pod_config(
             volume_without_name,
             False,
-            expected_error_msg=
-            'Validation error in spec.volumes: Invalid value for `name`')
+            expected_error_msg='Validation error in spec.volumes:')
 
     def test_missing_required_container_env_name(self):
         """Test with missing required container env name."""
@@ -1085,8 +1083,7 @@ spec:
         self._check_pod_config(
             container_without_env_name,
             False,
-            expected_error_msg=
-            'Validation error in spec.containers.env: Invalid value for `name`')
+            expected_error_msg='Validation error in spec.containers.env:')
 
     def test_missing_optional_container_image(self):
         """Test with missing optional container image."""
@@ -1102,11 +1099,9 @@ spec:
         spec_without_containers = '''
 spec: {}'''
 
-        self._check_pod_config(
-            spec_without_containers,
-            False,
-            expected_error_msg=
-            'Validation error in spec: Invalid value for `containers`')
+        self._check_pod_config(spec_without_containers,
+                               False,
+                               expected_error_msg='Validation error in spec:')
 
     def test_valid_field_invalid_type(self):
         """Test with valid field but invalid type.

@@ -2126,6 +2126,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
     Returns: The created Pod object.
     """
+    kubernetes_utils.normalize_pod_resource_quantities(pod_spec['spec'])
     try:
         # Attempt to create the Pod with the AppArmor annotation
         pod = kubernetes.core_api(context).create_namespaced_pod(
@@ -2682,6 +2683,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
+            kubernetes_utils.normalize_pod_resource_quantities(
+                template_pod_spec['spec'])
             # Propagate the labels to the deployment for identification.
             deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
                 'labels']
