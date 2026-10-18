@@ -187,6 +187,116 @@ def test_inject_ephemeral_volumes():
     ]
 
 
+_GPU_TOLERATION = {
+    'key': 'nvidia.com/gpu',
+    'operator': 'Exists',
+    'effect': 'NoSchedule',
+}
+
+
+def _accelerator_pod_spec(limits, node_selector=None, tolerations=None):
+    spec = {'containers': [{'resources': {'limits': limits}}]}
+    if node_selector is not None:
+        spec['nodeSelector'] = node_selector
+    if tolerations is not None:
+        spec['tolerations'] = tolerations
+    return {'spec': spec}
+
+
+def test_inject_accelerator_tolerations(monkeypatch):
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    user_toleration = {'key': 'dedicated', 'operator': 'Exists'}
+    pod_spec = _accelerator_pod_spec({'nvidia.com/gpu': 8},
+                                     tolerations=[user_toleration])
+
+    instance.inject_accelerator_tolerations(pod_spec, 'ctx')
+    instance.inject_accelerator_tolerations(pod_spec, 'ctx')
+
+    assert pod_spec['spec']['tolerations'] == [user_toleration, _GPU_TOLERATION]
+
+
+def test_inject_accelerator_tolerations_keeps_one_copy(monkeypatch):
+    """A toleration the pod_config already carries is not added again."""
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    pod_spec = _accelerator_pod_spec({'nvidia.com/gpu': 1},
+                                     tolerations=[dict(_GPU_TOLERATION)])
+
+    instance.inject_accelerator_tolerations(pod_spec, 'ctx')
+
+    assert pod_spec['spec']['tolerations'] == [_GPU_TOLERATION]
+
+
+def test_inject_accelerator_tolerations_tpu_and_neuron(monkeypatch):
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+    tpu_pod_spec = _accelerator_pod_spec(
+        {'google.com/tpu': 4},
+        node_selector={tpu_label: 'tpu-v5-lite-podslice'})
+    neuron_pod_spec = _accelerator_pod_spec({'aws.amazon.com/neuron': 16})
+
+    instance.inject_accelerator_tolerations(tpu_pod_spec, 'ctx')
+    instance.inject_accelerator_tolerations(neuron_pod_spec, 'ctx')
+
+    assert tpu_pod_spec['spec']['tolerations'] == [{
+        'key': 'google.com/tpu',
+        'operator': 'Equal',
+        'value': 'present',
+        'effect': 'NoSchedule',
+    }]
+    assert neuron_pod_spec['spec']['tolerations'] == [{
+        'key': 'aws.amazon.com/neuron',
+        'operator': 'Exists',
+        'effect': 'NoSchedule',
+    }]
+
+
+def test_inject_accelerator_tolerations_leaves_cpu_pods_alone(monkeypatch):
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    pod_spec = _accelerator_pod_spec({'cpu': '8'})
+
+    instance.inject_accelerator_tolerations(pod_spec, 'ctx')
+
+    assert 'tolerations' not in pod_spec['spec']
+
+
+def test_create_pods_tolerates_the_gpu_taint_on_every_pod(monkeypatch):
+    """The head and the worker pod each carry the GPU toleration once."""
+    cluster_on_cloud = 'test-cluster-gpu'
+    _patch_create_pods_k8s_boundary(monkeypatch, {}, None)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    created = []
+
+    def fake_create_pod(namespace, pod_spec, context):
+        del namespace, context
+        created.append(pod_spec)
+        pod = _fake_pod(pod_spec['metadata']['name'])
+        pod.metadata.labels = pod_spec['metadata']['labels']
+        return pod
+
+    monkeypatch.setattr(instance, '_create_namespaced_pod_with_retries',
+                        fake_create_pod)
+    config = _make_provision_config(count=2)
+    config.node_config['spec']['containers'][0]['resources'] = {
+        'limits': {
+            'nvidia.com/gpu': 1
+        }
+    }
+
+    instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+    assert sorted(pod['metadata']['name'] for pod in created) == [
+        f'{cluster_on_cloud}-head',
+        f'{cluster_on_cloud}-worker1',
+    ]
+    for pod in created:
+        assert pod['spec']['tolerations'] == [_GPU_TOLERATION]
+
+
 def test_out_of_cpus(monkeypatch):
     """Test to check if the error message is correct when there is only CPU resource shortage."""
 
