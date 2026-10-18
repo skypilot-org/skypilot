@@ -1,5 +1,6 @@
 import os
 import pathlib
+import subprocess
 from unittest import mock
 
 import pytest
@@ -787,3 +788,42 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+@pytest.mark.parametrize('target_prefix', ['', '~/', '$HOME/'])
+@pytest.mark.parametrize('existing',
+                         ['missing', 'symlink', 'file', 'directory'])
+def test_make_safe_symlink_command_paths_with_spaces(tmp_path, monkeypatch,
+                                                     target_prefix, existing):
+    home = tmp_path / 'home dir'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    target = home / 'target file'
+    target.write_text('payload')
+    source = tmp_path / 'mount dir' / 'mounted file'
+    if existing != 'missing':
+        source.parent.mkdir()
+    if existing == 'symlink':
+        source.symlink_to(tmp_path / 'old target')
+    elif existing == 'file':
+        source.write_text('keep')
+    elif existing == 'directory':
+        source.mkdir()
+    target_arg = target_prefix + target.name if target_prefix else str(target)
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=target_arg, sudo_cmd='')
+    # Never change ownership of the temporary directory's ancestors.
+    result = subprocess.run(['bash', '-c', 'chown() { :; }; ' + command],
+                            capture_output=True,
+                            text=True)
+    if existing in ('file', 'directory'):
+        assert result.returncode != 0
+        assert not source.is_symlink()
+        if existing == 'file':
+            assert source.read_text() == 'keep'
+        else:
+            assert source.is_dir()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert source.is_symlink()
+        assert source.read_text() == 'payload'

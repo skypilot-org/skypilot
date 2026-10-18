@@ -541,16 +541,21 @@ class FileMountHelper(object):
         sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
-        dir_of_symlink = os.path.dirname(source)
+        dir_of_symlink = shlex.quote(os.path.dirname(source))
+        source = shlex.quote(source)
+        # Keep remote home expansion for wrapped file-mount paths.
+        for prefix in ('~/', '$HOME/'):
+            if target.startswith(prefix):
+                target = ('~/' if prefix == '~/' else '"$HOME"/') + shlex.quote(
+                    target[len(prefix):])
+                break
+        else:
+            target = shlex.quote(target)
         commands = [
-            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
-            # chown $(whoami) on it so user can use these intermediate dirs
-            # (excluding /).
             f'{sudo}mkdir -p {dir_of_symlink}',
-            # p: path so far
-            ('(p=""; '
-             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
+            # Walk ancestors without splitting path components on whitespace.
+            (f'(p={dir_of_symlink}; while [ "$p" != / ]; do '
+             f'{sudo}chown $(whoami) "$p"; p=$(dirname "$p"); done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -559,7 +564,7 @@ class FileMountHelper(object):
             # Error out if source is an existing, non-symlink directory/file.
             f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
-            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            f'(echo "!!! Failed mounting because path exists ("{source}")"; '
             'exit 1)))',
         ]
         commands += [
