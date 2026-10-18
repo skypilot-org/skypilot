@@ -832,7 +832,8 @@ def test_make_safe_symlink_command_paths_with_spaces(tmp_path, monkeypatch,
 @pytest.mark.parametrize('separator', ['/', '//', '///'])
 def test_make_safe_symlink_command_newline_ancestor(tmp_path, separator):
     parent = tmp_path / 'group\n'
-    source = str(parent) + separator + 'child/file'
+    parent_path = separator + str(parent).lstrip('/')
+    source = parent_path + separator + 'child/file'
     target = tmp_path / 'payload'
     target.write_text('payload')
     command = backend_utils.FileMountHelper.make_safe_symlink_command(
@@ -843,7 +844,21 @@ def test_make_safe_symlink_command_newline_ancestor(tmp_path, separator):
         capture_output=True)
     assert result.returncode == 0, result.stderr
     visited = result.stdout.split(b'\0')[:-1]
-    assert os.fsencode(parent) in visited
+    assert os.fsencode(parent_path) in visited
     assert os.fsencode(tmp_path / 'group') not in visited
     assert all(path.strip(b'/') for path in visited)
     assert pathlib.Path(source).read_text() == 'payload'
+
+
+def test_make_safe_symlink_command_deep_path(tmp_path):
+    source = tmp_path.joinpath(*(['ab'] * 200), 'file')
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=str(target), sudo_cmd='')
+    # Keep command size proportional to the path, rather than its ancestors.
+    assert len(command) < 20 * (len(str(source)) + len(str(target)))
+    result = subprocess.run(['bash', '-c', 'chown() { :; }; ' + command],
+                            capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert source.read_text() == 'payload'
