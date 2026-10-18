@@ -862,3 +862,23 @@ def test_make_safe_symlink_command_deep_path(tmp_path):
                             capture_output=True)
     assert result.returncode == 0, result.stderr
     assert source.read_text() == 'payload'
+
+
+@pytest.mark.parametrize('parent_index', [0, -2])
+def test_make_safe_symlink_command_chown_failure(tmp_path, parent_index):
+    source = tmp_path / 'mount' / 'file'
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=str(target), sudo_cmd='')
+    # Fail at an ancestor without changing any actual permissions.
+    env = dict(os.environ, FAILED_PARENT=str(source.parents[parent_index]))
+    result = subprocess.run([
+        'bash', '-c',
+        'chown() { [ "${@: -1}" != "$FAILED_PARENT" ] || return 37; }; ' +
+        command
+    ],
+                            env=env,
+                            capture_output=True)
+    assert result.returncode == 37, result.stderr
+    assert not source.is_symlink()

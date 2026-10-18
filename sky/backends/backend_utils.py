@@ -557,7 +557,7 @@ class FileMountHelper(object):
             (f'(p={dir_of_symlink}; while [ "$p" ]; do '
              'while [ "${p%/}" != "$p" ]; do p=${p%/}; done; '
              '[ "$p" ] || break; '
-             f'{sudo}chown $(whoami) "$p"; p=${{p%/*}}; done)')
+             f'{sudo}chown $(whoami) "$p" || exit; p=${{p%/*}}; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
