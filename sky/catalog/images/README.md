@@ -110,7 +110,7 @@ pytest tests/smoke_tests/test_cluster_job.py::test_cancel_gcp
 ```
 
 ## Ship Images & Cleanup
-Submit a PR to update [`SkyPilot Catalog`](https://github.com/skypilot-org/skypilot-catalog/tree/master/catalogs) then clean up the old images to avoid extra iamge storage fees.
+Submit a PR to update [`SkyPilot Catalog`](https://github.com/skypilot-org/skypilot-catalog/tree/master/catalogs) then clean up the old images to avoid extra image storage fees.
 
 ### GCP
 1. Update Catalog with new images: [example PR](https://github.com/skypilot-org/skypilot-catalog/pull/86)

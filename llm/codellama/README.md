@@ -5,7 +5,7 @@
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
-The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka SkyServe) (see more details about the setup in later sections):
+The following are the demos of Code Llama 70B hosted by SkyPilot Serve (aka SkyServe) (see more details about the setup in later sections):
 
 ## Demos
 <figure>
