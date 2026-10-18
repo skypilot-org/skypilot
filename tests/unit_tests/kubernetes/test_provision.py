@@ -779,6 +779,8 @@ def test_invalid_request_config_stops_failover(monkeypatch, tmp_path,
             'ray': 'unused.yaml',
             'cluster_name_on_cloud': 'test'
         })
+    monkeypatch.setattr(backend.global_user_state, 'get_cluster_yaml_dict',
+                        lambda *a: {'provider': {}})
     handle = mock.MagicMock(cluster_yaml='unused.yaml',
                             launched_nodes=1,
                             cluster_name_on_cloud='test')
