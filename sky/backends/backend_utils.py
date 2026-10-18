@@ -541,6 +541,11 @@ class FileMountHelper(object):
         sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
+        parent = os.path.dirname(source)
+        parents = []
+        while parent.strip('/'):
+            parents.append(shlex.quote(parent))
+            parent = os.path.dirname(parent)
         dir_of_symlink = shlex.quote(os.path.dirname(source))
         source = shlex.quote(source)
         # Keep remote home expansion for wrapped file-mount paths.
@@ -554,8 +559,8 @@ class FileMountHelper(object):
         commands = [
             f'{sudo}mkdir -p {dir_of_symlink}',
             # Walk ancestors without splitting path components on whitespace.
-            (f'(p={dir_of_symlink}; while [ "$p" != / ]; do '
-             f'{sudo}chown $(whoami) "$p"; p=$(dirname "$p"); done)')
+            (f'(for p in {" ".join(parents)}; do '
+             f'{sudo}chown $(whoami) "$p"; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a

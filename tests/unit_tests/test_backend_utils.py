@@ -827,3 +827,23 @@ def test_make_safe_symlink_command_paths_with_spaces(tmp_path, monkeypatch,
         assert result.returncode == 0, result.stderr
         assert source.is_symlink()
         assert source.read_text() == 'payload'
+
+
+@pytest.mark.parametrize('separator', ['/', '//', '///'])
+def test_make_safe_symlink_command_newline_ancestor(tmp_path, separator):
+    parent = tmp_path / 'group\n'
+    source = str(parent) + separator + 'child/file'
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=source, target=str(target), sudo_cmd='')
+    # Record ownership targets without changing any actual permissions.
+    result = subprocess.run(
+        ['bash', '-c', 'chown() { printf "%s\\0" "${@: -1}"; }; ' + command],
+        capture_output=True)
+    assert result.returncode == 0, result.stderr
+    visited = result.stdout.split(b'\0')[:-1]
+    assert os.fsencode(parent) in visited
+    assert os.fsencode(tmp_path / 'group') not in visited
+    assert all(path.strip(b'/') for path in visited)
+    assert pathlib.Path(source).read_text() == 'payload'
