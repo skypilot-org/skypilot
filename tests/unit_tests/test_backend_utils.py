@@ -872,7 +872,8 @@ def test_make_safe_symlink_command_chown_failure(tmp_path, parent_index):
     command = backend_utils.FileMountHelper.make_safe_symlink_command(
         source=str(source), target=str(target), sudo_cmd='')
     # Fail at an ancestor without changing any actual permissions.
-    env = dict(os.environ, FAILED_PARENT=str(source.parents[parent_index]))
+    env = dict(os.environ,
+               FAILED_PARENT=str(tuple(source.parents)[parent_index]))
     result = subprocess.run([
         'bash', '-c',
         'chown() { [ "${@: -1}" != "$FAILED_PARENT" ] || return 37; }; ' +
