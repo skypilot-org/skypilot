@@ -223,11 +223,12 @@ if [ -n "$GIT_TOKEN" ]; then
         # credentials from the effective URL), which git reads as a redirect
         # and then retries without credentials. The helper is stateless, reads
         # the token from the environment, and keeps it out of .git/config and
-        # the process arguments.
+        # the process arguments. It sends the token as the username with an
+        # empty password, the same credential the URL form carried.
         export GIT_TOKEN
         git() {
             command git -c credential.helper= \
-                -c 'credential.helper=!f() { test "$1" = get && { echo username=x-access-token; echo "password=${GIT_TOKEN}"; }; }; f' \
+                -c 'credential.helper=!f() { test "$1" = get && { echo "username=${GIT_TOKEN}"; echo password=; }; }; f' \
                 "$@"
         }
         log "Token authentication configured via credential helper"
@@ -314,8 +315,9 @@ if [ -d "$TARGET_DIR" ]; then
                 NEED_CLONE=false
             else
                 log "Repository remote URL matches exactly, fetching updates"
-                # Drop a token that an earlier run embedded in the remote URL.
-                if [ "$CURRENT_REMOTE" != "$CLONE_URL" ]; then
+                # Drop a token that an earlier run embedded in the remote URL,
+                # but only when the helper is there to replace it.
+                if [ -n "$GIT_TOKEN" ] && [ "$CURRENT_REMOTE" != "$CLONE_URL" ]; then
                     git remote set-url origin "$CLONE_URL"
                 fi
                 NEED_CLONE=false

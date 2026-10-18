@@ -14,6 +14,7 @@ _SCRIPT = (pathlib.Path(__file__).resolve().parents[3] / 'sky' / 'utils' /
 
 # Stand-in for git that records its arguments, one call per line.
 _GIT_SHIM = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$GIT_SHIM_LOG"\n'
+_HELPER_PREFIX = 'credential.helper=!'
 
 
 @pytest.mark.skipif(sys.platform == 'win32' or shutil.which('bash') is None,
@@ -47,4 +48,15 @@ def test_token_is_passed_via_credential_helper_not_the_url(tmp_path):
     logged = calls.read_text()
     assert 'clone' in logged
     assert 'secret-token' not in logged
-    assert 'credential.helper=!' in logged
+
+    # Run the helper the way git does (snippet plus the `get` action) and
+    # check it hands back the same credential the URL form carried: the token
+    # as the username and an empty password.
+    clone_call = next(line for line in logged.splitlines() if 'clone' in line)
+    snippet = clone_call.split(_HELPER_PREFIX, 1)[1].split(' clone', 1)[0]
+    helper = subprocess.run(['sh', '-c', f'{snippet} get'],
+                            env=dict(os.environ, GIT_TOKEN='secret-token'),
+                            check=True,
+                            capture_output=True,
+                            text=True)
+    assert helper.stdout.splitlines() == ['username=secret-token', 'password=']
