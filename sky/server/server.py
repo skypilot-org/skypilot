@@ -1320,7 +1320,7 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
             versions.get_local_readable_version())
 
 
-app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app = fastapi.FastAPI(debug=True, lifespan=lifespan)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
 #   app.add_middleware(Middleware2)
