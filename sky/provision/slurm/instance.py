@@ -1514,6 +1514,7 @@ def query_instances(
     # TODO(kevin): Include more states here.
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
+        'configuring': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
         'completing': status_lib.ClusterStatus.UP,
         'completed': None,
