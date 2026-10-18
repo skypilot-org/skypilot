@@ -7,7 +7,9 @@ import re
 import sys
 import time
 from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
-                    Set, Tuple, TYPE_CHECKING, Union)
+                    Set, Tuple, Type, TYPE_CHECKING, Union)
+
+import pydantic
 
 from sky import exceptions
 from sky import global_user_state
@@ -37,6 +39,7 @@ from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 if TYPE_CHECKING:
+    from kubernetes.client import V1Deployment
     from kubernetes.client import V1Pod
 
 POLL_INTERVAL = 2
@@ -2115,6 +2118,29 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+def _validate_request_body(
+        body: Dict[str, Any], model: Union[Type['V1Pod'],
+                                           Type['V1Deployment']]) -> None:
+    """Validate an outgoing request, raising InvalidCloudConfigs on failure.
+
+    Skip validation for legacy clients without Pydantic models. Validate before
+    the API call so response-validation errors are not treated as config errors.
+    """
+    if not hasattr(model, 'model_validate'):
+        # Legacy clients do not perform Pydantic request validation.
+        # This fallback can be removed once the minimum supported Kubernetes
+        # Python client version is 37.
+        return
+    # The API call can raise ValidationError for either the request or response.
+    # Validate here so only invalid requests are reported as config errors.
+    try:
+        model.model_validate(body)
+    except pydantic.ValidationError as e:
+        resource_kind = model.__name__[2:]  # Strip the V1 API-version prefix.
+        raise exceptions.InvalidCloudConfigs(
+            f'Invalid Kubernetes {resource_kind} configuration: {e}') from e
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
@@ -2127,6 +2153,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
     Returns: The created Pod object.
     """
     kubernetes_utils.normalize_pod_resource_quantities(pod_spec['spec'])
+    _validate_request_body(pod_spec, kubernetes.kubernetes.client.V1Pod)
     try:
         # Attempt to create the Pod with the AppArmor annotation
         pod = kubernetes.core_api(context).create_namespaced_pod(
@@ -2688,6 +2715,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # Propagate the labels to the deployment for identification.
             deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
                 'labels']
+            _validate_request_body(deployment_spec,
+                                   kubernetes.kubernetes.client.V1Deployment)
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(

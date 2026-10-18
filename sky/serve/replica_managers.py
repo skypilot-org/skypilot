@@ -176,8 +176,9 @@ def launch_cluster(replica_id: int,
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
-                exceptions.ResourcesMismatchError) as e:
-            logger.error('Failure happened before provisioning. '
+                exceptions.ResourcesMismatchError,
+                exceptions.InvalidCloudConfigs) as e:
+            logger.error('Non-retryable launch failure. '
                          f'{common_utils.format_exception(e)}')
             raise RuntimeError('Failed to launch the sky serve replica '
                                f'cluster {cluster_name}.') from e

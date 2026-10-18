@@ -7,6 +7,7 @@ from typing import Optional
 from unittest import mock
 
 from kubernetes import client as k8s_client
+import pydantic
 import pytest
 import urllib3
 
@@ -24,6 +25,10 @@ from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
 from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
+
+# Client v37+ uses Pydantic models for request and response validation.
+# Only Pydantic client models have the model_validate method.
+_PYDANTIC_CLIENT = hasattr(k8s_client.V1Pod, 'model_validate')
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -135,13 +140,9 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
 
 
-@pytest.mark.parametrize('deployment', [False, True])
-@pytest.mark.parametrize(
-    'volume_type', [None, 'ephemeral', 'emptyDir', 'downwardAPI', 'projected'])
-def test_create_pods_normalizes_quantities_before_api_validation(
-        monkeypatch: pytest.MonkeyPatch, deployment: bool,
-        volume_type: Optional[str]) -> None:
-    """Exercise the real generated API validators, mocking only transport."""
+@pytest.fixture
+def real_client(monkeypatch):
+    """Use real generated APIs with mocked transport and provisioning boundaries."""
     _patch_create_pods_k8s_boundary(monkeypatch, {}, None)
     monkeypatch.setattr(kubernetes_utils, 'get_allowed_nodes_config',
                         lambda *a, **k: None)
@@ -153,6 +154,20 @@ def test_create_pods_normalizes_quantities_before_api_validation(
                         lambda *a, **k: None)
     monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
                         lambda fn, items, *a, **k: [fn(i) for i in items])
+    with k8s_client.ApiClient() as api_client:
+        send = mock.Mock(side_effect=AssertionError('Unexpected transport'))
+        monkeypatch.setattr(api_client.rest_client, 'request', send)
+        monkeypatch.setattr(kubernetes, 'core_api',
+                            lambda *a, **k: k8s_client.CoreV1Api(api_client))
+        monkeypatch.setattr(kubernetes, 'apps_api',
+                            lambda *a, **k: k8s_client.AppsV1Api(api_client))
+        yield send
+
+
+def _quantity_config(
+        volume_type: Optional[str] = None,
+        deployment: bool = False) -> provision_common.ProvisionConfig:
+    """Build a fresh provisioning config containing numeric quantities."""
     config = _make_provision_config(count=1)
     resource_requirements = {
         'requests': {
@@ -254,54 +269,88 @@ def test_create_pods_normalizes_quantities_before_api_validation(
             },
         }
         config.node_config['pvc_spec'] = {}
+    return config
+
+
+@pytest.mark.parametrize('deployment', [False, True])
+@pytest.mark.parametrize(
+    'volume_type', [None, 'ephemeral', 'emptyDir', 'downwardAPI', 'projected'])
+def test_create_pods_normalizes_quantities_before_api_validation(
+        real_client, deployment: bool, volume_type: Optional[str]) -> None:
+    config = _quantity_config(volume_type, deployment)
     original = copy.deepcopy(config.node_config)
-    with k8s_client.ApiClient() as api_client:
-        # Stop at the transport boundary, after generated request validation
-        # and serialization. Never contact a cluster, even if validation fails.
-        send = mock.Mock(side_effect=RuntimeError('request reached transport'))
-        monkeypatch.setattr(api_client.rest_client, 'request', send)
-        monkeypatch.setattr(kubernetes, 'core_api',
-                            lambda *a, **k: k8s_client.CoreV1Api(api_client))
-        monkeypatch.setattr(kubernetes, 'apps_api',
-                            lambda *a, **k: k8s_client.AppsV1Api(api_client))
-        with pytest.raises(RuntimeError, match='request reached transport'):
-            instance._create_pods('us', 'test', 'test', config)
-        send.assert_called_once()
-        body = send.call_args.kwargs['body']
-        spec = body['spec']['template']['spec'] if deployment else body['spec']
-        assert spec['containers'][0]['resources'] == {
-            'requests': {
-                'cpu': '0.5',
-                'memory': '1Gi',
-                'nvidia.com/gpu': '1'
-            },
-            'limits': {
-                'cpu': '2',
-                'nvidia.com/gpu': '1'
-            },
-        }
-        assert spec['initContainers'][0]['resources']['requests'][
-            'cpu'] == '0.1'
-        assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
-        assert spec['overhead'] == {'cpu': '0.1'}
-        for field in ('containers', 'initContainers'):
-            selector = spec[field][0]['env'][0]['valueFrom']['resourceFieldRef']
-            assert selector['divisor'] == '1'
-        if volume_type == 'ephemeral':
-            claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
-                'spec']
-            assert claim_spec['resources']['requests'][
-                'storage'] == '1073741824'
-        elif volume_type == 'emptyDir':
-            assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
-        elif volume_type in ('downwardAPI', 'projected'):
-            source = spec['volumes'][0]
-            if volume_type == 'projected':
-                source = source['projected']['sources'][0]
-            selector = source['downwardAPI']['items'][0]['resourceFieldRef']
-            assert selector['divisor'] == '1'
+    send = real_client
+    send.side_effect = RuntimeError('request reached transport')
+    with pytest.raises(RuntimeError, match='request reached transport'):
+        instance._create_pods('us', 'test', 'test', config)
+    send.assert_called_once()
+    body = send.call_args.kwargs['body']
+    spec = body['spec']['template']['spec'] if deployment else body['spec']
+    assert spec['containers'][0]['resources'] == {
+        'requests': {
+            'cpu': '0.5',
+            'memory': '1Gi',
+            'nvidia.com/gpu': '1'
+        },
+        'limits': {
+            'cpu': '2',
+            'nvidia.com/gpu': '1'
+        },
+    }
+    assert spec['initContainers'][0]['resources']['requests']['cpu'] == '0.1'
+    assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
+    assert spec['overhead'] == {'cpu': '0.1'}
+    for field in ('containers', 'initContainers'):
+        selector = spec[field][0]['env'][0]['valueFrom']['resourceFieldRef']
+        assert selector['divisor'] == '1'
+    if volume_type == 'ephemeral':
+        claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
+            'spec']
+        assert claim_spec['resources']['requests']['storage'] == '1073741824'
+    elif volume_type == 'emptyDir':
+        assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
+    elif volume_type in ('downwardAPI', 'projected'):
+        source = spec['volumes'][0]
+        if volume_type == 'projected':
+            source = source['projected']['sources'][0]
+        selector = source['downwardAPI']['items'][0]['resourceFieldRef']
+        assert selector['divisor'] == '1'
     # In particular, accelerator counts must stay numeric in stored configs:
     # _create_pods compares them to zero to select runtime classes/tolerations.
+    assert config.node_config == original
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+@pytest.mark.parametrize('deployment', [False, True])
+@pytest.mark.parametrize('case', ['invalid_request', 'invalid_response'])
+def test_create_pods_classifies_validation_errors(real_client, deployment,
+                                                  case):
+    config = _quantity_config(deployment=deployment)
+    send = real_client
+    if case == 'invalid_request':
+        config.node_config['spec']['containers'][0]['ports'][0][
+            'containerPort'] = 'not-a-port'
+    else:
+        # Valid HTTP response, but an invalid model field in its body.
+        send.side_effect = None
+        send.return_value = k8s_client.rest.RESTResponse(
+            urllib3.HTTPResponse(body=b'{"metadata": {"name": []}}',
+                                 status=201,
+                                 headers={'Content-Type': 'application/json'}))
+    original = copy.deepcopy(config.node_config)
+    if case == 'invalid_request':
+        kind = 'Deployment' if deployment else 'Pod'
+        with pytest.raises(
+                sky_exceptions.InvalidCloudConfigs,
+                match=f'Invalid Kubernetes {kind} configuration') as exc:
+            instance._create_pods('us', 'test', 'test', config)
+        assert 'containerPort' in str(exc.value)
+        send.assert_not_called()
+    else:
+        with pytest.raises(pydantic.ValidationError, match='V1ObjectMeta'):
+            instance._create_pods('us', 'test', 'test', config)
+        send.assert_called_once()
     assert config.node_config == original
 
 
@@ -695,6 +744,83 @@ def test_out_of_memory(monkeypatch):
         1] == '└── Cluster does not have sufficient Memory for your request: Run \'kubectl get nodes -o custom-columns=NAME:.metadata.name,MEMORY:.status.allocatable.memory\' to check the available memory on the node.'
 
     assert len(error_output) == 2
+
+
+@pytest.mark.parametrize(
+    'prev_cluster_status',
+    [None, cloud_vm_ray_backend.status_lib.ClusterStatus.INIT])
+def test_invalid_request_config_stops_failover(monkeypatch, tmp_path,
+                                               prev_cluster_status):
+    """Config errors stop retries and discard only fresh cluster records."""
+    backend = cloud_vm_ray_backend
+    retrying = backend.RetryingVmProvisioner(log_dir=str(tmp_path),
+                                             dag=None,
+                                             optimize_target=None,
+                                             requested_features=set(),
+                                             local_wheel_path=None,
+                                             wheel_hash='',
+                                             extra_launch_context={})
+    monkeypatch.setattr(retrying, '_yield_zones', lambda *a: iter([None, None]))
+    to_provision = mock.MagicMock(spec=resources.Resources)
+    to_provision.assert_launchable = mock.Mock(return_value=to_provision)
+    to_provision.region = 'test-context'
+    to_provision.cloud = clouds.Kubernetes()
+    monkeypatch.setattr(to_provision.cloud, 'check_quota_available',
+                        lambda *a: True)
+    monkeypatch.setattr(to_provision.cloud,
+                        'yield_cloud_specific_failover_overrides',
+                        lambda **k: iter([None]))
+    monkeypatch.setattr(backend.provision_lib, 'get_registered_provisioner',
+                        lambda *a: None)
+    monkeypatch.setattr(backend, '_get_cluster_config_template',
+                        lambda *a: 'unused')
+    monkeypatch.setattr(
+        backend.backend_utils, 'write_cluster_config', lambda *a, **k: {
+            'ray': 'unused.yaml',
+            'cluster_name_on_cloud': 'test'
+        })
+    handle = mock.MagicMock(cluster_yaml='unused.yaml',
+                            launched_nodes=1,
+                            cluster_name_on_cloud='test')
+    monkeypatch.setattr(backend, 'CloudVmRayResourceHandle', lambda **k: handle)
+    for name in ('add_or_update_cluster', 'add_cluster_event',
+                 'set_owner_identity_for_cluster'):
+        monkeypatch.setattr(backend.global_user_state, name, mock.Mock())
+    monkeypatch.setattr(backend.rich_utils, 'force_update_status', mock.Mock())
+    cleanup = mock.Mock()
+    monkeypatch.setattr(backend.CloudVmRayBackend, 'post_teardown_cleanup',
+                        cleanup)
+    final_status = mock.Mock()
+    monkeypatch.setattr(backend.usage_lib.messages.usage,
+                        'update_final_cluster_status', final_status)
+    blocklist = mock.Mock()
+    monkeypatch.setattr(backend.FailoverCloudErrorHandlerV2,
+                        'update_blocklist_on_error', blocklist)
+    error = sky_exceptions.InvalidCloudConfigs(
+        'Invalid Kubernetes Pod configuration')
+    provision = mock.Mock(side_effect=error)
+    monkeypatch.setattr(backend.provisioner, 'bulk_provision', provision)
+    with pytest.raises(sky_exceptions.InvalidCloudConfigs) as exc:
+        retrying._retry_zones(to_provision,
+                              num_nodes=1,
+                              requested_resources=set(),
+                              dryrun=False,
+                              stream_logs=False,
+                              cluster_name='test',
+                              cloud_user_identity=None,
+                              prev_cluster_status=prev_cluster_status,
+                              prev_handle=None,
+                              prev_cluster_ever_up=False,
+                              skip_if_config_hash_matches=None,
+                              volume_mounts=None,
+                              task=None)
+    assert exc.value is error
+    provision.assert_called_once()
+    blocklist.assert_not_called()
+    cleanup.assert_called_once()
+    fresh_launch = prev_cluster_status is None
+    assert cleanup.call_args.kwargs['remove_from_db'] is fresh_launch
+    assert (mock.call(None) in final_status.call_args_list) is fresh_launch
 
 
 def test_insufficient_resources_msg(monkeypatch):
@@ -6151,7 +6277,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -6194,7 +6329,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -6232,7 +6376,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -6260,7 +6413,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         with pytest.raises(AssertionError):
             instance._create_namespaced_pod_with_retries(
                 'default', pod_spec, None)

@@ -944,6 +944,8 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                3. Invalid cloud configuration. This is terminal even when
+                raise_on_failure is False, since recovery cannot fix it.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -1269,6 +1271,13 @@ class StrategyExecutor:
                         logger.error('The pool no longer exists: '
                                      f'{common_utils.format_exception(e)}')
                         raise
+                    except exceptions.InvalidCloudConfigs as e:
+                        # Retrying the same invalid config cannot succeed,
+                        # including during recovery (raise_on_failure=False).
+                        logger.error('Invalid cloud configuration: '
+                                     f'{common_utils.format_exception(e)}')
+                        raise exceptions.ProvisionPrechecksError(
+                            reasons=[e]) from e
                     except PRECHECK_FAILURES as e:
                         logger.error('Failure happened before provisioning. '
                                      f'{common_utils.format_exception(e)}')

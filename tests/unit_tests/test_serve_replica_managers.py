@@ -6,7 +6,39 @@ main thread for `self.lock` before `_recover_replica_operations` runs.
 """
 from unittest import mock
 
+import pytest
+
+from sky import exceptions
 from sky.serve import replica_managers
+
+
+def test_invalid_cloud_config_stops_replica_launch_retries(
+        monkeypatch, tmp_path):
+    monkeypatch.setattr(replica_managers.context, 'get', mock.MagicMock())
+    monkeypatch.setattr(replica_managers.task_lib.Task, 'from_yaml_str',
+                        mock.Mock(return_value=mock.Mock()))
+    launch = mock.Mock(return_value='request-1')
+    monkeypatch.setattr(replica_managers.sdk, 'launch', launch)
+    error = exceptions.InvalidCloudConfigs(
+        'Invalid Kubernetes Pod: containerPort')
+    result = mock.Mock(side_effect=error)
+    monkeypatch.setattr(replica_managers.sdk, 'stream_and_get', result)
+    terminate = mock.Mock()
+    monkeypatch.setattr(replica_managers, 'terminate_cluster', terminate)
+    monkeypatch.setattr(replica_managers.common_utils.Backoff,
+                        'current_backoff', lambda self: 0)
+
+    with pytest.raises(RuntimeError) as exc:
+        replica_managers.launch_cluster(1,
+                                        'unused',
+                                        'test-replica',
+                                        str(tmp_path / 'launch.log'), {}, {},
+                                        max_retry=2)
+
+    assert exc.value.__cause__ is error
+    launch.assert_called_once()
+    result.assert_called_once_with('request-1')
+    terminate.assert_not_called()
 
 
 class TestSkyPilotReplicaManagerInitOrdering:

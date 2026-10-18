@@ -304,6 +304,26 @@ def _patch_launch_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('raise_on_failure', [True, False])
+async def test_invalid_cloud_config_is_terminal_during_launch_and_recovery(
+        monkeypatch, raise_on_failure):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    error = exceptions.InvalidCloudConfigs(
+        'Invalid Kubernetes Pod: containerPort')
+    executor._await_launch_request = mock.AsyncMock(side_effect=error)
+
+    # Bound the retries so a regression fails rather than looping forever.
+    with pytest.raises(exceptions.ProvisionPrechecksError) as exc:
+        await executor._launch(max_retry=2, raise_on_failure=raise_on_failure)
+
+    assert list(exc.value.reasons) == [error]
+    patches.sdk_launch.assert_called_once()
+    executor._await_launch_request.assert_awaited_once()
+    patches.set_backoff_pending.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     """A parked launch request releases the slot and re-attaches on resume."""
     executor = _make_launch_executor()

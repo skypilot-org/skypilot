@@ -1345,6 +1345,22 @@ class RetryingVmProvisioner(object):
                         # Pausing to wait on an external condition: keep the
                         # resources for resume, do not tear down or fail over.
                         raise
+                    except exceptions.InvalidCloudConfigs:
+                        # bulk_provision has cleaned up any partially created
+                        # resources. A malformed request cannot be fixed by
+                        # trying another zone/context, so do not fail over.
+                        fresh_launch = prev_cluster_status is None
+                        CloudVmRayBackend().post_teardown_cleanup(
+                            handle,
+                            terminate=not prev_cluster_ever_up,
+                            remove_from_db=fresh_launch,
+                            failover=True,
+                        )
+                        if fresh_launch:
+                            usage_lib.messages.usage.update_final_cluster_status(
+                                None)
+                        with ux_utils.print_exception_no_traceback():
+                            raise
                     except exceptions.ProvisionUnsupportedError as e:
                         # The request itself cannot be served here, so the
                         # remaining zones of this candidate cannot help. Tear
