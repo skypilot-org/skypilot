@@ -19,6 +19,7 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
@@ -1033,3 +1034,70 @@ def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
     assert '<redacted>' in logged, (
         'the token should be replaced, not dropped, so the log still shows '
         'that the field was set')
+
+
+@pytest.fixture
+def applied_hook(monkeypatch):
+    """Registers a recording admin-policy-applied hook on an empty registry."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    hook = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook('test', hook)
+    return hook
+
+
+def test_applied_hook_receives_mutated_request(add_example_policy_paths, task,
+                                               applied_hook):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        dag, config = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    applied_hook.assert_called_once()
+    hook_dag, hook_config, request_name, request_options = (
+        applied_hook.call_args.args)
+    assert hook_dag is dag
+    assert hook_config == config
+    assert hook_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels', 'app'), None) == 'skypilot'
+    assert request_name == (request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    assert request_options.cluster_name == 'test'
+
+
+def test_applied_hook_fires_without_policy(task, applied_hook, tmp_path):
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    applied_hook.assert_called_once()
+    assert applied_hook.call_args.args[0] is dag
+    assert applied_hook.call_args.args[1] == config
+
+
+def test_applied_hook_skipped_at_client_side(add_example_policy_paths, task,
+                                             applied_hook):
+    _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    admin_policy_utils.apply(
+        task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        at_client_side=True)
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_skipped_when_rejected(add_example_policy_paths, task,
+                                            applied_hook):
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy):
+        _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'reject_all.yaml'))
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_failure_does_not_fail_request(task, monkeypatch,
+                                                    tmp_path):
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    following = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'failing', mock.Mock(side_effect=RuntimeError('hook failed')))
+    plugin_hooks.register_admin_policy_applied_hook('following', following)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, _ = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks
+    following.assert_called_once()
