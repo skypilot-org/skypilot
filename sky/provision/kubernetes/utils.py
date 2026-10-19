@@ -3853,13 +3853,12 @@ _cluster_uid_cache_lock = threading.Lock()
 
 def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
     """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
-    paths = os.environ.get('KUBECONFIG', kubernetes.DEFAULT_KUBECONFIG_PATH)
     fingerprint: List[Tuple[Any, ...]] = []
-    for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
+    for path in get_kubeconfig_paths():
         if not path:
             continue
         try:
-            st = os.stat(os.path.expanduser(path))
+            st = os.stat(path)
             fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
         except OSError:
             fingerprint.append((path, None))
