@@ -117,9 +117,6 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
-# Emitted by instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND: alive, total.
-_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
-                                  re.MULTILINE)
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
     r'(\d+) ray[._]worker[._]reserved')
@@ -2835,7 +2832,7 @@ def _update_cluster_status(
                 rc, cmd, f'Failed to check ray cluster\'s healthiness.\n'
                 '-- stdout --\n'
                 f'{output}\n', stderr)
-        match = _ALIVE_NODES_PATTERN.search(output)
+        match = instance_setup.RAY_ALIVE_NODES_PATTERN.search(output)
         if match is None:
             raise exceptions.CommandError(
                 rc, cmd, 'Failed to read the alive node count from the ray '

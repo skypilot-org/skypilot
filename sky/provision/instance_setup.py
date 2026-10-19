@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import tarfile
 import time
@@ -360,6 +361,9 @@ RAY_ALIVE_NODE_COUNT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '
     f'-c {shlex.quote(_ALIVE_NODES_PY)}')
+# Parses RAY_ALIVE_NODE_COUNT_COMMAND's output: alive count, total count.
+RAY_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
+                                     re.MULTILINE)
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
