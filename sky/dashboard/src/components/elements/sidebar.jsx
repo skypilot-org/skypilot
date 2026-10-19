@@ -50,6 +50,8 @@ import { useMobile } from '@/hooks/useMobile';
 import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { ThemeMenu } from '@/components/elements/ThemeToggle';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -198,6 +200,7 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
+  const { resolvedTheme } = useTheme();
   const {
     userEmail,
     userRole,
@@ -528,7 +531,7 @@ export function TopBar() {
             >
               <div className={`h-20 w-20 flex items-center justify-center`}>
                 <Image
-                  src={`${BASE_PATH}/skypilot.svg`}
+                  src={`${BASE_PATH}/${resolvedTheme === THEME_DARK ? 'skypilot-dark' : 'skypilot'}.svg`}
                   alt="SkyPilot Logo"
                   width={80}
                   height={80}
@@ -682,6 +685,8 @@ export function TopBar() {
                   </a>
                 </CustomTooltip>
 
+                <ThemeMenu />
+
                 <div className="border-l border-line h-6"></div>
 
                 {/* Version Display */}
@@ -710,6 +715,8 @@ export function TopBar() {
                 )}
               </>
             )}
+
+            {isMobile && <ThemeMenu />}
 
             {/* User Profile Icon and Dropdown */}
             {userEmail && (

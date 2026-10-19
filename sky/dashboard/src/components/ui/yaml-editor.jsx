@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
@@ -9,6 +9,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { search } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { getNonce } from '@/utils/csp';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 
 // Dock the search panel at the top of the editor (like the browser's find bar
 // and most code editors) instead of CodeMirror's default bottom placement.
@@ -29,6 +30,30 @@ export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.squareBracket, color: 'hsl(var(--content-tertiary))' },
   { tag: t.punctuation, color: 'hsl(var(--content-tertiary))' },
 ]);
+
+// Base editor colors from the dashboard tokens. Replaces CodeMirror's bundled
+// 'light'/'dark' themes (white / One Dark), which ignore our palette. Light
+// keeps CodeMirror's own defaults for text, caret and selection; only dark
+// overrides them.
+export const yamlColorTheme = (dark) =>
+  EditorView.theme(
+    {
+      '&': {
+        backgroundColor: 'hsl(var(--surface))',
+        ...(dark ? { color: 'hsl(var(--content))' } : {}),
+      },
+      ...(dark
+        ? {
+            '.cm-cursor, .cm-dropCursor': {
+              borderLeftColor: 'hsl(var(--content-strong))',
+            },
+            '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground':
+              { backgroundColor: 'hsl(var(--blue-tint-strong))' },
+          }
+        : {}),
+    },
+    { dark }
+  );
 
 // I-beam over the entire editor box (gutter + content + empty area)
 // so the whole surface reads as a single text region. CodeMirror's
@@ -206,6 +231,11 @@ export function YamlEditor({
   minHeight,
   disabled = false,
 }) {
+  const { resolvedTheme } = useTheme();
+  const colorTheme = useMemo(
+    () => yamlColorTheme(resolvedTheme === THEME_DARK),
+    [resolvedTheme]
+  );
   return (
     <div
       className={`rounded-md border border-line overflow-hidden flex flex-col ${className || ''}`}
@@ -245,7 +275,7 @@ export function YamlEditor({
           autocompletion: false,
         }}
         style={{ fontSize: '13px', flex: 1, minHeight: 0 }}
-        theme="light"
+        theme={colorTheme}
       />
     </div>
   );

@@ -1337,7 +1337,7 @@ export function RecipeHub() {
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-[#1668e0] hover:text-[#1257bd] flex items-center"
+            className="text-[#1668e0] hover:text-[#1257bd] dark:text-blue-fg dark:hover:text-blue-fg-strong flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             <span>Refresh</span>

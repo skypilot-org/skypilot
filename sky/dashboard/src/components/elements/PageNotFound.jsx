@@ -46,8 +46,12 @@ export function PageNotFound() {
         alt=""
         width={150}
         height={113}
+        className="dark:invert"
       />
-      <div style={{ fontSize: 14, lineHeight: '21px', color: '#525252' }}>
+      <div
+        className="text-[#525252] dark:text-content-secondary"
+        style={{ fontSize: 14, lineHeight: '21px' }}
+      >
         This page has wandered off.
       </div>
       <Button

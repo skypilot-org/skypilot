@@ -11,6 +11,7 @@ import '@/app/globals.css';
 import { useEffect, useState } from 'react';
 import { BASE_PATH, EVENT_PLUGINS_LOADED } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
+import { ThemeProvider } from '@/hooks/useTheme';
 import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
 import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
@@ -93,23 +94,25 @@ function App({ Component, pageProps }) {
 
   return (
     <CacheProvider value={emotionCache}>
-      {/* PluginProvider must render unconditionally — it is what loads the
+      <ThemeProvider>
+        {/* PluginProvider must render unconditionally — it is what loads the
           plugin bundles the gate below is waiting on. */}
-      <PluginProvider>
-        {pluginsSettled ? (
-          <PluginWrapperSlot name="app.providers">
-            <VersionProvider>
-              <TourProvider>
-                <Layout highlighted={pageProps.highlighted}>
-                  <Component {...pageProps} />
-                </Layout>
-              </TourProvider>
-            </VersionProvider>
-          </PluginWrapperSlot>
-        ) : (
-          <div className="min-h-screen bg-surface-subtle" />
-        )}
-      </PluginProvider>
+        <PluginProvider>
+          {pluginsSettled ? (
+            <PluginWrapperSlot name="app.providers">
+              <VersionProvider>
+                <TourProvider>
+                  <Layout highlighted={pageProps.highlighted}>
+                    <Component {...pageProps} />
+                  </Layout>
+                </TourProvider>
+              </VersionProvider>
+            </PluginWrapperSlot>
+          ) : (
+            <div className="min-h-screen bg-surface-subtle" />
+          )}
+        </PluginProvider>
+      </ThemeProvider>
     </CacheProvider>
   );
 }

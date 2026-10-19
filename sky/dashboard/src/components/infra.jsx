@@ -193,7 +193,7 @@ const CleanUtilizationBar = ({
       <Tooltip
         placement="top"
         content={
-          <span className="px-2 py-1 text-xs text-white bg-gray-800 rounded whitespace-nowrap">
+          <span className="px-2 py-1 text-xs text-white bg-gray-800 dark:bg-gray-700 rounded whitespace-nowrap">
             {value.toLocaleString()} {label}
           </span>
         }
