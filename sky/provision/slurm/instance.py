@@ -1137,14 +1137,16 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
         remove_stale_container_script = f"""\
 while IFS= read -r candidate; do
     if [ "$candidate" = {shlex.quote(global_enroot_name)} ]; then
-        enroot remove -f "$candidate"
+        enroot remove -f "$candidate" || exit 1
     fi
 done < <(enroot list)
 """
         remove_stale_container_step = (
             f'srun --overlap --unbuffered --nodes={num_nodes} '
             f'--ntasks-per-node=1 bash -c '
-            f'{shlex.quote(remove_stale_container_script)}')
+            f'{shlex.quote(remove_stale_container_script)} || '
+            '{ echo "[container] ERROR: Failed to remove stale container '
+            f'{global_enroot_name}." >&2; exit 1; }}')
         if snapshot_manifest is None:
             container_cmd = shlex.quote(
                 f'{container_init_script}'
