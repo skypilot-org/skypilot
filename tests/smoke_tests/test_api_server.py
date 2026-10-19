@@ -379,10 +379,14 @@ def test_api_cancel_other_users_request(generic_cloud: str):
         f'export {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}=true && '
         f'{smoke_tests_utils.SKY_API_RESTART}')
 
+    # The auth-proxy identity that mints the tokens (and deletes them in the
+    # teardown, which also deletes their service accounts).
+    minter = f'cancel-admin-{suffix}@example.com'
+    headers = {'X-Auth-Request-Email': minter}
+
     def mint_tokens() -> Generator[str, None, None]:
         # The first user to reach the server through the auth-proxy header
         # gets the default (admin) role and mints a token per test identity.
-        headers = {'X-Auth-Request-Email': f'cancel-admin-{suffix}@example.com'}
         role = requests.get(f'{base_url}/users/role',
                             headers=headers,
                             timeout=30).json().get('role')
@@ -404,6 +408,8 @@ def test_api_cancel_other_users_request(generic_cloud: str):
                 token['token'], encoding='utf-8')
             pathlib.Path(f'{state_dir}/{identity}.id').write_text(
                 token['service_account_user_id'], encoding='utf-8')
+            pathlib.Path(f'{state_dir}/{identity}.token_id').write_text(
+                token['token_id'], encoding='utf-8')
             yield (f'Minted a {sa_role} token for {identity}: '
                    f'{token["service_account_user_id"]}')
 
@@ -462,6 +468,13 @@ def test_api_cancel_other_users_request(generic_cloud: str):
         teardown=(f'{as_("admin")}sky api cancel -y "$(cat {req_file})" '
                   f'2>/dev/null || true; '
                   f'{as_("admin")}sky down -y {name} 2>/dev/null || true; '
+                  f'for f in {state_dir}/*.token_id; do '
+                  f'  [ -f "$f" ] && curl -sS -X POST '
+                  f'-H "X-Auth-Request-Email: {minter}" '
+                  f'-H "Content-Type: application/json" '
+                  f'-d "{{\\"token_id\\": \\"$(cat "$f")\\"}}" '
+                  f'{base_url}/users/service-account-tokens/delete || true; '
+                  f'done; '
                   f'unset {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR} '
                   f'{constants.USER_ID_ENV_VAR} '
                   f'{constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}; '
