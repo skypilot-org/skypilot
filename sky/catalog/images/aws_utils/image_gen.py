@@ -83,10 +83,10 @@ def copy_image_and_make_public(target_region):
     # Copy the AMI to the target region
     if args.arch == 'arm64':
         ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-{args.arch}-'
-                    f'{time.strftime("%y%m%d%H%M")}')
+                    f'{time.strftime("%y%m%d%H%M", time.gmtime())}')
     else:
         ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-'
-                    f'{time.strftime("%y%m%d%H%M")}')
+                    f'{time.strftime("%y%m%d%H%M", time.gmtime())}')
     # AMI names are unique per region, so two same-day variants differing only
     # in their tag would otherwise collide.
     ami_name += args.tag_suffix
