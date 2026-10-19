@@ -449,7 +449,9 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
       )}
       {field(
         'Workspace',
-        <Link href="/workspaces">{taskData.workspace || 'default'}</Link>
+        <Link href="/workspaces">
+          {taskData.workspace_name || taskData.workspace || 'default'}
+        </Link>
       )}
       {field(
         'Duration',

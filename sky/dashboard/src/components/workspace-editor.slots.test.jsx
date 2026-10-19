@@ -2,7 +2,7 @@
 // the built-in role badges render; a plugin registered for a slot replaces the
 // badge and receives the row's context.
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 const mockComponents = {};
 jest.mock('@/plugins/PluginProvider', () => ({
@@ -70,19 +70,20 @@ jest.mock('@/data/connectors/jobs', () => ({
 }));
 const mockInvalidate = jest.fn();
 const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
-jest.mock('@/lib/cache', () => ({
-  __esModule: true,
-  dashboardCache: {
+jest.mock('@/lib/cache', () => {
+  const cache = {
     get: (...args) => mockCacheGet(...args),
     invalidate: (...args) => mockInvalidate(...args),
     invalidateFunction: jest.fn(),
-  },
-}));
+  };
+  return { __esModule: true, default: cache, dashboardCache: cache };
+});
 
 import {
   DetailedAllowedUsers,
   WorkspaceEditor,
 } from '@/components/workspace-editor';
+import { getWorkspaceContexts } from '@/data/connectors/infra';
 
 const config = { private: true, allowed_users: ['alice', 'bob'] };
 const users = [
@@ -373,6 +374,40 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     expect(server.ws.gcp).toBeUndefined();
   });
 
+  test('Apply drops the cached workspace views', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: saved\n`);
+    mockInvalidate.mockClear();
+    await apply();
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+
+  test('a rename that lands under a draft is refused at Apply', async () => {
+    await renderEditor();
+    await edit((y) => `# note\n${y}`);
+    server = { ws: { ...server.ws, name: 'renamed' } };
+    await pluginRefresh();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        'The top-level key must stay "renamed". To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('a name in the YAML is refused, not saved', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  name: other\n`);
+    expect(
+      screen.getByText(
+        'Remove "name" from the YAML. To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
   test('Apply sends the config the draft started from', async () => {
     await renderEditor();
     await edit((y) => `${y}  gcp:\n    project_id: mine\n`);
@@ -418,6 +453,9 @@ describe('WorkspaceEditor for a non-admin', () => {
     expect(screen.getByText('Workspace YAML')).toBeTruthy();
     expect(screen.queryByText('Apply')).toBeNull();
     expect(screen.queryByText('Delete')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Rename workspace' })
+    ).toBeNull();
     expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
   });
 
@@ -621,5 +659,131 @@ describe('WorkspaceEditor Refresh for an admin', () => {
     });
     expect(screen.queryByText('1 / 1')).toBeNull();
     console.error.mockRestore();
+  });
+});
+
+describe('WorkspaceEditor rename', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      default: {},
+      team: { private: false },
+      'ws-0123456789ab': { name: 'ml', private: false },
+    }));
+    mockUpdateWorkspace.mockReset();
+    mockUpdateWorkspace.mockResolvedValue({});
+  });
+
+  const pencil = () =>
+    screen.queryByRole('button', { name: 'Rename workspace' });
+
+  const renderEditor = async (workspaceName) => {
+    render(<WorkspaceEditor workspaceName={workspaceName} />);
+    await screen.findByText('Apply');
+  };
+
+  test('the pencil next to the name opens the rename dialog', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(screen.queryByText('Rename')).toBeNull();
+    fireEvent.click(pencil());
+    expect(
+      await screen.findByText(/Scripts and configs that use "ml" will stop/)
+    ).toBeInTheDocument();
+  });
+
+  test('no pencil on the default workspace', async () => {
+    await renderEditor('default');
+    expect(pencil()).toBeNull();
+  });
+
+  test('the pencil is disabled while the YAML has unsaved edits', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(pencil()).toBeEnabled();
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, { target: { value: `${box.value}# note\n` } });
+    expect(pencil()).toBeDisabled();
+    expect(pencil()).toHaveAttribute(
+      'title',
+      'Apply or discard the YAML changes first'
+    );
+  });
+
+  test('a rename moves the YAML key and its baseline to the new name', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false },
+      { name: 'ml', private: false }
+    );
+    expect(screen.getByLabelText('workspace yaml').value).toMatch(/^ml-v2:/);
+    expect(screen.getByText('Workspace renamed to "ml-v2".')).toBeTruthy();
+    // The new YAML is the baseline, not a draft.
+    expect(pencil()).toBeEnabled();
+  });
+
+  test('Apply after a rename expects the renamed config', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: `${box.value}  gcp:\n    project_id: x\n` },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply'));
+    });
+    expect(mockUpdateWorkspace).toHaveBeenLastCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false, gcp: { project_id: 'x' } },
+      { name: 'ml-v2', private: false }
+    );
+  });
+
+  test('changing the YAML key points at the rename pencil', async () => {
+    await renderEditor('ws-0123456789ab');
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: box.value.replace(/^ml:/, 'other:') },
+    });
+    expect(
+      screen.getByText(
+        'The top-level key must stay "ml" (found "other"). To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('Delete drops the cached workspace views', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(screen.getByText('Delete'));
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete',
+        })
+      );
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+});
+
+describe('WorkspaceEditor for a new workspace', () => {
+  test('creating drops the cached workspace views', async () => {
+    render(<WorkspaceEditor workspaceName="ml" isNewWorkspace />);
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(await screen.findByText('Apply'));
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
   });
 });

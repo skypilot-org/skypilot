@@ -149,52 +149,28 @@ class TestWorkspaceManagement(unittest.TestCase):
         mock_validate_schema.return_value = None
 
         new_config = {'gcp': {'project_id': 'staging-project'}}
+        workspaces = self.sample_config['workspaces'].copy()
 
-        expected_return = {'updated': 'workspaces'}
-        mock_update_workspaces_config.return_value = expected_return
-
-        result = core.create_workspace('staging', new_config)
-
-        # Verify that _update_workspaces_config was called with a function
-        mock_update_workspaces_config.assert_called_once()
-        self.assertEqual(result, expected_return)
-
-    @mock.patch('sky.workspaces.core.get_workspaces')
-    @mock.patch('sky.utils.schemas.get_config_schema')
-    @mock.patch('sky.utils.common_utils.validate_schema')
-    @mock.patch('sky.check.check')
-    @mock.patch('sky.workspaces.core._update_workspaces_config')
-    def test_create_workspace_already_exists(
-            self, mock_update_workspaces_config, mock_sky_check,
-            mock_validate_schema, mock_get_schema, mock_get_workspaces):
-        """Test creating a workspace that already exists should fail."""
-        mock_get_workspaces.return_value = self.sample_config[
-            'workspaces'].copy()
-        mock_get_schema.return_value = {
-            'properties': {
-                'workspaces': {
-                    'additionalProperties': {}
-                }
-            }
-        }
-        mock_validate_schema.return_value = None
-
-        # Mock _update_workspaces_config to simulate the ValueError being raised
-        # inside the modifier function
         def side_effect(modifier_fn):
-            # Simulate calling the modifier function with existing workspaces
-            workspaces = self.sample_config['workspaces'].copy()
-            modifier_fn(workspaces)  # This should raise ValueError
+            modifier_fn(workspaces)
+            return workspaces
 
         mock_update_workspaces_config.side_effect = side_effect
 
-        new_config = {'gcp': {'project_id': 'test-project'}}
+        result = core.create_workspace('staging', new_config)
 
-        # Should raise ValueError when workspace already exists
-        with self.assertRaises(ValueError) as cm:
-            core.create_workspace('dev', new_config)
-
-        self.assertIn("already exists", str(cm.exception))
+        # The new workspace is keyed by a generated id and named 'staging'.
+        mock_update_workspaces_config.assert_called_once()
+        new_ids = set(result) - set(self.sample_config['workspaces'])
+        self.assertEqual(len(new_ids), 1)
+        new_id = new_ids.pop()
+        self.assertRegex(new_id, r'^ws-[0-9a-f]{12}$')
+        self.assertEqual(result[new_id], {
+            'gcp': {
+                'project_id': 'staging-project'
+            },
+            'name': 'staging'
+        })
 
     @mock.patch('sky.workspaces.core.get_workspaces')
     @mock.patch(

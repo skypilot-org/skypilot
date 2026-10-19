@@ -1320,7 +1320,7 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
             versions.get_local_readable_version())
 
 
-app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app = fastapi.FastAPI(debug=True, lifespan=lifespan)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
 #   app.add_middleware(Middleware2)
@@ -1595,7 +1595,7 @@ async def check(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CHECK,
         request_body=check_body,
-        func=sky_check.check,
+        func=sky_check.check_for_request,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -1611,7 +1611,7 @@ async def enabled_clouds(request: fastapi.Request,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
                                                 expand=expand),
-        func=core.enabled_clouds,
+        func=core.enabled_clouds_for_request,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -2470,8 +2470,16 @@ def _check_workspace_read_permission(auth_user: models.User,
 def _check_cluster_read_permission(auth_user: models.User,
                                    cluster_name: str) -> None:
     workspace = global_user_state.get_cluster_workspace(cluster_name)
-    if workspace is not None:
+    if workspace is None:
+        return
+    try:
         _check_workspace_read_permission(auth_user, workspace)
+    except exceptions.PermissionDeniedError as e:
+        # The user named the cluster, not its workspace, which they may not
+        # be allowed to see.
+        raise exceptions.PermissionDeniedError(
+            f'User {auth_user.name} ({auth_user.id}) does not have permission '
+            f'to access the workspace of cluster {cluster_name!r}') from e
 
 
 async def _reject_cluster_read_for_unauthorized(request: fastapi.Request,

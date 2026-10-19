@@ -1883,7 +1883,9 @@ function JobDetailsContent({
       )}
       {field(
         'Workspace',
-        <Link href="/workspaces">{jobData.workspace || 'default'}</Link>
+        <Link href="/workspaces">
+          {jobData.workspace_name || jobData.workspace || 'default'}
+        </Link>
       )}
       {field(
         'Duration',
