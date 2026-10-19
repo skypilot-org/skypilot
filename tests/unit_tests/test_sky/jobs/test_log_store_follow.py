@@ -33,10 +33,12 @@ class _Reader(logs.LogReader):
         return self.result
 
 
-def _handle():
+def _handle(region='ctx-a'):
     handle = mock.MagicMock()
     handle.cluster_name = 'train-7'
     handle.cluster_name_on_cloud = 'train-7-abcd1234'
+    handle.launched_resources.cloud = 'Kubernetes'
+    handle.launched_resources.region = region
     return handle
 
 
@@ -47,8 +49,13 @@ def _follow(tail=None, since=None):
 
 @pytest.fixture(autouse=True)
 def _reset_hooks():
+    # Only clusters in context ctx-a ship their logs to the store.
+    logs.register_logging_agent_provider(
+        lambda cloud=None, region=None: mock.MagicMock()
+        if (cloud, region) == ('kubernetes', 'ctx-a') else None)
     yield
     logs.register_log_reader(None)
+    logs.register_logging_agent_provider(None)
     LogDeliverySource._undelivered_reason_func = None  # pylint: disable=protected-access
 
 
@@ -67,6 +74,28 @@ def test_default_reader_does_not_follow():
 
 def test_no_reader_falls_back():
     assert _follow() is None
+
+
+def test_placement_without_an_agent_falls_back():
+    # A reader is registered, but nothing ships this context's logs to it.
+    reader = _Reader()
+    logs.register_log_reader(reader)
+    assert managed_job_utils._follow_from_log_store(
+        1, 0, 'task', _handle(region='ctx-b'), None, None) is None
+    assert not reader.calls
+
+
+def test_logs_in_external_store():
+    reader = _Reader()
+    assert managed_job_utils.logs_in_external_store(_handle()) == (False, None)
+    logs.register_log_reader(reader)
+    assert managed_job_utils.logs_in_external_store(_handle()) == (True, None)
+    assert managed_job_utils.logs_in_external_store(
+        _handle(region='ctx-b')) == (False, None)
+    LogDeliverySource.register(
+        undelivered_reason=lambda **kwargs: 'collector not ready')
+    assert managed_job_utils.logs_in_external_store(
+        _handle()) == (False, 'collector not ready')
 
 
 def test_undelivered_logs_fall_back():

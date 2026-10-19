@@ -2343,29 +2343,61 @@ def _wait_for_task_recovery(job_id: int, task_id: int,
         status_display.stop()
 
 
+def logs_in_external_store(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+) -> Tuple[bool, Optional[str]]:
+    """Whether a cluster's logs are read back from the external log store.
+
+    They are when a logging agent is configured for the cluster's placement,
+    a log reader is registered, and no registered ``LogDeliverySource``
+    reports them as undelivered.
+
+    Returns:
+        A tuple of whether the store holds the logs, and the source's reason
+        when it reports them undelivered (None otherwise).
+    """
+    agent_cloud: Optional[str] = None
+    agent_region: Optional[str] = None
+    if handle is not None and handle.launched_resources is not None:
+        launched = handle.launched_resources
+        if launched.cloud is not None:
+            agent_cloud = str(launched.cloud).lower()
+        agent_region = launched.region
+    if not (logs.is_logging_agent_configured(cloud=agent_cloud,
+                                             region=agent_region) and
+            logs.get_log_reader() is not None):
+        return False, None
+    if handle is None:
+        return True, None
+    reason = LogDeliverySource.undelivered_reason(
+        cluster_name=handle.cluster_name,
+        cluster_name_on_cloud=handle.cluster_name_on_cloud)
+    return reason is None, reason
+
+
 def _follow_from_log_store(
         job_id: int, task_id: int, task_name: Optional[str],
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         tail: Optional[int], since: Optional[float]) -> Optional[float]:
     """Follows a running task's logs from the external log store.
 
-    Returns None when the task cannot be followed from the store (no reader,
-    the reader cannot follow this task, or its logs are not confirmed to reach
-    the store), so the caller streams from the cluster instead. Otherwise
-    returns, once the task is no longer RUNNING and its logs were read, the
-    time the task was first seen not RUNNING. A recovery may place the task's
-    next attempt elsewhere, with its logs in another store, so the caller
-    follows again from that time once the task is RUNNING again.
+    Returns None when the task cannot be followed from the store (its logs do
+    not go to a store that can be read back, they are not confirmed to reach
+    it, or the reader cannot follow this task), so the caller streams from the
+    cluster instead. Otherwise returns, once the task is no longer RUNNING and
+    its logs were read, the time the task was first seen not RUNNING. A
+    recovery may place the task's next attempt elsewhere, with its logs in
+    another store, so the caller follows again from that time once the task is
+    RUNNING again.
     """
+    in_store, reason = logs_in_external_store(handle)
+    if not in_store:
+        if reason is not None:
+            logger.debug(f'Not following job {job_id} task {task_id} from the '
+                         f'external log store: {reason}')
+        return None
     reader = logs.get_log_reader()
     if reader is None:
-        return None
-    reason = LogDeliverySource.undelivered_reason(
-        cluster_name=handle.cluster_name,
-        cluster_name_on_cloud=handle.cluster_name_on_cloud)
-    if reason is not None:
-        logger.debug(f'Not following job {job_id} task {task_id} from the '
-                     f'external log store: {reason}')
         return None
 
     last_check = 0.0
