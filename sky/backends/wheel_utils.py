@@ -51,10 +51,14 @@ def _source_path_file() -> pathlib.Path:
     return WHEEL_DIR / '.source_path'
 
 
+def _source_id() -> str:
+    # Resolved, so retargeting a symlinked checkout counts as a new source.
+    return str(SKY_PACKAGE_PATH.resolve())
+
+
 def _built_from_current_source() -> bool:
     try:
-        return _source_path_file().read_text(
-            encoding='utf-8') == str(SKY_PACKAGE_PATH)
+        return _source_path_file().read_text(encoding='utf-8') == _source_id()
     except OSError:
         return False
 
@@ -315,8 +319,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
             # vouches for a wheel from another source dir.
             _source_path_file().unlink(missing_ok=True)
             latest_wheel = _build_sky_wheel()
-            _source_path_file().write_text(str(SKY_PACKAGE_PATH),
-                                           encoding='utf-8')
+            _source_path_file().write_text(_source_id(), encoding='utf-8')
         else:
             latest_wheel = _get_latest_wheel()
 

@@ -339,6 +339,23 @@ def test_cache_not_reused_across_source_dirs(tmp_path, monkeypatch,
     assert fake_wheel_cache == [hash_a, hash_b]
 
 
+def test_cache_not_reused_after_symlink_retarget(tmp_path, monkeypatch,
+                                                 fake_wheel_cache):
+    """A stable checkout symlink pointed at another checkout is a new source."""
+    _make_source_tree(tmp_path / 'a', age_seconds=7200)
+    _make_source_tree(tmp_path / 'b', age_seconds=3600)
+    current = tmp_path / 'current'
+    current.symlink_to(tmp_path / 'a', target_is_directory=True)
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', current / 'sky')
+    _, hash_a = wheel_utils.build_sky_wheel()
+
+    current.unlink()
+    current.symlink_to(tmp_path / 'b', target_is_directory=True)
+    _, hash_b = wheel_utils.build_sky_wheel()
+
+    assert fake_wheel_cache == [hash_a, hash_b]
+
+
 def test_cache_reused_for_same_source_dir(tmp_path, monkeypatch,
                                           fake_wheel_cache):
     src = _make_source_tree(tmp_path / 'a', age_seconds=3600)
