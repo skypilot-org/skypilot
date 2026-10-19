@@ -808,9 +808,11 @@ def override_request_env_and_config(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
-                    logger.debug(f'{request_id} resolved workspace '
-                                 f'{resolution.workspace!r} from '
-                                 f'{resolution.source} for user {user.name}')
+                    ws_label = skypilot_config.workspace_label(
+                        resolution.workspace)
+                    logger.debug(f'{request_id} resolved workspace {ws_label} '
+                                 f'from {resolution.source} for user '
+                                 f'{user.name}')
                     # For resource-creating commands, surface the
                     # resolver's pick at INFO level so the user sees
                     # which workspace their cluster / job actually
@@ -825,14 +827,22 @@ def override_request_env_and_config(
                             _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
                             and resolution.source
                             not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
-                        logger.info(f'Using workspace {resolution.workspace!r} '
+                        workspace_name = skypilot_config.get_workspace_name(
+                            resolution.workspace)
+                        logger.info(f'Using workspace {workspace_name!r} '
                                     f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:
                         # Reject requests that the user does not have
                         # permission to access.
+                        # Name the workspace as the user sent it, not by the
+                        # id it resolved to.
+                        override = request_body.override_skypilot_config or {}
+                        workspace_ref = override.get('active_workspace')
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user, ws_action)
+                            user,
+                            ws_action,
+                            workspace_ref=workspace_ref)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '

@@ -2403,6 +2403,11 @@ def status(verbose: bool,
     # on. `_show_enabled_infra` is a pure renderer and only takes the
     # final label.
     display_workspace = active_workspace or resolved_workspace
+    if display_workspace is not None:
+        # Either may be an id (a typed name resolves against the client's
+        # own `workspaces:` when it has one); show the name.
+        display_workspace = skypilot_config.get_workspace_name(
+            display_workspace, all_workspaces)
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
@@ -8597,18 +8602,22 @@ def workspace_info(output_format: str):
         click.echo(json.dumps(info, indent=2))
         return
 
-    workspace_str = (f'{info["workspace"]!r}'
+    # The server answers with workspace ids; `names` maps them to names
+    # (absent from older servers).
+    names = info.get('names') or {}
+    workspace_str = (f'{names.get(info["workspace"], info["workspace"])!r}'
                      if info.get('workspace') is not None else '(none)')
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
-    preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
+    preferred_str = (f'{names.get(preferred, preferred)!r}'
+                     if preferred is not None else '(not set)')
     # `accessible` is the writable set (where a launch can land);
     # `read_only` is listed separately.
     writable = info.get('accessible') or []
     read_only = info.get('read_only') or []
     writable_str = ', '.join(
-        repr(w) for w in writable) if writable else '(none)'
-    read_only_str = ', '.join(repr(w) for w in read_only)
+        repr(names.get(w, w)) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(names.get(w, w)) for w in read_only)
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',
