@@ -97,11 +97,17 @@ const WorkspaceConfigDescription = ({
   );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-    // Skip non-cloud configuration keys
+    // Skip non-cloud configuration keys: the access-control keys
+    // (`private`, `allowed_users`, `read_access`) and any other
+    // plugin-registered workspace property. A cloud section is always an
+    // object; the others are booleans, strings or lists.
     if (
       cloud === 'private' ||
       cloud === 'allowed_users' ||
-      cloud === 'read_access'
+      cloud === 'read_access' ||
+      cloudConfig === null ||
+      typeof cloudConfig !== 'object' ||
+      Array.isArray(cloudConfig)
     ) {
       return;
     }

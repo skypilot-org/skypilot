@@ -8,6 +8,7 @@ from unittest import mock
 from sky import exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import schemas
 from sky.workspaces import core
 
 
@@ -410,6 +411,51 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertTrue(result.only_user_access_changes)
         self.assertFalse(result.private_changed)
         self.assertFalse(result.allowed_users_changed)
+
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_compare_workspace_configs_registered_access_only_property(
+            self, mock_get_users, mock_get_users_for_role):
+        """A plugin-registered access-only property is a user-access change.
+
+        A property registered with ``access_only=True`` controls who may use
+        the workspace, like allowed_users, so changing it alone must not be
+        treated as an infra change. A property registered without the flag
+        still is.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+        saved_props = dict(schemas._extra_workspace_properties)
+        saved_access = set(schemas._access_only_workspace_properties)
+
+        def restore():
+            schemas._extra_workspace_properties.clear()
+            schemas._extra_workspace_properties.update(saved_props)
+            schemas._access_only_workspace_properties.clear()
+            schemas._access_only_workspace_properties.update(saved_access)
+
+        self.addCleanup(restore)
+        schemas.register_workspace_property('leads', {'type': 'array'},
+                                            access_only=True)
+        schemas.register_workspace_property('quota_tier', {'type': 'string'})
+
+        current_config = {'private': True, 'allowed_users': ['user1']}
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'leads': ['user1'],
+        }
+        result = core._compare_workspace_configs(current_config, new_config)
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.allowed_users_changed)
+
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'quota_tier': 'gold',
+        }
+        result = core._compare_workspace_configs(current_config, new_config)
+        self.assertFalse(result.only_user_access_changes)
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')

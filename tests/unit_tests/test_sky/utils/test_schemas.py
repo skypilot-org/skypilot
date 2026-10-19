@@ -1457,6 +1457,85 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
+class TestRegisterWorkspaceProperty(unittest.TestCase):
+    """Tests for register_workspace_property and schema validation."""
+
+    def setUp(self):
+        self._saved_extra = schemas._extra_workspace_properties.copy()
+        self._saved_access = set(schemas._access_only_workspace_properties)
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        schemas._extra_workspace_properties.clear()
+        schemas._extra_workspace_properties.update(self._saved_extra)
+        schemas._access_only_workspace_properties.clear()
+        schemas._access_only_workspace_properties.update(self._saved_access)
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    def _get_workspace_entry_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['workspaces']['additionalProperties']
+
+    def test_server_registered_property_passes(self):
+        """On the server, a registered property validates like a built-in."""
+        plugins._plugins_loaded = True
+        schemas.register_workspace_property('leads', {
+            'type': 'array',
+            'items': {
+                'type': 'string'
+            }
+        })
+        config = {'private': True, 'allowed_users': ['a'], 'leads': ['a']}
+        jsonschema.validate(instance=config,
+                            schema=self._get_workspace_entry_schema())
+        # The registered schema itself is enforced.
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': 'a'},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_unregistered_property_rejected(self):
+        """On the server, an unregistered workspace property fails."""
+        plugins._plugins_loaded = True
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': ['a']},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_before_plugins_loaded_allows_unknown_property(self):
+        """Before plugins load, the server lets unknown properties through.
+
+        The server reads its config file before plugins register their
+        properties; a strict schema then would reject a plugin's field at
+        startup.
+        """
+        plugins._plugins_loaded = False
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_client_allows_unknown_property(self):
+        """On the client, unknown workspace properties pass through."""
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
+        plugins._plugins_loaded = True
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_access_only_flag(self):
+        """access_only is recorded per property and re-registration resets."""
+        schemas.register_workspace_property('leads', {'type': 'array'},
+                                            access_only=True)
+        schemas.register_workspace_property('tier', {'type': 'string'})
+        self.assertIn('leads', schemas.access_only_workspace_properties())
+        self.assertNotIn('tier', schemas.access_only_workspace_properties())
+        schemas.register_workspace_property('leads', {'type': 'array'})
+        self.assertNotIn('leads', schemas.access_only_workspace_properties())
+
+
 class TestDashboardSchema(unittest.TestCase):
     """Tests for the top-level dashboard config schema."""
 
