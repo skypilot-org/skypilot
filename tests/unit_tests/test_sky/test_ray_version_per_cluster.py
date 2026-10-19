@@ -364,3 +364,17 @@ def test_the_notice_passes_the_region_it_already_has():
         backend_utils._log_pinned_ray_version(  # pylint: disable=protected-access
             'c', '2.4.0', cloud, resources, 'my-context')
     assert checked.call_args.args[2] == 'my-context'
+
+
+def test_the_ray_install_does_not_upgrade_unrelated_packages():
+    """uv's -U re-resolves every dependency to its newest release.
+
+    On an image baked with another Ray that bumped cryptography and urllib3
+    past what the image's own Python environment was built against, and code
+    that mixes the two (the batch worker) failed to import boto3.
+    """
+    install = re.search(r'install[^;]*"ray\[default\]==[^;]*',
+                        constants.RAY_INSTALLATION_COMMANDS)
+    assert install is not None, constants.RAY_INSTALLATION_COMMANDS
+    args = install.group(0).split()
+    assert not {'-U', '--upgrade', '--reinstall'} & set(args), install.group(0)

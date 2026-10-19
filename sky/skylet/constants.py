@@ -429,7 +429,10 @@ RAY_INSTALLATION_COMMANDS = (
     # so we need to avoid that specific version.
     # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
     # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
+    # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
+    # with another ray it also bumps unrelated packages (cryptography,
+    # urllib3, ...) that other Python environments on the image rely on.
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
