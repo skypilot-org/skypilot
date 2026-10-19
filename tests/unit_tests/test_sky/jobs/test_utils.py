@@ -1664,12 +1664,15 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
     print the logs the controller persists for the finished job instead.
     """
 
-    def _patch_job(self,
-                   monkeypatch,
-                   final_status,
-                   log_files,
-                   submitted=True,
-                   batch=False):
+    def _patch_job(
+            self,
+            monkeypatch,
+            final_status,
+            log_files,
+            submitted=True,
+            batch=False,
+            schedule_state=managed_job_state.ManagedJobScheduleState.ALIVE,
+            reader=None):
         """Stubs a job that is STARTING on entry and final_status afterwards.
 
         log_files: what successive reads of the task's local log path return;
@@ -1677,11 +1680,16 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
         submitted: whether the task began launching (False for a task with
             no run command).
         batch: whether the job is a batch coordinator job.
+        schedule_state: the job's schedule state while the tail waits.
+        reader: the registered log reader, if any.
         """
         starting = managed_job_state.ManagedJobStatus.STARTING
         statuses = iter([starting])
         mock_state = MagicMock(wraps=managed_job_state)
         mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_job_schedule_state.return_value = schedule_state
         mock_state.get_num_tasks.return_value = 1
         mock_state.get_status.side_effect = (
             lambda _: next(statuses, final_status))
@@ -1710,7 +1718,7 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
                             lambda *args: None)
         monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
         mock_logs = MagicMock()
-        mock_logs.get_log_reader.return_value = None
+        mock_logs.get_log_reader.return_value = reader
         monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
         return mock_state
 
@@ -1729,6 +1737,40 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
 
         assert 'job output' in capsys.readouterr().out
         assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_a_local_copy_with_a_reader_registered(
+            self, monkeypatch, tmp_path, capsys):
+        # A registered reader does not mean the controller keeps no copy: in
+        # a placement without a logging agent it keeps one, and the tail must
+        # wait for it rather than ask a store that never got the logs.
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\njob output\n',
+            encoding='utf-8')
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED,
+                        [None, None, str(log_file)],
+                        reader=MagicMock())
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'job output' in capsys.readouterr().out
+
+    def test_stops_waiting_once_the_job_is_done(self, monkeypatch):
+        # The controller kept no copy (the logs are in the store) and is done
+        # with the job: nothing more will be recorded, so stop waiting.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            schedule_state=managed_job_state.ManagedJobScheduleState.DONE)
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        # One read in the wait, one in the terminal-job read.
+        assert mock_state.get_all_task_ids_names_statuses_logs.call_count == 2
+        mock_state.get_job_schedule_state.assert_called_once_with(5)
 
     def test_no_persisted_logs_to_wait_for(self, monkeypatch, capsys):
         # A job that failed before it ran user code has no logs to wait for.

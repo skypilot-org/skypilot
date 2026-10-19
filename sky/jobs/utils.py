@@ -2277,10 +2277,12 @@ def _wait_for_persisted_task_logs(job_id: int) -> bool:
     The controller marks a task SUCCEEDED before it downloads the task's logs
     and records their local path, so a reader that sees SUCCEEDED can be ahead
     of the path. (For a failed task it records the path, if any, before the
-    failed status.) Waits until every SUCCEEDED task that ran user code has a
-    local log path, or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS pass. Returns at
-    once when a log reader is registered, as the controller then normally
-    keeps no local copy and the reader serves the logs.
+    failed status.) Whether it keeps a local copy at all depends on the task's
+    placement: it skips the copy only when the logs went to an external store
+    that can read them back. Waits until every SUCCEEDED task that ran user
+    code has a local log path, the job's schedule state is DONE (the
+    controller sets it after it handled the last task's logs, copy or not), or
+    _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS pass.
 
     Returns:
         False if no task of the job ran user code, so there are no task logs
@@ -2289,8 +2291,6 @@ def _wait_for_persisted_task_logs(job_id: int) -> bool:
     submitted_task_ids = managed_job_state.get_submitted_task_ids(job_id)
     if not submitted_task_ids:
         return False
-    if logs.get_log_reader() is not None:
-        return True
     deadline = time.time() + _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
     while time.time() < deadline:
         context_utils.raise_if_canceled()
@@ -2299,6 +2299,9 @@ def _wait_for_persisted_task_logs(job_id: int) -> bool:
         if all(log_file for task_id, _, task_status, log_file, _ in task_info
                if task_status == managed_job_state.ManagedJobStatus.SUCCEEDED
                and task_id in submitted_task_ids):
+            return True
+        if (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE):
             return True
         time.sleep(1)
     return True
