@@ -36,9 +36,8 @@ class IONetError(Exception):
 
 
 def get_api_key() -> str:
-    api_key = os.environ.get('IONET_API_KEY')
-    if api_key:
-        return api_key
+    # Only this file is uploaded to clusters, so reading nothing else keeps
+    # autodown on the VM using the same key as the API server.
     path = os.path.expanduser(API_KEY_PATH)
     try:
         with open(path, 'r', encoding='utf-8') as file:

@@ -52,6 +52,14 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(utils.requests, 'request', request)
 
 
+@pytest.fixture(autouse=True)
+def _api_key_file(monkeypatch, tmp_path):
+    """Points the provisioner at a test API key file."""
+    path = tmp_path / 'api_key'
+    path.write_text('test-key\n', encoding='utf-8')
+    monkeypatch.setattr(utils, 'API_KEY_PATH', str(path))
+
+
 @pytest.fixture
 def catalog_df(monkeypatch, tmp_path):
     """Serves the io.net catalog from a static vms.csv."""
@@ -462,7 +470,6 @@ def test_deploy_variables_check_disk_size(catalog_df):
 
 
 def _credential_check(monkeypatch, status_code):
-    monkeypatch.setenv('IONET_API_KEY', 'test-key')
     calls = []
 
     def request(method, url, **kwargs):
@@ -495,16 +502,34 @@ def test_credential_check_rejected_key(monkeypatch, status_code):
     (ok, reason), _ = _credential_check(monkeypatch, status_code)
     assert not ok
     assert 'rejected the API key' in reason
-    assert 'IONET_API_KEY' in reason
+    assert '~/.ionet/api_key' in reason
 
 
 def test_credential_check_missing_key(monkeypatch, tmp_path):
-    monkeypatch.delenv('IONET_API_KEY', raising=False)
-    monkeypatch.setattr(utils, 'API_KEY_PATH', str(tmp_path / 'api_key'))
+    monkeypatch.setattr(utils, 'API_KEY_PATH', str(tmp_path / 'missing'))
     ok, reason = clouds.IONet._check_compute_credentials()
     assert not ok
     assert 'API key not found' in reason
-    assert 'IONET_API_KEY' in reason
+    assert '~/.ionet/api_key' in reason
+
+
+def test_provisioner_reads_only_the_uploaded_key_file(monkeypatch):
+    # Autodown runs on the VM with the uploaded file, so the API server must
+    # not use a different key from the environment.
+    monkeypatch.setenv('IONET_API_KEY', 'from-env')
+    assert utils.get_api_key() == 'test-key'
+    assert clouds.IONet().get_credential_file_mounts() == {
+        utils.API_KEY_PATH: utils.API_KEY_PATH
+    }
+
+
+def test_autodown_is_supported_but_autostop_is_not():
+    resources = sky.Resources(cloud=clouds.IONet())
+    features = clouds.CloudImplementationFeatures
+    clouds.IONet.check_features_are_supported(resources, {features.AUTODOWN})
+    with pytest.raises(exceptions.NotSupportedError):
+        clouds.IONet.check_features_are_supported(resources,
+                                                  {features.AUTOSTOP})
 
 
 # ---------------------------------------------------------------------------
@@ -811,8 +836,7 @@ def test_auth_errors_raise_invalid_credentials(fake_api, status_code):
         instance.run_instances('US', 'test', 'sky-test', _config())
 
 
-def test_no_paid_deploy_retry(monkeypatch):
-    monkeypatch.setenv('IONET_API_KEY', 'test-key')
+def test_no_paid_deploy_retry():
     response = mock.Mock()
     response.status_code = 503
     response.reason = 'Unavailable'
@@ -825,8 +849,7 @@ def test_no_paid_deploy_retry(monkeypatch):
     assert request.call_count == 1
 
 
-def test_ambiguous_deploy_transport_failure_is_not_retried(monkeypatch):
-    monkeypatch.setenv('IONET_API_KEY', 'test-key')
+def test_ambiguous_deploy_transport_failure_is_not_retried():
     with mock.patch.object(
             utils.requests,
             'request',
@@ -892,8 +915,7 @@ def test_delete_404_counts_as_terminated(fake_api):
     assert not _local_deployments()
 
 
-def test_error_status_code_is_set(monkeypatch):
-    monkeypatch.setenv('IONET_API_KEY', 'test-key')
+def test_error_status_code_is_set():
     response = mock.Mock()
     response.status_code = 401
     response.reason = 'Unauthorized'

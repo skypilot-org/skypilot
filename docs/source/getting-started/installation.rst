@@ -1324,7 +1324,7 @@ If you want to want to use SkyPilot with a different Cudo Compute account or pro
 io.net |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-`io.net <https://io.net/>`_ provides GPU virtual machines through the `VMaaS API <https://io.net/docs/reference/vmaas/get-started-with-vmaas-api>`_. SkyPilot launches a single GPU VM with SSH access; stop/resume, autostop/autodown, multi-node clusters, and custom ports are not supported. Use ``sky down`` to release the VM. To configure io.net access:
+`io.net <https://io.net/>`_ provides GPU virtual machines through the `VMaaS API <https://io.net/docs/reference/vmaas/get-started-with-vmaas-api>`_. SkyPilot launches a single GPU VM with SSH access; stop/resume, autostop, multi-node clusters, and custom ports are not supported. Use ``sky down``, or autodown (``sky launch -i <idle_minutes> --down``), to release the VM. To configure io.net access:
 
 Install the necessary dependencies for io.net.
 
@@ -1371,8 +1371,6 @@ Create an API key in the `io.net Cloud <https://cloud.io.net/>`_ console (associ
   mkdir -p ~/.ionet
   echo "<your_api_key_here>" > ~/.ionet/api_key
   chmod 600 ~/.ionet/api_key
-
-Alternatively, set the :code:`IONET_API_KEY` environment variable. Managed jobs and SkyServe need :code:`~/.ionet/api_key`, because only that file is uploaded to the controllers.
 
 io.net VMs are billed for a fixed lifetime. Set the number of hours in :code:`~/.sky/config.yaml` (see :ref:`config-yaml-ionet`):
 

@@ -24,7 +24,7 @@ else:
 
 _SETUP_HINT = ('Create an API key for the IO Cloud project (see '
                'https://io.net/docs/reference/vmaas/get-started-with-vmaas-api'
-               ') and save it to ~/.ionet/api_key or set IONET_API_KEY.')
+               ') and save it to ~/.ionet/api_key.')
 
 
 @registry.CLOUD_REGISTRY.register
@@ -69,8 +69,6 @@ class IONet(clouds.Cloud):
             ('io.net does not support custom local disks.'),
         clouds.CloudImplementationFeatures.AUTOSTOP:
             ('io.net does not support autostop.'),
-        clouds.CloudImplementationFeatures.AUTODOWN:
-            ('io.net does not support autodown.'),
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -106,7 +104,8 @@ class IONet(clouds.Cloud):
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Mounts the io.net API key file when it exists locally.
 
-        Mounting lets managed-jobs and serve controllers launch on io.net.
+        Mounting lets a cluster tear itself down (autodown) and lets
+        managed-jobs and serve controllers launch on io.net.
         """
         if os.path.exists(os.path.expanduser(ionet_utils.API_KEY_PATH)):
             return {ionet_utils.API_KEY_PATH: ionet_utils.API_KEY_PATH}

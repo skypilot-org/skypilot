@@ -241,7 +241,9 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
                   mode='r',
                   encoding='utf-8') as f:
             return f.read().strip()
-    # Reads IONET_API_KEY, then ~/.ionet/api_key.
+    api_key = os.environ.get('IONET_API_KEY')
+    if api_key:
+        return api_key
     return ionet_utils.get_api_key()
 
 
