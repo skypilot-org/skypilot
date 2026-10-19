@@ -230,9 +230,11 @@ def _route_workspace(
             reason = (f'{resource} is in workspace '
                       f'{skypilot_config.workspace_label(resource_ws)}')
         if reason is not None:
+            # The user never enters policy_ws here and may not be able to read
+            # it, so don't leak its name.
+            policy_label = workspaces_core.workspace_label_for_caller(policy_ws)
             logger.warning(
-                'The admin policy set workspace '
-                f'{skypilot_config.workspace_label(policy_ws)} for request '
+                f'The admin policy set workspace {policy_label!r} for request '
                 f'{request_name}, but it stays in workspace '
                 f'{skypilot_config.workspace_label(workspace)}: {reason}.')
         if workspace != request_ws and not precheck:
@@ -243,10 +245,10 @@ def _route_workspace(
                     workspace,
                     action=workspace_constants.WORKSPACE_ACTION_WRITE)
             except exceptions.PermissionDeniedError:
+                label = workspaces_core.workspace_label_for_caller(workspace)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.UserRequestRejectedByPolicy(
-                        'Cannot run this request in workspace '
-                        f'{skypilot_config.workspace_label(workspace)} '
+                        f'Cannot run this request in workspace {label!r} '
                         f'(source: {source}): user {user.name!r} has no write '
                         'access to it.') from None
             logger.info('Using workspace '

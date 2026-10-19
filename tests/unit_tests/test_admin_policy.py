@@ -1273,6 +1273,29 @@ def test_policy_workspace_resolves_a_renamed_workspace(server_policy,
             in policy_logs.getvalue())
 
 
+@pytest.mark.parametrize('readable,shown', [({'ws-1a2b'}, 'team-a'),
+                                            (set(), 'ws-1a2b')])
+def test_messages_show_the_policy_workspace_name_only_to_readers(
+        server_policy, policy_logs, task, tmp_path, monkeypatch, readable,
+        shown):
+    _use_workspaces(tmp_path, monkeypatch, '  ws-1a2b: {name: team-a}\n')
+    server_policy.cls = _PinRefPolicy
+    monkeypatch.setattr('sky.workspaces.core.get_readable_workspace_names',
+                        lambda: readable)
+    # The user stays out of the policy's workspace: a warning names it.
+    admin_policy_utils.apply(
+        task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
+    assert (f"The admin policy set workspace {shown!r} for request"
+            in policy_logs.getvalue())
+    # The user cannot write to it: the rejection names it.
+    server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy) as e:
+        admin_policy_utils.apply(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    assert f'Cannot run this request in workspace {shown!r} ' in str(e.value)
+
+
 def test_ambiguous_policy_workspace_name_is_rejected(server_policy, task,
                                                      tmp_path, monkeypatch):
     _use_workspaces(tmp_path, monkeypatch, '  ws-1: {name: team-a}\n'
