@@ -3182,9 +3182,13 @@ def test_job_group_cancelled_logs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-def _run_job_group_networking_test(cloud: str) -> None:
-    """JobGroup cross-job networking via hostname resolution on `cloud`."""
-    name = smoke_tests_utils.get_cluster_name()
+def _run_job_group_networking_test(cloud: str, name: str) -> None:
+    """JobGroup cross-job networking via hostname resolution on `cloud`.
+
+    `name` must come from smoke_tests_utils.get_cluster_name() called in the
+    test function itself: it derives the name from its caller's function
+    name, and a helper name starting with '_' yields an invalid job name.
+    """
     yaml_path = _render_job_group_yaml(
         'tests/test_job_groups/smoke_networking.yaml', name, cloud)
 
@@ -3216,7 +3220,8 @@ def _run_job_group_networking_test(cloud: str) -> None:
 @pytest.mark.kubernetes
 def test_job_group_networking(generic_cloud: str):
     """Test JobGroup cross-job networking via hostname resolution."""
-    _run_job_group_networking_test(generic_cloud)
+    _run_job_group_networking_test(generic_cloud,
+                                   smoke_tests_utils.get_cluster_name())
 
 
 @pytest.mark.managed_jobs
@@ -3224,7 +3229,7 @@ def test_job_group_networking(generic_cloud: str):
 def test_job_group_networking_aws():
     """In-group networking on AWS VMs: peers in the same region reach
     each other via /etc/hosts entries with internal IPs."""
-    _run_job_group_networking_test('aws')
+    _run_job_group_networking_test('aws', smoke_tests_utils.get_cluster_name())
 
 
 @pytest.mark.managed_jobs
@@ -3232,7 +3237,7 @@ def test_job_group_networking_aws():
 def test_job_group_networking_gcp():
     """In-group networking on GCP VMs: peers in the same region reach
     each other via /etc/hosts entries with internal IPs."""
-    _run_job_group_networking_test('gcp')
+    _run_job_group_networking_test('gcp', smoke_tests_utils.get_cluster_name())
 
 
 @pytest.mark.managed_jobs
