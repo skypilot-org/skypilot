@@ -6285,3 +6285,55 @@ def test_set_execution_context_ignores_none():
     utils.set_execution_context_in_config(provider_config, None)
     assert _EXECUTION_KEY not in provider_config
     assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def _namespace_with_uid(uid):
+    namespace = mock.MagicMock()
+    namespace.metadata.uid = uid
+    return namespace
+
+
+def test_get_cluster_uid_caches_reads(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert core.read_namespace.call_count == 1
+        mock_core_api.assert_called_once_with('ctx-a')
+        core.read_namespace.assert_called_with('kube-system',
+                                               _request_timeout=mock.ANY)
+
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+
+
+def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.side_effect = kubernetes.client.rest.ApiException(
+        status=403)
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core):
+        assert utils.get_cluster_uid('ctx-a') is None
+        # Failures are cached for a shorter time than successful reads.
+        expiry = utils._cluster_uid_cache['ctx-a'][1]  # pylint: disable=protected-access
+        with patch('sky.provision.kubernetes.utils.time.monotonic',
+                   return_value=expiry + 1):
+            core.read_namespace.side_effect = None
+            core.read_namespace.return_value = _namespace_with_uid('uid-a')
+            assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+
+
+def test_get_cluster_uid_in_cluster_uses_in_cluster_auth(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid(
+            kubernetes_adaptor.in_cluster_context_name()) == 'uid-a'
+        mock_core_api.assert_called_once_with(None)

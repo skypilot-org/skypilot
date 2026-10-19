@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
@@ -3835,6 +3836,56 @@ def get_all_kube_context_names() -> List[str]:
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
+
+
+# kube-system exists in every cluster and is never recreated, so its UID
+# identifies the cluster a context points at, whatever the credentials or the
+# route (direct, proxy, tunnel) used to reach it.
+CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+_CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
+_CLUSTER_UID_CACHE_TTL_SECONDS = 300
+_CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
+# context -> (uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Optional[str], float]] = {}
+_cluster_uid_cache_lock = threading.Lock()
+
+
+def read_cluster_uid(core, timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
+                                    _request_timeout=timeout)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def get_cluster_uid(context: Optional[str],
+                    use_cache: bool = True) -> Optional[str]:
+    """Returns the UID of the cluster `context` points at.
+
+    Returns None when kube-system cannot be read (e.g. no RBAC grant, the
+    cluster is unreachable). Results are cached per process.
+    """
+    now = time.monotonic()
+    if use_cache:
+        with _cluster_uid_cache_lock:
+            cached = _cluster_uid_cache.get(context)
+        if cached is not None and now < cached[1]:
+            return cached[0]
+    uid: Optional[str] = None
+    api_context = (None if context == kubernetes.in_cluster_context_name() else
+                   context)
+    try:
+        uid = read_cluster_uid(kubernetes.core_api(api_context),
+                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
+                     f'namespace UID of context {context!r}: {e}')
+    ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
+           if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
+    with _cluster_uid_cache_lock:
+        _cluster_uid_cache[context] = (uid, time.monotonic() + ttl)
+    return uid
 
 
 @annotations.lru_cache(scope='request')

@@ -642,6 +642,88 @@ def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
             'my-cluster', record)
 
 
+def _patch_k8s_target(monkeypatch, provider_config, contexts, current_uid):
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    set_owner = mock.MagicMock()
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        set_owner)
+    monkeypatch.setattr('sky.global_user_state.get_cluster_yaml_dict',
+                        lambda _: {'provider': provider_config})
+    # The kubeconfig entry names behind the context differ from the ones the
+    # owner was recorded with (e.g. the context was re-created with other
+    # credentials).
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [['other_names_default']]))
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_all_kube_context_names',
+        lambda: contexts)
+    get_uid = mock.MagicMock(return_value=current_uid)
+    monkeypatch.setattr('sky.provision.kubernetes.utils.get_cluster_uid',
+                        get_uid)
+    return set_owner, get_uid
+
+
+@pytest.mark.parametrize(
+    'recorded_uid,current_uid',
+    [
+        ('uid-a', 'uid-a'),
+        # Launched before the cluster UID was recorded.
+        (None, 'uid-a'),
+        # kube-system unreadable through the context.
+        ('uid-a', None),
+    ])
+def test_check_owner_identity_k8s_same_context_passes(monkeypatch, recorded_uid,
+                                                      current_uid):
+    """The recorded context reaching the same cluster is enough to pass."""
+    provider_config = {'context': 'my-ctx'}
+    if recorded_uid is not None:
+        provider_config['cluster_uid'] = recorded_uid
+    set_owner, get_uid = _patch_k8s_target(monkeypatch, provider_config,
+                                           ['other-ctx', 'my-ctx'], current_uid)
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    # The owner keeps its recorded value so older versions still accept it.
+    set_owner.assert_not_called()
+    if recorded_uid is None:
+        get_uid.assert_not_called()
+    else:
+        get_uid.assert_called_once_with('my-ctx')
+
+
+def test_check_owner_identity_k8s_context_points_at_other_cluster(monkeypatch):
+    _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['my-ctx'], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
+                       match='different Kubernetes cluster'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+
+
+def test_check_owner_identity_k8s_context_missing(monkeypatch):
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['other-ctx'], 'uid-a')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
+                       match='not available'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+    get_uid.assert_not_called()
+
+
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
 def test_is_controller_accessible_accepts_autostopping(mock_refresh):
     """Verify is_controller_accessible accepts AUTOSTOPPING status."""
