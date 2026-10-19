@@ -887,6 +887,25 @@ ENV_VAR_SERVER_DB_CONNECTION_POOL_SIZE = (
 ENV_VAR_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_MAX_OVERFLOW')
 
+# When true, a server process that pools state-DB connections keeps its burst
+# connections open for reuse instead of closing each one when it is returned,
+# and closes connections idle for
+# ENV_VAR_SERVER_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS until it is back to
+# its pool size (`sky.utils.db.elastic_pool.ElasticQueuePool`). A process still
+# uses at most pool size + max overflow connections at once. Off by default,
+# and no effect on a process that does not pool (pool size 0).
+#
+# Without it, a process under sustained load past its pool size opens and
+# closes a database connection for most queries past the pool.
+#
+# Server-side only: the SKYPILOT_SERVER_ prefix keeps clients from forwarding
+# it (`sky.server.requests.payloads.request_body_env_vars`).
+ENV_VAR_SERVER_DB_CONNECTION_POOL_ELASTIC = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_ELASTIC')
+ENV_VAR_SERVER_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS')
+DEFAULT_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS = 300.0
+
 # Explicit sizes for the API server's long and short executor pools and, in
 # consolidation mode, its jobs-controller pool, in place of the counts the
 # server derives from CPU and memory (`sky.server.config.compute_server_config`,

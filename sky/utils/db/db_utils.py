@@ -20,6 +20,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils.db import elastic_pool
 from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
@@ -544,6 +545,52 @@ def get_db_connection_pool_max_overflow(pool_size: int) -> int:
             constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY - pool_size))
 
 
+def db_connection_pool_is_elastic() -> bool:
+    """Whether a pooling process keeps its burst connections for reuse.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_ELASTIC``, off when unset.
+
+    Raises:
+        ValueError: if the variable is set but is not a boolean.
+    """
+    env_var = constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_ELASTIC
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return False
+    value = raw.strip().lower()
+    if value in ('1', 'true', 'yes'):
+        return True
+    if value in ('0', 'false', 'no'):
+        return False
+    raise ValueError(f'{env_var}={raw!r} is not a boolean.')
+
+
+def get_db_connection_pool_idle_timeout_seconds() -> float:
+    """Seconds an elastic pool keeps an idle connection beyond its pool size.
+
+    ``constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS`` when
+    it is set, otherwise
+    ``constants.DEFAULT_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS``.
+
+    Raises:
+        ValueError: if the variable is set but is not a positive, finite
+            number of seconds.
+    """
+    env_var = constants.ENV_VAR_SERVER_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS
+    raw = os.environ.get(env_var)
+    if raw is None or not raw.strip():
+        return constants.DEFAULT_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise ValueError(
+            f'{env_var}={raw!r} is not a number of seconds.') from None
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise ValueError(
+            f'{env_var}={raw!r} must be a positive, finite number of seconds.')
+    return seconds
+
+
 def _read_connection_count_env(env_var: str, default: int) -> int:
     """A number of connections read from ``env_var``, ``default`` if unset.
 
@@ -952,6 +999,20 @@ def get_engine(
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(psycopg2_url(conn_string),
                                                  poolclass=sqlalchemy.NullPool))
+                elif db_connection_pool_is_elastic():
+                    # Same concurrency ceiling as the QueuePool below, but
+                    # burst connections stay open until they sit idle.
+                    _postgres_engine_cache[cache_key] = (
+                        sqlalchemy.create_engine(
+                            psycopg2_url(conn_string),
+                            poolclass=elastic_pool.ElasticQueuePool,
+                            pool_size=pool_size +
+                            get_db_connection_pool_max_overflow(pool_size),
+                            min_size=pool_size,
+                            idle_timeout=(
+                                get_db_connection_pool_idle_timeout_seconds()),
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
                 else:
                     # Sync engines can safely use QueuePool for connection reuse
                     _postgres_engine_cache[cache_key] = (
