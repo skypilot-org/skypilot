@@ -3845,9 +3845,25 @@ CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
 _CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
 _CLUSTER_UID_CACHE_TTL_SECONDS = 300
 _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
-# context -> (uid or None, expiry as time.monotonic()).
-_cluster_uid_cache: Dict[Optional[str], Tuple[Optional[str], float]] = {}
+# context -> (kubeconfig fingerprint, uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
+                                              float]] = {}
 _cluster_uid_cache_lock = threading.Lock()
+
+
+def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
+    paths = os.environ.get('KUBECONFIG', kubernetes.DEFAULT_KUBECONFIG_PATH)
+    fingerprint: List[Tuple[Any, ...]] = []
+    for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
+        if not path:
+            continue
+        try:
+            st = os.stat(os.path.expanduser(path))
+            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            fingerprint.append((path, None))
+    return tuple(fingerprint)
 
 
 def read_cluster_uid(core, timeout: float) -> Optional[str]:
@@ -3864,14 +3880,18 @@ def get_cluster_uid(context: Optional[str],
     """Returns the UID of the cluster `context` points at.
 
     Returns None when kube-system cannot be read (e.g. no RBAC grant, the
-    cluster is unreachable). Results are cached per process.
+    cluster is unreachable). Results are cached per process until a file on
+    KUBECONFIG changes, since a rewritten kubeconfig may point `context` at
+    another cluster.
     """
     now = time.monotonic()
+    fingerprint = _kubeconfig_fingerprint()
     if use_cache:
         with _cluster_uid_cache_lock:
             cached = _cluster_uid_cache.get(context)
-        if cached is not None and now < cached[1]:
-            return cached[0]
+        if (cached is not None and cached[0] == fingerprint and
+                now < cached[2]):
+            return cached[1]
     uid: Optional[str] = None
     api_context = (None if context == kubernetes.in_cluster_context_name() else
                    context)
@@ -3884,7 +3904,7 @@ def get_cluster_uid(context: Optional[str],
     ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
            if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
     with _cluster_uid_cache_lock:
-        _cluster_uid_cache[context] = (uid, time.monotonic() + ttl)
+        _cluster_uid_cache[context] = (fingerprint, uid, time.monotonic() + ttl)
     return uid
 
 
