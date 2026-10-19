@@ -1233,6 +1233,59 @@ def test_unknown_policy_workspace_is_rejected(server_policy, task):
     server_policy.check.assert_not_called()
 
 
+class _PinRefPolicy(sky.AdminPolicy):
+    ref = 'team-a'
+
+    @classmethod
+    def validate_and_mutate(cls, user_request):
+        config = user_request.skypilot_config
+        config.set_nested(('active_workspace',), cls.ref)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+def _use_workspaces(tmp_path, monkeypatch, workspaces_yaml: str) -> None:
+    config_path = tmp_path / 'renamed.yaml'
+    config_path.write_text(f'workspaces:\n{workspaces_yaml}')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    importlib.reload(skypilot_config)
+
+
+@pytest.mark.parametrize('ref', ['team-a', 'ws-1a2b'])
+def test_policy_workspace_resolves_a_renamed_workspace(server_policy,
+                                                       policy_logs, task,
+                                                       tmp_path, monkeypatch,
+                                                       ref):
+    # A renamed workspace is reachable by its new name and by its id; the
+    # request always runs under the id.
+    _use_workspaces(tmp_path, monkeypatch, '  ws-1a2b: {name: team-a}\n')
+    server_policy.cls = _PinRefPolicy
+    monkeypatch.setattr(_PinRefPolicy, 'ref', ref)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=_options('new-cluster')):
+        assert skypilot_config.get_active_workspace() == 'ws-1a2b'
+    server_policy.check.assert_called_once_with(_USER,
+                                                'ws-1a2b',
+                                                action='write')
+    assert ("INFO Using workspace 'team-a' (ws-1a2b) (source: admin policy)."
+            in policy_logs.getvalue())
+
+
+def test_ambiguous_policy_workspace_name_is_rejected(server_policy, task,
+                                                     tmp_path, monkeypatch):
+    _use_workspaces(tmp_path, monkeypatch, '  ws-1: {name: team-a}\n'
+                    '  ws-2: {name: team-a}\n')
+    server_policy.cls = _PinRefPolicy
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='More than one workspace is named'):
+        admin_policy_utils.apply(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    server_policy.check.assert_not_called()
+
+
 def test_routing_without_write_access_is_rejected(server_policy, task):
     server_policy.check.side_effect = exceptions.PermissionDeniedError('denied')
     with pytest.raises(exceptions.UserRequestRejectedByPolicy,

@@ -149,19 +149,27 @@ def use_policy_workspace(workspace: str) -> Iterator[None]:
 
 
 def _policy_workspace_id(ref: str) -> str:
-    """Returns the workspace a policy's `active_workspace` value refers to.
+    """Returns the id of the workspace a policy's `active_workspace` names.
 
     Raises:
-        exceptions.UserRequestRejectedByPolicy: no such workspace.
+        exceptions.UserRequestRejectedByPolicy: no such workspace, or more than
+            one workspace has that name.
     """
-    if (ref != constants.SKYPILOT_DEFAULT_WORKSPACE and
-            ref not in skypilot_config.get_nested(('workspaces',), {})):
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
+    try:
+        workspace = skypilot_config.resolve_workspace_ref(ref, workspaces)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.UserRequestRejectedByPolicy(
+                f'Workspace {ref} set by the admin policy: {e}') from None
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and
+            workspace not in workspaces):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.UserRequestRejectedByPolicy(
                 f'Workspace {ref} set by the admin policy does not exist. '
                 'Use `sky check` to see if it is defined on the API server and '
                 'try again.')
-    return ref
+    return workspace
 
 
 def _route_workspace(
@@ -219,11 +227,14 @@ def _route_workspace(
             # the policy routes there: a mismatch keeps the usual error.
             resource, resource_ws = existing_resource
             workspace = request_ws
-            reason = f'{resource} is in workspace {resource_ws!r}'
+            reason = (f'{resource} is in workspace '
+                      f'{skypilot_config.workspace_label(resource_ws)}')
         if reason is not None:
-            logger.warning(f'The admin policy set workspace {policy_ws!r} for '
-                           f'request {request_name}, but it stays in '
-                           f'workspace {workspace!r}: {reason}.')
+            logger.warning(
+                'The admin policy set workspace '
+                f'{skypilot_config.workspace_label(policy_ws)} for request '
+                f'{request_name}, but it stays in workspace '
+                f'{skypilot_config.workspace_label(workspace)}: {reason}.')
         if workspace != request_ws and not precheck:
             # A policy may route a request, but cannot grant access.
             try:
@@ -234,10 +245,13 @@ def _route_workspace(
             except exceptions.PermissionDeniedError:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.UserRequestRejectedByPolicy(
-                        f'Cannot run this request in workspace {workspace!r} '
+                        'Cannot run this request in workspace '
+                        f'{skypilot_config.workspace_label(workspace)} '
                         f'(source: {source}): user {user.name!r} has no write '
                         'access to it.') from None
-            logger.info(f'Using workspace {workspace!r} (source: {source}).')
+            logger.info('Using workspace '
+                        f'{skypilot_config.workspace_label(workspace)} '
+                        f'(source: {source}).')
     mutated_config['active_workspace'] = workspace
 
 
