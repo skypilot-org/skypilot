@@ -415,9 +415,10 @@ def test_api_cancel_other_users_request(generic_cloud: str):
                 f'export {constants.USER_ID_ENV_VAR}='
                 f'$(cat {state_dir}/{identity}.id); ')
 
-    def assert_status(status: str) -> str:
-        return (f'{as_("admin")}s=$(sky api status -a "$(cat {req_file})"); '
-                f'echo "$s"; echo "$s" | grep -w {status}')
+    # The admin sees every request, so it reads the owner's request status.
+    assert_active = (f'{as_("admin")}s=$(sky api status -a '
+                     f'"$(cat {req_file})"); echo "$s"; '
+                     f'echo "$s" | grep -wE "PENDING|RUNNING|WAITING"')
 
     wait_cancelled = (f'{as_("admin")}req=$(cat {req_file}); start=$SECONDS; '
                       f'until sky api status -a "$req" | grep -qw CANCELLED; '
@@ -442,17 +443,17 @@ def test_api_cancel_other_users_request(generic_cloud: str):
              f'head -1 | awk \'{{print $2}}\'); '
              f'echo "captured request id: $req"; test -n "$req"; '
              f'echo "$req" > {req_file}'),
-            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            assert_active,
             # Another non-admin cannot cancel it by id.
             (f'{as_("other")}s=$(sky api cancel -y "$(cat {req_file})" 2>&1);'
              f' echo "$s"; echo "$s" | grep "No requests need to be cancelled"'
             ),
-            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            assert_active,
             # -u with ids is refused instead of cancelling every request.
             (f'{as_("other")}s=$(sky api cancel -y -u "$(cat {req_file})" '
              f'2>&1) && exit 1; echo "$s"; '
              f'echo "$s" | grep "Can only specify one of REQUEST_IDS"'),
-            assert_status('PENDING\\|RUNNING\\|WAITING'),
+            assert_active,
             # An admin cancels it by id.
             (f'{as_("admin")}s=$(sky api cancel -y "$(cat {req_file})" 2>&1);'
              f' echo "$s"; echo "$s" | grep "Cancelled 1 request"'),
