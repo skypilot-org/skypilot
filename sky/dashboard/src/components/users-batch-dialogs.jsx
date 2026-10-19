@@ -26,6 +26,7 @@ import {
   getWorkspaces,
 } from '@/data/connectors/workspaces';
 import dashboardCache from '@/lib/cache';
+import { getWorkspaceName } from '@/hooks/useWorkspacesConfig';
 
 const FOOTER_BUTTON_CLASS = 'min-w-[80px]';
 
@@ -34,7 +35,7 @@ const FOOTER_BUTTON_CLASS = 'min-w-[80px]';
  * Both the user-role batch and the workspace batch endpoints return the
  * shape { succeeded: [...], failed: [{ <key>, error }] }.
  */
-function ResultSummary({ result, idKey, idLabel }) {
+function ResultSummary({ result, idKey, idLabel, formatId = (id) => id }) {
   if (!result) return null;
   const succeeded = result.succeeded || [];
   const failed = result.failed || [];
@@ -63,7 +64,7 @@ function ResultSummary({ result, idKey, idLabel }) {
             {failed.map((f, i) => (
               <li key={i} className="px-3 py-2 text-xs text-gray-700">
                 <span className="font-mono text-gray-500">
-                  {idLabel}={f[idKey]}
+                  {idLabel}={formatId(f[idKey])}
                 </span>
                 {/* whitespace-pre-wrap renders the \n in server error
                     messages as actual line breaks. */}
@@ -294,8 +295,13 @@ function WorkspacePickerDialog({
   const privateWorkspaces = useMemo(() => {
     return Object.entries(workspaces)
       .filter(([, cfg]) => cfg && cfg.private)
-      .map(([name, cfg]) => ({ name, config: cfg }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(([name, cfg]) => ({
+        // `name` is the workspace id; `label` is what users see.
+        name,
+        label: getWorkspaceName(workspaces, name),
+        config: cfg,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [workspaces]);
 
   // Returns the subset of selectedUsers already listed in this
@@ -385,7 +391,7 @@ function WorkspacePickerDialog({
                 !loadError &&
                 privateWorkspaces.length > 0 && (
                   <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto">
-                    {privateWorkspaces.map(({ name, config }) => {
+                    {privateWorkspaces.map(({ name, label, config }) => {
                       const isChecked = picked.has(name);
                       const currentMembers = computeCurrentMembers(config);
                       // currentMembers is `selectedUsers.filter(...)` so the
@@ -421,7 +427,7 @@ function WorkspacePickerDialog({
                           />
                           <div className="flex-1 min-w-0">
                             <div className="text-sm text-gray-700 truncate">
-                              {name}
+                              {label}
                             </div>
                             {variant === 'remove' && (
                               <div className="text-xs text-gray-500 mt-0.5">
@@ -495,6 +501,7 @@ function WorkspacePickerDialog({
               result={result}
               idKey="workspace_name"
               idLabel="workspace"
+              formatId={(id) => getWorkspaceName(workspaces, id)}
             />
             <DialogFooter>
               <Button

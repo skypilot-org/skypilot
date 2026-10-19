@@ -560,6 +560,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
+    elif accelerator == 'H100-MEGA':
+        # H100-MEGA is named as H100-MEGA-80GB in GKE.
+        accelerator = 'H100-MEGA-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB',
                        'B200'):
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
@@ -743,10 +746,12 @@ class GKELabelFormatter(GPULabelFormatter):
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
             if acc == 'H100-80GB':
-                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
-                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
-                # to distinguish between a3-high and a3-mega instances
+                # H100 can be either H100-80GB (a3-high) or H100-MEGA-80GB
+                # (a3-mega) in GKE. Map both to their catalog names, which
+                # keep the two instance families distinct.
                 return 'H100'
+            elif acc == 'H100-MEGA-80GB':
+                return 'H100-MEGA'
             elif acc == 'H200-141GB':
                 return 'H200'
             return acc
