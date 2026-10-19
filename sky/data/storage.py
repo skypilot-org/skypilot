@@ -3523,25 +3523,28 @@ class AzureBlobStore(AbstractStore):
                 created already exists or fails to assign role to the create
                 storage account.
         """
+        # Use typed models instead of a raw dict: the dict shape relies on
+        # msrest (azure-mgmt-storage <= 24.x) remapping the top-level
+        # 'encryption' key to 'properties.encryption'. The TypeSpec-based
+        # serializer in azure-mgmt-storage >= 25.0.0 serializes dicts
+        # verbatim, and ARM rejects the malformed body. Typed models
+        # serialize correctly under both. See #9775.
+        storage_models = azure.azure_mgmt_models('storage')
         try:
             creation_response = (
                 self.storage_client.storage_accounts.begin_create(
-                    resource_group_name, storage_account_name, {
-                        'sku': {
-                            'name': 'Standard_GRS'
-                        },
-                        'kind': 'StorageV2',
-                        'location': self.region,
-                        'encryption': {
-                            'services': {
-                                'blob': {
-                                    'key_type': 'Account',
-                                    'enabled': True
-                                }
-                            },
-                            'key_source': 'Microsoft.Storage'
-                        },
-                    }).result())
+                    resource_group_name, storage_account_name,
+                    storage_models.StorageAccountCreateParameters(
+                        sku=storage_models.Sku(name='Standard_GRS'),
+                        kind='StorageV2',
+                        location=self.region,
+                        encryption=storage_models.Encryption(
+                            services=storage_models.EncryptionServices(
+                                blob=storage_models.EncryptionService(
+                                    key_type='Account', enabled=True)),
+                            key_source='Microsoft.Storage',
+                        ),
+                    )).result())
         except azure.exceptions().ResourceExistsError as error:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -3909,7 +3912,8 @@ class AzureBlobStore(AbstractStore):
                 self.resource_group_name,
                 self.storage_account_name,
                 container_name,
-                blob_container={})
+                blob_container=azure.azure_mgmt_models(
+                    'storage').BlobContainer())
             logger.info(f'  {colorama.Style.DIM}Created AZ Container '
                         f'{container_name!r} in {self.region!r} under storage '
                         f'account {self.storage_account_name!r}.'
