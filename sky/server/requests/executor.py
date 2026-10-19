@@ -1292,7 +1292,7 @@ def stamp_request_body(request_body: payloads.RequestBody,
     else:
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
-        user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR)
+        user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')
         # This identity comes straight from the client and is stored as the
         # owner of any cluster the request creates, so reject a malformed one
         # here. A well-formed id is an invariant elsewhere in the codebase
