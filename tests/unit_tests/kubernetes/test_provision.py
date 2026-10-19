@@ -6172,6 +6172,42 @@ class TestCreatePodWebhookUnavailable:
         assert core_api_mock.create_namespaced_pod.call_count == 1
         assert not sleeps
 
+    @pytest.mark.parametrize('first_error', [
+        (422, 'Unprocessable Entity', 'Pod "c-head" is invalid: '
+         'FieldValueForbidden: AppArmorProfile: nil'),
+        (409, 'Conflict',
+         'object is being deleted: pods "c-head" already exists'),
+    ],
+                             ids=['apparmor-422', 'terminating-409'])
+    def test_second_attempt_retries_webhook(self, monkeypatch, first_error):
+        """The create after the AppArmor 422 or 409 handling also retries
+        while the webhook cannot be called."""
+        import json
+        status, reason, message = first_error
+        created_pod = mock.MagicMock()
+        core_api_mock, sleeps = self._patch(monkeypatch, [
+            _make_api_exception(
+                status, reason, body=json.dumps({'message': message})),
+            self._api_exc(self._WEBHOOK_MSG), created_pod
+        ])
+        core_api_mock.read_namespaced_pod.return_value.metadata.finalizers = (
+            None)
+        pod_spec = {
+            'metadata': {
+                'name': 'c-head',
+                'annotations': {
+                    'container.apparmor.security.beta.kubernetes.io/'
+                    f'{k8s_constants.RAY_NODE_CONTAINER_NAME}': 'unconfined'
+                },
+            },
+            'spec': {},
+        }
+
+        assert instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, 'ctx-a') is created_pod
+        assert core_api_mock.create_namespaced_pod.call_count == 3
+        assert len(sleeps) == 1
+
 
 def _fake_node(ready=True, unschedulable=False):
     node = mock.Mock()

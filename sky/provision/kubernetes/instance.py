@@ -2174,8 +2174,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.
     See https://github.com/skypilot-org/skypilot/issues/4174 for details.
-    An admission webhook that cannot be called is retried for a while and then
-    raised as a KubernetesError naming the webhook.
+    On every create attempt, an admission webhook that cannot be called is
+    retried for a while and then raised as a KubernetesError naming the
+    webhook.
 
     Returns: The created Pod object.
     """
@@ -2219,8 +2220,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
             # Retry Pod creation without the AppArmor annotation
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'without AppArmor annotation.')
                 return pod
@@ -2260,8 +2261,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # the old object around; _force_remove_terminating_pod clears both.
             _force_remove_terminating_pod(pod_name, namespace, context)
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'after force-removing the terminating pod.')
                 return pod
