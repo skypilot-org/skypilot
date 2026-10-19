@@ -72,7 +72,8 @@ export BASE_IMAGE_ID=ami-01b2110eef525172b   # Update this
 python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --base-image-id ${BASE_IMAGE_ID} --arch arm64
 ```
 Pass `--tag-suffix` to name a new tag rather than add rows to an existing one,
-e.g. `--tag-suffix -cuda13-ray256`. Older SkyPilot versions read the same
+e.g. `--tag-suffix=-cuda13-ray256` (with `=`: argparse reads a separate
+leading-dash value as another flag). Older SkyPilot versions read the same
 catalog, so an existing tag must keep pointing at images they can run. The
 tags must match `_DEFAULT_*_IMAGE_ID` in `sky/clouds/aws.py` (GCP rows are
 written by hand; match `sky/clouds/gcp.py`).
@@ -81,6 +82,12 @@ written by hand; match `sky/clouds/gcp.py`).
 Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use public [ubuntu images](https://cloud-images.ubuntu.com/locator/ec2/) as fallback.)
 
 ### Azure
+The catalog points at gallery image definitions without a version, so every
+SkyPilot version launches the latest version of each definition. Publishing
+into an existing definition (the `image_name` in the templates) rolls the new
+image out to all of them at once; publish a change of Ray or driver into new
+definitions instead, with new tags.
+
 1. Generate a client secret for packer [here](https://portal.azure.com/?feature.msaljs=true#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/1d249f23-c22e-4d02-b62b-a6827bd113fe/isMSAApp~/false).
 ```bash
 export SECRET=xxxxxx  # Update this

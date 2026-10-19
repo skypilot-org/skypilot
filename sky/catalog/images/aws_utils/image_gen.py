@@ -29,7 +29,9 @@ parser.add_argument('--os-version', default='22.04', help='The OS version')
 parser.add_argument('--arch', default='x86_64', help='The architecture')
 parser.add_argument('--tag-suffix',
                     default='',
-                    help='Appended to the image tag, e.g. -cuda13-ray256')
+                    help='Appended to the image tag and the copied AMI '
+                    'names. Pass it as --tag-suffix=-cuda13-ray256: argparse '
+                    'reads a separate leading-dash value as another flag.')
 parser.add_argument('--output-csv',
                     default='images.csv',
                     help='The output CSV file name')
@@ -85,6 +87,9 @@ def copy_image_and_make_public(target_region):
     else:
         ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-'
                     f'{time.strftime("%y%m%d")}')
+    # AMI names are unique per region, so two same-day variants differing only
+    # in their tag would otherwise collide.
+    ami_name += args.tag_suffix
     copy_command = (
         f'aws ec2 copy-image --source-region {args.region} '
         f'--source-image-id {args.image_id} --region {target_region} '

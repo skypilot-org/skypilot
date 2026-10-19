@@ -108,7 +108,8 @@ def _aws_default_ami(monkeypatch, acc, arch):
 def test_aws_default_images_have_the_current_ray_baked(monkeypatch, acc, arch):
     """A stale default image makes every node reinstall Ray at launch.
 
-    Bumping SKY_REMOTE_RAY_VERSION without new images fails here: build them
+    A major or minor bump of SKY_REMOTE_RAY_VERSION without new images fails
+    here (a patch bump does not change the suffix): build them
     (sky/catalog/images/README.md) or accept the reinstall by updating this.
     """
     assert _aws_default_ami(monkeypatch, acc, arch).endswith(_BAKED_RAY_SUFFIX)
