@@ -340,8 +340,10 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # `ray status` keeps a node under `Active:` after the GCS has marked it dead
 # (on Ray 2.56.1 it never drops off), so counting its node lines over-reports
 # after any node loss -- a resize-down, a preemption, a replaced worker. Ask
-# the GCS instead, the same source task_codegen uses to size its placement
-# groups. Prints one parseable line plus a per-node dump for diagnostics.
+# the GCS node table instead (state 0 is ALIVE). A bare GcsClient rather than
+# ray.init(): that starts a driver and a worker and leaves their logs on the
+# head per check, which a status refresh would pile up. Its per-node value is
+# a dict on Ray 2.9.3 and a GcsNodeInfo message on 2.56.1.
 # Nothing listening on the port prints the "Ray cluster is not found" line
 # that `ray status` printed up to Ray 2.9.3 and the health check keys on.
 _ALIVE_NODES_PY = (
@@ -351,12 +353,10 @@ _ALIVE_NODES_PY = (
     's.connect_ex((h, int(p))) == 0 or '
     'sys.exit(print("Ray cluster is not found at", a) or 1); '
     's.close(); '
-    'import ray; '
-    'ray.init(address=a, log_to_driver=False); '
-    'ns = ray.nodes(); '
-    'print("SKY_ALIVE_NODES", sum(1 for n in ns if n["Alive"]), len(ns)); '
-    '[print(" ", n["NodeID"][:16], n["Alive"], n.get("NodeManagerAddress")) '
-    'for n in ns]')
+    'from ray._raylet import GcsClient; '
+    'ns = GcsClient(address=a).get_all_node_info(timeout=10).values(); '
+    'st = [n["state"] if isinstance(n, dict) else n.state for n in ns]; '
+    'print("SKY_ALIVE_NODES", st.count(0), len(st))')
 RAY_ALIVE_NODE_COUNT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '

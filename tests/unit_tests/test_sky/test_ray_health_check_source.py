@@ -12,6 +12,8 @@ import sys
 import time
 from unittest import mock
 
+import pytest
+
 from sky import backends
 from sky import clouds
 from sky.backends import backend_utils
@@ -136,16 +138,23 @@ def test_worker_whose_ray_died_is_not_up():
 
 def test_the_command_asks_the_gcs_not_ray_status():
     cmd = instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND
-    assert 'ray.nodes()' in cmd and '"Alive"' in cmd
+    assert 'get_all_node_info' in cmd
     assert 'ray status' not in cmd, (
         'the count must not come from `ray status` again')
+    # ray.init() registers a driver and leaves a log on the head per check.
+    assert 'ray.init' not in cmd
     # It is spliced into a shell command, so it has to survive the shell.
     assert shlex.split(cmd)
 
 
-def _run_probe(tmp_path, listening):
-    """Runs the probe against a local port; a fake `ray` exits 7 on import."""
-    (tmp_path / 'ray.py').write_text('raise SystemExit(7)\n')
+def _run_probe(tmp_path, listening, raylet='raise SystemExit(7)\n'):
+    """Runs the probe against a local port with a fake `ray._raylet`.
+
+    By default the fake exits 7 on import.
+    """
+    (tmp_path / 'ray').mkdir(exist_ok=True)
+    (tmp_path / 'ray' / '__init__.py').write_text('')
+    (tmp_path / 'ray' / '_raylet.py').write_text(raylet)
     with socket.socket() as server:
         server.bind(('127.0.0.1', 0))
         if listening:
@@ -175,6 +184,27 @@ def test_no_ray_on_the_port_reports_cluster_not_found(tmp_path):
     rc, out = _run_probe(tmp_path, listening=True)
     assert rc == 7, out
     assert backend_utils._RAY_CLUSTER_NOT_FOUND_MESSAGE not in out  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize(
+    'node',
+    [
+        # Ray 2.9.3
+        'dict(state=state)',
+        # Ray 2.56.1: a GcsNodeInfo message
+        'types.SimpleNamespace(state=state)',
+    ])
+def test_the_probe_counts_alive_nodes_of_either_ray_version(tmp_path, node):
+    raylet = (
+        'import types\n'
+        'class GcsClient:\n'
+        '    def __init__(self, address):\n'
+        '        pass\n'
+        '    def get_all_node_info(self, timeout):\n'
+        f'        return {{i: {node} for i, state in enumerate([0, 1, 0])}}\n')
+    rc, out = _run_probe(tmp_path, listening=True, raylet=raylet)
+    assert rc == 0, out
+    assert out.strip() == 'SKY_ALIVE_NODES 2 3'
 
 
 def test_the_head_wait_does_not_depend_on_a_ray_message():
