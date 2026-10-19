@@ -523,6 +523,12 @@ def test_credential_check_missing_key(monkeypatch, tmp_path):
     assert '~/.ionet/api_key' in reason
 
 
+def test_requests_identify_skypilot():
+    headers = utils.IONetClient().headers
+    assert headers['User-Agent'] == f'skypilot/{sky.__version__}'
+    assert headers['x-api-key'] == 'test-key'
+
+
 def test_provisioner_reads_only_the_uploaded_key_file(monkeypatch):
     # Autodown runs on the VM with the uploaded file, so the API server must
     # not use a different key from the environment.

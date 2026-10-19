@@ -7,6 +7,7 @@ import time
 import typing
 from typing import Any, Dict, Optional, Tuple
 
+import sky
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
 
@@ -103,7 +104,9 @@ class IONetClient:
     def __init__(self, api_key: Optional[str] = None):
         self.headers = {
             'x-api-key': api_key or get_api_key(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            # Lets io.net attribute API traffic to SkyPilot, as Nebius does.
+            'User-Agent': f'skypilot/{sky.__version__}',
         }
 
     def _request(self,
