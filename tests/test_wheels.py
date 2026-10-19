@@ -356,6 +356,27 @@ def test_cache_not_reused_after_symlink_retarget(tmp_path, monkeypatch,
     assert fake_wheel_cache == [hash_a, hash_b]
 
 
+def test_cache_not_reused_after_unmarked_wheel_replaced_it(
+        tmp_path, monkeypatch, fake_wheel_cache):
+    """A SkyPilot version without the marker builds over this one's wheel.
+
+    It writes a newer wheel and deletes the other hash dirs, but knows
+    nothing of the marker.
+    """
+    src = _make_source_tree(tmp_path / 'a', age_seconds=3600)
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', src)
+    _, hash_a = wheel_utils.build_sky_wheel()
+
+    foreign = wheel_utils.WHEEL_DIR / 'foreign'
+    foreign.mkdir()
+    (foreign / wheel_utils._WHEEL_PATTERN.replace('*', 'py3-none-any')).touch()
+    shutil.rmtree(wheel_utils.WHEEL_DIR / hash_a)
+
+    _, rebuilt_hash = wheel_utils.build_sky_wheel()
+
+    assert fake_wheel_cache == [hash_a, rebuilt_hash]
+
+
 def test_cache_reused_for_same_source_dir(tmp_path, monkeypatch,
                                           fake_wheel_cache):
     src = _make_source_tree(tmp_path / 'a', age_seconds=3600)

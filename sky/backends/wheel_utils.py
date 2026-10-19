@@ -6,6 +6,7 @@ installing the SkyPilot on the cluster nodes.
 
 The generated folder is like:
     ~/.sky/wheels/<hash_of_wheel>/sky-<version>-py3-none-any.whl
+    ~/.sky/wheels/<hash_of_wheel>/.source_path  (source dir it was built from)
 
 Whenever a new wheel is built, the old ones will be removed.
 
@@ -45,10 +46,12 @@ _WHEEL_PATTERN = (f'{_PACKAGE_WHEEL_NAME}-'
                   f'{version.parse(sky.__version__)}-*.whl')
 
 
-def _source_path_file() -> pathlib.Path:
-    # Records which source dir the cached wheel was built from. mtimes alone
-    # cannot tell two checkouts apart, as every dev build has the same version.
-    return WHEEL_DIR / '.source_path'
+def _source_path_file(wheel_dir: pathlib.Path) -> pathlib.Path:
+    # Records which source dir the wheel next to it was built from. mtimes
+    # alone cannot tell two checkouts apart, as every dev build has the same
+    # version. Kept beside the wheel so it never outlives it, even when a
+    # SkyPilot version without it replaces the wheel.
+    return wheel_dir / '.source_path'
 
 
 def _source_id() -> str:
@@ -58,7 +61,8 @@ def _source_id() -> str:
 
 def _built_from_current_source() -> bool:
     try:
-        return _source_path_file().read_text(encoding='utf-8') == _source_id()
+        marker = _source_path_file(_get_latest_wheel().parent)
+        return marker.read_text(encoding='utf-8') == _source_id()
     except OSError:
         return False
 
@@ -315,11 +319,9 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 not _built_from_current_source()):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
-            # Cleared first so a crash mid-build cannot leave a marker that
-            # vouches for a wheel from another source dir.
-            _source_path_file().unlink(missing_ok=True)
             latest_wheel = _build_sky_wheel()
-            _source_path_file().write_text(_source_id(), encoding='utf-8')
+            _source_path_file(latest_wheel.parent).write_text(_source_id(),
+                                                              encoding='utf-8')
         else:
             latest_wheel = _get_latest_wheel()
 
