@@ -3404,10 +3404,13 @@ async def api_status(
                 fields=fields or requests_lib.DISPLAY_COLUMNS,
                 sort=True,
             ))
-        return requests_lib.encode_requests(request_tasks,
-                                            caller_user_id=caller_user_id)
+        # Encoding reads user names from the DB with the sync engine, so it
+        # runs in a thread to keep the event loop free.
+        return await asyncio.to_thread(requests_lib.encode_requests,
+                                       request_tasks,
+                                       caller_user_id=caller_user_id)
     else:
-        encoded_request_tasks = []
+        visible_request_tasks = []
         for request_id in request_ids:
             request_tasks = await requests_lib.get_requests_async_with_prefix(
                 request_id, requests_lib.DISPLAY_COLUMNS)
@@ -3418,9 +3421,13 @@ async def api_status(
                 if (scope_user_id is not None and
                         request_task.user_id != scope_user_id):
                     continue
-                encoded_request_tasks.append(
-                    request_task.readable_encode(caller_user_id=caller_user_id))
-        return encoded_request_tasks
+                visible_request_tasks.append(request_task)
+        # readable_encode reads the user name from the DB with the sync
+        # engine, so it runs in a thread to keep the event loop free.
+        return await asyncio.to_thread(lambda: [
+            request_task.readable_encode(caller_user_id=caller_user_id)
+            for request_task in visible_request_tasks
+        ])
 
 
 def _get_local_contexts() -> List[str]:
