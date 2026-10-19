@@ -3332,30 +3332,68 @@ class TestJobGroupOnRecoveryNetworking:
     """on_recovery re-runs networking setup after a task recovers.
 
     Failures on the recovered task's OWN nodes are fatal
-    (ClusterSetUpError -> FAILED_SETUP): its fresh pod has no DNS
-    updater or readiness marker, so without setup its networking wait
+    (ClusterSetUpError -> FAILED_SETUP): its fresh node has no hostname
+    entries or readiness marker, so without setup its networking wait
     would stall and fail minutes later with a generic message.
-    Peer-only failures must NOT fail the task: a healthy peer's running
-    updater short-circuits the re-push, so a failing peer is usually
-    itself mid-recovery (simultaneous preemption) and its own recovery
-    re-runs this setup.
+
+    Failures on a RUNNING peer are retried until a timeout, then fatal:
+    on VM clouds that peer would keep the recovered task's old IP, and
+    nothing else would update it. Failures on a peer in any other state
+    are dropped: a RECOVERING peer's own recovery pushes current IPs to
+    the whole group, and a finished peer no longer needs hostnames.
     """
+
+    _RUNNING = managed_job_state.ManagedJobStatus.RUNNING
+    _RECOVERING = managed_job_state.ManagedJobStatus.RECOVERING
+    _SUCCEEDED = managed_job_state.ManagedJobStatus.SUCCEEDED
 
     async def _captured_on_recovery(self,
                                     setup_failures,
                                     inter_connection_enabled=True,
-                                    self_delivering=False):
-        """Run _monitor_job_group_task with a fake executor, return the
-        captured on_recovery callback invoked under patches."""
+                                    self_delivering=False,
+                                    peer_statuses=None,
+                                    timeout_seconds=600):
+        """Run _monitor_job_group_task with a fake executor, then invoke
+        the captured on_recovery callback under patches.
+
+        setup_failures is either one failure list returned by every push
+        round, or a list of per-round failure lists. peer_statuses is
+        either one status for the peer (job-b, task_id 1) or a list of
+        per-round statuses. Returns (net mock, raised error or None).
+        """
         controller = MagicMock(spec=JobController)
         controller._job_id = 1
-        controller._dag = MagicMock()
-        controller._dag.inter_connection_enabled = MagicMock(
-            return_value=inter_connection_enabled)
         task = MagicMock()
         task.name = 'job-a'
         peer = MagicMock()
         peer.name = 'job-b'
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(
+            return_value=inter_connection_enabled)
+        controller._dag.tasks = [task, peer]
+
+        if setup_failures and isinstance(setup_failures[0], list):
+            rounds = list(setup_failures)
+        else:
+            rounds = None
+        if isinstance(peer_statuses, list):
+            status_rounds = list(peer_statuses)
+        else:
+            status_rounds = None
+
+        async def fake_setup(*args, **kwargs):
+            del args, kwargs
+            if rounds is None:
+                return setup_failures
+            return rounds.pop(0) if rounds else []
+
+        async def fake_statuses(job_id):
+            assert job_id == 1
+            if status_rounds is None:
+                peer_status = peer_statuses or self._RUNNING
+            else:
+                peer_status = status_rounds.pop(0)
+            return [(0, self._RUNNING), (1, peer_status)]
 
         captured = {}
 
@@ -3366,11 +3404,26 @@ class TestJobGroupOnRecoveryNetworking:
         executor = MagicMock()
         executor.monitor_task = fake_monitor_task
 
+        # A fake clock that each sleep advances, so the timeout path runs
+        # without real waiting.
+        clock = [1000.0]
+
+        async def fake_sleep(seconds):
+            clock[0] += seconds
+
         with patch('sky.jobs.controller.job_group_networking') as net, \
              patch('sky.jobs.controller.managed_job_utils') as utils, \
-             patch('sky.jobs.controller.global_user_state') as gus:
-            net.setup_job_group_networking = AsyncMock(
-                return_value=setup_failures)
+             patch('sky.jobs.controller.global_user_state') as gus, \
+             patch('sky.jobs.controller.managed_job_state.'
+                   'get_all_task_ids_statuses_async',
+                   side_effect=fake_statuses), \
+             patch('sky.jobs.controller.asyncio.sleep',
+                   side_effect=fake_sleep), \
+             patch('sky.jobs.controller.time.time',
+                   side_effect=lambda: clock[0]):
+            net.setup_job_group_networking = AsyncMock(side_effect=fake_setup)
+            net.RECOVERY_PEER_PUSH_TIMEOUT_SECONDS = timeout_seconds
+            net.RECOVERY_PEER_PUSH_RETRY_INTERVAL_SECONDS = 30
             # Non-None marks the recovered task as self-delivering
             # (inline task.run prelude owns its updater delivery).
             net.dns_addresses_for_task.return_value = (
@@ -3390,15 +3443,27 @@ class TestJobGroupOnRecoveryNetworking:
                 error = e
             return net, error
 
+    @staticmethod
+    def _targets(net):
+        """target_task_names passed to each push round, in order."""
+        return [
+            call.args[2]
+            for call in net.setup_job_group_networking.await_args_list
+        ]
+
+    @staticmethod
+    def _peer_failure(reason='ssh timeout'):
+        return job_group_networking.SetupFailure('job-b', 'job-b-0', reason)
+
     @pytest.mark.asyncio
     async def test_no_failures_no_error(self):
         net, error = await self._captured_on_recovery(setup_failures=[])
         assert error is None
         net.setup_job_group_networking.assert_awaited_once()
+        assert self._targets(net) == [None]
 
     @pytest.mark.asyncio
     async def test_own_node_failure_raises_cluster_setup_error(self):
-        from sky import exceptions
         _, error = await self._captured_on_recovery(setup_failures=[
             job_group_networking.SetupFailure('job-a', 'job-a-0',
                                               'K8s DNS updater failed')
@@ -3408,19 +3473,60 @@ class TestJobGroupOnRecoveryNetworking:
         assert 'K8s DNS updater failed' in str(error)
 
     @pytest.mark.asyncio
-    async def test_peer_only_failure_does_not_raise(self):
-        # Simultaneous preemption: the peer is down awaiting its own
-        # recovery; failing this task for it would turn every
-        # multi-task preemption into a group failure.
-        _, error = await self._captured_on_recovery(setup_failures=[
-            job_group_networking.SetupFailure('job-b', 'job-b-0',
-                                              'K8s DNS updater failed')
+    async def test_running_peer_failure_retried_until_success(self):
+        # A flaky SSH push to a healthy peer must be retried: on VM
+        # clouds that peer would otherwise keep the old IP.
+        net, error = await self._captured_on_recovery(setup_failures=[
+            [self._peer_failure()],
+            [self._peer_failure()],
+            [],
         ])
         assert error is None
+        # Later rounds push only to the failed running peer.
+        assert self._targets(net) == [None, {'job-b'}, {'job-b'}]
+
+    @pytest.mark.asyncio
+    async def test_running_peer_failure_raises_after_timeout(self):
+        net, error = await self._captured_on_recovery(
+            setup_failures=[self._peer_failure('ssh timeout')],
+            timeout_seconds=90)
+        assert isinstance(error, exceptions.ClusterSetUpError)
+        assert 'job-b' in str(error)
+        assert 'ssh timeout' in str(error)
+        # Rounds at t=0, 30, 60, 90; the deadline check after the round
+        # at t=90 raises.
+        assert net.setup_job_group_networking.await_count == 4
+
+    @pytest.mark.asyncio
+    async def test_recovering_peer_failure_not_retried(self):
+        # Simultaneous preemption: the peer is down awaiting its own
+        # recovery, which pushes current IPs to the whole group. Failing
+        # this task for it would turn every multi-task preemption into a
+        # group failure.
+        net, error = await self._captured_on_recovery(
+            setup_failures=[self._peer_failure()],
+            peer_statuses=self._RECOVERING)
+        assert error is None
+        net.setup_job_group_networking.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_finished_peer_failure_not_retried(self):
+        net, error = await self._captured_on_recovery(
+            setup_failures=[self._peer_failure()],
+            peer_statuses=self._SUCCEEDED)
+        assert error is None
+        net.setup_job_group_networking.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_peer_that_starts_recovering_mid_retry_is_dropped(self):
+        net, error = await self._captured_on_recovery(
+            setup_failures=[self._peer_failure()],
+            peer_statuses=[self._RUNNING, self._RECOVERING])
+        assert error is None
+        assert self._targets(net) == [None, {'job-b'}]
 
     @pytest.mark.asyncio
     async def test_mixed_failures_raise(self):
-        from sky import exceptions
         _, error = await self._captured_on_recovery(setup_failures=[
             job_group_networking.SetupFailure('job-b', 'job-b-0', 'peer down'),
             job_group_networking.SetupFailure('job-a', 'job-a-1', 'timeout')
@@ -3501,7 +3607,8 @@ class TestOnRecoveryIncludesInlineTasks:
             await captured['on_recovery']()
 
             net.setup_job_group_networking.assert_awaited_once()
-            _, passed_handles = (net.setup_job_group_networking.await_args.args)
+            _, passed_handles, _ = (
+                net.setup_job_group_networking.await_args.args)
             passed_tasks = [t for t, _ in passed_handles]
             assert passed_tasks == [task, inline_peer]
             net.dns_addresses_for_task.assert_not_called()

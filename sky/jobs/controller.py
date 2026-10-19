@@ -2163,14 +2163,15 @@ class JobController:
                     await on_recovery()
                 except exceptions.ClusterSetUpError as e:
                     # Job Groups: in-group networking could not be
-                    # re-established on this task's own nodes after its
-                    # recovery. Without it the relaunched task would only
-                    # stall at its networking wait and fail minutes later
-                    # with a generic message; fail the task now with the
-                    # actual reason instead. Raising here would instead be
-                    # swallowed into the Phase 4 monitor results with no
-                    # terminal state set for this task, which run()'s
-                    # finally would then mislabel as CANCELLED.
+                    # re-established after this task's recovery, either on
+                    # its own nodes or on a running peer. Without it the
+                    # relaunched task would only stall at its networking
+                    # wait, or a peer would keep its old address. Fail the
+                    # task now with the actual reason instead. Raising
+                    # here would instead be swallowed into the Phase 4
+                    # monitor results with no terminal state set for this
+                    # task, which run()'s finally would then mislabel as
+                    # CANCELLED.
                     failure_reason = common_utils.format_exception(e)
                     logger.error(failure_reason)
                     await managed_job_state.set_failed_async(
@@ -2249,7 +2250,8 @@ class JobController:
             # - If we block in setup, it times out before Phase 3 can run
             wait_script = (
                 job_group_networking.generate_wait_for_networking_script(
-                    job_group_name, other_job_names))
+                    job_group_name, other_job_names,
+                    job_group_networking.network_marker_wait_seconds(task)))
             # When non-empty, this prelude is prepended to the task's run
             # section to start the JobGroup DNS updater from there. Phase 3
             # below does the same delivery via SSH for tasks not covered
@@ -2342,6 +2344,16 @@ class JobController:
             Unlike Phase 3, we do NOT skip tasks that inline the DNS
             mapping — a recovered peer may have a new IP, so every
             task's /etc/hosts needs refreshing.
+
+            Raises ClusterSetUpError when the push fails on this task's
+            own nodes (unless the task delivers its own networking), or
+            when a RUNNING peer still fails after
+            RECOVERY_PEER_PUSH_TIMEOUT_SECONDS of retries. A RUNNING peer
+            that misses the push keeps this task's old IP on VM clouds,
+            and nothing else would update it. A peer in any other state
+            is not retried: a RECOVERING peer's own recovery pushes the
+            current IPs to the whole group, and a finished peer no longer
+            needs hostnames.
             """
             if not self._dag.inter_connection_enabled():
                 return
@@ -2355,57 +2367,98 @@ class JobController:
                 return await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name, t_cluster)
 
-            # Independent DB reads; fetched in parallel, mirroring the
-            # Phase 2 handle sync.
             group_tasks = [t for t, _ in all_tasks_handles]
-            handles = await asyncio.gather(
-                *(_fetch_handle(t) for t in group_tasks))
-            updated_handles = list(zip(group_tasks, handles))
+            # A task's ID in the managed jobs table is its index in the DAG,
+            # not its index in all_tasks_handles, which can skip tasks.
+            task_ids = {t.name: tid for tid, t in enumerate(self._dag.tasks)}
+            timeout = job_group_networking.RECOVERY_PEER_PUSH_TIMEOUT_SECONDS
+            interval = (
+                job_group_networking.RECOVERY_PEER_PUSH_RETRY_INTERVAL_SECONDS)
+            deadline = time.time() + timeout
+            # The first round pushes to every node. Later rounds push only
+            # to the RUNNING peers whose push failed.
+            target_task_names: Optional[Set[str]] = None
+            while True:
+                # Re-read handles every round, in parallel like the Phase 2
+                # handle sync: a peer that recovered since the last round
+                # has a new IP that every pushed entry must carry.
+                handles = await asyncio.gather(
+                    *(_fetch_handle(t) for t in group_tasks))
+                updated_handles = list(zip(group_tasks, handles))
 
-            failed_nodes = await (
-                job_group_networking.setup_job_group_networking(
-                    job_group_name, updated_handles))
-            if not failed_nodes:
-                return
-            # Only failures on the recovered task's own nodes are fatal:
-            # its fresh pod has no DNS updater or readiness marker, so
-            # without this setup its networking wait would stall and fail
-            # the task minutes later with a generic message. Failures on
-            # peer nodes are not: a healthy peer's running updater
-            # short-circuits the re-push (it never fails), so a peer
-            # failure means the peer is unreachable -- typically because
-            # it was preempted at the same time and its own recovery,
-            # which re-runs this setup, owns fixing it.
-            own_failures = [f for f in failed_nodes if f.task_name == task.name]
-            failed_desc = '; '.join(
-                f'{f.node_label}: {f.reason}' for f in failed_nodes)
-            if own_failures and (job_group_networking.dns_addresses_for_task(
-                    task, self._job_id) is not None):
-                # The recovered task delivers its own networking: its
-                # relaunched task.run prelude starts the updater and its
-                # networking wait enforces the outcome. The controller
-                # push is a best-effort top-up for such tasks in every
-                # phase (Phase 3 skips them entirely), so its failure
-                # must not be fatal here either -- the prelude may well
-                # have succeeded.
-                logger.error(
-                    'Controller networking push after recovery of '
-                    f'self-delivering task {task.name!r} failed on node(s): '
-                    f'[{failed_desc}]. Not failing the task: its run '
-                    'prelude starts the updater and its networking wait '
-                    'enforces the outcome.')
-                return
-            if not own_failures:
-                logger.error(
-                    'Networking re-setup after recovery of task '
-                    f'{task.name!r} failed on peer node(s): [{failed_desc}]. '
-                    'Not failing the task: unreachable peers are usually '
-                    'themselves mid-recovery, which re-runs this setup.')
-                return
-            raise exceptions.ClusterSetUpError(
-                'Failed to re-establish in-group networking for Job Group '
-                f'{job_group_name!r} after recovery of task {task.name!r}; '
-                f'failed node(s): [{failed_desc}]')
+                failed_nodes = await (
+                    job_group_networking.setup_job_group_networking(
+                        job_group_name, updated_handles, target_task_names))
+                if not failed_nodes:
+                    return
+                failed_desc = '; '.join(
+                    f'{f.node_label}: {f.reason}' for f in failed_nodes)
+                own_failures = [
+                    f for f in failed_nodes if f.task_name == task.name
+                ]
+                if own_failures:
+                    if job_group_networking.dns_addresses_for_task(
+                            task, self._job_id) is None:
+                        # The fresh node has no hostname entries or
+                        # readiness marker, so its networking wait would
+                        # stall and fail the task later with a generic
+                        # message. Fail it now with the real reason.
+                        raise exceptions.ClusterSetUpError(
+                            'Failed to re-establish in-group networking for '
+                            f'Job Group {job_group_name!r} after recovery of '
+                            f'task {task.name!r}; failed node(s): '
+                            f'[{failed_desc}]')
+                    # The recovered task delivers its own networking: its
+                    # relaunched task.run prelude starts the updater and
+                    # its networking wait enforces the outcome. The
+                    # controller push is a best-effort top-up for such
+                    # tasks in every phase (Phase 3 skips them entirely),
+                    # so its failure must not be fatal here either.
+                    logger.error(
+                        'Controller networking push after recovery of '
+                        f'self-delivering task {task.name!r} failed on its '
+                        f'own node(s): [{failed_desc}]. Not failing the '
+                        'task: its run prelude starts the updater and its '
+                        'networking wait enforces the outcome.')
+
+                failed_peers = {
+                    f.task_name
+                    for f in failed_nodes
+                    if f.task_name != task.name
+                }
+                if not failed_peers:
+                    return
+                statuses = dict(
+                    await managed_job_state.get_all_task_ids_statuses_async(
+                        self._job_id))
+                target_task_names = {
+                    name for name in failed_peers
+                    if statuses.get(task_ids.get(name)) ==
+                    managed_job_state.ManagedJobStatus.RUNNING
+                }
+                skipped_peers = sorted(failed_peers - target_task_names)
+                if skipped_peers:
+                    logger.info(
+                        'Networking push after recovery of task '
+                        f'{task.name!r} failed on peer(s) {skipped_peers} '
+                        'that are not RUNNING; not retrying them. A '
+                        'recovering peer pushes current IPs to the group '
+                        'when its own recovery completes.')
+                if not target_task_names:
+                    return
+                if time.time() >= deadline:
+                    raise exceptions.ClusterSetUpError(
+                        'Failed to push the new address of recovered task '
+                        f'{task.name!r} to running peer(s) '
+                        f'{sorted(target_task_names)} of Job Group '
+                        f'{job_group_name!r} within {timeout}s; those '
+                        'peers would keep its old address. Failed '
+                        f'node(s): [{failed_desc}]')
+                logger.warning('Networking push after recovery of task '
+                               f'{task.name!r} failed on running peer(s) '
+                               f'{sorted(target_task_names)}: [{failed_desc}]. '
+                               f'Retrying in {interval}s.')
+                await asyncio.sleep(interval)
 
         # Mirror the dispatch in `_run_one_task`: give the recovery
         # strategy first refusal at owning the per-task monitor loop so

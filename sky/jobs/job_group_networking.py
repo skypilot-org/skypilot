@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import traceback
 import typing
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import AbstractSet, Awaitable, Callable, List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -45,12 +45,22 @@ logger = sky_logging.init_logger(__name__)
 # connection or slow node never blocks -- or fails -- the whole group.
 _SETUP_MAX_ATTEMPTS = 3
 # How long a task waits on its node for the controller's networking push
-# (Phase 3) before failing. The push happens only once every cluster in the
-# group is UP, and a peer on a VM cloud can sit in capacity retries for a
-# long time, so this is a generous backstop against a dead controller
-# rather than a tight deadline: the controller fails the group itself when
-# the push fails.
-NETWORK_MARKER_WAIT_SECONDS = 2 * 60 * 60
+# (Phase 3) before failing. A task's run starts as soon as its own cluster
+# is UP, but the push happens only once every cluster in the group is UP,
+# so the wait has to cover the slowest peer's provisioning. It is a
+# backstop against a dead controller: the controller fails the group
+# itself when a launch or the push fails.
+K8S_NETWORK_MARKER_WAIT_SECONDS = 10 * 60
+# A peer on a VM cloud can sit in capacity retries for hours. Drop this to
+# the Kubernetes value once a task's run cannot start before every cluster
+# of its group is UP (gang scheduling on VM clouds).
+VM_NETWORK_MARKER_WAIT_SECONDS = 2 * 60 * 60
+# After a task recovers, how long the controller keeps re-pushing
+# networking to a RUNNING peer whose push failed before it fails the
+# recovered task, and how long it sleeps between rounds. Each round
+# already retries every node _SETUP_MAX_ATTEMPTS times.
+RECOVERY_PEER_PUSH_TIMEOUT_SECONDS = 10 * 60
+RECOVERY_PEER_PUSH_RETRY_INTERVAL_SECONDS = 30
 _SETUP_ATTEMPT_TIMEOUT_SECONDS = 60.0
 _SETUP_RETRY_INITIAL_BACKOFF_SECONDS = 5.0
 
@@ -83,6 +93,21 @@ class _NodeSetupSpec:
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
 # ============================================================================
+
+
+def network_marker_wait_seconds(task: 'task_lib.Task') -> int:
+    """How long the task's networking wait waits for the Phase 3 marker.
+
+    Returns K8S_NETWORK_MARKER_WAIT_SECONDS when any of the task's
+    resources target Kubernetes, else VM_NETWORK_MARKER_WAIT_SECONDS.
+    JobGroup tasks are pinned to one cloud before they reach the
+    controller, so any resource decides for the task.
+    """
+    for res in task.resources:
+        if res.cloud is not None and res.cloud.is_same_cloud(
+                sky_clouds.Kubernetes()):
+            return K8S_NETWORK_MARKER_WAIT_SECONDS
+    return VM_NETWORK_MARKER_WAIT_SECONDS
 
 
 def _is_kubernetes(
@@ -659,25 +684,28 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        target_task_names: Optional[AbstractSet[str]] = None,
     ) -> List[SetupFailure]:
         """Set up network configuration for JobGroup.
 
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples.
+            target_task_names: See setup_job_group_networking.
 
         Returns:
             Empty list when every node succeeded; otherwise one
             SetupFailure per node that failed after its retry budget.
         """
         return await NetworkConfigurator._inject_etc_hosts(
-            job_group_name, tasks_handles)
+            job_group_name, tasks_handles, target_task_names)
 
     @staticmethod
     async def _inject_etc_hosts(
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        target_task_names: Optional[AbstractSet[str]] = None,
     ) -> List[SetupFailure]:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
@@ -692,6 +720,7 @@ class NetworkConfigurator:
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples for all jobs.
+            target_task_names: See setup_job_group_networking.
 
         Returns:
             Empty list when every node succeeded; otherwise one
@@ -707,6 +736,9 @@ class NetworkConfigurator:
         setup_specs: List[_NodeSetupSpec] = []
         failures: List[SetupFailure] = []
         for task, handle in tasks_handles:
+            if (target_task_names is not None and
+                    task.name not in target_task_names):
+                continue
             if handle is None:
                 # The cluster is in transition (e.g., a peer that is
                 # itself mid-recovery). Not a failure: its own recovery
@@ -781,6 +813,7 @@ async def setup_job_group_networking(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+    target_task_names: Optional[AbstractSet[str]] = None,
 ) -> List[SetupFailure]:
     """Set up networking for all tasks in a JobGroup.
 
@@ -791,13 +824,18 @@ async def setup_job_group_networking(
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
+            The hostname entries pushed to every node are built from all
+            of them.
+        target_task_names: When set, push only to the nodes of these
+            tasks. None pushes to the nodes of every task.
 
     Returns:
         Empty list when every node succeeded; otherwise one SetupFailure
         per node that failed after its retry budget.
     """
     logger.info(f'Setting up networking for Job Group: {job_group_name}')
-    return await NetworkConfigurator.setup(job_group_name, tasks_handles)
+    return await NetworkConfigurator.setup(job_group_name, tasks_handles,
+                                           target_task_names)
 
 
 def get_network_ready_marker_path(job_group_name: str) -> str:
@@ -817,7 +855,8 @@ def get_network_ready_marker_path(job_group_name: str) -> str:
 
 
 def generate_wait_for_networking_script(job_group_name: str,
-                                        other_job_names: List[str]) -> str:
+                                        other_job_names: List[str],
+                                        marker_wait_seconds: int) -> str:
     """Generate a bash script to wait for network setup.
 
     This script should be prepended to task.setup to ensure networking
@@ -835,6 +874,8 @@ def generate_wait_for_networking_script(job_group_name: str,
     Args:
         job_group_name: Name of the JobGroup.
         other_job_names: List of other task names in the group to wait for.
+        marker_wait_seconds: How long to wait for the Phase 3 marker
+            before failing (see network_marker_wait_seconds).
 
     Returns:
         Bash script as a string.
@@ -867,7 +908,7 @@ def generate_wait_for_networking_script(job_group_name: str,
         # Phase 1: Wait for networking setup to be initiated by controller
         # This marker file is created after Phase 3 sets up /etc/hosts
         MARKER_FILE="{marker_file}"
-        MARKER_WAIT={NETWORK_MARKER_WAIT_SECONDS}  # wait for Phase 3 to start
+        MARKER_WAIT={marker_wait_seconds}  # wait for Phase 3 to start
         MARKER_ELAPSED=0
         echo "[SkyPilot] Waiting for networking initialization marker..."
         while [ ! -f "$MARKER_FILE" ]; do

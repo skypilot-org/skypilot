@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from sky import clouds
 from sky.jobs import job_group_networking
 
 
@@ -19,7 +20,7 @@ class TestWaitForNetworkingScript:
 
     def test_fails_job_when_networking_not_ready(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1', 'peer2'])
+            'group', ['peer1', 'peer2'], 600)
         assert 'exit 1' in script
         assert 'inter_connection' in script
         # The old silent-fallthrough messaging must be gone.
@@ -27,13 +28,13 @@ class TestWaitForNetworkingScript:
 
     def test_waits_for_all_peer_hostnames(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1', 'peer2'])
+            'group', ['peer1', 'peer2'], 600)
         assert 'peer1-0.group' in script
         assert 'peer2-0.group' in script
 
     def test_empty_without_peers(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', [])
+            'group', [], 600)
         assert script == ''
 
 
@@ -101,7 +102,7 @@ class TestWaitScriptDiagnostic:
         # contains the pattern), reporting 'yes' for a dead updater --
         # exactly when someone is reading this output to debug.
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1'])
+            'group', ['peer1'], 600)
         assert 'UPDATER_PID_FILE' in script
         assert 'kill -0' in script
         assert 'pgrep' not in script
@@ -454,12 +455,29 @@ class TestSshHostsRewriteInBash:
 
 class TestMarkerWait:
     """The on-node wait for the controller's networking push must outlast
-    VM provisioning retries of peer tasks (capacity retries routinely
-    exceed 10 minutes on VM clouds)."""
+    provisioning of peer tasks. VM capacity retries routinely exceed 10
+    minutes, so VM tasks wait longer than Kubernetes tasks."""
 
-    def test_marker_wait_covers_long_provisioning(self):
+    def _task(self, cloud):
+        res = MagicMock()
+        res.cloud = cloud
+        task = MagicMock()
+        task.resources = [res]
+        return task
+
+    def test_script_uses_given_wait(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'grp', ['peer'])
-        wait = job_group_networking.NETWORK_MARKER_WAIT_SECONDS
+            'grp', ['peer'], 1234)
+        assert 'MARKER_WAIT=1234' in script
+
+    def test_kubernetes_task_uses_kubernetes_wait(self):
+        task = self._task(clouds.Kubernetes())
+        assert (job_group_networking.network_marker_wait_seconds(task) ==
+                job_group_networking.K8S_NETWORK_MARKER_WAIT_SECONDS == 600)
+
+    @pytest.mark.parametrize('cloud', [clouds.AWS(), clouds.GCP()])
+    def test_vm_task_uses_vm_wait(self, cloud):
+        task = self._task(cloud)
+        wait = job_group_networking.network_marker_wait_seconds(task)
+        assert wait == job_group_networking.VM_NETWORK_MARKER_WAIT_SECONDS
         assert wait >= 3600
-        assert f'MARKER_WAIT={wait}' in script
