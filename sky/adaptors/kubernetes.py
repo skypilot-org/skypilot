@@ -59,6 +59,12 @@ IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
 # interval.
 KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
     'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS')
+# Connections an ApiClient keeps open for reuse. Requests beyond this many in
+# parallel open a connection that closes after use. Clients are cached for the
+# life of a process that never clears the request-level cache (e.g. a jobs
+# controller), so the kubernetes default (5 per CPU) keeps every connection
+# opened at peak concurrency open and idle for as long as the process runs.
+CONNECTION_POOL_MAXSIZE = 4
 
 logger = sky_logging.init_logger(__name__)
 
@@ -145,6 +151,11 @@ def _get_api_client(context: Optional[str] = None) -> Any:
     """
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    def _new_configuration() -> Any:
+        config = kubernetes.client.Configuration()
+        config.connection_pool_maxsize = CONNECTION_POOL_MAXSIZE
+        return config
+
     def _get_api_client_from_kubeconfig(context: Optional[str] = None) -> Any:
         """Load kubeconfig, return ApiClient without modifying global state."""
         try:
@@ -152,7 +163,9 @@ def _get_api_client(context: Optional[str] = None) -> Any:
             # specified context WITHOUT modifying the global configuration.
             # This is the key to thread-safety.
             return kubernetes.config.new_client_from_config(
-                config_file=_get_config_file(), context=context)
+                config_file=_get_config_file(),
+                context=context,
+                client_configuration=_new_configuration())
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
@@ -214,7 +227,7 @@ def _get_api_client(context: Optional[str] = None) -> Any:
             if 'KUBERNETES_SERVICE_PORT' not in os.environ:
                 os.environ['KUBERNETES_SERVICE_PORT'] = '443'
 
-            config = kubernetes.client.Configuration()
+            config = _new_configuration()
             kubernetes.config.load_incluster_config(config)
             return _enable_response_compression(
                 kubernetes.client.ApiClient(configuration=config))
