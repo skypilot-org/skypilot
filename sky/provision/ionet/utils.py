@@ -107,6 +107,8 @@ class IONetClient:
             'Content-Type': 'application/json',
             # Lets io.net attribute API traffic to SkyPilot, as Nebius does.
             'User-Agent': f'skypilot/{sky.__version__}',
+            # io.net records this header with each deployment for attribution.
+            'X-Utm-Source': 'skypilot',
         }
 
     def _request(self,

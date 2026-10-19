@@ -526,6 +526,7 @@ def test_credential_check_missing_key(monkeypatch, tmp_path):
 def test_requests_identify_skypilot():
     headers = utils.IONetClient().headers
     assert headers['User-Agent'] == f'skypilot/{sky.__version__}'
+    assert headers['X-Utm-Source'] == 'skypilot'
     assert headers['x-api-key'] == 'test-key'
 
 
