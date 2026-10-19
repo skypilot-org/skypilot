@@ -247,6 +247,14 @@ def test_sold_out_offers_are_skipped():
            ] == [('1x_RTX4090_24GB', 'DE')]
 
 
+def test_gaudi_offers_are_skipped():
+    rows = fetch_ionet.parse_hardware(
+        _response(_offer(name='GAUDI2', num_cards=8, vram_per_card=96),
+                  _offer(id='2', location='DE')))
+    assert [(r['InstanceType'], r['Region']) for r in rows
+           ] == [('1x_RTX4090_24GB', 'DE')]
+
+
 def test_region_collision_keeps_cheapest():
     rows = fetch_ionet.parse_hardware(
         _response(_offer(deploy_id=1, price=0.5), _offer(deploy_id=2,

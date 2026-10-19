@@ -137,6 +137,9 @@ def _parse_offer(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         raise ValueError('Missing location, name, num_cards or price')
     vram_gib = _to_float(item.get('vram_per_card'))
     accelerator = canonicalize_gpu_name(name, vram_gib)
+    # SkyPilot's VM setup supports NVIDIA and AMD GPUs only.
+    if accelerator.startswith('GAUDI'):
+        return None
     return {
         'InstanceType': _make_instance_type(accelerator, count, vram_gib),
         'AcceleratorName': accelerator,
