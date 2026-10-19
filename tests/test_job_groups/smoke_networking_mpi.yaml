@@ -1,0 +1,53 @@
+# JobGroup MPI smoke test.
+# Two tasks of two nodes each, on different instance types. The launcher
+# node (mpia-0) writes a hostfile from the group hostnames and runs one
+# MPI rank per node across both tasks. mpirun reaches the other task's
+# nodes over SSH with the cluster key, so this checks hostname
+# resolution, cross-cluster SSH, and MPI traffic between ranks.
+---
+name: {{name}}
+execution: parallel
+---
+name: mpia
+num_nodes: 2
+resources:
+  instance_type: {{instance_type_a}}
+  infra: {{cloud}}
+setup: |
+  sudo apt-get update -q && sudo apt-get install -y -q openmpi-bin
+run: |
+  if [ "$SKYPILOT_NODE_RANK" != "0" ]; then
+    exit 0
+  fi
+  G="$SKYPILOT_JOBGROUP_NAME"
+  HOSTS="mpia-0.$G mpia-1.$G mpib-0.$G mpib-1.$G"
+  : > ~/mpi_hostfile
+  for h in $HOSTS; do echo "$h slots=1" >> ~/mpi_hostfile; done
+  cat ~/mpi_hostfile
+  # The other task's setup (installing openmpi) can still be running.
+  for i in $(seq 1 30); do
+    mpirun --hostfile ~/mpi_hostfile -np 4 \
+      bash -c 'echo "MPI_RANK_OK rank=$OMPI_COMM_WORLD_RANK host=$(hostname)"' \
+      > ~/mpi_out 2>&1 && break
+    echo "mpirun attempt $i failed:"; cat ~/mpi_out
+    sleep 10
+  done
+  cat ~/mpi_out
+  RANKS=$(grep -c MPI_RANK_OK ~/mpi_out)
+  NODES=$(grep MPI_RANK_OK ~/mpi_out | sed 's/.*host=//' | sort -u | wc -l)
+  echo "ranks=$RANKS distinct_hosts=$NODES"
+  if [ "$RANKS" = "4" ] && [ "$NODES" = "4" ]; then
+    echo "MPI_ALL_RANKS_OK"
+  else
+    echo "MPI_FAILED"; exit 1
+  fi
+---
+name: mpib
+num_nodes: 2
+resources:
+  instance_type: {{instance_type_b}}
+  infra: {{cloud}}
+setup: |
+  sudo apt-get update -q && sudo apt-get install -y -q openmpi-bin
+run: |
+  echo "mpib node $SKYPILOT_NODE_RANK ready"
