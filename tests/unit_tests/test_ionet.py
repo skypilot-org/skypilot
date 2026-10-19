@@ -167,24 +167,35 @@ def _response(*offers):
     return {'data': {'hardware': list(offers)}}
 
 
-@pytest.mark.parametrize('name,vram,expected', [
-    ('NVIDIA GeForce RTX 4090', 24, 'RTX4090'),
-    ('GeForce RTX 3090', 24, 'RTX3090'),
-    ('H100 80GB HBM3', 80, 'H100'),
-    ('NVIDIA H100 SXM5', 80, 'H100'),
-    ('H100-PCIe', 80, 'H100'),
-    ('H100 NVL', 94, 'H100-NVL'),
-    ('h200', 141, 'H200'),
-    ('NVIDIA A100-SXM4-80GB', 80, 'A100-80GB'),
-    ('A100 40GB PCIe', 40, 'A100'),
-    ('A100', None, 'A100'),
-    ('Tesla V100', 32, 'V100-32GB'),
-    ('NVIDIA L40S', 48, 'L40S'),
-    ('RTX 6000 Ada', 48, 'RTX6000-Ada'),
-    ('NVIDIA RTX A6000', 48, 'RTXA6000'),
-    ('RTX PRO 6000', 96, 'RTXPRO6000'),
-    ('AMD MI300X', 192, 'MI300X'),
-])
+@pytest.mark.parametrize(
+    'name,vram,expected',
+    [
+        ('NVIDIA GeForce RTX 4090', 24, 'RTX4090'),
+        ('GeForce RTX 3090', 24, 'RTX3090'),
+        ('H100 80GB HBM3', 80, 'H100'),
+        ('NVIDIA H100 SXM5', 80, 'H100'),
+        ('H100-PCIe', 80, 'H100'),
+        ('H100 NVL', 94, 'H100-NVL'),
+        ('h200', 141, 'H200'),
+        ('NVIDIA A100-SXM4-80GB', 80, 'A100-80GB'),
+        ('A100 40GB PCIe', 40, 'A100'),
+        ('A100', None, 'A100'),
+        ('Tesla V100', 32, 'V100-32GB'),
+        ('NVIDIA L40S', 48, 'L40S'),
+        ('RTX 6000 Ada', 48, 'RTX6000-Ada'),
+        ('NVIDIA RTX A6000', 48, 'RTXA6000'),
+        ('RTX PRO 6000', 96, 'RTXPRO6000'),
+        ('AMD MI300X', 192, 'MI300X'),
+        # Names returned by the live /hardware endpoint.
+        ('DGX A100', 80, 'A100-80GB'),
+        ('V100_32G', 32, 'V100-32GB'),
+        ('6000 ADA', 48, 'RTX6000-Ada'),
+        ('RTX6000ADA', 48, 'RTX6000-Ada'),
+        ('RTX6000Ada', 48, 'RTX6000-Ada'),
+        ('PRO 6000 BLACKWELL', 96, 'RTXPRO6000'),
+        ('RTXPro6000', 96, 'RTXPRO6000'),
+        ('B200', 180, 'B200'),
+    ])
 def test_canonical_gpu_names(name, vram, expected):
     assert fetch_ionet.canonicalize_gpu_name(name, vram) == expected
 

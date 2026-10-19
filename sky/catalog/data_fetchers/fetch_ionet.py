@@ -55,12 +55,25 @@ def canonicalize_gpu_name(name: str, vram_gib: Optional[float]) -> str:
     """
     gpu = re.sub(r'[\s_-]+', ' ', name).strip()
     gpu = re.sub(r'^(NVIDIA|AMD)\s+', '', gpu, flags=re.IGNORECASE)
-    gpu = re.sub(r'^(GeForce|Tesla)\s+', '', gpu, flags=re.IGNORECASE)
-    # Memory size and form factor are not part of SkyPilot's names; the
-    # memory is recorded in GpuInfo instead.
-    gpu = re.sub(r'\b\d+\s*GB\b', '', gpu, flags=re.IGNORECASE)
-    gpu = re.sub(r'\b(SXM\d?|PCIe|HBM\d?e?)\b', '', gpu, flags=re.IGNORECASE)
+    gpu = re.sub(r'^(GeForce|Tesla|DGX)\s+', '', gpu, flags=re.IGNORECASE)
+    # Memory size, form factor and architecture are not part of SkyPilot's
+    # names; the memory is recorded in GpuInfo instead.
+    gpu = re.sub(r'\b\d+\s*GB?\b', '', gpu, flags=re.IGNORECASE)
+    gpu = re.sub(r'\b(SXM\d?|PCIe|HBM\d?e?|Blackwell)\b',
+                 '',
+                 gpu,
+                 flags=re.IGNORECASE)
     gpu = re.sub(r'\s+', ' ', gpu).strip()
+    # Suppliers spell the same cards differently, e.g. '6000 ADA' and
+    # 'RTX6000ADA', or 'PRO 6000' and 'RTXPro6000'.
+    gpu = re.sub(r'^(RTX ?)?6000 ?Ada$',
+                 'RTX 6000 Ada',
+                 gpu,
+                 flags=re.IGNORECASE)
+    gpu = re.sub(r'^(RTX ?)?PRO ?6000$',
+                 'RTX PRO 6000',
+                 gpu,
+                 flags=re.IGNORECASE)
     # SkyPilot has no separator in RTX names, e.g. RTX4090 and RTXPRO6000.
     gpu = re.sub(r'^RTX PRO ', 'RTXPRO', gpu, flags=re.IGNORECASE)
     gpu = re.sub(r'^RTX ', 'RTX', gpu, flags=re.IGNORECASE)
