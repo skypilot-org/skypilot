@@ -1614,6 +1614,27 @@ def queue_v2_api(
             status_counts, total_no_filter, infra_options)
 
 
+class _ManagedJobQueueQuery(typing.TypedDict):
+    """Arguments shared by the in-process, skylet, and runner queue reads."""
+    skip_finished: bool
+    accessible_workspaces: List[str]
+    job_ids: Optional[List[int]]
+    include_tree: bool
+    workspace_match: Optional[str]
+    name_match: Optional[str]
+    pool_match: Optional[str]
+    infra_match: Optional[str]
+    page: Optional[int]
+    limit: Optional[int]
+    user_hashes: Optional[List[Optional[str]]]
+    statuses: Optional[List[str]]
+    fields: Optional[List[str]]
+    sort_by: Optional[str]
+    sort_order: Optional[str]
+    submitted_after: Optional[float]
+    submitted_before: Optional[float]
+
+
 def _fetch_managed_job_queue_in_process(
     skip_finished: bool,
     accessible_workspaces: List[str],
@@ -1658,7 +1679,12 @@ def _fetch_managed_job_queue_in_process(
         submitted_after=submitted_after,
         submitted_before=submitted_before,
     )
-    return (result['jobs'], result['total'], result['status_counts'],
+    jobs = result['jobs']
+    # Same post-processing as the codegen path's load_managed_job_queue:
+    # status comes back as ManagedJobStatus, and user_hash becomes user_name.
+    # pylint: disable-next=protected-access
+    managed_job_utils._restore_managed_job_queue_jobs(jobs)
+    return (jobs, result['total'], result['status_counts'],
             result['total_no_filter'], result['infra_options'])
 
 
@@ -1956,30 +1982,34 @@ def queue_v2(
         workspaces_core.get_accessible_workspace_names(
             action=workspace_constants.WORKSPACE_ACTION_READ))
 
-    # A plugin runner owns the read. Otherwise consolidation reads the
-    # jobs database in this process. The gRPC flag still sends the read to
-    # the controller skylet, and an old skylet falls back to codegen.
+    # A plugin runner owns the read, including a subclass of the default
+    # runner. Otherwise consolidation reads the jobs database in this
+    # process. The gRPC flag still sends the read to the controller skylet,
+    # and an old skylet falls back to codegen.
     runner = managed_job_runner.current()
-    queue_kwargs = dict(
-        skip_finished=skip_finished,
-        accessible_workspaces=accessible_workspaces,
-        job_ids=job_ids,
-        include_tree=include_tree,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        infra_match=infra_match,
-        page=page,
-        limit=limit,
-        user_hashes=user_hashes,
-        statuses=statuses,
-        fields=fields,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        submitted_after=submitted_after,
-        submitted_before=submitted_before,
-    )
-    if isinstance(runner, _DefaultManagedJobRunner):
+    queue_kwargs: _ManagedJobQueueQuery = {
+        'skip_finished': skip_finished,
+        'accessible_workspaces': accessible_workspaces,
+        'job_ids': job_ids,
+        'include_tree': include_tree,
+        'workspace_match': workspace_match,
+        'name_match': name_match,
+        'pool_match': pool_match,
+        'infra_match': infra_match,
+        'page': page,
+        'limit': limit,
+        'user_hashes': user_hashes,
+        'statuses': statuses,
+        'fields': fields,
+        'sort_by': sort_by,
+        'sort_order': sort_order,
+        'submitted_after': submitted_after,
+        'submitted_before': submitted_before,
+    }
+    # type() so a plugin that subclasses the default runner is not treated
+    # as the stock implementation.
+    # pylint: disable-next=unidiomatic-typecheck
+    if type(runner) is _DefaultManagedJobRunner:
         if managed_job_utils.is_consolidation_mode():
             return _fetch_managed_job_queue_in_process(**queue_kwargs)
         if handle.is_grpc_enabled_with_flag:

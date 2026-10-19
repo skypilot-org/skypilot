@@ -3738,6 +3738,18 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
+    _restore_managed_job_queue_jobs(jobs)
+    return jobs, total, result_type, total_no_filter, status_counts, \
+        infra_options
+
+
+def _restore_managed_job_queue_jobs(jobs: List[Dict[str, Any]]) -> None:
+    """Restore the status enum and owner name on queue rows.
+
+    ``get_managed_job_queue`` stringifies ``status`` so a controller payload
+    can be encoded. ``queue_v2`` callers receive ``ManagedJobStatus``, and
+    ``user_name`` looked up from ``user_hash``. A missing user stays None.
+    """
     all_users = global_user_state.get_all_users()
     all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
@@ -3746,8 +3758,6 @@ def load_managed_job_queue(
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
             job['user_name'] = all_users_map.get(job['user_hash'])
-    return jobs, total, result_type, total_no_filter, status_counts, \
-        infra_options
 
 
 def _get_job_status_from_tasks(
