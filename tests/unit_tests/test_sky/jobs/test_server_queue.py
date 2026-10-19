@@ -840,29 +840,53 @@ class TestQueue:
                 'jobs': [{
                     'job_id': 1,
                     'status': 'RUNNING',
+                    'user_hash': 'hash-1',
+                    'workspace': 'w1',
+                }, {
+                    'job_id': 2,
+                    'status': 'PENDING',
+                    'user_hash': 'missing',
+                    'workspace': 'w1',
+                }, {
+                    'job_id': 3,
+                    'status': 'RUNNING',
                     'workspace': 'w1',
                 }],
-                'total': 1,
+                'total': 3,
                 'status_counts': {
-                    'RUNNING': 1
+                    'RUNNING': 2,
+                    'PENDING': 1,
                 },
-                'total_no_filter': 1,
+                'total_no_filter': 3,
                 'infra_options': ['kubernetes'],
             }
 
+        class _User:
+
+            def __init__(self, user_id: str, name: str) -> None:
+                self.id = user_id
+                self.name = name
+
         monkeypatch.setattr(jobs_core.managed_job_utils,
                             'get_managed_job_queue', fake_queue)
+        monkeypatch.setattr(jobs_core.managed_job_utils.global_user_state,
+                            'get_all_users', lambda: [_User('hash-1', 'Alice')])
 
         queued, total, status_counts, total_no_filter, infra = jobs_core.queue_v2(
             refresh=False, all_users=True, skip_finished=True)
         assert calls['in_process'] == 1
         assert calls['skip_finished'] is True
         assert calls['codegen'] == 0
-        assert total == 1
-        assert total_no_filter == 1
-        assert status_counts == {'RUNNING': 1}
+        assert total == 3
+        assert total_no_filter == 3
+        assert status_counts == {'RUNNING': 2, 'PENDING': 1}
         assert infra == ['kubernetes']
         assert queued[0]['job_id'] == 1
+        assert queued[0]['status'] is managed_job_state.ManagedJobStatus.RUNNING
+        assert queued[0]['user_name'] == 'Alice'
+        assert queued[1]['status'] is managed_job_state.ManagedJobStatus.PENDING
+        assert queued[1]['user_name'] is None
+        assert 'user_name' not in queued[2]
 
     def test_consolidation_keeps_a_plugin_runner(self, monkeypatch):
         jobs = [_make_job(1, workspace='w1')]
@@ -891,6 +915,39 @@ class TestQueue:
 
         queued, total, _, _, _ = jobs_core.queue_v2(refresh=False,
                                                     all_users=True)
+        assert calls['in_process'] == 0
+        assert total == 1
+        assert queued[0]['job_id'] == 1
+
+    def test_consolidation_uses_a_default_runner_subclass(self, monkeypatch):
+        jobs = [_make_job(1, workspace='w1')]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: True)
+        calls = {'in_process': 0, 'custom': 0}
+
+        class CustomRunner(jobs_core._DefaultManagedJobRunner):
+
+            def fetch_managed_job_table(self, **kwargs):
+                del kwargs
+                calls['custom'] += 1
+                return ([{
+                    'job_id': 1,
+                    'status': 'RUNNING',
+                    'workspace': 'w1',
+                }], 1, jobs_utils.ManagedJobQueueResultType.DICT, 1, {
+                    'RUNNING': 1
+                }, [])
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: CustomRunner())
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'get_managed_job_queue',
+                            lambda **kwargs: calls.__setitem__('in_process', 1))
+
+        queued, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                    all_users=True)
+        assert calls['custom'] == 1
         assert calls['in_process'] == 0
         assert total == 1
         assert queued[0]['job_id'] == 1
