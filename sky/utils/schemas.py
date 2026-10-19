@@ -148,14 +148,25 @@ def register_workspace_property(name: str,
     additionalProperties: False.
 
     Args:
-        name: The property name.
+        name: The property name. Must not be a built-in workspace property
+            (``private``, ``allowed_users``, ...) or a cloud name: those
+            carry infrastructure settings and their own validation, which a
+            registration must not override or exempt from the active-resource
+            checks.
         schema: The JSON Schema for the property
             (e.g., {'type': 'array', 'items': {'type': 'string'}}).
         access_only: Whether the property only controls who may use the
             workspace, like ``allowed_users``, and never its infrastructure.
             Changing an access-only property does not require the workspace
             to have no active clusters or jobs.
+
+    Raises:
+        ValueError: If ``name`` is a built-in workspace property or a cloud.
     """
+    if name in _reserved_workspace_property_names():
+        raise ValueError(
+            f'Cannot register workspace property {name!r}: it is a built-in '
+            'workspace property or a cloud name.')
     _extra_workspace_properties[name] = schema
     if access_only:
         _access_only_workspace_properties.add(name)
@@ -166,6 +177,21 @@ def register_workspace_property(name: str,
 def access_only_workspace_properties() -> FrozenSet[str]:
     """Registered workspace properties that only control access."""
     return frozenset(_access_only_workspace_properties)
+
+
+def _reserved_workspace_property_names() -> FrozenSet[str]:
+    """Workspace entry keys a plugin may not register: the built-in
+    properties and every cloud name (including the pattern-matched clouds
+    that only accept ``disabled``)."""
+    workspace_entry = get_config_schema(
+    )['properties']['workspaces']['additionalProperties']
+    builtin = set(
+        workspace_entry['properties']) - set(_extra_workspace_properties)
+    clouds = {
+        cloud.lower()
+        for cloud in list(constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
+    }
+    return frozenset(builtin | clouds)
 
 
 def _check_not_both_fields_present(field1: str, field2: str):

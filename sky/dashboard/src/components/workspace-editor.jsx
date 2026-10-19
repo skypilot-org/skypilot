@@ -97,21 +97,6 @@ const WorkspaceConfigDescription = ({
   );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-    // Skip non-cloud configuration keys: the access-control keys
-    // (`private`, `allowed_users`, `read_access`) and any other
-    // plugin-registered workspace property. A cloud section is always an
-    // object; the others are booleans, strings or lists.
-    if (
-      cloud === 'private' ||
-      cloud === 'allowed_users' ||
-      cloud === 'read_access' ||
-      cloudConfig === null ||
-      typeof cloudConfig !== 'object' ||
-      Array.isArray(cloudConfig)
-    ) {
-      return;
-    }
-
     const cloudName =
       CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
 
@@ -123,6 +108,19 @@ const WorkspaceConfigDescription = ({
       Array.from(enabledCloudsSet).some((enabledCloud) =>
         enabledCloud.startsWith(cloudLower + '/')
       );
+
+    // Skip non-cloud configuration keys: the access-control keys
+    // (`private`, `allowed_users`, `read_access`) and plugin-registered
+    // workspace properties, whatever their shape. A key is a cloud section
+    // only if it names a known cloud or one that is currently enabled.
+    const isCloud =
+      Object.prototype.hasOwnProperty.call(
+        CLOUD_CANONICALIZATIONS,
+        cloud.toLowerCase()
+      ) || isActuallyEnabled;
+    if (!isCloud) {
+      return;
+    }
 
     // For Kubernetes, get the specific contexts that are enabled
     const getEnabledKubernetesContexts = () => {

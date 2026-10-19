@@ -1533,6 +1533,18 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
         jsonschema.validate(instance={'leads': ['a']},
                             schema=self._get_workspace_entry_schema())
 
+    def test_builtin_and_cloud_names_are_reserved(self):
+        """A plugin can't take over a built-in key or a cloud section."""
+        for name in ('private', 'allowed_users', 'read_access', 'gcp',
+                     'kubernetes', 'azure', 'runpod'):
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'string'})
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'object'},
+                                                    access_only=True)
+        self.assertNotIn('gcp', schemas.access_only_workspace_properties())
+        self.assertNotIn('azure', schemas._extra_workspace_properties)
+
     def test_access_only_flag(self):
         """access_only is recorded per property and re-registration resets."""
         schemas.register_workspace_property('leads', {'type': 'array'},
