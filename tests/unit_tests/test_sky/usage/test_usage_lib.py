@@ -395,8 +395,14 @@ def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
 
 
 def test_workspace_lookup_failure_is_not_reported_as_zero(monkeypatch):
-    monkeypatch.setattr(skypilot_config, 'get_nested',
-                        lambda *args, **kwargs: {'team-a': {}})
+
+    def get_nested(keys, default_value=None, **kwargs):
+        del kwargs
+        return {
+            'team-a': {}
+        } if tuple(keys) == ('workspaces',) else (default_value)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
 
     def lookup():
         if skypilot_config.get_active_workspace() == 'team-a':

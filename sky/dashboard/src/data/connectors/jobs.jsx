@@ -347,6 +347,7 @@ export async function getManagedJobs(options = {}) {
         job_duration: job.job_duration,
         total_duration: total_duration,
         workspace: job.workspace,
+        workspace_name: job.workspace_name || job.workspace,
         status: job.status,
         requested_resources: job.resources,
         resources_str: cluster_resources,

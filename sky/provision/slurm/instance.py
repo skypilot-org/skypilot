@@ -943,7 +943,7 @@ def _create_virtual_instance(
     # Check if job already exists
     existing_jobs = client.query_jobs(
         cluster_name_on_cloud,
-        ['pending', 'running'],
+        ['pending', 'configuring', 'running'],
     )
 
     provision_timeout: int = provider_config['provision_timeout']
@@ -1514,6 +1514,7 @@ def query_instances(
     # TODO(kevin): Include more states here.
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
+        'configuring': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
         'completing': status_lib.ClusterStatus.UP,
         'completed': None,
