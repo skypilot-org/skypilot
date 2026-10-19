@@ -5,6 +5,7 @@ Plugins can register callbacks here to react to events emitted by core code
 by a callback is logged and swallowed so it cannot affect the originating
 operation.
 """
+import copy
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from sky import sky_logging
@@ -110,14 +111,21 @@ def register_admin_policy_applied_hook(hook_id: str,
                                        fn: AdminPolicyAppliedHook) -> None:
     """Register a callback to run after the server applies the admin policy.
 
-    Callbacks run synchronously in the request worker each time the server
-    resolves the effective request for a DAG (``admin_policy_utils.apply``),
-    whether or not an admin policy is configured. They receive the effective
-    DAG, the effective SkyPilot config, the request name and the request
-    options. The config is the full resolved config and may hold credentials.
-    Callbacks should return promptly and treat their arguments as read-only.
-    They do not run for client-side policy application, nor for requests the
-    policy rejects.
+    Callbacks run synchronously each time the server resolves the effective
+    request for a DAG (``admin_policy_utils.apply``), whether or not an admin
+    policy is configured. They receive the effective DAG, the effective
+    SkyPilot config, the request name and the request options. Each callback
+    gets its own deep copy of these, so nothing a callback does (even one that
+    raises) changes the request or what later callbacks see. The config is the
+    full resolved config and may hold credentials. Callbacks should return
+    promptly. They do not run for client-side policy application, nor for
+    requests the policy rejects.
+
+    Registrations are per process, and the policy is applied in the process
+    that handles the request: request executor workers for launches and other
+    scheduled requests, the API server process itself for request validation.
+    A plugin must register in each process whose applications it wants to
+    observe (e.g. load in both the executor and uvicorn contexts).
 
     Args:
         hook_id: A stable, unique identifier. Re-registering with the same ID
@@ -139,7 +147,10 @@ def fire_admin_policy_applied(
     # Snapshot the registry so callbacks can register hooks during dispatch.
     for hook_id, fn in list(_ADMIN_POLICY_APPLIED_HOOKS.items()):
         try:
-            fn(dag, config, request_name, request_options)
+            # A private copy per callback: the caller goes on to execute this
+            # request, so a callback must not be able to alter it.
+            fn(copy.deepcopy(dag), copy.deepcopy(config), request_name,
+               copy.deepcopy(request_options))
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'admin-policy-applied hook {hook_id!r} raised '
                            f'for request {request_name.value!r}: {e}')

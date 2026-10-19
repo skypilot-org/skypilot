@@ -1054,7 +1054,9 @@ def test_applied_hook_receives_mutated_request(add_example_policy_paths, task,
     applied_hook.assert_called_once()
     hook_dag, hook_config, request_name, request_options = (
         applied_hook.call_args.args)
-    assert hook_dag is dag
+    # A copy of the effective request, not the request itself.
+    assert hook_dag is not dag
+    assert [t.name for t in hook_dag.tasks] == [t.name for t in dag.tasks]
     assert hook_config == config
     assert hook_config.get_nested(
         ('kubernetes', 'custom_metadata', 'labels', 'app'), None) == 'skypilot'
@@ -1067,7 +1069,7 @@ def test_applied_hook_fires_without_policy(task, applied_hook, tmp_path):
     config_path.write_text('allowed_clouds: [aws]\n')
     dag, config = _load_task_and_apply_policy(task, str(config_path))
     applied_hook.assert_called_once()
-    assert applied_hook.call_args.args[0] is dag
+    assert applied_hook.call_args.args[0].tasks[0].run == dag.tasks[0].run
     assert applied_hook.call_args.args[1] == config
 
 
@@ -1101,3 +1103,35 @@ def test_applied_hook_failure_does_not_fail_request(task, monkeypatch,
     dag, _ = _load_task_and_apply_policy(task, str(config_path))
     assert dag.tasks
     following.assert_called_once()
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_applied_hook_mutation_does_not_alter_request(task, monkeypatch,
+                                                      tmp_path, raises):
+    """A callback that mutates its arguments (and maybe then raises) changes
+    neither the request the caller executes nor what later callbacks see."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+
+    def mutate(dag, config, _request_name, request_options):
+        dag.tasks[0].run = 'echo tampered'
+        dag.tasks[0].update_envs({'TAMPERED': '1'})
+        config.set_nested(('allowed_clouds',), ['gcp'])
+        request_options.cluster_name = 'tampered'
+        if raises:
+            raise RuntimeError('hook failed')
+
+    seen = []
+    plugin_hooks.register_admin_policy_applied_hook('mutate', mutate)
+    plugin_hooks.register_admin_policy_applied_hook(
+        'following', lambda dag, config, _name, options: seen.append(
+            (dag.tasks[0].run, dict(dag.tasks[0].envs),
+             config.get_nested(
+                 ('allowed_clouds',), None), options.cluster_name)))
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    original_run = task.run
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks[0].run == original_run
+    assert 'TAMPERED' not in dag.tasks[0].envs
+    assert config.get_nested(('allowed_clouds',), None) == ['aws']
+    assert seen == [(original_run, dict(dag.tasks[0].envs), ['aws'], 'test')]
