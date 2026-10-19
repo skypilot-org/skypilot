@@ -1533,6 +1533,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
+def _cluster_name_for_job(job: Dict[str, Any]) -> str:
+    """Cluster whose handle backs this job's cloud and region columns."""
+    cluster_name = job.get('current_cluster_name', None)
+    if cluster_name is None:
+        cluster_name = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
+    return cluster_name
+
+
 # Managed-job queue fields by the controller SKYLET_VERSION that introduced
 # them. A remote controller older than that version has no such column and
 # rejects a request naming it, so the server strips them before asking over
@@ -3449,9 +3458,13 @@ def get_managed_job_queue(
     )
 
     if cluster_handle_required:
-        # Fetch the cluster name to handle map for managed clusters only.
+        # Unpickle only this page's clusters. The managed table keeps every
+        # historical job cluster.
         cluster_name_to_handle = (
-            global_user_state.get_cluster_name_to_handle_map(is_managed=True))
+            global_user_state.get_handles_from_cluster_names(
+                {_cluster_name_for_job(job) for job in jobs},
+                is_managed=True,
+            ))
 
     highest_blocking_priority = constants.MIN_PRIORITY
     if not fields or 'details' in fields:
@@ -3487,12 +3500,8 @@ def get_managed_job_queue(
             job['schedule_state'] = None
 
         if cluster_handle_required:
-            cluster_name = job.get('current_cluster_name', None)
-            if cluster_name is None:
-                cluster_name = generate_managed_job_cluster_name(
-                    job['task_name'], job['job_id'])
-            handle = cluster_name_to_handle.get(
-                cluster_name, None) if cluster_name is not None else None
+            cluster_name = _cluster_name_for_job(job)
+            handle = cluster_name_to_handle.get(cluster_name, None)
             if isinstance(handle, backends.CloudVmRayResourceHandle):
                 jobs_with_handle.append({
                     'job': job,

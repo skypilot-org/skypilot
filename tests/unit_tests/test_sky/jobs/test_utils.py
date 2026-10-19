@@ -296,9 +296,62 @@ class TestGetManagedJobQueue:
         def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {}
 
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            del cluster_names, is_managed
+            return {}
+
         monkeypatch.setattr(jobs_utils.global_user_state,
                             'get_cluster_name_to_handle_map',
                             fake_get_cluster_name_to_handle_map)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
+
+    def test_loads_handles_only_for_returned_jobs(self, monkeypatch):
+        """Queue enrichment must not unpickle every managed cluster.
+
+        Infra counts jobs from cloud/region, which are filled from each job's
+        own cluster handle. Loading the full managed-cluster table does the
+        same fill and unpickles clusters this result never reads.
+        """
+        jobs = [
+            self._make_test_job(1, current_cluster_name='job-cluster-1'),
+            self._make_test_job(2),
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        seen = {}
+
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            seen['names'] = set(cluster_names)
+            seen['is_managed'] = is_managed
+            return {}
+
+        def fake_get_cluster_name_to_handle_map(is_managed=True):
+            seen['loaded_all'] = True
+            return {}
+
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_cluster_name_to_handle_map',
+                            fake_get_cluster_name_to_handle_map)
+
+        jobs_utils.get_managed_job_queue(fields=[
+            'job_id',
+            'status',
+            'cloud',
+            'region',
+            'cluster_resources',
+            'cluster_resources_full',
+        ])
+
+        assert seen.get('loaded_all') is not True
+        assert seen['names'] == {
+            'job-cluster-1',
+            jobs_utils.generate_managed_job_cluster_name('task_2', 2),
+        }
+        assert seen['is_managed'] is True
 
     def test_basic_functionality_without_filters(self, monkeypatch):
         """Test basic get_managed_job_queue without any filters."""
@@ -709,7 +762,9 @@ class TestGetManagedJobQueue:
         mock_handle.launched_resources.accelerators = {'V100': 1}
         mock_handle.cached_cluster_info = None
 
-        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            assert is_managed is True
+            assert set(cluster_names) == {'test-cluster'}
             return {'test-cluster': mock_handle}
 
         def fake_get_readable_resources_repr(handle, simplified_only=False):
@@ -719,8 +774,8 @@ class TestGetManagedJobQueue:
 
         # Patch functions
         monkeypatch.setattr(jobs_utils.global_user_state,
-                            'get_cluster_name_to_handle_map',
-                            fake_get_cluster_name_to_handle_map)
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
         monkeypatch.setattr(jobs_utils.resources_utils,
                             'get_readable_resources_repr',
                             fake_get_readable_resources_repr)
@@ -759,12 +814,13 @@ class TestGetManagedJobQueue:
         ]
         self._patch_managed_job_state(monkeypatch, jobs)
 
-        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            del cluster_names, is_managed
             return {}  # No handle available
 
         monkeypatch.setattr(jobs_utils.global_user_state,
-                            'get_cluster_name_to_handle_map',
-                            fake_get_cluster_name_to_handle_map)
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
 
         result = jobs_utils.get_managed_job_queue(
             fields=['job_id', 'cloud', 'region', 'cluster_resources'])
@@ -787,12 +843,13 @@ class TestGetManagedJobQueue:
         ]
         self._patch_managed_job_state(monkeypatch, jobs)
 
-        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            del cluster_names, is_managed
             return {'test-cluster': None}  # Handle is None
 
         monkeypatch.setattr(jobs_utils.global_user_state,
-                            'get_cluster_name_to_handle_map',
-                            fake_get_cluster_name_to_handle_map)
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
 
         result = jobs_utils.get_managed_job_queue(
             fields=['job_id', 'cloud', 'region', 'cluster_resources'])
@@ -817,7 +874,8 @@ class TestGetManagedJobQueue:
 
         generated_cluster_name = None
 
-        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
+        def fake_get_handles_from_cluster_names(cluster_names, is_managed=None):
+            del cluster_names, is_managed
             return {}
 
         def fake_generate_managed_job_cluster_name(task_name, job_id):
@@ -826,8 +884,8 @@ class TestGetManagedJobQueue:
             return generated_cluster_name
 
         monkeypatch.setattr(jobs_utils.global_user_state,
-                            'get_cluster_name_to_handle_map',
-                            fake_get_cluster_name_to_handle_map)
+                            'get_handles_from_cluster_names',
+                            fake_get_handles_from_cluster_names)
         monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
                             fake_generate_managed_job_cluster_name)
 
