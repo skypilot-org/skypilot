@@ -17,6 +17,7 @@ _CANCELLING = managed_job_state.ManagedJobStatus.CANCELLING
 
 
 class _Reader(logs.LogReader):
+    """Returns ``result`` after one is_done() check, if it can follow."""
 
     def __init__(self, result: Optional[int] = 0, raises=None):
         self.result = result
@@ -30,6 +31,8 @@ class _Reader(logs.LogReader):
         self.calls.append(dict(job_id=job_id, task_id=task_id, **kwargs))
         if self.raises is not None:
             raise self.raises
+        if self.result is not None:
+            kwargs['is_done']()
         return self.result
 
 
@@ -126,7 +129,8 @@ def test_cancellation_propagates():
         _follow(tail=10)
 
 
-def test_follow_passes_identity_tail_and_resume_point():
+def test_follow_passes_identity_tail_and_resume_point(monkeypatch):
+    _set_task_statuses(monkeypatch, [_SUCCEEDED, _SUCCEEDED])
     reader = _Reader()
     logs.register_log_reader(reader)
     assert managed_job_utils._follow_from_log_store(7, 1, 'task', _handle(),
@@ -138,6 +142,15 @@ def test_follow_passes_identity_tail_and_resume_point():
     assert call['cluster_name_on_cloud'] == 'train-7-abcd1234'
     assert call['tail'] == 0
     assert call['since'] == 123.5
+
+
+def test_reader_stopping_while_running_falls_back(monkeypatch, capsys):
+    # The store closed the stream while the task still runs: re-following it
+    # from now would skip lines and could spin, so stream from the cluster.
+    _set_task_statuses(monkeypatch, [_RUNNING])
+    logs.register_log_reader(_Reader())
+    assert _follow() is None
+    assert 'may repeat' in capsys.readouterr().out
 
 
 def test_is_done_when_the_task_leaves_running(monkeypatch):

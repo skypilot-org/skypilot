@@ -2383,12 +2383,12 @@ def _follow_from_log_store(
 
     Returns None when the task cannot be followed from the store (its logs do
     not go to a store that can be read back, they are not confirmed to reach
-    it, or the reader cannot follow this task), so the caller streams from the
-    cluster instead. Otherwise returns, once the task is no longer RUNNING and
-    its logs were read, the time the task was first seen not RUNNING. A
-    recovery may place the task's next attempt elsewhere, with its logs in
-    another store, so the caller follows again from that time once the task is
-    RUNNING again.
+    it, or the reader cannot follow this task) or the reader stops while the
+    task is still RUNNING, so the caller streams from the cluster instead.
+    Otherwise returns, once the task is no longer RUNNING and its logs were
+    read, the time the task was first seen not RUNNING. A recovery may place
+    the task's next attempt elsewhere, with its logs in another store, so the
+    caller follows again from that time once the task is RUNNING again.
     """
     in_store, reason = logs_in_external_store(handle)
     if not in_store:
@@ -2441,7 +2441,16 @@ def _follow_from_log_store(
         return None
     if returncode is None:
         return None
-    return left_running_at if left_running_at is not None else time.time()
+    if left_running_at is None:
+        # The reader stopped while the task still runs, possibly after
+        # printing part of the log.
+        print(
+            f'{colorama.Fore.YELLOW}The external log store stopped streaming '
+            'before the task finished; streaming from the cluster instead. '
+            f'Lines already shown may repeat.{colorama.Style.RESET_ALL}',
+            flush=True)
+        return None
+    return left_running_at
 
 
 def stream_logs_by_id(
