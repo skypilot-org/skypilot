@@ -192,8 +192,9 @@ class ClusterStartCompletePrecondition(Precondition):
         self.cluster_name = cluster_name
 
     async def check(self) -> Tuple[bool, Optional[str]]:
-        cluster_status = global_user_state.get_status_from_cluster_name(
-            self.cluster_name)
+        cluster_status = (
+            await global_user_state.get_status_from_cluster_name_async(
+                self.cluster_name))
         if cluster_status is status_lib.ClusterStatus.UP:
             # Shortcut for started clusters, ignore cluster not found
             # since the cluster record might not yet be created by the
