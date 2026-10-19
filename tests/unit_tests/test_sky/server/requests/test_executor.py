@@ -8,7 +8,7 @@ import pathlib
 import queue as queue_lib
 import threading
 import time
-from typing import List
+from typing import List, Optional
 from unittest import mock
 import weakref
 
@@ -2070,13 +2070,16 @@ class TestClientUserIdValidation:
     verbatim as a cluster's owner, producing an identity that matches no user.
     """
 
-    def _body(self, user_id: str) -> payloads.RequestBody:
+    def _body(self, user_id: Optional[str]) -> payloads.RequestBody:
         body = payloads.RequestBody()
-        body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        if user_id is None:
+            body.env_vars.pop(constants.USER_ID_ENV_VAR, None)
+        else:
+            body.env_vars[constants.USER_ID_ENV_VAR] = user_id
         body.env_vars[constants.USER_ENV_VAR] = 'someone'
         return body
 
-    async def _prepare(self, user_id: str, auth_user=None):
+    async def _prepare(self, user_id: Optional[str], auth_user=None):
         # Everything after the identity check needs the requests DB, which is
         # not what these tests are about.
         with mock.patch.object(executor.api_requests,
@@ -2103,6 +2106,7 @@ class TestClientUserIdValidation:
             '../x',  # path traversal characters
             '/abs',
             'abcdef12\n',  # trailing newline: a distinct identity
+            None,  # missing from env_vars
         ])
     @pytest.mark.asyncio
     async def test_malformed_user_id_is_rejected(self, user_id):

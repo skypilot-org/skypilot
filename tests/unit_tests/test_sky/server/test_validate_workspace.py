@@ -87,7 +87,8 @@ class _Env:
                  api_version: Optional[int] = _NEW_CLIENT,
                  override_config: Optional[Dict[str, Any]] = None,
                  report_user_in_env: Optional[str] = None,
-                 extra_env: Optional[Dict[str, str]] = None) -> Optional[Any]:
+                 extra_env: Optional[Dict[str, str]] = None,
+                 drop_user_env: bool = False) -> Optional[Any]:
         """Calls the handler; returns the 400 detail, or None if it passed."""
         request = mock.MagicMock(spec=fastapi.Request)
         request.state = mock.MagicMock()
@@ -103,6 +104,8 @@ class _Env:
                                      },
                                      override_skypilot_config=override_config or
                                      {})
+        if drop_user_env:
+            body.env_vars.clear()
         self.monkeypatch.setattr(versions, 'get_remote_api_version',
                                  lambda: api_version)
         workspace_access.set_request_endpoint('/validate', 'POST')
@@ -227,6 +230,12 @@ class TestWorkspaceResolution:
 
     def test_rejects_a_malformed_user_id_without_auth(self, env):
         detail = env.validate(user=None, report_user_in_env='bad id')
+        assert detail is not None
+        error = exceptions.deserialize_exception(detail)
+        assert isinstance(error, exceptions.InvalidUserIdError)
+
+    def test_rejects_a_missing_user_id_without_auth(self, env):
+        detail = env.validate(user=None, drop_user_env=True)
         assert detail is not None
         error = exceptions.deserialize_exception(detail)
         assert isinstance(error, exceptions.InvalidUserIdError)
