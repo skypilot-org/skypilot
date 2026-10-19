@@ -273,6 +273,16 @@ def test_region_collision_keeps_cheapest():
     assert rows[0]['Price'] == 0.2
 
 
+def test_same_region_shape_variants_are_kept():
+    rows = fetch_ionet.parse_hardware(
+        _response(_offer(deploy_id=1, price=0.2),
+                  _offer(deploy_id=2, price=0.3, vcpu=32, memory=128)))
+    assert [(r['InstanceType'], r['HardwareId']) for r in rows] == [
+        ('1x_RTX4090_24GB_16vCPU_64GiB', 1),
+        ('1x_RTX4090_24GB_32vCPU_128GiB', 2),
+    ]
+
+
 def test_cross_region_shape_mismatch_gets_suffix():
     rows = fetch_ionet.parse_hardware(
         _response(_offer(), _offer(location='DE', vcpu=32, memory=128),
@@ -726,6 +736,33 @@ def test_pending_deployment_without_vm_is_reported(fake_api, monkeypatch):
     assert instance.query_instances('test', 'sky-test', {}) == {
         'deployment-1': (status_lib.ClusterStatus.INIT, None)
     }
+
+
+def test_running_deployment_without_vm_is_not_up(fake_api, monkeypatch):
+    instance.run_instances('US', 'test', 'sky-test', _config())
+    monkeypatch.setattr(fake_api, 'get_deployment_vms',
+                        lambda *args: {'data': {
+                            'total': 0,
+                            'workers': []
+                        }})
+    assert instance.query_instances('test', 'sky-test', {}) == {
+        'deployment-1': (status_lib.ClusterStatus.INIT, None)
+    }
+
+
+def test_local_deployment_missing_remotely_is_cleared(fake_api):
+    instance.run_instances('US', 'test', 'sky-test', _config())
+    # The deployment has expired: io.net neither lists it nor knows its ID.
+    fake_api.deployment = None
+
+    def gone(deployment_id):
+        raise utils.IONetError(f'io.net API HTTP 404: {deployment_id}',
+                               status_code=404)
+
+    fake_api.get_deployment_details = gone
+    assert instance.query_instances('test', 'sky-test', {}) == {}
+    instance.terminate_instances('sky-test', {})
+    assert not _local_deployments()
 
 
 def test_wait_timeout_destroys_created_deployment(fake_api, monkeypatch):

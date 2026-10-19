@@ -164,9 +164,9 @@ def parse_hardware(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     id, name, num_cards, deploy_id, location, sold_out, price (USD per VM
     hour), vram_per_card, vcpu, memory and storage (sizes in GB).
 
-    Sold-out and malformed offers are skipped. Instance types are unique per
-    region; when two offers collide, the cheaper one is kept. If an instance
-    type has different vCPUs or memory in different regions, its name gets a
+    Sold-out and malformed offers are skipped. When two offers in a region
+    have the same name and shape, the cheaper one is kept. If a name has more
+    than one vCPU/memory shape, in any region, each shape's name gets a
     vCPU/memory suffix, as SkyPilot requires one shape per instance type.
     """
     data = response.get('data') if isinstance(response, dict) else None
@@ -174,7 +174,7 @@ def parse_hardware(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(items, list):
         raise ValueError('io.net hardware response has no data.hardware list.')
 
-    rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    rows: Dict[Tuple[str, str, Any, Any], Dict[str, Any]] = {}
     for item in items:
         offer_id = item.get('id') if isinstance(item, dict) else None
         try:
@@ -185,7 +185,8 @@ def parse_hardware(response: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         if row is None:
             continue
-        key = (row['InstanceType'], row['Region'])
+        key = (row['InstanceType'], row['Region'], row['vCPUs'],
+               row['MemoryGiB'])
         existing = rows.get(key)
         if existing is not None:
             kept, dropped = sorted([existing, row], key=lambda r: r['Price'])

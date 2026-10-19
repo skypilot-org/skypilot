@@ -66,7 +66,12 @@ def _find_deployment(client: utils.IONetClient, cluster_name: str,
             f'Multiple local io.net deployments match cluster {cluster_name}.')
     existing_id: Optional[str] = next(iter(existing), None)
     if existing_id is not None:
-        details = client.get_deployment_details(existing_id).get('data', {})
+        try:
+            details = client.get_deployment_details(existing_id).get('data', {})
+        except utils.IONetError as exc:
+            if exc.status_code != 404:
+                raise
+            details = {'status': 'destroyed'}
         if details.get('status') in _TERMINAL_STATUSES:
             metadata.set_deployment(existing_id, None)
             return None
@@ -330,9 +335,9 @@ def query_instances(
         return {}
     workers = _get_workers(client, deployment_id)
     if not workers:
-        # The deployment is pending and has no VM yet. Report it by
-        # deployment ID so it is not treated as terminated and leaked.
-        return {deployment_id: (sky_status, None)}
+        # The deployment has no VM yet. Report it by deployment ID so it is
+        # not treated as terminated and leaked, but never as UP.
+        return {deployment_id: (status_lib.ClusterStatus.INIT, None)}
     return {str(worker['vm_id']): (sky_status, None) for worker in workers}
 
 
