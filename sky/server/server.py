@@ -1806,56 +1806,44 @@ async def validate(validate_body: payloads.ValidateBody,
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
-    ctx = context.get()
-    assert ctx is not None
-    # Stamp the body as `executor.prepare_request_async` does for a scheduled
-    # request, so that the request runs as the same user, in the same workspace.
-    auth_user = request.state.auth_user
-    if auth_user is not None:
-        validate_body.env_vars[constants.USER_ID_ENV_VAR] = auth_user.id
-        validate_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
-    else:
-        # The id below is stored as a user, so reject a malformed one.
-        user_id = validate_body.env_vars.get(constants.USER_ID_ENV_VAR)
-        if not common_utils.is_valid_user_hash(user_id):
-            e = exceptions.InvalidUserIdError(f'Invalid user id: {user_id!r}.')
-            # Serialize it as the except block below does, so the client
-            # deserializes it to the same error rather than a plain string.
-            requests_lib.set_exception_stacktrace(e)
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail=exceptions.serialize_exception(e)) from e
-    validate_body.client_api_version = versions.get_remote_api_version()
-    validate_body.workspace_access = workspace_access.for_current_request()
-    # TODO(aylei): generalize this to all requests without a db record.
-    ctx.override_envs(validate_body.env_vars)
+    # The body is stamped as for a scheduled request, so validation runs as the
+    # same user, in the same workspace.
+    try:
+        executor.stamp_request_body(validate_body, request.state.auth_user)
+    except exceptions.InvalidUserIdError as e:
+        # Serialize it as the except block below does, so the client
+        # deserializes it to the same error rather than a plain string.
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
 
-    def validate_dag(dag: dag_utils.dag_lib.Dag):
+    def validate_dag():
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        # Apply the client's config and resolve the active workspace as for a
-        # scheduled request.
+        # Apply the client's env and config and resolve the active workspace
+        # as for a scheduled request. Load the DAG inside, so that nothing
+        # reads the client's env vars before they are sanitized.
         with executor.override_request_env_and_config(
                 validate_body, request.state.request_id,
-                request_names.AdminPolicyRequestName.VALIDATE.value), \
-            admin_policy_utils.apply_and_use_config_in_current_request(
-                dag,
-                request_name=request_names.AdminPolicyRequestName.VALIDATE,
-                request_options=validate_body.get_request_options()) as dag:
-            dag.resolve_and_validate_volumes()
-            # Skip validating workdir and file_mounts, as those need to be
-            # validated after the files are uploaded to the SkyPilot API server
-            # with `upload_mounts_to_api_server`.
-            dag.validate(skip_file_mounts=True, skip_workdir=True)
+                request_names.AdminPolicyRequestName.VALIDATE.value):
+            dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
+            with admin_policy_utils.apply_and_use_config_in_current_request(
+                    dag,
+                    request_name=request_names.AdminPolicyRequestName.VALIDATE,
+                    request_options=validate_body.get_request_options()) as dag:
+                dag.resolve_and_validate_volumes()
+                # Skip validating workdir and file_mounts, as those need to be
+                # validated after the files are uploaded to the SkyPilot API
+                # server with `upload_mounts_to_api_server`.
+                dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
-        dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await asyncio.to_thread(validate_dag, dag)
+        await asyncio.to_thread(validate_dag)
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():

@@ -8,6 +8,7 @@ Real state DB, config file and casbin policy; the handler is called directly.
 import asyncio
 import json
 import os
+import threading
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -85,7 +86,8 @@ class _Env:
                  user: Optional[str] = 'alice',
                  api_version: Optional[int] = _NEW_CLIENT,
                  override_config: Optional[Dict[str, Any]] = None,
-                 report_user_in_env: Optional[str] = None) -> Optional[Any]:
+                 report_user_in_env: Optional[str] = None,
+                 extra_env: Optional[Dict[str, str]] = None) -> Optional[Any]:
         """Calls the handler; returns the 400 detail, or None if it passed."""
         request = mock.MagicMock(spec=fastapi.Request)
         request.state = mock.MagicMock()
@@ -97,6 +99,7 @@ class _Env:
                                      env_vars={
                                          constants.USER_ID_ENV_VAR: reported,
                                          constants.USER_ENV_VAR: reported,
+                                         **(extra_env or {}),
                                      },
                                      override_skypilot_config=override_config or
                                      {})
@@ -153,7 +156,7 @@ def _private(*members: str, **extra: Any) -> Dict[str, Any]:
 
 
 def _two_workspaces(env: _Env) -> None:
-    """Private `default` has no members; alice is in `ws-a`, `ws-b`, bob in `ws-a`."""
+    """Private `default` has no members; alice is in ws-a, ws-b; bob in ws-a."""
     env.configure({
         'default': _private(),
         'ws-a': _private('alice', 'bob'),
@@ -263,6 +266,60 @@ class TestWorkspaceResolution:
             assert env.validate(user='bob') is None
         assert env.seen == ['ws-b', 'ws-a']
         assert not skypilot_config.is_active_workspace_set()
+
+
+class TestClientEnvIsSanitized:
+
+    def test_server_only_env_vars_are_not_visible_while_validating(
+            self, env, monkeypatch):
+        """Client env vars are only visible once the server-only ones are
+        stripped, including to the DAG loader."""
+        _two_workspaces(env)
+        global_user_state.set_user_preferred_workspace('alice', 'ws-b')
+        # The API server hijacks os.environ to make it contextual.
+        monkeypatch.setattr(os, 'environ',
+                            context.ContextualEnviron(os.environ))
+        seen: Dict[str, Optional[str]] = {}
+
+        def _record(*args, **kwargs):
+            del args, kwargs
+            for name in (constants.ENV_VAR_DB_CONNECTION_URI,
+                         constants.SKYPILOT_SERVER_ENV_VAR_PREFIX + 'FLAG'):
+                seen[name] = os.environ.get(name)
+
+        injected = {
+            constants.ENV_VAR_DB_CONNECTION_URI: 'postgresql://evil',
+            constants.SKYPILOT_SERVER_ENV_VAR_PREFIX + 'FLAG': '1',
+        }
+        with mock.patch('sky.dag.Dag.validate', side_effect=_record):
+            assert env.validate(user='alice', extra_env=injected) is None
+        assert seen == {name: None for name in injected}
+
+
+class TestConcurrentRequests:
+
+    def test_another_request_does_not_reset_the_resolved_workspace(self, env):
+        """A request that enters `override_skypilot_config` resets only its own
+        thread's workspace, so a validation in another thread keeps its own."""
+        _two_workspaces(env)
+        entered = threading.Event()
+        other_done = threading.Event()
+        seen: List[str] = []
+
+        def _validate_in_another_thread():
+            with skypilot_config.local_active_workspace_ctx('ws-a'):
+                entered.set()
+                other_done.wait(timeout=30)
+                seen.append(skypilot_config.get_active_workspace())
+
+        thread = threading.Thread(target=_validate_in_another_thread)
+        thread.start()
+        assert entered.wait(timeout=30)
+        with skypilot_config.override_skypilot_config({'allowed_clouds': []}):
+            pass
+        other_done.set()
+        thread.join(timeout=30)
+        assert seen == ['ws-a']
 
 
 class TestResolverIsSkipped:
