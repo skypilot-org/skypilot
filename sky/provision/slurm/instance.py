@@ -943,7 +943,7 @@ def _create_virtual_instance(
     # Check if job already exists
     existing_jobs = client.query_jobs(
         cluster_name_on_cloud,
-        ['pending', 'running'],
+        ['pending', 'configuring', 'running'],
     )
 
     provision_timeout: int = provider_config['provision_timeout']
