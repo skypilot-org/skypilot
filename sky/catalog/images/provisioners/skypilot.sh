@@ -52,14 +52,25 @@ echo PATH=$PATH
 python3 -m venv ~/skypilot-runtime
 PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python
 
-# Install SkyPilot
-$PYTHON_EXEC -m pip install "skypilot-nightly[remote]"
+# Install SkyPilot. SKYPILOT_SRC (a pip source such as
+# git+https://github.com/skypilot-org/skypilot@<sha>) bakes from that commit;
+# otherwise the latest skypilot-nightly is used.
+sky_requirement() {
+    if [ -n "${SKYPILOT_SRC:-}" ]; then
+        echo "skypilot[$1] @ $SKYPILOT_SRC"
+    else
+        echo "skypilot-nightly[$1]"
+    fi
+}
+$PYTHON_EXEC -m pip install "$(sky_requirement remote)" || exit 1
 
 # Install Ray
-# Keep RAY_VERSION in sync with SKY_REMOTE_RAY_VERSION in skylet.constants.
+# The Ray version and the patches applied below both come from the SkyPilot
+# just installed, so they cannot disagree.
 # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues with
 # Sentinel values. See https://github.com/ray-project/ray/issues/56747.
-RAY_VERSION=2.56.1
+RAY_VERSION=$($PYTHON_EXEC -c 'from sky.skylet import constants; print(constants.SKY_REMOTE_RAY_VERSION)') || exit 1
+echo "Baking Ray $RAY_VERSION"
 RAY_ADDRESS=127.0.0.1:6380
 $PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==$RAY_VERSION" "click<8.3.0"
 export PATH=$PATH:$HOME/.local/bin
@@ -71,12 +82,12 @@ $PYTHON_EXEC -m pip list | grep "ray " | grep $RAY_VERSION 2>&1 > /dev/null && {
 
 # Install cloud dependencies
 if [ "$CLOUD" = "azure" ]; then
-    $PYTHON_EXEC -m pip install "skypilot-nightly[azure]"
+    $PYTHON_EXEC -m pip install "$(sky_requirement azure)"
 elif [ "$CLOUD" = "gcp" ]; then
     # We don't have to install the google-cloud-sdk since it is installed by default in GCP machines.
-    $PYTHON_EXEC -m pip install "skypilot-nightly[gcp]"
+    $PYTHON_EXEC -m pip install "$(sky_requirement gcp)"
 elif [ "$CLOUD" = "aws" ]; then
-    $PYTHON_EXEC -m pip install "skypilot-nightly[aws]"
+    $PYTHON_EXEC -m pip install "$(sky_requirement aws)"
 else
     echo "Error: Unknown cloud $CLOUD so not installing any cloud dependencies."
 fi
@@ -96,7 +107,7 @@ sudo systemctl disable jupyter > /dev/null 2>&1 || true
 
 # Cleanup
 # Remove SkyPilot in OS image because when user sky launch we will install whatever version of SkyPilot user has on their local machine.
-$PYTHON_EXEC -m pip uninstall "skypilot-nightly" -y
+$PYTHON_EXEC -m pip uninstall -y skypilot skypilot-nightly
 rm -rf ~/.sky
 
 # Clean up user home directories and sensitive files to prevent them from being baked into the image

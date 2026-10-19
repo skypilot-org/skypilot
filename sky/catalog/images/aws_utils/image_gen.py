@@ -27,6 +27,9 @@ parser.add_argument('--base-image-id',
 parser.add_argument('--os-type', default='ubuntu', help='The OS type')
 parser.add_argument('--os-version', default='22.04', help='The OS version')
 parser.add_argument('--arch', default='x86_64', help='The architecture')
+parser.add_argument('--tag-suffix',
+                    default='',
+                    help='Appended to the image tag, e.g. -cuda13-ray256')
 parser.add_argument('--output-csv',
                     default='images.csv',
                     help='The output CSV file name')
@@ -115,6 +118,7 @@ def write_image_to_csv(image_id, region):
             tag = f'skypilot:custom-{args.processor}-{args.os_type}-{args.arch}'
         else:
             tag = f'skypilot:custom-{args.processor}-{args.os_type}'
+        tag += args.tag_suffix
         row = [
             tag, region, args.os_type, args.os_version, image_id,
             time.strftime('%Y%m%d'), args.base_image_id
