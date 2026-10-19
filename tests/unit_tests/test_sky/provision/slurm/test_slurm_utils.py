@@ -59,6 +59,8 @@ class TestValidateSbatchTime:
         ' 5',
         '5 ',
         '5\n',
+        'ınfinite',
+        '٣٠',
     ])
     def test_invalid_formats_raise(self, value):
         with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):

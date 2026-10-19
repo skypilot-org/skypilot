@@ -1493,7 +1493,7 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
 
 
 # See: https://slurm.schedmd.com/sbatch.html#OPT_time
-_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_FORMAT, re.IGNORECASE)
+_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_PATTERN)
 
 
 def validate_sbatch_time(value: str) -> None:

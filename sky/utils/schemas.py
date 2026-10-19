@@ -1511,18 +1511,22 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 }
 
 # Slurm's time_str2secs grammar (src/common/parse_time.c), case-insensitive.
-SLURM_SBATCH_TIME_FORMAT = (r'-1|infinite|unlimited|\d+|\d+:\d+|\d+:\d+:\d+|'
-                            r'\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+SLURM_SBATCH_TIME_PATTERN = (
+    r'(?ai)^(?:-1|infinite|unlimited|\d+|\d+:\d+|'
+    r'\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+)\Z')
 
 _SBATCH_TIME_SCHEMA = {
     'oneOf': [
         {
             'type': 'string',
-            'pattern': rf'(?i)^(?:{SLURM_SBATCH_TIME_FORMAT})\Z'
+            'pattern': SLURM_SBATCH_TIME_PATTERN
         },
         {
             'type': 'integer',
             'minimum': -1
+        },
+        {
+            'enum': [None, False]
         },
     ]
 }
