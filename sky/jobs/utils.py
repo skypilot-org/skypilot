@@ -2880,6 +2880,7 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
             status_display.stop()
             if follow and tail_offset is None and pool is None:
                 since = resume_at if resume_task_id == task_id else None
+                resume_task_id, resume_at = None, None
                 left_running_at = _follow_from_log_store(
                     job_id, task_id, task_name, handle, tail, since)
                 if left_running_at is not None:
@@ -2888,7 +2889,6 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
                         # may run elsewhere and log to another store.
                         resume_task_id, resume_at = task_id, left_running_at
                         continue
-                    resume_task_id, resume_at = None, None
                     if filtered_task_id is None and task_id < num_tasks - 1:
                         # Keep the finished task's last line above the display.
                         print()

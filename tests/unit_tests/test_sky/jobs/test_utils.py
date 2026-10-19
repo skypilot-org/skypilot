@@ -1856,6 +1856,42 @@ class TestStreamLogsByIdStoreFollowAcrossTasks:
         assert waiting in calls
         assert ('start', ()) in calls[calls.index(waiting):]
 
+    def test_resume_point_is_used_once(self, monkeypatch):
+        # After a recovery the next follow resumes from when the task left
+        # RUNNING. When that follow falls back to the cluster, a later follow
+        # of the same task must not replay the attempt already streamed.
+        self._patch_job(monkeypatch, num_tasks=1)
+        mock_state = jobs_utils.managed_job_state
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        results = iter([100.0, None, 300.0])
+        recoveries = iter([True, False])
+        sinces = []
+
+        def _follow(job_id, task_id, task_name, handle, tail, since):
+            del job_id, task_id, task_name, handle, tail
+            sinces.append(since)
+            result = next(results)
+            if result == 300.0:
+                mock_state.get_status.side_effect = lambda _: succeeded
+                mock_state.get_latest_task_id_status.side_effect = (
+                    lambda _: (0, succeeded))
+            return result
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: next(recoveries))
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+        backend = MagicMock()
+        # Not a known exit code: the cluster tail ended without a result.
+        backend.tail_logs.return_value = 1
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert sinces == [None, 100.0, None]
+
     def test_last_task_shows_no_next_task_spinner(self, monkeypatch):
         display, followed = self._patch_job(monkeypatch, num_tasks=1)
 
