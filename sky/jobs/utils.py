@@ -2314,15 +2314,6 @@ _STORE_FOLLOW_STATUS_CHECK_SECONDS = 2
 _TASK_ADVANCE_POLL_SECONDS = 1
 
 
-def _task_status(job_id: int,
-                 task_id: int) -> Optional[managed_job_state.ManagedJobStatus]:
-    for row_task_id, _, status, _, _ in (
-            managed_job_state.get_all_task_ids_names_statuses_logs(job_id)):
-        if row_task_id == task_id:
-            return status
-    return None
-
-
 def _wait_for_task_recovery(job_id: int, task_id: int,
                             status_display: Any) -> bool:
     """Waits while a task recovers; returns whether it is RUNNING again.
@@ -2335,7 +2326,8 @@ def _wait_for_task_recovery(job_id: int, task_id: int,
     try:
         while True:
             context_utils.raise_if_canceled()
-            status = _task_status(job_id, task_id)
+            status = managed_job_state.get_job_status_with_task_id(
+                job_id, task_id)
             if status == managed_job_state.ManagedJobStatus.RUNNING:
                 return True
             if (status is None or status.is_terminal() or
@@ -2417,7 +2409,7 @@ def _follow_from_log_store(
         last_check = now
         # Taken before the read, so a recovered attempt starts after it.
         checked_at = time.time()
-        if (_task_status(job_id, task_id) !=
+        if (managed_job_state.get_job_status_with_task_id(job_id, task_id) !=
                 managed_job_state.ManagedJobStatus.RUNNING):
             left_running_at = checked_at
         return left_running_at is not None

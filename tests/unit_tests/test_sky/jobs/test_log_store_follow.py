@@ -63,10 +63,10 @@ def _reset_hooks():
 
 
 def _set_task_statuses(monkeypatch, statuses):
-    rows = [(i, f'task-{i}', s, None, None) for i, s in enumerate(statuses)]
-    monkeypatch.setattr(managed_job_state,
-                        'get_all_task_ids_names_statuses_logs',
-                        lambda job_id: rows)
+    monkeypatch.setattr(
+        managed_job_state, 'get_job_status_with_task_id',
+        lambda job_id, task_id: statuses[task_id]
+        if task_id < len(statuses) else None)
 
 
 def test_default_reader_does_not_follow():
@@ -202,20 +202,12 @@ def test_resumes_from_when_the_task_left_running(monkeypatch):
 def test_wait_for_task_recovery(monkeypatch):
     monkeypatch.setattr(managed_job_utils.time, 'sleep', lambda s: None)
     display = mock.MagicMock()
-    statuses = iter([[_RECOVERING], [_RECOVERING], [_RUNNING]])
-    monkeypatch.setattr(
-        managed_job_state, 'get_all_task_ids_names_statuses_logs',
-        lambda job_id: [(0, 't', s, None, None) for s in next(statuses)])
+    statuses = iter([_RECOVERING, _RECOVERING, _RUNNING])
+    monkeypatch.setattr(managed_job_state, 'get_job_status_with_task_id',
+                        lambda job_id, task_id: next(statuses))
     assert managed_job_utils._wait_for_task_recovery(1, 0, display)
     display.stop.assert_called_once()
 
     for terminal in (_SUCCEEDED, _CANCELLING):
         _set_task_statuses(monkeypatch, [terminal])
         assert not managed_job_utils._wait_for_task_recovery(1, 0, display)
-
-
-def test_task_status_by_task_id(monkeypatch):
-    _set_task_statuses(monkeypatch, [_SUCCEEDED, _RUNNING])
-    assert managed_job_utils._task_status(1, 0) == _SUCCEEDED
-    assert managed_job_utils._task_status(1, 1) == _RUNNING
-    assert managed_job_utils._task_status(1, 2) is None
