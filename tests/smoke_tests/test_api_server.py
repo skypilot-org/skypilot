@@ -465,21 +465,30 @@ def test_api_cancel_other_users_request(generic_cloud: str):
              f' echo "$s"; echo "$s" | grep "Cancelled 1 request"'),
             wait_cancelled,
         ],
-        teardown=(f'{as_("admin")}sky api cancel -y "$(cat {req_file})" '
-                  f'2>/dev/null || true; '
-                  f'{as_("admin")}sky down -y {name} 2>/dev/null || true; '
-                  f'for f in {state_dir}/*.token_id; do '
-                  f'  [ -f "$f" ] && curl -sS -X POST '
-                  f'-H "X-Auth-Request-Email: {minter}" '
-                  f'-H "Content-Type: application/json" '
-                  f'-d "{{\\"token_id\\": \\"$(cat "$f")\\"}}" '
-                  f'{base_url}/users/service-account-tokens/delete || true; '
-                  f'done; '
-                  f'unset {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR} '
-                  f'{constants.USER_ID_ENV_VAR} '
-                  f'{constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}; '
-                  f'{smoke_tests_utils.SKY_API_RESTART}; '
-                  f'rm -rf {state_dir}'),
+        teardown=(
+            f'{as_("admin")}sky api cancel -y "$(cat {req_file})" '
+            f'2>/dev/null || true; '
+            f'{as_("admin")}sky down -y {name} 2>/dev/null || true; '
+            # Best effort, but report a rejected delete (e.g. 400 while
+            # the account still owns a cluster): curl exits 0 on HTTP
+            # errors.
+            f'for f in {state_dir}/*.token_id; do '
+            f'  [ -f "$f" ] || continue; '
+            f'  code=$(curl -sS -o {state_dir}/delete.out '
+            f'-w "%{{http_code}}" -X POST '
+            f'-H "X-Auth-Request-Email: {minter}" '
+            f'-H "Content-Type: application/json" '
+            f'-d "{{\\"token_id\\": \\"$(cat "$f")\\"}}" '
+            f'{base_url}/users/service-account-tokens/delete); '
+            f'  [ "$code" = 200 ] || echo "Failed to delete service '
+            f'account token $(cat "$f") (HTTP $code): '
+            f'$(cat {state_dir}/delete.out 2>/dev/null)"; '
+            f'done; '
+            f'unset {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR} '
+            f'{constants.USER_ID_ENV_VAR} '
+            f'{constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}; '
+            f'{smoke_tests_utils.SKY_API_RESTART}; '
+            f'rm -rf {state_dir}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
