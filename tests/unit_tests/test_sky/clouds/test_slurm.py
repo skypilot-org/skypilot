@@ -1633,6 +1633,35 @@ class TestCreateVirtualInstance:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
+    def test_configuring_allocation_is_reused(self, mock_ssh_runner,
+                                              mock_slurm_client,
+                                              mock_get_partition_info,
+                                              mock_get_proctrack_type,
+                                              mock_wait_for_job_nodes):
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        client = mock_slurm_client.return_value
+        client.query_jobs.side_effect = (lambda name, states: ['42']
+                                         if 'configuring' in states else [])
+
+        record = slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster',
+            config=self._make_non_container_config(2),
+        )
+
+        client.submit_job.assert_not_called()
+        mock_wait_for_job_nodes.assert_called_once()
+        assert record.head_instance_id == slurm_utils.instance_id('42', 'node1')
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
     def test_corrupt_snapshot_blocks_restart(self, mock_ssh_runner,
                                              mock_slurm_client,
                                              mock_get_partition_info,
