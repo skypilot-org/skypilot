@@ -36,6 +36,10 @@ class TestValidateSbatchTime:
             '1-12',  # d-h (multi-digit hour)
             '2-23:59',  # d-h:m
             '7-00:00:00',  # d-h:m:s
+            'UNLIMITED',
+            'unlimited',
+            'INFINITE',
+            '-1',
         ])
     def test_accepted_formats(self, value):
         # Should not raise. One sample per grammatical form.
@@ -48,7 +52,7 @@ class TestValidateSbatchTime:
         '1m30s',
         '1:2:3:4',
         '1.5',
-        '-1',
+        '-2',
         '1-2-3',
         ':30',
         '1:',
