@@ -530,6 +530,8 @@ def _k8s_owner_check_record(owner_identity):
     # in __init__, not on the class).
     handle.__class__ = backends.CloudVmRayResourceHandle
     handle.launched_resources = launched_resources
+    # No cluster yaml: a cluster without a recorded context.
+    handle.cluster_yaml = None
     return {
         'handle': handle,
         'workspace': 'default',
@@ -685,6 +687,7 @@ def test_check_owner_identity_k8s_same_context_passes(monkeypatch, recorded_uid,
     set_owner, get_uid = _patch_k8s_target(monkeypatch, provider_config,
                                            ['other-ctx', 'my-ctx'], current_uid)
     record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
 
     backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
         'my-cluster', record)
@@ -703,6 +706,7 @@ def test_check_owner_identity_k8s_context_points_at_other_cluster(monkeypatch):
         'cluster_uid': 'uid-a'
     }, ['my-ctx'], 'uid-b')
     record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
 
     with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
                        match='different Kubernetes cluster'):
@@ -716,6 +720,7 @@ def test_check_owner_identity_k8s_context_missing(monkeypatch):
         'cluster_uid': 'uid-a'
     }, ['other-ctx'], 'uid-a')
     record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
 
     with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
                        match='not available'):

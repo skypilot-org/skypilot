@@ -2293,11 +2293,15 @@ def check_owner_identity(cluster_name: str) -> None:
 def _get_kubernetes_provider_config(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> Optional[Dict[str, Any]]:
+    if handle.cluster_yaml is None:
+        return None
     try:
         config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to load the cluster yaml {handle.cluster_yaml}: '
                      f'{e}')
+        return None
+    if not isinstance(config, dict):
         return None
     provider_config = config.get('provider')
     return provider_config if isinstance(provider_config, dict) else None
