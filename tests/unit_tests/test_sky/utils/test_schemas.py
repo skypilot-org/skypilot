@@ -1464,17 +1464,29 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
         self._saved_extra = schemas._extra_workspace_properties.copy()
         self._saved_access = set(schemas._access_only_workspace_properties)
         self._saved_plugins_loaded = plugins._plugins_loaded
-        self._env_patcher = mock.patch.dict(
-            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
-        self._env_patcher.start()
 
     def tearDown(self):
-        self._env_patcher.stop()
         schemas._extra_workspace_properties.clear()
         schemas._extra_workspace_properties.update(self._saved_extra)
         schemas._access_only_workspace_properties.clear()
         schemas._access_only_workspace_properties.update(self._saved_access)
         plugins._plugins_loaded = self._saved_plugins_loaded
+
+    # One environment patch per test, undone by addCleanup, so no test can
+    # leak the server flag into later tests on the same worker.
+    def _on_server(self, plugins_loaded: bool):
+        patcher = mock.patch.dict(
+            os.environ, {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plugins._plugins_loaded = plugins_loaded
+
+    def _on_client(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
+        plugins._plugins_loaded = True
 
     def _get_workspace_entry_schema(self):
         schema = schemas.get_config_schema()
@@ -1482,7 +1494,7 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
 
     def test_server_registered_property_passes(self):
         """On the server, a registered property validates like a built-in."""
-        plugins._plugins_loaded = True
+        self._on_server(plugins_loaded=True)
         schemas.register_workspace_property('leads', {
             'type': 'array',
             'items': {
@@ -1499,7 +1511,7 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
 
     def test_server_unregistered_property_rejected(self):
         """On the server, an unregistered workspace property fails."""
-        plugins._plugins_loaded = True
+        self._on_server(plugins_loaded=True)
         with self.assertRaises(jsonschema.exceptions.ValidationError):
             jsonschema.validate(instance={'leads': ['a']},
                                 schema=self._get_workspace_entry_schema())
@@ -1511,17 +1523,13 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
         properties; a strict schema then would reject a plugin's field at
         startup.
         """
-        plugins._plugins_loaded = False
+        self._on_server(plugins_loaded=False)
         jsonschema.validate(instance={'leads': ['a']},
                             schema=self._get_workspace_entry_schema())
 
     def test_client_allows_unknown_property(self):
         """On the client, unknown workspace properties pass through."""
-        monkeypatch = mock.patch.dict(os.environ)
-        monkeypatch.start()
-        self.addCleanup(monkeypatch.stop)
-        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
-        plugins._plugins_loaded = True
+        self._on_client()
         jsonschema.validate(instance={'leads': ['a']},
                             schema=self._get_workspace_entry_schema())
 
