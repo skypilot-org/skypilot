@@ -50,10 +50,34 @@ def test_bake_defaults_to_the_latest_nightly():
     assert _sky_requirement('gcp', '') == 'skypilot-nightly[gcp]'
 
 
-@pytest.mark.parametrize('template', [
+def test_every_skypilot_install_in_the_bake_honors_the_source():
+    """An install that names skypilot-nightly directly would ignore
+    skypilot_src, so the Ray version and patches would come from the nightly
+    again."""
+    script = _read('provisioners', 'skypilot.sh')
+    body = re.search(r'^sky_requirement\(\) \{\n.*?^\}\n', script,
+                     re.MULTILINE | re.DOTALL).group(0)
+    rest = script.replace(body, '')
+    installs = re.findall(
+        r'pip install [^\n]*(?:skypilot|sky_requirement)[^\n]*', rest)
+    # remote, plus one per cloud's extras.
+    assert len(installs) == 4, installs
+    for line in installs:
+        assert '"$(sky_requirement ' in line, line
+    assert 'skypilot-nightly[' not in rest
+
+
+_TEMPLATES = [
     name for name in sorted(os.listdir(_IMAGES_DIR))
     if name.startswith('skypilot-') and name.endswith('.pkr.hcl')
-])
+]
+
+
+def test_templates_are_found():
+    assert len(_TEMPLATES) >= 8, _TEMPLATES
+
+
+@pytest.mark.parametrize('template', _TEMPLATES)
 def test_every_template_passes_skypilot_src_to_the_bake(template):
     text = _read(template)
     assert 'variable "skypilot_src"' in text
@@ -90,9 +114,12 @@ def test_aws_default_images_have_the_current_ray_baked(monkeypatch, acc, arch):
     assert _aws_default_ami(monkeypatch, acc, arch).endswith(_BAKED_RAY_SUFFIX)
 
 
-@pytest.mark.parametrize('acc_name', ['A100', 'L4', 'T4'])
-def test_gcp_default_images_have_the_current_ray_baked(acc_name):
+def test_gcp_default_cpu_image_has_the_current_ray_baked():
     assert gcp_mod._DEFAULT_CPU_IMAGE_ID.endswith(_BAKED_RAY_SUFFIX)  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize('acc_name', ['A100', 'L4', 'T4'])
+def test_gcp_default_gpu_images_have_the_current_ray_baked(acc_name):
     assert gcp_mod.GCP._get_gpu_image_id(acc_name).endswith(  # pylint: disable=protected-access
         _BAKED_RAY_SUFFIX)
 

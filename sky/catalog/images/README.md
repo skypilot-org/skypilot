@@ -26,7 +26,7 @@ default that is the latest `skypilot-nightly`; to bake from a specific commit,
 e.g. one that changes the Ray version before it reaches a nightly, add this to
 any `packer build` below:
 ```bash
--var "skypilot_src=git+https://github.com/skypilot-org/skypilot@<pushed-sha>"
+-var "skypilot_src=git+https://github.com/skypilot-org/skypilot@<full 40-char sha, pushed>"
 ```
 
 ### GCP
@@ -73,7 +73,9 @@ python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --base-
 ```
 Pass `--tag-suffix` to name a new tag rather than add rows to an existing one,
 e.g. `--tag-suffix -cuda13-ray256`. Older SkyPilot versions read the same
-catalog, so an existing tag must keep pointing at images they can run.
+catalog, so an existing tag must keep pointing at images they can run. The
+tags must match `_DEFAULT_*_IMAGE_ID` in `sky/clouds/aws.py` (GCP rows are
+written by hand; match `sky/clouds/gcp.py`).
 
 3. Add fallback images if any region failed \
 Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use public [ubuntu images](https://cloud-images.ubuntu.com/locator/ec2/) as fallback.)
