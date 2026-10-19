@@ -17,9 +17,15 @@ ignore-patterns=
 # Pickle collected data for later comparisons.
 persistent=no
 
+# Python code to execute before loading plugins. Puts the repo's own pylint
+# plugins on the path; every pylint entry point (format.sh, pre-commit, CI)
+# runs from the repo root.
+init-hook='import sys; sys.path.append("tests/pylint_plugins")'
+
 # List of plugins (as comma separated values of python modules names) to load,
-# usually to register additional checkers.
-load-plugins=pylint.extensions.docstyle
+# usually to register additional checkers. banned_api lives in
+# tests/pylint_plugins.
+load-plugins=pylint.extensions.docstyle,banned_api
 
 # Use multiple processes to speed up Pylint.
 jobs=4

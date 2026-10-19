@@ -6,13 +6,15 @@ import os
 import random
 import shutil
 import subprocess
-from typing import List, Optional, Set
+from typing import Awaitable, List, Optional, Set, TypeVar
 
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
 _background_tasks: Set[asyncio.Task] = set()
+
+T = TypeVar('T')
 
 # Upper bound on the random delay applied before a periodic housekeeping
 # daemon runs its first pass. See sleep_startup_jitter().
@@ -121,6 +123,64 @@ def shield(func):
             raise
 
     return async_wrapper
+
+
+async def wait_for(awaitable: Awaitable[T], timeout: Optional[float]) -> T:
+    """`asyncio.wait_for` that never loses the caller's cancellation.
+
+    On CPython 3.9 to 3.11, `asyncio.wait_for` can swallow a cancel: when the
+    caller's task is cancelled as the inner future completes, so that the
+    inner is done by the time the caller resumes, it catches the
+    `CancelledError`, finds the inner done and returns its result instead of
+    re-raising (https://github.com/python/cpython/issues/86296). The cancel
+    request is consumed. A loop that bounds each iteration with `wait_for`
+    then keeps running after `task.cancel()`, and anything that awaits the
+    task waits for as long as the loop runs. CPython 3.12 reimplemented
+    `wait_for` on `asyncio.timeout()` and does not have the bug.
+
+    Same contract as `asyncio.wait_for`: returns the inner result; once
+    `timeout` seconds have passed, cancels the inner, waits for it to finish
+    and raises `asyncio.TimeoutError` (or returns or raises whatever the inner
+    finished with, if it did not end cancelled); and propagates the caller's
+    cancellation whenever it arrives, cancelling the inner and waiting for it
+    first. Built on `asyncio.wait`, which never catches `CancelledError`.
+
+    Like `asyncio.wait_for`, `timeout=None` awaits the inner directly, and a
+    `timeout` of zero or less gives up at once: a coroutine inner is
+    cancelled before it starts.
+
+    Use this instead of `asyncio.wait_for` in any coroutine that another task
+    cancels and expects to stop, such as a polling loop.
+    """
+    if timeout is None:
+        # No deadline and so no race: a cancel reaches the inner directly.
+        return await awaitable
+    inner = asyncio.ensure_future(awaitable)
+    if timeout > 0:
+        try:
+            done, _ = await asyncio.wait({inner}, timeout=timeout)
+        except asyncio.CancelledError:
+            inner.cancel()
+            # Like asyncio.wait_for, do not return while the inner may still
+            # be running. asyncio.wait does not raise the inner's exception,
+            # so only a second cancel of the caller can interrupt this.
+            await asyncio.wait({inner})
+            raise
+        if inner in done:
+            return inner.result()
+    elif inner.done():
+        return inner.result()
+    # The deadline has passed. A Task cancelled before its first step never
+    # runs its coroutine, so with `timeout <= 0` the inner does not start.
+    inner.cancel()
+    await asyncio.wait({inner})
+    try:
+        # The inner may have finished on its own before the cancel reached
+        # it, or caught the cancel; asyncio.wait_for returns or raises that
+        # outcome too.
+        return inner.result()
+    except asyncio.CancelledError as e:
+        raise asyncio.TimeoutError() from e
 
 
 # Bytes read from the pipe per readiness callback in NonOwningPipeReader.
