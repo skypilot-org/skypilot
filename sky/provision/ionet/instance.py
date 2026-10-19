@@ -335,9 +335,12 @@ def query_instances(
         return {}
     workers = _get_workers(client, deployment_id)
     if not workers:
-        # The deployment has no VM yet. Report it by deployment ID so it is
-        # not treated as terminated and leaked, but never as UP.
-        return {deployment_id: (status_lib.ClusterStatus.INIT, None)}
+        # The deployment has no VM. Report it by deployment ID so a live one
+        # is not treated as terminated and leaked, but never as UP. A
+        # terminal one stays terminal so teardown can verify it.
+        if sky_status is not None:
+            sky_status = status_lib.ClusterStatus.INIT
+        return {deployment_id: (sky_status, None)}
     return {str(worker['vm_id']): (sky_status, None) for worker in workers}
 
 

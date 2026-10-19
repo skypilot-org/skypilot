@@ -757,6 +757,27 @@ def test_running_deployment_without_vm_is_not_up(fake_api, monkeypatch):
     }
 
 
+def test_terminated_deployment_without_vm_stays_terminal(fake_api, monkeypatch):
+    instance.run_instances('US', 'test', 'sky-test', _config())
+    # Teardown verification queries with non_terminated_only=False and
+    # rejects INIT, so a destroyed deployment must not be reported as INIT.
+    # The list can still say running after details already say destroyed.
+    monkeypatch.setattr(fake_api, 'get_deployment_details',
+                        lambda *args: {'data': {
+                            'status': 'destroyed'
+                        }})
+    monkeypatch.setattr(fake_api, 'get_deployment_vms',
+                        lambda *args: {'data': {
+                            'total': 0,
+                            'workers': []
+                        }})
+    assert instance.query_instances('test',
+                                    'sky-test', {},
+                                    non_terminated_only=False) == {
+                                        'deployment-1': (None, None)
+                                    }
+
+
 def test_local_deployment_missing_remotely_is_cleared(fake_api):
     instance.run_instances('US', 'test', 'sky-test', _config())
     # The deployment has expired: io.net neither lists it nor knows its ID.
