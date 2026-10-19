@@ -1797,6 +1797,77 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
         assert code == exceptions.JobExitCode.SUCCEEDED
 
 
+class TestStreamLogsByIdStoreFollowAcrossTasks:
+    """A tail that follows each task from the log store moves on per task."""
+
+    def _patch_job(self, monkeypatch, num_tasks):
+        """Stubs a RUNNING job whose tasks finish one per store follow."""
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        latest = {'task_id': 0, 'status': running}
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = num_tasks
+        mock_state.get_status.side_effect = lambda _: latest['status']
+        mock_state.get_latest_task_id_status.side_effect = (
+            lambda _: (latest['task_id'], latest['status']))
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name', lambda
+            _: MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle))
+        monkeypatch.setattr(jobs_utils, 'read_provision_status_from_log',
+                            lambda path, pos, msg: (pos, msg))
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        followed = []
+
+        def _follow(job_id, task_id, *args):
+            del job_id, args
+            followed.append(task_id)
+            # The task finishes and the controller moves on.
+            if task_id < num_tasks - 1:
+                latest['task_id'] = task_id + 1
+            else:
+                latest['status'] = succeeded
+            return 100.0
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: False)
+        display = MagicMock()
+        monkeypatch.setattr(jobs_utils.rich_utils, 'safe_status',
+                            lambda msg: display)
+        return display, followed
+
+    def test_shows_the_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=2)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0, 1]
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        calls = [(c[0], c.args) for c in display.mock_calls]
+        waiting = ('update', (jobs_utils.ux_utils.spinner_message(
+            'Waiting for the next task: 1'),))
+        # The display was stopped for the store follow, so it is started
+        # again after the update rather than left hidden.
+        assert waiting in calls
+        assert ('start', ()) in calls[calls.index(waiting):]
+
+    def test_last_task_shows_no_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=1)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0]
+        updates = [
+            c.args[0] for c in display.mock_calls if c[0] == 'update' and c.args
+        ]
+        assert not any('Waiting for the next task' in u for u in updates)
+
+
 class TestTryToGetJobEndTime:
     """Tests for try_to_get_job_end_time's best-effort fallback."""
 

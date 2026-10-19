@@ -2880,6 +2880,13 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
                         resume_task_id, resume_at = task_id, left_running_at
                         continue
                     resume_task_id, resume_at = None, None
+                    if filtered_task_id is None and task_id < num_tasks - 1:
+                        # Keep the finished task's last line above the display.
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                f'Waiting for the next task: {task_id + 1}'))
+                        status_display.start()
                     # The task finished. Wait for the controller to move on
                     # so the next round does not follow the same task again.
                     while True:
@@ -2895,8 +2902,6 @@ def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
                             not should_keep_logging(managed_job_status)):
                         break
                     assert latest_task_id is not None, job_id
-                    # Keep the finished task's last line above the display.
-                    print()
                     task_id = latest_task_id
                     continue
             returncode = None
