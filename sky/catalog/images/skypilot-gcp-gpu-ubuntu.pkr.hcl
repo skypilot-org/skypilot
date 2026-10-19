@@ -10,7 +10,8 @@ variable "zone" {
 }
 
 locals {
-  date = formatdate("YYMMDD", timestamp())
+  # UTC, to the minute, so same-day rebuilds get distinct image names.
+  date = formatdate("YYMMDDhhmm", timestamp())
 }
 
 source "googlecompute" "gpu-ubuntu" {
