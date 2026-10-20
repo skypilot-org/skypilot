@@ -1,10 +1,12 @@
 """Utils for building pip wheels.
 
-This module is used for building the wheel for SkyPilot under `~/.sky/wheels`,
-and the wheel will be used for installing the SkyPilot on the cluster nodes.
+This module is used for building the wheel for SkyPilot under `~/.sky/wheels`
+(anchored at SKY_RUNTIME_DIR when set), and the wheel will be used for
+installing the SkyPilot on the cluster nodes.
 
 The generated folder is like:
     ~/.sky/wheels/<hash_of_wheel>/sky-<version>-py3-none-any.whl
+    ~/.sky/wheels/<hash_of_wheel>/.source_path  (source dir it was built from)
 
 Whenever a new wheel is built, the old ones will be removed.
 
@@ -26,14 +28,15 @@ from packaging import version
 
 import sky
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.server import common
+from sky.skylet import runtime_utils
 from sky.utils import directory_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Local wheel path is same as the remote path.
-WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
+# Per runtime dir, so isolated API servers sharing a HOME do not reuse or
+# delete each other's wheels.
+WHEEL_DIR = pathlib.Path(runtime_utils.get_runtime_dir_path('.sky/wheels'))
 _WHEEL_LOCK_PATH = WHEEL_DIR.parent / '.wheels_lock'
 SKY_PACKAGE_PATH = pathlib.Path(directory_utils.get_sky_dir())
 
@@ -41,6 +44,27 @@ SKY_PACKAGE_PATH = pathlib.Path(directory_utils.get_sky_dir())
 _PACKAGE_WHEEL_NAME = 'skypilot'
 _WHEEL_PATTERN = (f'{_PACKAGE_WHEEL_NAME}-'
                   f'{version.parse(sky.__version__)}-*.whl')
+
+
+def _source_path_file(wheel_dir: pathlib.Path) -> pathlib.Path:
+    # Records which source dir the wheel next to it was built from. mtimes
+    # alone cannot tell two checkouts apart, as every dev build has the same
+    # version. Kept beside the wheel so it never outlives it, even when a
+    # SkyPilot version without it replaces the wheel.
+    return wheel_dir / '.source_path'
+
+
+def _source_id() -> str:
+    # Resolved, so retargeting a symlinked checkout counts as a new source.
+    return str(SKY_PACKAGE_PATH.resolve())
+
+
+def _built_from_current_source() -> bool:
+    try:
+        marker = _source_path_file(_get_latest_wheel().parent)
+        return marker.read_text(encoding='utf-8') == _source_id()
+    except OSError:
+        return False
 
 
 def _remove_stale_wheels(latest_wheel_dir: pathlib.Path) -> None:
@@ -286,14 +310,18 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
         # Only build wheels if the wheel is outdated, wheel does not exist
-        # for the requested version, or files were deleted during checking.
+        # for the requested version, was built from another source dir, or
+        # files were deleted during checking.
         if ((last_modification_time is None or
              last_wheel_modification_time is None) or
             (last_wheel_modification_time < last_modification_time) or
-                not any(WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}'))):
+                not any(WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')) or
+                not _built_from_current_source()):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             latest_wheel = _build_sky_wheel()
+            _source_path_file(latest_wheel.parent).write_text(_source_id(),
+                                                              encoding='utf-8')
         else:
             latest_wheel = _get_latest_wheel()
 

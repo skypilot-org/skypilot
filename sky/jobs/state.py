@@ -1364,12 +1364,13 @@ async def set_backoff_pending_async(job_id: int,
 
 
 async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
-    """Set the task back to STARTING or RECOVERING from PENDING.
+    """Set the task back to STARTING or RECOVERING.
 
     This should not be used for the initial transition from PENDING to STARTING.
-    In that case, use set_starting instead. This function should only be used
-    after using set_backoff_pending to transition back to PENDING during
-    launch retry backoff.
+    In that case, use set_starting instead. This function is used after
+    set_backoff_pending moved the task to PENDING during launch retry backoff,
+    and to launch again a resumed pool task that never got a worker (STARTING
+    or RECOVERING).
     """
     target_status = ManagedJobStatus.STARTING
     if recovering:

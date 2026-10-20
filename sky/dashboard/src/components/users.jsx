@@ -70,6 +70,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import {
   BatchRoleDialog,
@@ -1122,6 +1129,7 @@ export function Users() {
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
               </select>
             </div>
           </div>
@@ -2554,6 +2562,7 @@ function UsersTable({
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
+                                <option value="viewer">Viewer</option>
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
@@ -2821,6 +2830,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
+    role: '',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -2864,6 +2874,34 @@ function ServiceAccountTokensView({
     if (!serverPaginated) return;
     setPage(1);
   }, [debouncedSearch, serverPaginated]);
+
+  // Start the Role field on the server's `rbac.default_role`, unless a role
+  // was already picked.
+  useEffect(() => {
+    if (!showCreateDialog) return undefined;
+    let cancelled = false;
+    const fetchDefaultRole = async () => {
+      try {
+        const response = await apiClient.get('/users/default-role');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to get default role');
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          setNewToken((prev) =>
+            prev.role ? prev : { ...prev, role: data.role }
+          );
+        }
+      } catch (error) {
+        console.error('Failed to get default role:', error);
+      }
+    };
+    fetchDefaultRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateDialog]);
 
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
@@ -3063,6 +3101,7 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
 
       const response = await apiClient.post(
@@ -3073,7 +3112,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30 });
+        setNewToken({ token_name: '', expires_in_days: 30, role: '' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3254,6 +3293,7 @@ function ServiceAccountTokensView({
                             >
                               <option value="admin">Admin</option>
                               <option value="user">User</option>
+                              <option value="viewer">Viewer</option>
                             </select>
                             <button
                               onClick={() => handleSaveEdit(token.token_id)}
@@ -3563,6 +3603,30 @@ function ServiceAccountTokensView({
                   />
                 </div>
                 <div className="grid gap-2">
+                  <label
+                    htmlFor="create-sa-role-select"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Role
+                  </label>
+                  <Select
+                    value={newToken.role}
+                    onValueChange={(role) => setNewToken({ ...newToken, role })}
+                  >
+                    <SelectTrigger
+                      id="create-sa-role-select"
+                      className="w-full focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
                     Expiration (days)
                   </label>
@@ -3615,7 +3679,9 @@ function ServiceAccountTokensView({
                 <button
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
                   onClick={handleCreateToken}
-                  disabled={creating || !newToken.token_name.trim()}
+                  disabled={
+                    creating || !newToken.token_name.trim() || !newToken.role
+                  }
                 >
                   {creating ? 'Creating...' : 'Create Token'}
                 </button>
