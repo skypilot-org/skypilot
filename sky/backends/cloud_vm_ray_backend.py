@@ -4892,14 +4892,48 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         job_ids: Optional[List[int]] = None,
         stream_logs: bool = True,
-        timeout: Optional[int] = None,
+        deadline: Optional[float] = None,
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+        """Returns the status of each job in job_ids, or of all jobs if None.
+
+        Args:
+            deadline: A time.monotonic() value. If set, every gRPC call and
+                the command on the head node is bounded to end before it, and
+                the command is killed if it runs past it. If the deadline
+                passes before a call starts, raises CommandFailureException
+                without starting the call.
+        """
+        code = job_lib.JobLibCodeGen.get_job_status(job_ids)
+
+        def _seconds_left() -> Optional[float]:
+            if deadline is None:
+                return None
+            # Leave a margin so the command is killed before the caller,
+            # which waits until `deadline`, gives up on this thread.
+            left = deadline - time.monotonic() - 1
+            if left < 1:
+                raise exceptions.CommandFailureException(
+                    command=code,
+                    failure='was not started',
+                    error_msg='Failed to get job status.',
+                    detailed_reason='The status check deadline passed.')
+            return left
+
         if handle.is_grpc_enabled_with_flag:
             try:
                 request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
+
+                def _call_skylet() -> 'jobsv1_pb2.GetJobStatusResponse':
+                    left = _seconds_left()
+                    grpc_timeout = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+                    if left is not None:
+                        grpc_timeout = min(grpc_timeout, left)
+                    return SkyletClient(
+                        handle.get_grpc_channel()).get_job_status(
+                            request, timeout=grpc_timeout)
+
                 response = backend_utils.invoke_skylet_with_retries(
-                    lambda: SkyletClient(handle.get_grpc_channel()
-                                        ).get_job_status(request))
+                    _call_skylet)
                 statuses: Dict[Optional[int], Optional[job_lib.JobStatus]] = {
                     job_id: job_lib.JobStatus.from_protobuf(proto_status)
                     for job_id, proto_status in response.job_statuses.items()
@@ -4908,22 +4942,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
                 logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
-        code = job_lib.JobLibCodeGen.get_job_status(job_ids)
-        # If timeout is set, pass it to the underlying command runner.
-        # log_lib.run_with_log uses a threading.Timer to kill the subprocess
-        # (and its kubectl exec child) if the deadline is hit, then raises
-        # subprocess.TimeoutExpired. Without this, the caller's
-        # asyncio.wait_for can fire but cannot terminate the subprocess —
-        # leaking a kubectl process that keeps holding TCP connections and
-        # consuming CPU.
+        # Build the runner before reading the time left, so that building it
+        # counts against the deadline. Only process startup then runs between
+        # the check and the start of the runner's kill timer.
+        head_runner = handle.get_command_runners()[0]
         kwargs: Dict[str, Any] = {}
-        if timeout is not None:
-            kwargs['timeout'] = timeout
+        left = _seconds_left()
+        if left is not None:
+            # On timeout, the runner kills the process tree (e.g. kubectl
+            # exec) and returns command_runner.TIMEOUT_RETURNCODE. The caller
+            # cannot do this itself: when its own wait gives up, this thread
+            # and its subprocess keep running.
+            kwargs['timeout'] = int(left)
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
                                                       separate_stderr=True,
+                                                      head_runner=head_runner,
                                                       **kwargs)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)

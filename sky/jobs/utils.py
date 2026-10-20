@@ -16,7 +16,6 @@ import os
 import pathlib
 import re
 import shlex
-import subprocess
 import textwrap
 import time
 import traceback
@@ -788,28 +787,24 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        # The asyncio.wait_for here cancels the Future on timeout but cannot
-        # kill the thread or its subprocess (kubectl exec) — that would leak
-        # a kubectl process. Pass a slightly-shorter subprocess `timeout` so
-        # log_lib.run_with_log fires its threading.Timer (which calls
-        # kill_children_processes) and raises subprocess.TimeoutExpired
-        # *before* this wait_for's deadline. The except clause below catches
-        # both TimeoutExpired (from the subprocess path) and TimeoutError
-        # (from the outer wait_for as a fallback).
-        subprocess_timeout = max(1, _JOB_STATUS_FETCH_TIMEOUT_SECONDS - 10)
+        # When wait_for gives up, the worker thread keeps running, and so
+        # would a kubectl exec it started. Passing the same deadline lets the
+        # backend kill its command before then. The deadline is set before
+        # to_thread, so time spent waiting for a free thread counts too.
+        deadline = time.monotonic() + _JOB_STATUS_FETCH_TIMEOUT_SECONDS
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
                               job_ids=job_ids,
                               stream_logs=False,
-                              timeout=subprocess_timeout),
+                              deadline=deadline),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         _log_job_status(status)
         return status, None
     except (exceptions.CommandError, exceptions.CommandFailureException,
             grpc.RpcError, grpc.FutureTimeoutError, ValueError, TypeError,
-            asyncio.TimeoutError, subprocess.TimeoutExpired) as e:
+            asyncio.TimeoutError) as e:
         # Note: Each of these exceptions has some additional conditions to
         # limit how we handle it and whether or not we catch it.
         potential_transient_error_reason = None
@@ -830,12 +825,6 @@ async def get_job_status(
             potential_transient_error_reason = (
                 'Job status check timed out after '
                 f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
-        elif isinstance(e, subprocess.TimeoutExpired):
-            # The inner subprocess timeout (set slightly below the outer
-            # wait_for) fires first, killing the kubectl child. Treat the
-            # same as the outer asyncio.TimeoutError: transient, retry.
-            potential_transient_error_reason = (
-                f'Job status check subprocess timed out after {e.timeout}s')
         # TODO(cooperc): Gracefully handle these exceptions in the backend.
         elif isinstance(e, ValueError):
             # If the cluster yaml is deleted in the middle of getting the
