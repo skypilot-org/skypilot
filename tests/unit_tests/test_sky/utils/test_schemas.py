@@ -1536,7 +1536,8 @@ class TestRegisterWorkspaceProperty(unittest.TestCase):
     def test_builtin_and_cloud_names_are_reserved(self):
         """A plugin can't take over a built-in key or a cloud section."""
         for name in ('private', 'allowed_users', 'read_access', 'gcp',
-                     'kubernetes', 'azure', 'runpod'):
+                     'kubernetes', 'azure', 'runpod', 'slurm', 'cloudflare',
+                     'Azure', 'KUBERNETES', 'Private'):
             with self.assertRaises(ValueError):
                 schemas.register_workspace_property(name, {'type': 'string'})
             with self.assertRaises(ValueError):

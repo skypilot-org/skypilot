@@ -163,7 +163,9 @@ def register_workspace_property(name: str,
     Raises:
         ValueError: If ``name`` is a built-in workspace property or a cloud.
     """
-    if name in _reserved_workspace_property_names():
+    # Cloud keys are matched case-insensitively by the dashboard, so compare
+    # the lowercased name.
+    if name.lower() in _reserved_workspace_property_names():
         raise ValueError(
             f'Cannot register workspace property {name!r}: it is a built-in '
             'workspace property or a cloud name.')

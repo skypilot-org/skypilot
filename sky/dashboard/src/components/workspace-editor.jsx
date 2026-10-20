@@ -45,7 +45,10 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
-import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  WORKSPACE_CLOUD_KEYS,
+} from '@/data/connectors/constants';
 import { getUserRole, getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
@@ -112,12 +115,10 @@ const WorkspaceConfigDescription = ({
     // Skip non-cloud configuration keys: the access-control keys
     // (`private`, `allowed_users`, `read_access`) and plugin-registered
     // workspace properties, whatever their shape. A key is a cloud section
-    // only if it names a known cloud or one that is currently enabled.
+    // if it names a supported cloud (enabled or not, with or without a
+    // display name here) or one that is currently enabled.
     const isCloud =
-      Object.prototype.hasOwnProperty.call(
-        CLOUD_CANONICALIZATIONS,
-        cloud.toLowerCase()
-      ) || isActuallyEnabled;
+      WORKSPACE_CLOUD_KEYS.has(cloud.toLowerCase()) || isActuallyEnabled;
     if (!isCloud) {
       return;
     }
