@@ -6306,6 +6306,12 @@ def test_get_cluster_uid_caches_reads(monkeypatch):
         core.read_namespace.assert_called_with('kube-system',
                                                _request_timeout=mock.ANY)
 
+        # An uncached read refreshes the cache for later reads.
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+        assert core.read_namespace.call_count == 2
+
 
 def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
     monkeypatch.setattr(utils, '_cluster_uid_cache', {})
