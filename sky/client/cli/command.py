@@ -8246,8 +8246,8 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
-@flags.all_users_option('Cancel all requests from all users (admin only; '
-                        'other users cancel only their own).')
+@flags.all_users_option('Cancel all requests from all users. On a server with '
+                        'per-user auth, a non-admin cancels only their own.')
 @flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -8256,7 +8256,8 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
     """Cancel a request running on SkyPilot API server.
 
     A request named by ID is cancelled whoever owns it, if you are allowed
-    to: an admin can cancel any request, other users only their own.
+    to: on a server with per-user auth, an admin can cancel any request and
+    other users only their own.
 
     Examples:
 
@@ -8268,7 +8269,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
       # Cancel all your requests.
       sky api cancel --all
       \b
-      # Cancel all requests from all users (admin only).
+      # Cancel all requests from all users.
       sky api cancel --all-users
 
     """
@@ -8279,9 +8280,13 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
             f'Provided REQUEST_IDS and {flag!r}.')
     if all or all_users:
         if not yes:
-            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            if all_users:
+                scope = ('all requests from ALL USERS (only your own if you '
+                         'are not an admin on a server with per-user auth)')
+            else:
+                scope = 'all YOUR requests'
             user_input = click.prompt(
-                f'This will cancel all {keyword} requests.\n'
+                f'This will cancel {scope}.\n'
                 f'To proceed, please type {colorama.Style.BRIGHT}'
                 f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
                 type=str)

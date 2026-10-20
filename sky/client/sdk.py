@@ -2655,13 +2655,17 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
                silent: bool = False) -> server_common.RequestId[List[str]]:
     """Aborts a request or all requests.
 
+    With neither request_ids nor all_users, aborts all of the caller's own
+    requests.
+
     Args:
         request_ids: The request ID(s) to abort. Can be a single string or a
-            list of strings. Named requests are cancelled whoever owns them,
-            subject to the server's permission check: an admin can cancel any
-            request, other users only their own.
-        all_users: Whether to abort all requests from all users. Only used
-            when request_ids is not given.
+            list of strings. On a server with per-user auth, an admin can
+            abort any request by id and other users only their own; on a
+            server without it, anyone can abort any request by id.
+        all_users: Whether to abort all requests from all users. On a server
+            with per-user auth, a non-admin aborts only their own. Cannot be
+            combined with request_ids.
         silent: Whether to suppress the output.
 
     Returns:
@@ -2671,35 +2675,32 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
         A list of request IDs that were cancelled.
 
     Raises:
-        click.BadParameter: If no request ID is specified and not all or
-            all_users is not set.
+        ValueError: If both request_ids and all_users are given.
     """
     echo = logger.info if not silent else logger.debug
+    # Same rule as `sky api cancel`: ids name what to cancel, all_users means
+    # every request, so asking for both is ambiguous.
+    if request_ids is not None and all_users:
+        raise ValueError('Can only specify one of request_ids or all_users.')
+    user_id = None
+    if not all_users:
+        user_id = common_utils.get_user_hash()
 
     # Convert single request ID to list if needed
     if isinstance(request_ids, str):
         request_ids = [request_ids]
 
-    # Named requests are not scoped to the caller's user hash: the server
-    # decides who may cancel what, so an admin can cancel another user's (or
-    # the system's) request by id, while a non-admin is still limited to
-    # their own. Servers that predate that check never applied the user scope
-    # to an explicit id list, so this grants nothing new there either.
-    user_id = None
-    if request_ids is None and not all_users:
-        user_id = common_utils.get_user_hash()
-
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
-    if request_ids is not None:
+    if all_users:
+        echo('Cancelling all users\' requests...')
+    elif request_ids is None:
+        echo(f'Cancelling all requests for user {user_id!r}...')
+    else:
         request_id_str = ', '.join(
             repr(request_id) for request_id in request_ids)
         plural = 's' if len(request_ids) > 1 else ''
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
-    elif all_users:
-        echo('Cancelling all users\' requests...')
-    else:
-        echo(f'Cancelling all requests for user {user_id!r}...')
 
     response = server_common.make_authenticated_request(
         'POST',

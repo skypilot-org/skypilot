@@ -47,7 +47,7 @@ def test_all_flags_cancel_everything(cancel_sdk, flag, all_users):
 def test_all_users_still_asks_for_confirmation(cancel_sdk):
     result = _invoke('-u', input_text='no\n')
     assert result.exit_code != 0
-    assert 'ALL USERS\' requests' in result.output
+    assert 'ALL USERS' in result.output
     cancel_sdk.assert_not_called()
 
     result = _invoke('-u', input_text='cancel all requests\n')

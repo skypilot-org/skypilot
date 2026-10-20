@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import pathlib
 import subprocess
@@ -21,6 +22,7 @@ from sky import skypilot_config
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import context
 
 T = TypeVar('T')
@@ -383,14 +385,23 @@ def test_api_cancel_other_users_request(generic_cloud: str):
     # teardown, which also deletes their service accounts).
     minter = f'cancel-admin-{suffix}@example.com'
     headers = {'X-Auth-Request-Email': minter}
+    # The id the server derives from the auth-proxy header (see
+    # sky/server/server.py::_extract_user_from_header).
+    minter_id = hashlib.md5(
+        minter.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
 
     def mint_tokens() -> Generator[str, None, None]:
         # The first user to reach the server through the auth-proxy header
         # gets the default (admin) role and mints a token per test identity.
-        role = requests.get(f'{base_url}/users/role',
-                            headers=headers,
-                            timeout=30).json().get('role')
-        assert role == 'admin', f'Expected the minting user to be admin: {role}'
+        me = requests.get(f'{base_url}/users/role', headers=headers,
+                          timeout=30).json()
+        # /users/role answers admin for an unauthenticated caller too, so
+        # check the header identity was used before trusting the role.
+        assert (me.get('id'), me.get('name')) == (minter_id, minter), (
+            f'The server ignored the auth-proxy header: {me}')
+        assert me.get('role') == 'admin', (
+            f'Expected the minting user to be admin: {me}')
         for identity, sa_role in [('admin', 'admin'), ('owner', 'user'),
                                   ('other', 'user')]:
             resp = requests.post(
@@ -484,6 +495,14 @@ def test_api_cancel_other_users_request(generic_cloud: str):
             f'account token $(cat "$f") (HTTP $code): '
             f'$(cat {state_dir}/delete.out 2>/dev/null)"; '
             f'done; '
+            # The minter itself was created as an admin on its first
+            # request. Delete it without the header, which would create it
+            # again.
+            f'code=$(curl -sS -o {state_dir}/delete.out -w "%{{http_code}}" '
+            f'-X POST -H "Content-Type: application/json" '
+            f'-d \'{{"user_id": "{minter_id}"}}\' {base_url}/users/delete); '
+            f'[ "$code" = 200 ] || echo "Failed to delete user {minter} '
+            f'(HTTP $code): $(cat {state_dir}/delete.out 2>/dev/null)"; '
             f'unset {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR} '
             f'{constants.USER_ID_ENV_VAR} '
             f'{constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS}; '
