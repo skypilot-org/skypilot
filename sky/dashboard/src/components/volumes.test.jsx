@@ -16,11 +16,12 @@ jest.mock('@/plugins/PluginSlot', () => ({
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
-  useTableColumns: () => [],
+  useTableColumns: jest.fn(() => []),
 }));
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { VolumesTable } from '@/components/volumes';
 
 // A CSI provisioner's refusal, long enough that the cell must truncate it.
@@ -270,5 +271,58 @@ describe('VolumesTable size column while a resize is pending', () => {
 
     const row = container.querySelector('table tbody tr');
     expect(row.textContent).not.toContain('→');
+  });
+});
+
+describe('VolumesTable sorting by a plugin column', () => {
+  // A column a plugin adds, whose value lives with the plugin rather than on
+  // the volume record.
+  const mountPaths = { 'vol-a': '/mnt/zeta', 'vol-b': '/mnt/alpha' };
+  const mountColumn = (header) => ({
+    id: 'mount-path',
+    table: 'volumes',
+    header: { label: 'Mount Path', order: 55, ...header },
+    cell: { render: (v) => mountPaths[v.name] || '-' },
+  });
+
+  const rowNames = (container) =>
+    Array.from(container.querySelectorAll('table tbody tr')).map(
+      (tr) => tr.querySelector('a')?.textContent
+    );
+
+  afterEach(() => {
+    useTableColumns.mockImplementation(() => []);
+  });
+
+  it('sorts by the value the column computes', async () => {
+    useTableColumns.mockImplementation(() => [
+      mountColumn({
+        sortKey: 'mount_path',
+        sortValue: (v) => mountPaths[v.name] || '',
+      }),
+    ]);
+    const { container } = await renderTable([volume('vol-a'), volume('vol-b')]);
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+    expect(headers(container)).toContain('Mount Path ↑');
+
+    fireEvent.click(screen.getByText(/Mount Path/));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+    expect(headers(container)).toContain('Mount Path ↓');
+  });
+
+  it('sorts by the field named by sortKey when no value is given', async () => {
+    useTableColumns.mockImplementation(() => [
+      mountColumn({ sortKey: 'size' }),
+    ]);
+    const { container } = await renderTable([
+      { ...volume('vol-a'), size: 5 },
+      { ...volume('vol-b'), size: 2 },
+    ]);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
   });
 });

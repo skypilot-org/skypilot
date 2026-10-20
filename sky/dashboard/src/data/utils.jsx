@@ -21,9 +21,15 @@ export function sortData(data, accessor, direction) {
   if (accessor === null) {
     return data;
   }
+  // A function accessor computes the value to sort a row by; a string one
+  // names the row's field.
+  const valueOf =
+    typeof accessor === 'function' ? accessor : (row) => row[accessor];
   return [...data].sort((a, b) => {
-    if (a[accessor] < b[accessor]) return direction === 'ascending' ? -1 : 1;
-    if (a[accessor] > b[accessor]) return direction === 'ascending' ? 1 : -1;
+    const valueA = valueOf(a);
+    const valueB = valueOf(b);
+    if (valueA < valueB) return direction === 'ascending' ? -1 : 1;
+    if (valueA > valueB) return direction === 'ascending' ? 1 : -1;
     return 0;
   });
 }

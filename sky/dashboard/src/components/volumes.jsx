@@ -619,10 +619,19 @@ export function VolumesTable({
     );
   }, [data, filters]);
 
+  const pluginColumns = useTableColumns('volumes');
+
+  // A plugin column whose value is not a field on the volume sorts by the
+  // value it computes instead.
+  const sortAccessor =
+    pluginColumns.find(
+      (col) => col.header.sortKey === sortConfig.key && col.header.sortValue
+    )?.header.sortValue || sortConfig.key;
+
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
-    return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [filteredData, sortConfig]);
+    return sortData(filteredData, sortAccessor, sortConfig.direction);
+  }, [filteredData, sortAccessor, sortConfig.direction]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -737,8 +746,6 @@ export function VolumesTable({
       return 'Invalid Date';
     }
   };
-
-  const pluginColumns = useTableColumns('volumes');
 
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
