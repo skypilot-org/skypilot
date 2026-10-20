@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import pathlib
+import random
 from typing import Any, AsyncGenerator, Deque, List, Optional
 import zlib
 
@@ -34,6 +35,60 @@ _SHORT_REQUEST_SPINNER_TIMEOUT = 2
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
+
+# How long the log tail sleeps when the log file has no new bytes.
+_IDLE_READ_INTERVAL = 0.1
+# While a request is parked (WAITING), the log tail checks its status less and
+# less often, up to this interval. A park can last hours, and every check is a
+# read of the requests DB, so a fixed 1s check makes the DB load grow with the
+# number of parked requests that a client is streaming. The cap matches the
+# one `wait_for_request_to_start` reaches for a LONG request.
+_WAITING_STATUS_CHECK_MAX_INTERVAL = 10 * LONG_REQUEST_POLL_INTERVAL
+_WAITING_STATUS_CHECK_MULTIPLIER = 2
+# Each interval while parked is shortened by a random fraction of up to this
+# much. It is applied after the cap, so that intervals at the cap differ too,
+# and streams of requests that parked at the same time drift apart instead of
+# reading the DB in the same instant.
+_WAITING_STATUS_CHECK_JITTER = 0.4
+# A parked request does not write to its log, so while the request is parked
+# and the log has no new bytes, the tail also reads the file less often.
+_WAITING_IDLE_READ_INTERVAL = 1.0
+
+
+class _StatusCheckInterval:
+    """The interval between two request status checks of a log tail.
+
+    It is the base polling interval unless the request is parked: each check
+    that finds the request WAITING doubles the interval, up to
+    `_WAITING_STATUS_CHECK_MAX_INTERVAL`, and then shortens it by a random
+    fraction. Any other status, or new bytes in the log, sets it back to the
+    base interval.
+    """
+
+    def __init__(self, base: float) -> None:
+        self._base = base
+        self._backoff = base
+        # The interval to wait before the next check.
+        self.current = base
+        # Whether the last check found the request WAITING, with no new log
+        # bytes since.
+        self.parked = False
+
+    def on_waiting(self) -> None:
+        """Back off after a check that found the request WAITING."""
+        self.parked = True
+        self._backoff = min(self._backoff * _WAITING_STATUS_CHECK_MULTIPLIER,
+                            max(self._base, _WAITING_STATUS_CHECK_MAX_INTERVAL))
+        jittered = self._backoff * (
+            1 - random.uniform(0, _WAITING_STATUS_CHECK_JITTER))
+        # Never check more often than the base interval.
+        self.current = max(self._base, jittered)
+
+    def reset(self) -> None:
+        """Go back to the base interval."""
+        self.parked = False
+        self._backoff = self._base
+        self.current = self._base
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -405,6 +460,7 @@ async def _tail_log_file(
 
     last_heartbeat_time = asyncio.get_event_loop().time()
     last_status_check_time = asyncio.get_event_loop().time()
+    status_check_interval = _StatusCheckInterval(polling_interval)
     # The last parked-state message pushed to this stream; see the WAITING
     # branch in the status check below.
     last_waiting_msg: Optional[str] = None
@@ -457,8 +513,9 @@ async def _tail_log_file(
 
             # Avoid checking the status too frequently to avoid overloading the
             # DB.
-            should_check_status = (current_time -
-                                   last_status_check_time) >= polling_interval
+            since_last_check = current_time - last_status_check_time
+            should_check_status = (since_last_check >=
+                                   status_check_interval.current)
             if not follow:
                 # We will only hit this path once, but we should make sure to
                 # check the status so that we display the final request status
@@ -484,11 +541,16 @@ async def _tail_log_file(
                         last_waiting_msg = waiting_msg
                         buffer.extend(
                             _waiting_status_chunks(waiting_msg, plain_logs))
+                    # The parked message changes rarely, and a resume shows up
+                    # as new log bytes, so the status can be checked less
+                    # often while the request stays parked.
+                    status_check_interval.on_waiting()
                 else:
                     # Any other status (resumed, queued again, finished): the
                     # request drives its own status again, and a later park has
                     # to be able to report the same reason afresh.
                     last_waiting_msg = None
+                    status_check_interval.reset()
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
@@ -552,13 +614,27 @@ async def _tail_log_file(
             # Sleep shortly to avoid storming the DB and CPU, this has
             # little impact on the responsivness here since we are waiting
             # for a new line to come in.
-            await asyncio.sleep(0.1)
+            idle_sleep = _IDLE_READ_INTERVAL
+            if status_check_interval.parked and not buffer:
+                # Parked, with nothing to flush: read the log less often, but
+                # wake up in time for the next status check.
+                until_next_check = (last_status_check_time +
+                                    status_check_interval.current -
+                                    asyncio.get_event_loop().time())
+                idle_sleep = max(
+                    _IDLE_READ_INTERVAL,
+                    min(_WAITING_IDLE_READ_INTERVAL, until_next_check))
+            await asyncio.sleep(idle_sleep)
             continue
 
         # Refresh the heartbeat time, this is a trivial optimization for
         # performance but it helps avoid unnecessary heartbeat strings
         # being printed when the client runs in an old version.
         last_heartbeat_time = asyncio.get_event_loop().time()
+        # New bytes: a parked request writes to its log again once it
+        # resumes, so go back to checking its status at the base interval.
+        if status_check_interval.parked:
+            status_check_interval.reset()
 
         # Combine with any incomplete line from previous chunk
         file_chunk = incomplete_line + file_chunk

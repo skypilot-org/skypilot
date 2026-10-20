@@ -40,6 +40,19 @@ if not os.path.exists(POLICY_PATH):
                                'admin_policy')
 
 
+@pytest.fixture(autouse=True)
+def _restore_config_env():
+    # Tests here point ENV_VAR_SKYPILOT_CONFIG at temp configs via os.environ;
+    # restore it and reload so later tests on this worker don't inherit them.
+    old = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    yield
+    if old is None:
+        os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    else:
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = old
+    skypilot_config.reload_config()
+
+
 @pytest.fixture
 def add_example_policy_paths(monkeypatch):
     # Patch sys.path in fixture scope to avoid interven the global path

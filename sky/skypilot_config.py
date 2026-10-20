@@ -486,6 +486,68 @@ def get_effective_region_config(cloud: str,
         merge_dicts=merge_dicts)
 
 
+def _loaded_workspaces() -> Dict[str, Any]:
+    """The loaded `workspaces:` section, not copied (`get_nested` deep-copies
+    the whole config): name lookups run per record and only read it."""
+    workspaces = _get_loaded_config().get('workspaces')
+    return workspaces if isinstance(workspaces, dict) else {}
+
+
+def get_workspace_name(workspace_id: str,
+                       workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """Returns the user-facing name of the workspace with this id.
+
+    A workspace's key in `workspaces:` is its immutable id; its `name` field is
+    what users see and type, and defaults to the id. The default workspace is
+    always named 'default', whatever is stored.
+    """
+    if workspace_id == constants.SKYPILOT_DEFAULT_WORKSPACE:
+        return workspace_id
+    if workspaces is None:
+        workspaces = _loaded_workspaces()
+    workspace_config = workspaces.get(workspace_id)
+    if isinstance(workspace_config, dict) and workspace_config.get('name'):
+        return workspace_config['name']
+    return workspace_id
+
+
+def workspace_label(workspace_id: str,
+                    workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """`'name' (id)` for logs and audit records; `'id'` when they match.
+
+    Names change and ids do not, so a record carries both.
+    """
+    name = get_workspace_name(workspace_id, workspaces)
+    if name == workspace_id:
+        return repr(workspace_id)
+    return f'{name!r} ({workspace_id})'
+
+
+def resolve_workspace_ref(ref: str,
+                          workspaces: Optional[Dict[str, Any]] = None) -> str:
+    """Maps a workspace reference (an id or a name) to its id.
+
+    An id wins: a name may not equal another workspace's id and a legacy id
+    stays taken after a rename, so a stored id never names another workspace
+    (barring a hand-edited config). Otherwise the ref is matched by name. An
+    unmatched ref is returned unchanged, so an unknown one fails where it is
+    checked.
+    """
+    if workspaces is None:
+        workspaces = _loaded_workspaces()
+    if ref == constants.SKYPILOT_DEFAULT_WORKSPACE or ref in workspaces:
+        return ref
+    matches = [
+        workspace_id for workspace_id in set(workspaces) |
+        {constants.SKYPILOT_DEFAULT_WORKSPACE}
+        if get_workspace_name(workspace_id, workspaces) == ref
+    ]
+    if len(matches) > 1:
+        raise ValueError(f'More than one workspace is named {ref!r}. Ask an '
+                         'administrator to rename one of them.')
+    return matches[0] if matches else ref
+
+
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace cloud config, deep-merged with global cloud config.
@@ -594,6 +656,9 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
                      f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
         active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
     else:
+        # Outside a request (e.g. a handler in the main process) this is the
+        # server config's own value, which an admin may write as a name.
+        active_workspace = _resolve_server_active_workspace(active_workspace)
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
 
@@ -952,6 +1017,22 @@ def loaded() -> bool:
     return bool(_get_loaded_config())
 
 
+def _resolve_server_active_workspace(ref: str,
+                                     workspaces: Optional[Dict[str, Any]] = None
+                                    ) -> str:
+    """Resolves the server config's own `active_workspace`.
+
+    Only a hand-edited config can make the name ambiguous; failing every
+    request (internal daemons included) would be worse, so use it as an id.
+    """
+    try:
+        return resolve_workspace_ref(ref, workspaces)
+    except ValueError as e:
+        logger.warning(f'Using active_workspace {ref!r} from the server '
+                       f'config as an id: {e}')
+        return ref
+
+
 @contextlib.contextmanager
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]],
@@ -961,8 +1042,17 @@ def override_skypilot_config(
     # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
-        # If no override configs (None or empty dict), do nothing.
-        yield
+        # The server's own `active_workspace` is typed by an admin; resolve it
+        # like a client's. Only the active workspace changes: the config keeps
+        # what the admin wrote (the config editor shows it).
+        server_workspace = get_nested(keys=('active_workspace',),
+                                      default_value=None)
+        if server_workspace is None:
+            yield
+            return
+        with local_active_workspace_ctx(
+                _resolve_server_active_workspace(server_workspace)):
+            yield
         return
     original_config = _get_loaded_config()
     original_config_path = loaded_config_path_serialized()
@@ -1005,11 +1095,20 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    workspace = config.get_nested(
-        keys=('active_workspace',),
-        default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
-    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
-            not in get_nested(keys=('workspaces',), default_value={})):
+    workspaces = get_nested(keys=('workspaces',), default_value={})
+    workspace = config.get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if workspace is not None:
+        if override_configs.get('active_workspace') is not None:
+            workspace = resolve_workspace_ref(workspace, workspaces)
+        else:
+            workspace = _resolve_server_active_workspace(workspace, workspaces)
+    if workspace is None:
+        workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    else:
+        config.set_nested(('active_workspace',), workspace)
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and
+            workspace not in workspaces):
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Use `sky check` to see if it is defined on the API '
                          'server and try again.')

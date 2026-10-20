@@ -46,7 +46,9 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
                                'set_user_preferred_workspace') as set_pref:
             resp = users_server.set_user_preferred_workspace(
                 _fake_request(self.user), self._body('team-a'))
-        set_pref.assert_called_once_with(self.user, 'team-a')
+        set_pref.assert_called_once_with(self.user,
+                                         'team-a',
+                                         workspace_ref='team-a')
         self.assertEqual(resp, {'preferred': 'team-a'})
 
     def test_rejected_no_access_raises_403(self):
@@ -74,7 +76,7 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
                                'set_user_preferred_workspace') as set_pref:
             resp = users_server.set_user_preferred_workspace(
                 _fake_request(self.user), self._body(None))
-        set_pref.assert_called_once_with(self.user, None)
+        set_pref.assert_called_once_with(self.user, None, workspace_ref=None)
         self.assertIsNone(resp['preferred'])
 
     def test_unauth_post_raises_401(self):
@@ -243,7 +245,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                 self.auth_user),
                                                    requested='team-b')
         # Resolver MUST receive `requested='team-b'`, not None.
-        resolve_mock.assert_called_once_with(fresh, requested='team-b')
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='team-b',
+                                             requested_ref='team-b')
         self.assertEqual(resp['workspace'], 'team-b')
         self.assertEqual(resp['source'],
                          workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
@@ -280,8 +284,42 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                                return_value='server-pinned'):
             resp = users_server.get_user_workspace(_fake_request(
                 self.auth_user))
-        resolve_mock.assert_called_once_with(fresh, requested='server-pinned')
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='server-pinned',
+                                             requested_ref='server-pinned')
         self.assertEqual(resp['workspace'], 'server-pinned')
+
+    def test_server_active_workspace_is_not_resolved_as_a_name(self):
+        """The server's own value is already an id, so a name clash left by
+        a hand-edited config neither remaps it nor fails the request."""
+        fresh = models.User(id='alice', name='alice')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='team-a',
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               return_value=resolution) as resolve_mock, \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_workspace_access_sets',
+                               return_value=({'team-a'}, {'team-a'})), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=True), \
+             mock.patch.object(users_server.skypilot_config,
+                               'get_active_workspace',
+                               return_value='team-a'), \
+             mock.patch.object(users_server.skypilot_config,
+                               'resolve_workspace_ref',
+                               side_effect=ValueError('ambiguous')):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        resolve_mock.assert_called_once_with(fresh,
+                                             requested='team-a',
+                                             requested_ref='team-a')
+        self.assertEqual(resp['workspace'], 'team-a')
 
     def test_ambiguous_resolver_surfaces_as_state_coded_source(self):
         """Resolver raises WorkspaceAmbiguousError (multi-ws user, no
@@ -441,8 +479,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             workspace='default',
             source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
 
-        def _resolve(_user, requested=None, action=None):
-            del _user, requested
+        def _resolve(_user, requested=None, action=None, requested_ref=None):
+            del _user, requested, requested_ref
             if action == workspace_constants.WORKSPACE_ACTION_READ:
                 return read_pick
             raise exceptions.NoWorkspaceAccessError(
@@ -488,8 +526,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             workspace='pub',
             source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
 
-        def _resolve(_user, requested=None, action=None):
-            del _user, requested
+        def _resolve(_user, requested=None, action=None, requested_ref=None):
+            del _user, requested, requested_ref
             if action == workspace_constants.WORKSPACE_ACTION_READ:
                 return read_pick
             raise exceptions.NoWorkspaceAccessError(
@@ -588,8 +626,11 @@ class TestSetPreferredWorkspaceSdkVersionGate(unittest.TestCase):
         original = versions.get_remote_api_version
         versions.get_remote_api_version = lambda: too_old  # type: ignore
         try:
-            with self.assertRaises(exceptions.APINotSupportedError) as cm:
+            with mock.patch('sky.server.common.check_server_healthy_or_start_fn'), \
+                 mock.patch('sky.server.common.make_authenticated_request') as request, \
+                 self.assertRaises(exceptions.APINotSupportedError) as cm:
                 sdk.set_preferred_workspace('team-a')
+            request.assert_not_called()
             self.assertIn('set_preferred_workspace', str(cm.exception))
         finally:
             versions.get_remote_api_version = original  # type: ignore

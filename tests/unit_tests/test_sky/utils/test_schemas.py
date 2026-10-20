@@ -646,6 +646,21 @@ class TestWorkspaceSchema(unittest.TestCase):
         }
         jsonschema.validate(instance=config, schema=self.workspaces_schema)
 
+    def test_slurm_sbatch_time_follows_slurm_grammar(self):
+
+        def workspace(time):
+            return {'ws': {'slurm': {'sbatch_options': {'time': time}}}}
+
+        for time in ('UNLIMITED', 'infinite', '-1', '0', '2-00:00:00', 30, None,
+                     False):
+            jsonschema.validate(instance=workspace(time),
+                                schema=self.workspaces_schema)
+        for time in ('2h', '1.5', '-2', -2, '5\n', True, 'ınfinite', '٣٠'):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'time={time!r} should be rejected'):
+                jsonschema.validate(instance=workspace(time),
+                                    schema=self.workspaces_schema)
+
     def test_slurm_quota_rejects_empty_values(self):
         """An empty queue/account would become a bare `--qos=` / `--account=`."""
         for cloud_config in (
