@@ -643,12 +643,18 @@ def _log_pinned_ray_version(cluster_name: str, ray_version: str,
         return
     preamble = (f'Cluster {cluster_name!r} stays on Ray {ray_version}; this '
                 f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
-        # `sky stop` rejects controllers (core.stop).
-        logger.info(f'{preamble} A controller moves to it after it is '
-                    'autostopped and restarted, where its cloud can stop, or '
-                    f'when recreated: `sky down {cluster_name}` once it has no '
-                    'managed jobs in progress and no services.')
+    controller = controller_utils.Controllers.from_prefix(cluster_name)
+    if controller is not None:
+        # `sky stop` rejects controllers (core.stop); the CLI's `sky down`
+        # refuses one that still has work.
+        if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+            idle = 'no managed jobs in progress and no pools'
+        else:
+            idle = 'no services'
+        logger.info(f'{preamble} A controller moves to it the next time it '
+                    'is launched after an autostop or autodown, or when '
+                    f'recreated: `sky down {cluster_name}` once it has '
+                    f'{idle}.')
         return
     try:
         cloud.check_features_are_supported(

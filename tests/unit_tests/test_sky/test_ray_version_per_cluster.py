@@ -16,6 +16,7 @@ from sky import clouds
 from sky import resources as resources_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import status_lib
 
@@ -248,12 +249,38 @@ def test_a_cluster_that_cannot_stop_is_told_to_recreate_it():
     assert 'recreated' in info and 'sky down c' in info
 
 
-def test_a_controller_is_not_told_to_stop():
-    """`sky stop` rejects controllers (core.stop), on every cloud."""
-    name = controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name
+@pytest.mark.parametrize('controller,idle,unrelated', [
+    (controller_utils.Controllers.JOBS_CONTROLLER,
+     'no managed jobs in progress and no pools', ['services']),
+    (controller_utils.Controllers.SKY_SERVE_CONTROLLER, 'no services',
+     ['managed jobs', 'pools']),
+])
+def test_a_controller_is_not_told_to_stop(controller, idle, unrelated):
+    """`sky stop` rejects controllers (core.stop), on every cloud.
+
+    `sky down` refuses a controller that still has work, and what counts as
+    work differs between the two.
+    """
+    name = controller.value.cluster_name
     info, _ = _notice(clouds.AWS(), cluster_name=name)
     assert 'sky stop' not in info, info
-    assert f'sky down {name}' in info and 'autostopped' in info
+    assert f'sky down {name}' in info and 'after an autostop or autodown' in info
+    assert f'once it has {idle}.' in info
+    assert not [word for word in unrelated if word in info], info
+
+
+def test_a_controller_under_another_name_is_still_a_controller():
+    """A controller launched under another user hash or server id.
+
+    Neither asserted on nor recorded as this process's controller name.
+    """
+    controller = controller_utils.Controllers.JOBS_CONTROLLER.value
+    before = controller.cluster_name
+    name = f'{common.JOB_CONTROLLER_PREFIX}{"f" * 8}'
+    assert name != before
+    info, _ = _notice(clouds.AWS(), cluster_name=name)
+    assert f'sky down {name}' in info and 'after an autostop or autodown' in info
+    assert controller.cluster_name == before
 
 
 def test_kubernetes_really_does_declare_stop_unsupported():
