@@ -228,3 +228,37 @@ class TestVerifyCoreweaveBucket:
 
         assert result is True
         mock_client.head_bucket.assert_called_once_with(Bucket='test-bucket')
+
+
+class TestRcloneS3GetConfig:
+    """Tests for region handling in Rclone.RcloneStores.S3.get_config."""
+
+    @mock.patch('sky.clouds.AWS.should_use_env_auth_for_s3', return_value=True)
+    def test_env_auth_config_includes_region(self, mock_env_auth):
+        """Region must be written to the env_auth rclone profile."""
+        config = data_utils.Rclone.RcloneStores.S3.get_config(
+            bucket_name='test-bucket', region='eu-south-2')
+        assert 'env_auth = true' in config
+        assert 'region = eu-south-2' in config
+
+    @mock.patch('sky.clouds.AWS.should_use_env_auth_for_s3', return_value=False)
+    @mock.patch('sky.data.data_utils.aws.session')
+    def test_static_credentials_config_includes_region(self, mock_session,
+                                                       mock_env_auth):
+        """Region must be written to the static-credentials rclone profile."""
+        mock_credentials = mock.MagicMock(access_key='test-access-key',
+                                          secret_key='test-secret-key')
+        mock_session.return_value.get_credentials.return_value.\
+            get_frozen_credentials.return_value = mock_credentials
+        config = data_utils.Rclone.RcloneStores.S3.get_config(
+            bucket_name='test-bucket', region='eu-south-2')
+        assert 'access_key_id = test-access-key' in config
+        assert 'secret_access_key = test-secret-key' in config
+        assert 'region = eu-south-2' in config
+
+    @mock.patch('sky.clouds.AWS.should_use_env_auth_for_s3', return_value=True)
+    def test_no_region_omits_region_line(self, mock_env_auth):
+        """Without a region, the profile must stay unchanged."""
+        config = data_utils.Rclone.RcloneStores.S3.get_config(
+            bucket_name='test-bucket')
+        assert 'region =' not in config
