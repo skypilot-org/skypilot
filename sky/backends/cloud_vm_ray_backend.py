@@ -4925,7 +4925,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 def _call_skylet() -> 'jobsv1_pb2.GetJobStatusResponse':
                     left = _seconds_left()
-                    grpc_timeout = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+                    grpc_timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
                     if left is not None:
                         grpc_timeout = min(grpc_timeout, left)
                     return SkyletClient(
