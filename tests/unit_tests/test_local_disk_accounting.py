@@ -33,6 +33,9 @@ def roots(tmp_path, monkeypatch):
         'absent': str(tmp_path / 'absent'),
     }
     monkeypatch.setattr(local_disk, 'local_roots', lambda: mapping)
+    # tmp_path can be on a filesystem the scanner deliberately leaves
+    # unwalked (e.g. a tmpfs /tmp), which would hide every byte written here.
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral', lambda *_: True)
     return present, other
 
 
@@ -374,6 +377,8 @@ def test_a_root_inside_another_root_is_measured_once(tmp_path, monkeypatch):
             'inner': str(inner),
             'same_as_outer': str(outer),
         }))
+    # See the roots fixture.
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral', lambda *_: True)
 
     snapshot = local_disk.scan()
 
