@@ -34,15 +34,19 @@ def test_enabled_clouds_empty():
 @pytest.mark.asyncio
 async def test_cluster_event_retention_daemon():
     """Test the cluster event retention daemon runs correctly."""
+    interval = sky.global_user_state.CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS
     with mock.patch('sky.global_user_state.skypilot_config') as mock_config:
         with mock.patch(
                 'sky.global_user_state.cleanup_cluster_events_with_retention'
         ) as mock_clean:
-            with mock.patch('asyncio.sleep') as mock_sleep:
+            # The daemon jitters before its first pass; patch that out so the
+            # sleep call counts below refer only to the loop's own interval.
+            with mock.patch('sky.utils.asyncio_utils.sleep_startup_jitter'
+                           ), mock.patch('asyncio.sleep') as mock_sleep:
                 # Configure negative retention (disabled)
                 mock_config.get_nested.return_value = -1
 
-                mock_sleep.side_effect = [None, asyncio.CancelledError()]
+                mock_sleep.side_effect = [asyncio.CancelledError()]
 
                 # Run the daemon
                 with pytest.raises(asyncio.CancelledError):
@@ -51,13 +55,12 @@ async def test_cluster_event_retention_daemon():
                 # Verify cleanup was NOT called due to negative retention
                 mock_clean.assert_not_called()
 
-                # Verify sleep was called with max(-1, 3600) = 3600
-                assert mock_sleep.call_count == 2
-                mock_sleep.assert_any_call(3600)
+                assert mock_sleep.call_count == 1
+                mock_sleep.assert_any_call(interval)
 
                 # Now test when we run retention with a positive value.
                 mock_config.get_nested.return_value = 2  # every 2 hours.
-                mock_sleep.side_effect = [None, None, asyncio.CancelledError()]
+                mock_sleep.side_effect = [None, asyncio.CancelledError()]
 
                 with pytest.raises(asyncio.CancelledError):
                     await sky.global_user_state.cluster_event_retention_daemon()
@@ -68,9 +71,14 @@ async def test_cluster_event_retention_daemon():
                 mock_clean.assert_any_call(
                     2, sky.global_user_state.ClusterEventType.DEBUG)
 
-                # Verify sleep was called with max(2 * 3600, 3600) = 7200
-                assert mock_sleep.call_count == 5
-                mock_sleep.assert_any_call(7200)
+                # The retention window still governs *what* is deleted (asserted
+                # above), but no longer how often the daemon wakes. It used to
+                # sleep max(min(retention, debug_retention), 3600), so a 2-hour
+                # retention meant waking every 2 hours and accumulating two
+                # hours of eligible events per pass.
+                assert mock_sleep.call_count == 3
+                mock_sleep.assert_any_call(interval)
+                assert mock.call(7200) not in mock_sleep.call_args_list
 
 
 def test_add_or_update_cluster_update_only(_mock_db_conn):

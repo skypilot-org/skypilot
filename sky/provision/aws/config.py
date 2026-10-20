@@ -111,13 +111,21 @@ def bootstrap_instances(
                                                        expected_sg_name,
                                                        extended_ip_rules,
                                                        enable_efa)
-        if expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+        managed_by_skypilot = security_group_config.get('ManagedBySkyPilot',
+                                                        True)
+        if (expected_sg_name != aws_cloud.DEFAULT_SECURITY_GROUP_NAME and
+                managed_by_skypilot):
             logger.debug('Attempting to create the default security group.')
             # Attempt to create the default security group. This is needed
             # to enable us to use the default security group to quickly
             # delete the cluster. If the default security group is not created,
             # we will need to block on instance termination to delete the
             # security group.
+            # When the security group is specified by the user
+            # (ManagedBySkyPilot is False), SkyPilot never deletes it at
+            # teardown (see terminate_instances in instance.py), so the
+            # default security group would never be used. Skip creating it to
+            # avoid a pointless (and possibly denied) CreateSecurityGroup call.
             try:
                 _configure_security_group(ec2, vpc_id,
                                           aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
@@ -743,6 +751,8 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
     if security_group is not None:
         return security_group
 
+    logger.debug(f'Security group {expected_sg_name!r} was not found in VPC '
+                 f'{vpc_id!r}. Creating a new security group.')
     try:
         # create a new security group with skypilot tag
         ec2.meta.client.create_security_group(
@@ -772,7 +782,8 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
                 f'[id={security_group.id}]')
             return security_group
-        message = ('Failed to create security group. Error: '
+        message = (f'Failed to create security group {expected_sg_name!r} in '
+                   f'VPC {vpc_id!r}. Error: '
                    f'{common_utils.format_exception(e)}')
         logger.warning(message)
         raise exceptions.NoClusterLaunchedError(message) from e

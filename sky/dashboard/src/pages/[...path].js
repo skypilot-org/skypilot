@@ -6,7 +6,7 @@ import { usePluginRoute } from '@/plugins/PluginProvider';
 
 /**
  * Catch-all page that handles plugin routes without the /plugins/ prefix.
- * e.g. /dashboard/cron renders the plugin registered at /cron (or /plugins/cron).
+ * e.g. /dashboard/foo renders the plugin registered at /foo (or /plugins/foo).
  * Specific pages (clusters.js, jobs.js, etc.) take routing priority over this.
  */
 

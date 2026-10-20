@@ -303,6 +303,31 @@ In this configuration:
   You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
 
 
+.. _jobs-wait-for-scheduling-timeout:
+
+Giving up on jobs that cannot get resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, a managed job that cannot get resources keeps trying indefinitely. If capacity that never shows up is worse than no job at all (e.g., an 8-GPU job that is only useful if it starts today), set :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>` to give up instead:
+
+.. code-block:: yaml
+
+  job:
+    # Cancel the job if it has not started running within 2 hours.
+    wait_for_scheduling_timeout: 2h
+
+  resources:
+    accelerators: H100:8
+
+The clock starts at the job's :code:`SUBMITTED` time and covers everything until the job first starts running: on cloud VMs, the controller retrying the launch across regions and clouds; on Kubernetes, also waiting for the pods to be scheduled, including in a Kueue queue. Once the job has started, the timeout no longer applies, including during recovery from a later preemption.
+
+When the timeout fires, the job is cancelled as with :code:`sky jobs cancel` and ends :code:`CANCELLED`. The reason, e.g. ``task did not start within job.wait_for_scheduling_timeout=2h (waited 2h 25s)``, is shown in the details column of :code:`sky jobs queue` and in the job's events.
+
+.. note::
+
+  When :code:`job.wait_for_scheduling_timeout` is set, it is the only bound on a wait in a Kueue queue: the job keeps its place in the queue until it is admitted or the timeout fires. Without it, :ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>` (default 24 hours) ends each launch attempt's wait for admission, and the retry re-enters the queue at the back. Setting :code:`admission_timeout` explicitly still bounds each attempt.
+
+
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -317,7 +342,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Can't find available resources due to capacity:
-     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found.
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found, or, if :ref:`job.wait_for_scheduling_timeout <jobs-wait-for-scheduling-timeout>` is set, until it is reached before the job first starts.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
@@ -423,6 +448,78 @@ You can easily manage dozens, hundreds, or thousands of managed jobs at once. Th
 .. TODO(cooperc): code block or dashboard showcasing UX of many jobs (thousand-scale)
 
 To increase the maximum number of jobs that can run at once, see :ref:`consolidation-mode-resource-planning`.
+
+.. _num-jobs:
+
+Submitting many jobs at once with ``--num-jobs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When every job runs the same YAML and differs only in which slice of the work it
+processes, use :code:`--num-jobs` to submit them all with one command:
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+
+This submits 10 independent managed jobs. Each job is launched on its own
+cluster and is recovered independently if it is preempted or fails — exactly
+as if you had run :code:`sky jobs launch` ten times.
+
+Each job is given two environment variables that let it work out which slice of
+the work is its own:
+
+- :code:`$SKYPILOT_JOB_RANK`: this job's rank, an integer from :code:`0` to :code:`num_jobs - 1`.
+- :code:`$SKYPILOT_NUM_JOBS`: the total number of jobs submitted.
+
+Both are always set, so the same YAML also works when launched as a single job
+(rank :code:`0` of :code:`1` job).
+
+For example, to evaluate 1000 prompts across 10 jobs, job rank :code:`i` can
+process prompts :code:`i * 100` through :code:`(i + 1) * 100`:
+
+.. code-block:: yaml
+
+  # batch-job.yaml
+  name: batch-workload
+
+  resources:
+    accelerators: {H100:1, H200:1}
+
+  run: |
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
+    echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
+    # Actual business logic here...
+    echo "Job $SKYPILOT_JOB_RANK finished"
+
+Submitting it produces one job per rank:
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+  YAML to run: batch-job.yaml
+  Submitting 10 managed jobs. Each job will be launched on its own cluster.
+  Managed job 'batch-workload' will be launched on (estimated):
+  ...
+  Launching 10 managed jobs 'batch-workload'. Proceed? [Y/n]: Y
+  Jobs submitted with IDs: 1-10.
+  📋 Useful Commands
+  ├── Show all jobs:                      https://<api-server>/dashboard/jobs
+  ├── To stream job logs:                 sky jobs logs <job-id>
+  ├── To stream controller logs:          sky jobs logs --controller <job-id>
+  └── To cancel all these jobs:           sky jobs cancel <job-ids>
+
+All 10 jobs are submitted immediately, but they do not necessarily all start at
+once: how many run concurrently is bounded by the jobs controller's capacity.
+Jobs beyond that limit stay :code:`PENDING` and start as capacity frees up. See
+:ref:`consolidation-mode-resource-planning` to raise the limit.
+
+.. note::
+
+  Use :code:`--num-jobs` when the jobs share one YAML — either because they
+  differ only by rank, or because each job works out its own assignment (e.g.,
+  a sweep agent that pulls its next configuration from a controller). If each
+  job needs different resources or a different launch command, launch them
+  separately instead — see :ref:`many-jobs` for that workflow.
 
 
 .. _pipeline:
@@ -564,25 +661,28 @@ If you want to use a pre-provisioned bucket for storing intermediate files, set 
 
 If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
 
-When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
+When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under a per-workspace directory, :code:`workspaces/<workspace>/`, to store files. If :code:`jobs.bucket` includes a sub-path (e.g., :code:`s3://my-bucket/skypilot`), the directories are created under that sub-path. They are organized in the following structure:
 
 .. code-block:: text
 
   # cloud bucket, s3://my-bucket/ for example
   my-bucket/
-  ├── job-15891b25/            # Job-specific directory
-  │   ├── local-file-mounts/   # Files from local file mounts
-  │   ├── tmp-files/           # Temporary files
-  │   └── workdir/             # Files from workdir
-  └── job-cae228be/            # Another job's directory
-      ├── local-file-mounts/
-      ├── tmp-files/
-      └── workdir/
+  └── workspaces/
+      ├── default/                 # Jobs in the `default` workspace
+      │   ├── job-15891b25/        # Job-specific directory
+      │   │   ├── local-file-mounts/   # Files from local file mounts
+      │   │   ├── tmp-files/           # Temporary files
+      │   │   └── workdir/             # Files from workdir
+      │   └── job-cae228be/        # Another job's directory
+      └── team-a/                  # Jobs in the `team-a` workspace
+          └── job-4uqylqhd/
 
 When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
 
 .. tip::
-  Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
+  Multiple users and workspaces can share the same intermediate bucket. Each job has its own job-specific directory, and each :ref:`workspace <workspaces>` has its own :code:`workspaces/<workspace>/` prefix, so bucket IAM policies can grant access per workspace.
+
+  A workspace whose name contains characters other than lowercase letters, digits, :code:`-` and :code:`_` (e.g., a workspace named :code:`Research` or :code:`ml/prod`) uses the prefix :code:`<slug>.<hash>` instead, where :code:`<slug>` is the lowercased name with other characters replaced by :code:`-` and :code:`<hash>` is the first 8 hex digits of the SHA-256 of the name: :code:`Research` uses :code:`workspaces/research.979d6300/`.
 
 .. _nested-skypilot-managed-jobs:
 
@@ -602,6 +702,8 @@ means managed jobs can call the SkyPilot CLI/SDK to launch new workloads:
     sky jobs launch -y -n nested --cpus 2 "echo hello from nested job"
 
 The credentials are automatically injected and revoked when the job finishes. To disable this, set :code:`api_server_access: false`.
+
+When the launching job is a task of a :ref:`job group <job-groups>`, the new job attaches to that group: it is listed under the group and cancelled with it. See :ref:`job-groups-dynamic-members`. Pass :code:`--no-job-group` to launch a top-level job instead.
 
 .. note::
 
@@ -845,7 +947,7 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
 .. note::
   Remember to tear down your controller to apply these changes, as described above.
 
-With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+With this configuration, you can launch up to 512 jobs at once.
 
 .. _migrating-from-remote-controller:
 

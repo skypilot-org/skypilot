@@ -117,13 +117,17 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 )
 
 # Image ID tags
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
+# The -ray256 images have SKY_REMOTE_RAY_VERSION baked in. New tags
+# rather than new rows for the old ones, because older SkyPilot versions read
+# the same catalog and still run the Ray that the old images carry.
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204-ray256'
 # For GPU-related package version, see sky/catalog/images/provisioners/cuda.sh
 # Default GPU image: NVIDIA 580 open kernel module + CUDA 13. Supports Turing
 # and later only.
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204-cuda13'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204-cuda13-ray256'
 # Legacy GPU image: NVIDIA 535 proprietary driver + CUDA 12. Used for pre-Turing
-# GPUs (V100, P100, P4, M60) that the open kernel module does not support.
+# GPUs (V100, P100, P4, M60) that the open kernel module does not support. Not
+# rebuilt for the Ray upgrade: those nodes install Ray at launch.
 _DEFAULT_GPU_CUDA12_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Use COS image with GPU Direct support.
@@ -606,8 +610,14 @@ class GCP(clouds.Cloud):
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4', 'B200'):
-                    # A100-80GB and L4 have a different name pattern.
+                    # A100-80GB, L4, and B200 use the `nvidia-<acc>` form
+                    # rather than `nvidia-tesla-<acc>`.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
+                elif acc == 'RTXPRO6000':
+                    # GCP's accelerator type is `nvidia-rtx-pro-6000`; the
+                    # `nvidia-{acc.lower()}` shortcut would produce the wrong
+                    # `nvidia-rtxpro6000`.
+                    resources_vars['gpu'] = 'nvidia-rtx-pro-6000'
                 elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 elif acc in ('H200',):
@@ -1236,8 +1246,10 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4'):
-            # a3-ultragpu, n4, and a4 instances only support hyperdisk-balanced.
+        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4',
+                                                                 'g4'):
+            # a3-ultragpu, n4, a4, and g4 instances only support
+            # hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling

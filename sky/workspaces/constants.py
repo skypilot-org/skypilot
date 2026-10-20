@@ -27,3 +27,24 @@ WORKSPACE_SOURCE_SINGLE_MEMBERSHIP = 'single-membership'
 WORKSPACE_SOURCE_AMBIGUOUS = 'ambiguous'
 WORKSPACE_SOURCE_NO_ACCESS = 'no-access'
 WORKSPACE_SOURCE_PERMISSION_DENIED = 'permission-denied'
+# The user can read one or more workspaces but write none of them (every
+# accessible workspace is read-only-visible to them).
+WORKSPACE_SOURCE_READ_ONLY = 'read-only'
+
+# Values for the per-workspace ``read_access`` config key, which controls who
+# may read a (private) workspace. 'allowed_users' (default): only the
+# workspace's allowed users (its members) can see it — it is hidden from
+# everyone else. 'all': anyone can see the workspace and its clusters/jobs, but
+# writes stay members-only, so non-members effectively get read-only access.
+# Only meaningful for private workspaces; an open (non-private) workspace is
+# usable by everyone regardless.
+READ_ACCESS_ALLOWED_USERS = 'allowed_users'
+READ_ACCESS_ALL = 'all'
+
+# Access levels a request can require on the caller's *active* workspace.
+# 'read' means "may I use this workspace as my context" (satisfied by
+#  membership OR by the workspace being read-only-visible to non-members);
+# 'write' means "may I create resources in this workspace" (membership only).
+# Write implies read.
+WORKSPACE_ACTION_READ = 'read'
+WORKSPACE_ACTION_WRITE = 'write'

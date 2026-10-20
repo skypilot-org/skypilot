@@ -43,9 +43,14 @@ import {
 import {
   getClusters,
   getClusterHistory,
+  getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -68,10 +73,13 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { evaluateCondition } from '@/components/shared/FilterSystem';
+import { filterData } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
+import { getCurrentUserInfo } from '@/data/connectors/client';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 
 // Page-size ("rows per page") options for the clusters table, and the
@@ -88,33 +96,75 @@ const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 //   return cost.toFixed(2);
 // };
 
-// Define filter options for the filter dropdown
-const PROPERTY_OPTIONS = [
+// The filterable properties of this page, declared once. `key` is what the URL
+// carries and what `optionValues` is keyed by; `label` is display only, and is
+// what a chip stores in `filter.property`. Because the dropdown and the URL
+// read the same list, a filter the page offers is always one it can read back.
+export const CLUSTER_FILTER_SCHEMA = [
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'cluster', label: 'Cluster', kind: 'text' },
+  { key: 'user', label: 'User', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
+];
+
+const HISTORY_DAY_OPTIONS = [1, 5, 10, 30];
+
+// Non-filter state that also belongs in a shared link. Anything left at its
+// default stays out of the URL.
+const CLUSTER_VIEW_SCHEMA = [
+  { key: 'owner', default: 'mine' },
   {
-    label: 'Status',
-    value: 'status',
-  },
-  {
-    label: 'Cluster',
-    value: 'cluster',
-  },
-  {
-    label: 'User',
-    value: 'user',
-  },
-  {
-    label: 'Workspace',
-    value: 'workspace',
-  },
-  {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
-    label: 'Labels',
-    value: 'labels',
+    key: 'history',
+    default: 'off',
+    // Older links carry `history=true` and a separate `historyDays=N`.
+    legacyKeys: ['historyDays'],
+    fromLegacy: (query) => {
+      if (query.history === 'true') {
+        const days = parseInt(query.historyDays, 10);
+        return HISTORY_DAY_OPTIONS.includes(days) ? `${days}d` : '1d';
+      }
+      if (query.history === 'false') {
+        return 'off';
+      }
+      return undefined;
+    },
   },
 ];
+
+const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
+  label,
+  value: key,
+  multi: multi ?? false,
+}));
+
+// Properties whose values are alternatives rather than extra conditions. Only
+// these may hold more than one chip; everything else replaces, so the page can
+// never show more filters than a shared link is able to carry.
+const OR_PROPERTIES = CLUSTER_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(
+  CLUSTER_FILTER_SCHEMA.filter((e) => e.multi).map((e) => e.label)
+);
+
+// Add a chip, replacing any existing one on a single-valued property and
+// ignoring an exact duplicate.
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
+
+// `history` carries the window directly: absent means the history view is off,
+// otherwise `1d` / `5d` / `10d` / `30d`. Replaces the old `history=true` plus
+// `historyDays=N` pair.
+const parseHistory = (value) => {
+  const days = parseInt(String(value ?? '').replace(/d$/, ''), 10);
+  return HISTORY_DAY_OPTIONS.includes(days) ? days : null;
+};
 
 // Helper function to format username for display (reuse from users.jsx)
 const formatUserDisplay = (username, userId) => {
@@ -171,6 +221,73 @@ const formatDuration = (durationSeconds) => {
   return result.trim() || '0s';
 };
 
+// Default to the signed-in user's own clusters (matching the jobs page) and
+// remember the user's last My/All choice in localStorage.
+const OWNER_SCOPE_MINE = 'mine';
+const OWNER_SCOPE_ALL = 'all';
+const OWNER_SCOPE_STORAGE_KEY = 'skypilot-dashboard-clusters-owner-scope';
+
+const isOwnerScope = (value) =>
+  value === OWNER_SCOPE_MINE || value === OWNER_SCOPE_ALL;
+
+// localStorage access is wrapped in try-catch: it can throw when storage
+// is restricted (blocked site data, sandboxed iframes), and scope
+// persistence is not worth crashing the page over.
+const readStoredOwnerScope = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = window.localStorage.getItem(OWNER_SCOPE_STORAGE_KEY);
+    return isOwnerScope(stored) ? stored : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// The chosen history window is a preference, not part of the view: `history=off`
+// carries no day count, so remember it the way the page already remembers the
+// owner scope and the page size. A window named in the URL wins and is stored,
+// like a manual choice.
+const HISTORY_DAYS_STORAGE_KEY = 'skypilot-dashboard-clusters-history-days';
+
+const readStoredHistoryDays = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = parseInt(
+      window.localStorage.getItem(HISTORY_DAYS_STORAGE_KEY),
+      10
+    );
+    return HISTORY_DAY_OPTIONS.includes(stored) ? stored : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeStoredHistoryDays = (days) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(HISTORY_DAYS_STORAGE_KEY, String(days));
+  } catch (e) {
+    // Ignore: the window still applies for this session via state/URL.
+  }
+};
+
+const writeStoredOwnerScope = (scope) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, scope);
+  } catch (e) {
+    // Ignore: the scope still applies for this session via state/URL.
+  }
+};
+
 export function Clusters() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -179,36 +296,50 @@ export function Clusters() {
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
 
-  // Initialize showHistory from URL parameter immediately
-  const getInitialShowHistory = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const historyParam = router.query.history;
-      return historyParam === 'true';
-    }
-    return false;
-  };
+  // Filters and the shareable view state both live in the URL, keyed by name.
+  const { filters, setFilters, view, setView, initialQuery } =
+    useUrlFilterState(CLUSTER_FILTER_SCHEMA, CLUSTER_VIEW_SCHEMA);
 
-  // Initialize historyDays from URL parameter immediately
-  const getInitialHistoryDays = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const daysParam = router.query.historyDays;
-      if (
-        daysParam &&
-        typeof daysParam === 'string' &&
-        ['1', '5', '10', '30'].includes(daysParam)
-      ) {
-        return parseInt(daysParam);
-      }
-    }
-    return 1; // Default to 1 day
-  };
+  const historyDays = parseHistory(view.history) ?? 1;
+  const showHistory = parseHistory(view.history) !== null;
+  const userScope = isOwnerScope(view.owner) ? view.owner : OWNER_SCOPE_MINE;
+  const setUserScope = useCallback(
+    (scope) => setView('owner', scope),
+    [setView]
+  );
 
-  const [showHistory, setShowHistory] = useState(getInitialShowHistory);
-  const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
-  const [historyDays, setHistoryDays] = useState(getInitialHistoryDays);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  // Whether the current scope has any rows; gates the "Showing your
+  // clusters only" hint so it never overlaps the empty-state CTA.
+  const [scopedHasRows, setScopedHasRows] = useState(false);
   const isMobile = useMobile();
 
-  const [filters, setFilters] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserInfo()
+      .then((info) => {
+        if (cancelled) return;
+        setAuthResolved(true);
+        if (info && info.id && info.id !== 'local') {
+          setCurrentUser({ id: info.id, name: info.name });
+        } else {
+          setUserScope(OWNER_SCOPE_ALL);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthResolved(true);
+          setUserScope(OWNER_SCOPE_ALL);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount; setUserScope is stable via useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [optionValues, setOptionValues] = useState({
     status: [],
     cluster: [],
@@ -220,37 +351,35 @@ export function Clusters() {
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
-  // Handle URL query parameters for workspace and user filtering and show history
+  // Owner scope resolution: a deep-linked `?owner=` wins and is persisted like
+  // a manual toggle; otherwise fall back to the user's last choice. An
+  // anonymous server has no "mine" to scope to, so it is always All.
+  const scopeSeeded = useRef(false);
   useEffect(() => {
-    if (router.isReady) {
-      updateFiltersByURLParams();
-
-      // Sync showHistory state with URL if it has changed
-      const historyParam = router.query.history;
-      const expectedState = historyParam === 'true';
-
-      if (showHistory !== expectedState) {
-        setShouldAnimate(false); // Disable animation for programmatic changes
-        setShowHistory(expectedState);
-        // Re-enable animation after a short delay
-        setTimeout(() => setShouldAnimate(true), 50);
+    if (!router.isReady) {
+      return;
+    }
+    if (authResolved && !currentUser) {
+      if (view.owner !== OWNER_SCOPE_ALL) {
+        setView('owner', OWNER_SCOPE_ALL);
       }
-
-      // Sync historyDays state with URL if it has changed
-      const daysParam = router.query.historyDays;
-      if (
-        daysParam &&
-        typeof daysParam === 'string' &&
-        ['1', '5', '10', '30'].includes(daysParam)
-      ) {
-        const expectedDays = parseInt(daysParam);
-        if (historyDays !== expectedDays) {
-          setHistoryDays(expectedDays);
-        }
-      }
+      return;
+    }
+    if (scopeSeeded.current) {
+      return;
+    }
+    scopeSeeded.current = true;
+    const deepLinked = initialQuery.owner;
+    if (isOwnerScope(deepLinked)) {
+      writeStoredOwnerScope(deepLinked);
+      return;
+    }
+    const stored = readStoredOwnerScope();
+    if (stored && stored !== view.owner) {
+      setView('owner', stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.history, router.query.historyDays]);
+  }, [router.isReady, initialQuery, authResolved, currentUser, view.owner]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -322,116 +451,65 @@ export function Clusters() {
     fetchFilterData();
   }, []);
 
-  // Helper function to update URL query parameters
-  const updateURLParams = (filters) => {
-    const query = { ...router.query };
-
-    let properties = [];
-    let operators = [];
-    let values = [];
-
-    filters.map((filter, _index) => {
-      properties.push(filter.property.toLowerCase() ?? '');
-      operators.push(filter.operator);
-      values.push(filter.value);
-    });
-
-    query.property = properties;
-    query.operator = operators;
-    query.value = values;
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
+  const selectScope = (scope) => {
+    setView('owner', scope);
+    writeStoredOwnerScope(scope);
   };
 
-  // Helper function to update show history in URL
-  const updateShowHistoryURL = (showHistoryValue) => {
-    const query = { ...router.query };
-    query.history = showHistoryValue.toString();
-
-    // Use replace to avoid adding to browser history for show history changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Helper function to update history days in URL
-  const updateHistoryDaysURL = (historyDaysValue) => {
-    const query = { ...router.query };
-    query.historyDays = historyDaysValue.toString();
-
-    // Use replace to avoid adding to browser history for history days changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  const updateFiltersByURLParams = () => {
-    const query = { ...router.query };
-
-    const properties = query.property;
-    const operators = query.operator;
-    const values = query.value;
-
-    if (properties === undefined) {
-      return;
+  // Remember the chosen window across an Active/All round trip: `history=off`
+  // carries no day count, so without this the toggle would silently reset a
+  // 30-day view to 1 day.
+  const lastHistoryDays = useRef(
+    parseHistory(view.history) ?? readStoredHistoryDays() ?? 1
+  );
+  useEffect(() => {
+    const days = parseHistory(view.history);
+    if (days !== null) {
+      lastHistoryDays.current = days;
+      writeStoredHistoryDays(days);
     }
+  }, [view.history]);
 
-    let filters = [];
-
-    const length = Array.isArray(properties) ? properties.length : 1;
-
-    const propertyMap = new Map();
-    propertyMap.set('', '');
-    propertyMap.set('status', 'Status');
-    propertyMap.set('cluster', 'Cluster');
-    propertyMap.set('user', 'User');
-    propertyMap.set('workspace', 'Workspace');
-    propertyMap.set('infra', 'Infra');
-
-    if (length === 1) {
-      filters.push({
-        property: propertyMap.get(properties),
-        operator: operators,
-        value: values,
-      });
-    } else {
-      for (let i = 0; i < length; i++) {
-        filters.push({
-          property: propertyMap.get(properties[i]),
-          operator: operators[i],
-          value: values[i],
-        });
-      }
-    }
-
-    setFilters(filters);
+  const selectHistoryTab = (showHistoryValue) => {
+    setView(
+      'history',
+      showHistoryValue ? `${lastHistoryDays.current}d` : 'off'
+    );
   };
+
+  const selectHistoryDays = (days) => {
+    setView('history', `${days}d`);
+  };
+
+  const explicitUserFilter = useMemo(
+    () =>
+      (filters || []).find(
+        (f) => (f.property || '').toLowerCase() === 'user' && f.value
+      ),
+    [filters]
+  );
+
+  const isMine = useMemo(
+    () =>
+      explicitUserFilter
+        ? currentUser &&
+          (String(explicitUserFilter.value) === currentUser.id ||
+            String(explicitUserFilter.value) === currentUser.name)
+        : userScope === OWNER_SCOPE_MINE,
+    [explicitUserFilter, currentUser, userScope]
+  );
+
+  const isEveryone = !explicitUserFilter && userScope === OWNER_SCOPE_ALL;
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getClusters);
+    // Invalidate cache to ensure fresh data is fetched. Use invalidateFunction
+    // so every cache key is dropped regardless of arguments (e.g. the
+    // current-user-scoped [{allUsers: false}] entry used by "My Clusters").
+    dashboardCache.invalidateFunction(getClusters);
     dashboardCache.invalidate(getWorkspaces);
     // Only invalidate cluster history if we're currently showing history
     if (showHistory) {
-      dashboardCache.invalidate(getClusterHistory);
+      dashboardCache.invalidateFunction(getClusterHistory);
     }
 
     // Reset preloading state so ClusterTable can fetch fresh data immediately
@@ -448,6 +526,18 @@ export function Clusters() {
     });
   };
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={optionValues}
+      setFilters={setFilters}
+      placeholder="Filter clusters"
+      filters={filters}
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
@@ -460,96 +550,136 @@ export function Clusters() {
           </Link>
         </div>
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-            placeholder="Filter clusters"
-            filters={filters}
+          <PluginSlot
+            name="clusters.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList: optionValues,
+              placeholder: 'Filter clusters',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <div className="flex items-center gap-2">
-            <label
-              className="flex items-center cursor-pointer"
-              title="Toggle cluster history"
-            >
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => {
-                  const newValue = e.target.checked;
-                  setShowHistory(newValue);
-                  updateShowHistoryURL(newValue);
-                }}
-                className="sr-only"
-              />
+      </div>
+
+      <PluginSlot
+        name="clusters.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
+
+      {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
+          they read consistently across pages and stay clear of the search
+          box. Refresh/last-updated sit on the right of the same row; below
+          lg the timestamp hides and Refresh stays level with the first
+          toggle row when the toggles wrap. */}
+      <div className="flex justify-between mb-4 max-lg:items-start lg:items-center">
+        <div className="flex flex-wrap items-center gap-2">
+          <SegmentedToggle
+            ariaLabel="Filter clusters by activity"
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'all', label: 'All' },
+            ]}
+            value={showHistory ? 'all' : 'active'}
+            onChange={(value) => selectHistoryTab(value === 'all')}
+          />
+          {currentUser && (
+            <SegmentedToggle
+              ariaLabel="Filter clusters by owner"
+              options={[
+                { value: OWNER_SCOPE_MINE, label: 'My Clusters' },
+                { value: OWNER_SCOPE_ALL, label: 'All Clusters' },
+              ]}
+              value={
+                isMine ? OWNER_SCOPE_MINE : isEveryone ? OWNER_SCOPE_ALL : null
+              }
+              onChange={selectScope}
+            />
+          )}
+          {/* Scope hint: when the table is filtered to the current user's
+              clusters, remind them and offer a one-click path to All
+              Clusters (mirrors the Managed Jobs page). Suppressed in the
+              empty state (the empty-state CTA already says this) and when
+              an explicit User filter has overridden the toggle. */}
+          {userScope === OWNER_SCOPE_MINE &&
+            currentUser &&
+            !explicitUserFilter &&
+            scopedHasRows && (
               <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
+                className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                role="status"
+                aria-live="polite"
               >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
+                <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                <span className="text-gray-700">
+                  Showing your clusters only.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectScope(OWNER_SCOPE_ALL)}
+                  className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                >
+                  View all clusters
+                </button>
               </div>
-              <span className="ml-2 text-sm text-gray-700">Show history</span>
-            </label>
-            {showHistory && (
-              <Select
-                value={historyDays.toString()}
-                onValueChange={(value) => {
-                  const newDays = parseInt(value);
-                  setHistoryDays(newDays);
-                  updateHistoryDaysURL(newDays);
-                }}
-              >
-                <SelectTrigger className="w-24 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 day</SelectItem>
-                  <SelectItem value="5">5 days</SelectItem>
-                  <SelectItem value="10">10 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                </SelectContent>
-              </Select>
             )}
-          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
+          {showHistory && (
+            <Select
+              value={historyDays.toString()}
+              onValueChange={(value) => selectHistoryDays(parseInt(value))}
+            >
+              <SelectTrigger className="w-24 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 day</SelectItem>
+                <SelectItem value="5">5 days</SelectItem>
+                <SelectItem value="10">10 days</SelectItem>
+                <SelectItem value="30">30 days</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            <div className="max-lg:hidden lg:flex lg:items-center">
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            </div>
           )}
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            title="Refresh"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
       </div>
-
-      <Filters
-        filters={filters}
-        setFilters={setFilters}
-        updateURLParams={updateURLParams}
-      />
 
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         filters={filters}
+        userScope={userScope}
+        currentUser={currentUser}
+        onViewAllClusters={() => selectScope(OWNER_SCOPE_ALL)}
+        onRowsPresenceChange={setScopedHasRows}
         showHistory={showHistory}
         historyDays={historyDays}
         onOpenSSHModal={(cluster) => {
@@ -585,6 +715,10 @@ export function ClusterTable({
   setLoading,
   refreshDataRef,
   filters,
+  userScope,
+  currentUser,
+  onViewAllClusters,
+  onRowsPresenceChange,
   showHistory,
   historyDays,
   onOpenSSHModal,
@@ -596,6 +730,12 @@ export function ClusterTable({
     key: null,
     direction: 'ascending',
   });
+
+  // Per-workspace writability, so the per-row Connect/VSCode actions can be
+  // disabled for clusters in workspaces the user can only read (read-only
+  // visibility). Shared with the cluster detail page; missing entry -> treated
+  // as writable (open/default).
+  const { isWorkspaceWritable, workspacesConfig } = useWorkspacesConfig();
 
   // Read initial page/limit from URL
   const getInitialPage = () => {
@@ -625,6 +765,21 @@ export function ClusterTable({
     return 10;
   };
 
+  // An explicit User filter from the dropdown overrides the My/All toggle, so
+  // in that case we fetch every user's clusters and let the filter match.
+  const hasExplicitUserFilter = (filters || []).some(
+    (f) => (f.property || '').toLowerCase() === 'user' && f.value
+  );
+
+  // Scope the fetch to the current user server-side ("My Clusters") instead of
+  // pulling everyone's clusters and filtering client-side. Falls back to all
+  // users when the caller is anonymous or an explicit User filter is active.
+  const allUsers = !(
+    userScope === OWNER_SCOPE_MINE &&
+    currentUser &&
+    !hasExplicitUserFilter
+  );
+
   // Use the cluster data hook (supports plugin override for server-side pagination)
   const {
     data: hookData,
@@ -648,6 +803,8 @@ export function ClusterTable({
     filters,
     initialPage: getInitialPage(),
     initialLimit: getInitialLimit(),
+    allUsers,
+    currentUser,
   });
 
   // Sync page/limit to URL query params.
@@ -667,7 +824,10 @@ export function ClusterTable({
       url.searchParams.delete('pageSize');
     }
     if (url.href !== window.location.href) {
-      window.history.replaceState(null, '', url.toString());
+      // Keep the existing state so Next's router entry (`__N`, `key`) survives;
+      // nulling it makes a later popstate change the address bar without
+      // re-rendering the page.
+      window.history.replaceState(window.history.state, '', url.toString());
     }
   }, [page, limit]);
 
@@ -685,7 +845,7 @@ export function ClusterTable({
     setLoading(hookLoading);
   }, [hookLoading, setLoading]);
 
-  const fetchOptionValuesFromClusters = (clusters) => {
+  const fetchOptionValuesFromClusters = (clusters, workspacesConfig) => {
     let optionValues = {
       status: [],
       cluster: [],
@@ -705,7 +865,11 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.status, cluster.status);
       pushWithoutDuplication(optionValues.cluster, cluster.cluster);
       pushWithoutDuplication(optionValues.user, cluster.user);
-      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        cluster.workspace_name ||
+          getWorkspaceName(workspacesConfig, cluster.workspace)
+      );
       // Use full_infra for filter values so they match database values
       pushWithoutDuplication(
         optionValues.infra,
@@ -730,41 +894,32 @@ export function ClusterTable({
   // Update filter option values when data changes
   useEffect(() => {
     if (allData && allData.length > 0) {
-      setOptionValues(fetchOptionValuesFromClusters(allData));
+      setOptionValues(fetchOptionValuesFromClusters(allData, workspacesConfig));
     }
-  }, [allData, setOptionValues]);
+  }, [allData, setOptionValues, workspacesConfig]);
 
   // Use useMemo to compute sorted and filtered data
   // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
   // For client-side pagination, we apply filters/sort to allData, then paginate
   const sortedData = React.useMemo(() => {
-    // Main filter function
-    const filterData = (data, filters) => {
-      if (filters.length === 0) {
-        return data;
-      }
-
-      return data.filter((item) => {
-        let result = null;
-
-        for (let i = 0; i < filters.length; i++) {
-          const filter = filters[i];
-          const current = evaluateCondition(item, filter);
-
-          if (result === null) {
-            result = current;
-          } else {
-            result = result && current;
-          }
-        }
-
-        return result;
-      });
-    };
-
     // For server-side pagination, server already handles filtering - just apply sorting
-    // For client-side pagination, we filter/sort the full data then paginate
-    const dataToProcess = isServerPagination ? hookData : allData;
+    // For client-side pagination, we filter/sort the full data then paginate.
+    // The current-user ("My Clusters") scope is applied server-side via the
+    // allUsers flag on useClusterData, so no client-side owner filter here.
+    // Filters and sorting go by the workspace name; records hold the id
+    // (history rows and older servers carry no name).
+    const dataToProcess = (isServerPagination ? hookData : allData || []).map(
+      (cluster) =>
+        cluster.workspace_name
+          ? cluster
+          : {
+              ...cluster,
+              workspace_name: getWorkspaceName(
+                workspacesConfig,
+                cluster.workspace
+              ),
+            }
+    );
 
     if (!isServerPagination) {
       const historicalCount = (allData || []).filter(
@@ -782,10 +937,55 @@ export function ClusterTable({
 
     const filteredData = isServerPagination
       ? dataToProcess
-      : filterData(dataToProcess, filters);
+      : filterData(dataToProcess, filters, { orProperties: OR_PROPERTIES });
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [hookData, allData, sortConfig, filters, isServerPagination]);
+  }, [
+    hookData,
+    allData,
+    sortConfig,
+    filters,
+    isServerPagination,
+    workspacesConfig,
+  ]);
+
+  // Number of clusters owned by *other* users, i.e. how many rows switching to
+  // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
+  // we don't nudge to All when there's nothing to show. Because the table is
+  // now scoped to the current user server-side, the scoped data no longer
+  // contains other users' clusters; probe for the all-users count (a cheap
+  // single-row page on the server-pagination path, or the shared all-users
+  // cache otherwise) only when the "My Clusters" view comes back empty.
+  const [othersTotal, setOthersTotal] = useState(0);
+  const scopedEmpty = isServerPagination
+    ? total === 0
+    : sortedData.length === 0;
+  // Report whether the current scope has rows so the parent can gate the
+  // "Showing your clusters only" hint (hidden while loading or empty).
+  useEffect(() => {
+    onRowsPresenceChange?.(!scopedEmpty && !hookLoading);
+  }, [scopedEmpty, hookLoading, onRowsPresenceChange]);
+  useEffect(() => {
+    let cancelled = false;
+    const scopedToMine =
+      userScope === OWNER_SCOPE_MINE && currentUser && !hasExplicitUserFilter;
+    if (!scopedToMine || hookLoading || !scopedEmpty) {
+      setOthersTotal(0);
+      return;
+    }
+    (async () => {
+      try {
+        const others = await getOtherUsersClustersCount(currentUser);
+        if (cancelled) return;
+        setOthersTotal(others);
+      } catch (e) {
+        if (!cancelled) setOthersTotal(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userScope, currentUser, hasExplicitUserFilter, hookLoading, scopedEmpty]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -943,15 +1143,15 @@ export function ClusterTable({
       order: 3,
       header: {
         label: 'Workspace',
-        sortKey: 'workspace',
+        sortKey: 'workspace_name',
         className: 'sortable whitespace-nowrap',
       },
       renderHeader: () => (
         <TableHead
           className="sortable whitespace-nowrap"
-          onClick={() => requestSort('workspace')}
+          onClick={() => requestSort('workspace_name')}
         >
-          Workspace{getSortDirection('workspace')}
+          Workspace{getSortDirection('workspace_name')}
         </TableHead>
       ),
       renderCell: (item) => (
@@ -960,7 +1160,8 @@ export function ClusterTable({
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
           >
-            {item.workspace || 'default'}
+            {item.workspace_name ||
+              getWorkspaceName(workspacesConfig, item.workspace)}
           </Link>
         </TableCell>
       ),
@@ -981,8 +1182,13 @@ export function ClusterTable({
           Infra{getSortDirection('infra')}
         </TableHead>
       ),
-      renderCell: (item) => (
-        <TableCell>
+      renderCell: (item) => {
+        // The default rendering, also handed to the plugin slot below as
+        // `defaultContent`: a plugin that only wants to change how *some*
+        // clusters read can return it unchanged for the rest, instead of
+        // reimplementing this markup. `fallback` keeps the no-plugin case
+        // byte-identical.
+        const infraContent = (
           <NonCapitalizedTooltip
             content={item.full_infra || item.infra}
             className="text-sm text-muted-foreground"
@@ -998,8 +1204,17 @@ export function ClusterTable({
               )}
             </span>
           </NonCapitalizedTooltip>
-        </TableCell>
-      ),
+        );
+        return (
+          <TableCell>
+            <PluginSlot
+              name="clusters.table.infra"
+              context={{ cluster: item, defaultContent: infraContent }}
+              fallback={infraContent}
+            />
+          </TableCell>
+        );
+      },
     },
     {
       id: 'resources',
@@ -1121,6 +1336,7 @@ export function ClusterTable({
               status={item.status}
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
+              writable={isWorkspaceWritable(item.workspace)}
             />
           )}
         </TableCell>
@@ -1215,6 +1431,28 @@ export function ClusterTable({
                     </TableRow>
                   );
                 })
+              ) : userScope === OWNER_SCOPE_MINE &&
+                currentUser &&
+                !hasExplicitUserFilter &&
+                othersTotal > 0 ? (
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<ServerIcon className="w-5 h-5" />}
+                  title={`You don't have any${showHistory ? '' : ' active'} clusters${showHistory ? ' yet' : ''}`}
+                  description={`${othersTotal.toLocaleString()} cluster${
+                    othersTotal === 1 ? '' : 's'
+                  } owned by other users — switch to All Clusters to see them.`}
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onViewAllClusters}
+                      className="text-sky-blue hover:text-sky-blue-bright"
+                    >
+                      View all clusters
+                    </Button>
+                  }
+                />
               ) : (
                 <EmptyTableState
                   colSpan={totalColSpan}
@@ -1296,6 +1534,11 @@ export function Status2Actions({
   status,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  // False when the cluster is in a workspace the current user cannot write to
+  // (e.g. a read-only workspace they are not a member of). Connect (SSH) and
+  // VSCode both open an interactive shell, so they are write operations and
+  // must be disabled for non-members.
+  writable = true,
 }) {
   const actions = enabledActions(status);
   const isMobile = useMobile();
@@ -1334,7 +1577,11 @@ export function Status2Actions({
           if (!withLabel) {
             label = '';
           }
-          if (actions.includes(actionName)) {
+          if (!writable) {
+            tooltipText =
+              'Read-only: you are not a member of this cluster’s workspace';
+          }
+          if (writable && actions.includes(actionName)) {
             return (
               <Tooltip
                 key={actionName}
@@ -1351,8 +1598,11 @@ export function Status2Actions({
               </Tooltip>
             );
           }
+          // The read-only hint is a full sentence, so it must not be
+          // title-cased.
+          const DisabledTooltip = !writable ? NonCapitalizedTooltip : Tooltip;
           return (
-            <Tooltip
+            <DisabledTooltip
               key={actionName}
               content={tooltipText}
               className="capitalize text-sm text-muted-foreground"
@@ -1364,7 +1614,7 @@ export function Status2Actions({
                 {actionIcon}
                 {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
-            </Tooltip>
+            </DisabledTooltip>
           );
         })}
       </div>
@@ -1376,7 +1626,6 @@ const FilterDropdown = ({
   propertyList = [],
   valueList,
   setFilters,
-  updateURLParams,
   placeholder = 'Filter clusters',
   filters = [],
 }) => {
@@ -1499,19 +1748,9 @@ const FilterDropdown = ({
 
   const handleOptionSelect = (option) => {
     trackFilterUsed('cluster', { property: propertyValue, value: option });
-    setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property: getPropertyLabel(propertyValue),
-          operator: ':',
-          value: option,
-        },
-      ];
-
-      updateURLParams(updatedFilters);
-      return updatedFilters;
-    });
+    setFilters((prevFilters) =>
+      addFilter(prevFilters, getPropertyLabel(propertyValue), option)
+    );
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -1519,19 +1758,9 @@ const FilterDropdown = ({
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && value.trim() !== '') {
-      setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property: getPropertyLabel(propertyValue),
-            operator: ':',
-            value: value,
-          },
-        ];
-
-        updateURLParams(updatedFilters);
-        return updatedFilters;
-      });
+      setFilters((prevFilters) =>
+        addFilter(prevFilters, getPropertyLabel(propertyValue), value)
+      );
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {
@@ -1622,21 +1851,14 @@ const FilterDropdown = ({
   );
 };
 
-const Filters = ({ filters = [], setFilters, updateURLParams }) => {
+const Filters = ({ filters = [], setFilters }) => {
   const onRemove = (index) => {
-    setFilters((prevFilters) => {
-      const updatedFilters = prevFilters.filter(
-        (_, _index) => _index !== index
-      );
-
-      updateURLParams(updatedFilters);
-
-      return updatedFilters;
-    });
+    setFilters((prevFilters) =>
+      prevFilters.filter((_, _index) => _index !== index)
+    );
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
     setFilters([]);
   };
 

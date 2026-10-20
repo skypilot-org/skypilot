@@ -10,6 +10,8 @@ import fastapi
 import pytest
 from starlette.datastructures import Headers
 
+from sky import models
+from sky.server.auth import db_lookup
 from sky.server.auth.oauth2_proxy import OAuth2ProxyMiddleware
 
 
@@ -19,10 +21,9 @@ class TestOAuth2ProxyMiddleware:
     async def test_http_request_calls_underlying_middleware(self):
         app = mock.AsyncMock()
         middleware = OAuth2ProxyMiddleware(app=app)
-        dispatch_mock = mock.AsyncMock(return_value=fastapi.Response(
+        on_request_mock = mock.AsyncMock(return_value=fastapi.Response(
             status_code=204))
-        middleware.middleware.dispatch = dispatch_mock
-        middleware.middleware.dispatch_func = dispatch_mock
+        middleware.middleware.on_request = on_request_mock
 
         scope = {
             'type': 'http',
@@ -44,7 +45,7 @@ class TestOAuth2ProxyMiddleware:
 
         await middleware(scope, receive, send)
 
-        middleware.middleware.dispatch.assert_awaited_once()
+        on_request_mock.assert_awaited_once()
         app.assert_not_called()
 
     @pytest.mark.asyncio
@@ -58,7 +59,6 @@ class TestOAuth2ProxyMiddleware:
 
         dispatch_mock = mock.AsyncMock(side_effect=fake_dispatch)
         middleware.middleware.dispatch = dispatch_mock
-        middleware.middleware.dispatch_func = dispatch_mock
 
         scope = {
             'type': 'websocket',
@@ -83,7 +83,14 @@ class TestOAuth2ProxyMiddleware:
         await middleware(scope, receive, send)
 
         middleware.middleware.dispatch.assert_awaited_once()
-        app.assert_awaited_once_with(scope, receive, send)
+        assert app.await_count == 1
+        passed_scope, passed_receive, passed_send = app.await_args.args
+        assert passed_scope is scope
+        assert passed_receive is receive
+        # `send` is wrapped, not passed through, so the accept can be counted
+        # where it happens; the wrapper must be transparent to the app.
+        await passed_send({'type': 'websocket.accept'})
+        assert sent_messages[-1] == {'type': 'websocket.accept'}
         assert all(
             msg.get('type') != 'websocket.close' for msg in sent_messages)
 
@@ -215,7 +222,7 @@ class TestOriginalOAuth2ProxyMiddleware:
 
     @pytest.mark.asyncio
     async def test_authenticate_strips_forwarded_headers(
-            self, middleware_enabled, mock_request, mock_call_next):
+            self, middleware_enabled, mock_request):
         """Test that forwarded headers are stripped during auth check."""
         mock_request.state.auth_user = None
 
@@ -235,8 +242,7 @@ class TestOriginalOAuth2ProxyMiddleware:
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
 
-            response = await middleware_enabled.authenticate(
-                mock_request, mock_call_next)
+            response = await middleware_enabled.authenticate(mock_request)
 
             # Get the actual call arguments
             call_args = mock_session.request.call_args
@@ -260,11 +266,11 @@ class TestOriginalOAuth2ProxyMiddleware:
             # Verify no body is sent for auth check
             assert 'data' not in call_args.kwargs
 
-            assert response.status_code == 200
+            assert response is None
 
     @pytest.mark.asyncio
     async def test_authenticate_timeout_handling(self, middleware_enabled,
-                                                 mock_request, mock_call_next):
+                                                 mock_request):
         """Test that timeouts are properly handled."""
         mock_request.state.auth_user = None
 
@@ -275,8 +281,7 @@ class TestOriginalOAuth2ProxyMiddleware:
             # Simulate timeout
             mock_session.request.side_effect = asyncio.TimeoutError()
 
-            response = await middleware_enabled.authenticate(
-                mock_request, mock_call_next)
+            response = await middleware_enabled.authenticate(mock_request)
 
             assert response.status_code == http.HTTPStatus.BAD_GATEWAY
             assert ('oauth2-proxy service unavailable'
@@ -284,8 +289,7 @@ class TestOriginalOAuth2ProxyMiddleware:
 
     @pytest.mark.asyncio
     async def test_authenticate_unauthorized_redirect(self, middleware_enabled,
-                                                      mock_request,
-                                                      mock_call_next):
+                                                      mock_request):
         """Test redirect behavior for unauthorized requests."""
         mock_request.state.auth_user = None
         mock_request.url.path = '/api/v1/jobs'  # Not health endpoint
@@ -304,15 +308,14 @@ class TestOriginalOAuth2ProxyMiddleware:
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
 
-            response = await middleware_enabled.authenticate(
-                mock_request, mock_call_next)
+            response = await middleware_enabled.authenticate(mock_request)
 
             assert response.status_code == 307  # RedirectResponse
             assert 'oauth2/start' in response.headers['location']
 
     @pytest.mark.asyncio
-    async def test_authenticate_health_endpoint_bypass(self, middleware_enabled,
-                                                       mock_call_next):
+    async def test_authenticate_health_endpoint_bypass(self,
+                                                       middleware_enabled):
         """Test that health endpoints bypass auth when unauthorized."""
         request = mock.Mock(spec=fastapi.Request)
         request.url = mock.Mock()
@@ -338,26 +341,24 @@ class TestOriginalOAuth2ProxyMiddleware:
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
 
-            response = await middleware_enabled.authenticate(
-                request, mock_call_next)
+            response = await middleware_enabled.authenticate(request)
 
             # Should allow through with anonymous_user flag
             assert hasattr(request.state, 'anonymous_user')
             assert request.state.anonymous_user is True
-            assert response.status_code == 200
+            assert response is None
 
     @pytest.mark.asyncio
     async def test_authenticate_already_authenticated_skip(
-            self, middleware_enabled, mock_request, mock_call_next):
+            self, middleware_enabled, mock_request):
         """Test that already authenticated requests skip auth check."""
         # Set user as already authenticated
         mock_request.state.auth_user = mock.Mock()
 
-        response = await middleware_enabled.authenticate(
-            mock_request, mock_call_next)
+        response = await middleware_enabled.authenticate(mock_request)
 
-        # Should call next directly without making auth request
-        assert response.status_code == 200
+        # Should pass through without making an auth request
+        assert response is None
 
     @pytest.mark.asyncio
     async def test_get_auth_user_extraction(self, middleware_enabled):
@@ -383,8 +384,7 @@ class TestOriginalOAuth2ProxyMiddleware:
     @pytest.mark.asyncio
     async def test_authenticate_missing_user_info_error(self,
                                                         middleware_enabled,
-                                                        mock_request,
-                                                        mock_call_next):
+                                                        mock_request):
         """Test error when proxy returns 202 but no user info."""
         mock_request.state.auth_user = None
 
@@ -403,8 +403,7 @@ class TestOriginalOAuth2ProxyMiddleware:
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
 
-            response = await middleware_enabled.authenticate(
-                mock_request, mock_call_next)
+            response = await middleware_enabled.authenticate(mock_request)
 
             assert (
                 response.status_code == http.HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -463,15 +462,6 @@ class TestOriginalOAuth2ProxyMiddlewareLoopback:
             return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
 
     @pytest.fixture
-    def mock_call_next(self):
-        """Create a mock call_next function."""
-
-        async def call_next(request):
-            return fastapi.responses.JSONResponse({'message': 'success'})
-
-        return call_next
-
-    @pytest.fixture
     def loopback_request(self):
         """Create a mock loopback request."""
         request = mock.Mock(spec=fastapi.Request)
@@ -490,19 +480,17 @@ class TestOriginalOAuth2ProxyMiddlewareLoopback:
 
     @pytest.mark.asyncio
     async def test_loopback_bypass_enabled(self, middleware_enabled,
-                                           loopback_request, mock_call_next):
+                                           loopback_request):
         """Test that loopback requests bypass OAuth2 when consolidation mode is enabled."""
         with mock.patch('sky.jobs.utils.is_consolidation_mode',
                         return_value=True):
-            response = await middleware_enabled.authenticate(
-                loopback_request, mock_call_next)
+            response = await middleware_enabled.authenticate(loopback_request)
 
-        assert response.status_code == 200
+        assert response is None
 
     @pytest.mark.asyncio
     async def test_loopback_bypass_with_proxy_headers(self, middleware_enabled,
-                                                      loopback_request,
-                                                      mock_call_next):
+                                                      loopback_request):
         """Test that loopback requests with proxy headers do NOT bypass (security)."""
         request = loopback_request
         request.url.path = '/api/status'
@@ -523,8 +511,84 @@ class TestOriginalOAuth2ProxyMiddlewareLoopback:
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
 
-            response = await middleware_enabled.authenticate(
-                request, mock_call_next)
+            response = await middleware_enabled.authenticate(request)
 
             # Should NOT bypass due to proxy headers - proceed to normal OAuth2 flow
             assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value
+
+
+class _AcceptedSession:
+    """An aiohttp-shaped stub whose auth call answers 202 ACCEPTED."""
+
+    def request(self, **_kwargs):
+        response = mock.Mock()
+        response.status = http.HTTPStatus.ACCEPTED
+
+        class _Ctx:
+
+            async def __aenter__(self):
+                return response
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return _Ctx()
+
+
+def _authenticated_request():
+    request = mock.Mock()
+    request.url = mock.Mock()
+    request.url.hostname = 'localhost'
+    request.url.path = '/status'
+    request.cookies = {}
+    request.state = mock.Mock()
+    return request
+
+
+class TestOAuth2ProxyUserUpsert:
+    """The user upsert is a database write; it must not run on the event loop.
+
+    `server.py`'s auth-proxy middleware has always bounded the same call. This
+    one ran it inline, so a slow database stalled every request on the worker,
+    not only the login that triggered it. Reaches `_authenticate` through the
+    wrapper's `.middleware`, since `websocket_aware` replaces the exported
+    class.
+    """
+
+    def _middleware(self):
+        return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
+
+    @pytest.mark.asyncio
+    async def test_the_upsert_is_bounded(self):
+        middleware = self._middleware()
+        user = models.User(id='u-1', name='tester')
+        with mock.patch.object(middleware, 'get_auth_user',
+                               return_value=user), \
+                mock.patch('sky.users.permission.permission_service'), \
+                mock.patch.object(db_lookup,
+                                  'call_with_deadline',
+                                  new=mock.AsyncMock(
+                                      return_value=False)) as bounded, \
+                mock.patch.object(db_lookup,
+                                  'ensure_role_for_authenticated_user',
+                                  new=mock.AsyncMock(return_value=None)):
+            await middleware._authenticate(_authenticated_request(),
+                                           _AcceptedSession())
+        bounded.assert_awaited_once()
+        assert bounded.await_args[0][0].__name__ == 'add_or_update_user'
+
+    @pytest.mark.asyncio
+    async def test_a_slow_upsert_answers_503_without_authenticating(self):
+        middleware = self._middleware()
+        request = _authenticated_request()
+        user = models.User(id='u-1', name='tester')
+        with mock.patch.object(middleware, 'get_auth_user',
+                               return_value=user), \
+                mock.patch('sky.users.permission.permission_service'), \
+                mock.patch.object(db_lookup,
+                                  'call_with_deadline',
+                                  side_effect=asyncio.TimeoutError):
+            response = await middleware._authenticate(request,
+                                                      _AcceptedSession())
+        assert response.status_code == 503
+        assert request.state.auth_user is not user

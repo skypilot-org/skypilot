@@ -203,6 +203,27 @@ class Azure(clouds.Cloud):
 
         # Process user-specified images.
         azure_utils.validate_image_id(image_id)
+
+        # Private Shared Image Gallery image. The gallery may live in a
+        # different subscription than the active project, so query the
+        # image's own subscription (parsed from the resource ID).
+        shared_gallery_image = azure_utils.parse_shared_image_gallery_id(
+            image_id)
+        if shared_gallery_image is not None:
+            try:
+                compute_client = azure.get_client(
+                    'compute', shared_gallery_image['subscription_id'])
+                return azure_utils.get_shared_image_gallery_image_size(
+                    compute_client, shared_gallery_image['resource_group'],
+                    shared_gallery_image['gallery_name'],
+                    shared_gallery_image['image_name'],
+                    shared_gallery_image['version'])
+            except (azure.exceptions().AzureError, RuntimeError,
+                    exceptions.ResourcesUnavailableError):
+                # Fall back to the default if the image's subscription is not
+                # readable with the caller's credentials.
+                return 0.0
+
         try:
             compute_client = azure.get_client('compute', cls.get_project_id())
         except (azure.exceptions().AzureError, RuntimeError):
@@ -398,6 +419,9 @@ class Azure(clouds.Cloud):
 
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
             image_config = {'community_gallery_image_id': image_id}
+        elif azure_utils.parse_shared_image_gallery_id(image_id) is not None:
+            # Private Shared Image Gallery image, booted by resource ID.
+            image_config = {'shared_gallery_image_id': image_id}
         else:
             publisher, offer, sku, version = image_id.split(':')
             image_config = {

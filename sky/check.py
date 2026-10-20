@@ -26,6 +26,7 @@ from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.workspaces import constants as workspace_constants
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -161,14 +162,22 @@ def check_capabilities(
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(core.get_accessible_workspace_names())
+    # Explicitly the writable set, even though that is already the default:
+    # every workspace this loop visits gets its cached enabled-clouds and
+    # check-results rows overwritten below, so this is the gate on a mutation
+    # of per-workspace shared state, not just on what the caller may see.
+    available_workspaces = list(
+        core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_WRITE))
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])
     initial_hint = 'Checking credentials to enable infra for SkyPilot.'
     if len(available_workspaces) > 1:
+        workspace_names = ', '.join(
+            skypilot_config.get_workspace_name(w) for w in available_workspaces)
         initial_hint = (f'Checking credentials to enable infra for SkyPilot '
-                        f'(Workspaces: {", ".join(available_workspaces)}).')
+                        f'(Workspaces: {workspace_names}).')
     echo(initial_hint)
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
@@ -306,7 +315,9 @@ def check_capabilities(
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
 
-        workspace_str = f' for workspace: {current_workspace_name!r}'
+        workspace_str = (
+            ' for workspace: '
+            f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
         if hide_workspace_str:
             workspace_str = ''
         with rich_utils.safe_status(
@@ -387,7 +398,7 @@ def check_capabilities(
         # re-running cloud probes. Full-workspace runs replace the row;
         # scoped runs (clouds is not None) merge at cloud granularity.
         # Wrapped in try/except: this row is a cache, and the
-        # source-of-truth enabled_clouds_<workspace>_<cap> rows have
+        # source-of-truth enabled_clouds_<workspace>_<cap>[_<user>] rows have
         # already been written above. A transient DB failure or
         # unsupported dialect must not fail the user-visible
         # `sky check` command.
@@ -400,8 +411,9 @@ def check_capabilities(
                 is_full_workspace_run=(clouds is None),
             )
         except Exception as e:  # pylint: disable=broad-except
+            label = skypilot_config.workspace_label(current_workspace_name)
             logger.warning(f'Failed to persist check_results for workspace '
-                           f'{current_workspace_name!r}: {e}')
+                           f'{label}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
@@ -418,8 +430,9 @@ def check_capabilities(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Workspace {workspace!r} not found in SkyPilot '
-                    'configuration. '
-                    f'Available workspaces: {", ".join(available_workspaces)}')
+                    'configuration. Available workspaces: ' + ', '.join(
+                        skypilot_config.get_workspace_name(w)
+                        for w in available_workspaces))
 
         # Always show details for single specified check (if verbose)
         hide_per_cloud_details_flag = False
@@ -436,7 +449,8 @@ def check_capabilities(
 
         for ws_name in workspaces_to_check:
             if not hide_workspace_str:
-                echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
+                echo('\nChecking enabled infra for workspace: '
+                     f'{skypilot_config.get_workspace_name(ws_name)!r}')
             with skypilot_config.local_active_workspace_ctx(ws_name):
                 enabled_ws_clouds = _execute_check_logic_for_workspace(
                     ws_name, hide_per_cloud_details_flag, hide_workspace_str)
@@ -478,13 +492,16 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
+    workspace_ref: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
     if workspace is not None:
         # Import here to avoid circular import:
         # pylint: disable=import-outside-toplevel
         from sky.workspaces import core as workspaces_core
         workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(), workspace)
+            common_utils.get_current_user(),
+            workspace,
+            workspace_ref=workspace_ref)
     capabilities_result = check_capabilities(quiet, verbose, clouds,
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
@@ -496,6 +513,26 @@ def check(
                    ] for cloud, caps in clouds_with_caps.items()
         }
     return result
+
+
+def check_for_request(
+    quiet: bool = False,
+    verbose: bool = False,
+    clouds: Optional[Iterable[str]] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Dict[str, List[str]]]:
+    """`POST /check`: `check`, with `workspace` as typed by the user.
+
+    In-process callers hold workspace ids and call `check` directly.
+    """
+    workspace_ref = workspace
+    if workspace is not None:
+        workspace = skypilot_config.resolve_workspace_ref(workspace)
+    return check(quiet=quiet,
+                 verbose=verbose,
+                 clouds=clouds,
+                 workspace=workspace,
+                 workspace_ref=workspace_ref)
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -816,14 +853,17 @@ def _summary_message(
                                               key=lambda item: item[0])
         ])
 
-    workspace_str = f' for workspace: {current_workspace_name!r}'
+    workspace_str = (
+        ' for workspace: '
+        f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
     if hide_workspace_str:
         workspace_str = ''
 
     disallowed_clouds_hint = ''
     if disallowed_cloud_names:
         disable_for_workspace_hint = (
-            f' or disabled for this workspace {current_workspace_name!r}')
+            ' or disabled for this workspace '
+            f'{skypilot_config.get_workspace_name(current_workspace_name)!r}')
         if hide_workspace_str:
             disable_for_workspace_hint = ''
         disallowed_clouds_hint = (

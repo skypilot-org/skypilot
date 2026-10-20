@@ -6,6 +6,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
+  {{- if and .Values.apiService.host (contains ":" .Values.apiService.host) }}
+  # An IPv6 bind host (e.g. "::") requires a dual-stack service so IPv6 clients
+  # can reach it. PreferDualStack falls back to single-stack on clusters that
+  # do not support dual-stack.
+  ipFamilyPolicy: PreferDualStack
+  {{- end }}
   ports:
     - port: 80
       name: http

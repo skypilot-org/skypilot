@@ -1,6 +1,7 @@
 """TCP proxy that brings chaos."""
 import argparse
 import asyncio
+import random
 from typing import Optional
 from urllib import parse
 
@@ -185,8 +186,8 @@ async def handle_client(local_reader, local_writer, target_host, target_port,
 
     # Check if connection is still active (tasks haven't completed)
     if pending:
-        print(
-            f'Connection {connection_id}: Closing connection after {interval}s')
+        print(f'Connection {connection_id}: Closing connection after '
+              f'{interval:.1f}s')
         # Cancel remaining tasks
         for task in pending:
             task.cancel()
@@ -214,7 +215,7 @@ async def handle_client(local_reader, local_writer, target_host, target_port,
         pass
 
 
-async def main(local_port, interval):
+async def main(local_port, interval, jitter=0.0):
     global connection_counter
 
     server_url = common.get_server_url()
@@ -225,14 +226,22 @@ async def main(local_port, interval):
     async def client_handler(reader, writer):
         global connection_counter
         connection_counter += 1
-        await handle_client(reader, writer, target_host, target_port, interval,
-                            connection_counter)
+        # Randomize each connection's lifetime. With a fixed interval the
+        # kill schedule phase-locks to the client's reconnect cadence, so a
+        # timing-sensitive race (e.g. the kill landing right as a stream
+        # finishes) either never fires or fires on every attempt. Jitter
+        # de-correlates the kills so no single unlucky alignment repeats
+        # deterministically.
+        effective_interval = max(1.0,
+                                 interval + random.uniform(-jitter, jitter))
+        await handle_client(reader, writer, target_host, target_port,
+                            effective_interval, connection_counter)
 
     server = await asyncio.start_server(client_handler, '127.0.0.1', local_port)
     addrs = ', '.join(str(sock.getsockname()) for sock in server.sockets)
     print(
         f'Serving proxy on {addrs}, forwarding to {target_host}:{target_port}, '
-        f'disconnect interval={interval}s')
+        f'disconnect interval={interval}s, jitter={jitter}s')
 
     async with server:
         await server.serve_forever()
@@ -248,6 +257,11 @@ if __name__ == '__main__':
                         type=int,
                         required=True,
                         help='Seconds before disconnect')
+    parser.add_argument('--jitter',
+                        type=float,
+                        default=0.0,
+                        help='Randomize each connection\'s disconnect time by '
+                        'up to +/- this many seconds')
     args = parser.parse_args()
 
-    asyncio.run(main(args.port, args.interval))
+    asyncio.run(main(args.port, args.interval, args.jitter))

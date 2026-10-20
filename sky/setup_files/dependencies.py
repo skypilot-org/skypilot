@@ -232,11 +232,10 @@ cloud_dependencies: Dict[str, List[str]] = {
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,
-    # For the container registry auth api. Reference:
-    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': [
-        # For the container registry auth api. Reference:
-        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        # Pods, templates and registry credentials go through the REST API v2
+        # in sky/adaptors/runpod.py. The SDK reads the API key from
+        # ~/.runpod/config.toml and serves the spot pod GraphQL mutation.
         'runpod>=1.6.1',
         # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
         # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
@@ -269,7 +268,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        'nebius>=0.3.59',
+        # 0.6.12 adds explicit spot price-taking in Compute instance specs.
+        'nebius>=0.6.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
@@ -277,13 +277,17 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': ['python-hostlist'],
+    # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
+    'slurm': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(cloud_dependencies)
+# Vast is opt-in (`pip install "skypilot[vast]"`): its SDK brings a large
+# dependency tree that most installations never use.
+clouds_for_all.remove('vast')
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
@@ -297,9 +301,6 @@ if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
-    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
-    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
-    clouds_for_all.remove('vast')
 
 cloud_extras = {
     cloud: dependencies + server_dependencies

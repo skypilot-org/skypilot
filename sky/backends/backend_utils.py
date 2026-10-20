@@ -1,9 +1,13 @@
 """Util constants/functions for the backends."""
 import asyncio
+import collections
 from datetime import datetime
+from datetime import timezone
 import enum
 import fnmatch
+import functools
 import hashlib
+import itertools
 import math
 import os
 import pathlib
@@ -11,14 +15,15 @@ import pprint
 import queue as queue_lib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
-                    Set, Tuple, TypeVar, Union)
+from typing import (Any, Callable, Deque, Dict, IO, Iterator, List, Optional,
+                    Sequence, Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -49,6 +54,7 @@ from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
@@ -72,6 +78,7 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -127,6 +134,8 @@ K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
+DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS = 5
+
 # We check network connection by going through _TEST_IP_LIST. We may need to
 # check multiple IPs because some IPs may be blocked on certain networks.
 # Fixed IP addresses are used to avoid DNS lookup blocking the check, for
@@ -151,18 +160,12 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+# If a user has very long run or setup commands, the generated command may
+# exceed the local command line limit, as we directly include scripts in job
+# submission commands. If the command is too long, we instead write it to a
+# file, rsync and execute it. Same ceiling the runners use for a shell
+# transport, kept in one place so the two cannot drift.
+_MAX_INLINE_SCRIPT_LENGTH = command_runner.MAX_INLINE_COMMAND_LENGTH
 
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
@@ -189,6 +192,17 @@ _LAUNCH_DOUBLE_CHECK_DELAY = 1
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
+
+# Where a cluster records the Ray version its nodes were set up with. Lives
+# under 'provider' because Ray's cluster schema sets additionalProperties=False
+# at the top level, so a new top-level key would fail `ray up` validation on
+# the clouds still using the Ray autoscaler.
+_RAY_VERSION_KEY = 'sky_ray_version'
+# What a cluster created before that marker existed is running. Every such
+# cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
+# TODO(hailong): one-shot migration constant; drop it once no marker-less
+# clusters remain (every cluster launched from this release on carries one).
+_LEGACY_RAY_VERSION = '2.9.3'
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -239,11 +253,17 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # The security group name includes a hostname-derived hash
     # (user_and_hostname_hash) that varies across API server restart
     ('provider', 'security_group'),
+    # The Ray version marker appears on a cluster the first time it is
+    # launched by a SkyPilot that writes one. Including it would cost every
+    # pre-existing cluster its `sky launch --fast` skip exactly once, for a
+    # key that records what the cluster already runs. A real version change
+    # still moves the hash, through the install commands themselves.
+    ('provider', _RAY_VERSION_KEY),
 ]
 
 # Filenames in `file_mounts` whose content sha256 should NOT participate in the
 # cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
-# transient on-disk caches whose bytes drift across replicas / time without any
+# transient on-disk caches whose bytes drift across hosts / time without any
 # user-meaningful semantic change (e.g., gcloud token refreshes), and including
 # them in the hash makes `sky launch --fast` re-provision unexpectedly.
 #
@@ -266,6 +286,8 @@ _FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+# Trailing lines of tunnel process output kept for error messages.
+_TUNNEL_OUTPUT_TAIL_LINES = 100
 
 
 def _caller_is_viewer() -> bool:
@@ -292,16 +314,18 @@ def _caller_is_viewer() -> bool:
             rbac_mod.RoleName.ADMIN.value not in roles)
 
 
-def is_command_length_over_limit(command: str) -> bool:
-    """Check if the length of the command exceeds the limit.
+def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
+    """Check if the quoted command exceeds the local command line limit.
 
-    We calculate the length of the command after quoting the command twice as
-    when it is executed by the CommandRunner, the command will be quoted twice
-    to ensure the correctness, which will add significant length to the command.
+    For a command SkyPilot is about to *transmit* to a cluster, use
+    ``CommandRunner.is_command_length_over_limit`` instead: the ceiling there
+    belongs to the runner's transport, which for Kubernetes is a request URL
+    rather than a shell. This function is the plain local-shell check, and is
+    called from generated code that runs on the cluster.
     """
-
-    quoted_length = len(shlex.quote(shlex.quote(command)))
-    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
+    for _ in range(quote_levels):
+        command = shlex.quote(command)
+    return len(command) > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:
@@ -312,8 +336,8 @@ def is_ip(s: str) -> bool:
 def _get_yaml_path_from_cluster_name(cluster_name: str,
                                      prefix: str = constants.SKY_USER_FILE_PATH
                                     ) -> str:
-    output_path = pathlib.Path(
-        prefix).expanduser().resolve() / f'{cluster_name}.yml'
+    output_path = runtime_utils.expanduser_path(
+        pathlib.Path(prefix)).resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
 
@@ -564,6 +588,96 @@ class FileMountHelper(object):
         return ' && '.join(commands)
 
 
+def _ray_version_for_cluster(cluster_name: str,
+                             old_yaml_content: Optional[str]) -> str:
+    """The Ray version to render for this cluster.
+
+    Whether to move to a new Ray is a property of the *cluster*, not of each
+    node. Deciding it per node lets a worker upgrade on its own while the head
+    keeps the old version: the head's `ray status` guard succeeds and skips the
+    install, a worker's cannot (it dials 127.0.0.1, where only the head has a
+    GCS), and the two end up on different Rays.
+
+    So a cluster keeps the version it was set up with, and only moves when the
+    whole cluster is starting from scratch and nothing can disagree.
+    """
+    if old_yaml_content is None:
+        # A new cluster.
+        return constants.SKY_REMOTE_RAY_VERSION
+    status = global_user_state.get_status_from_cluster_name(cluster_name)
+    if status is None or status == status_lib.ClusterStatus.STOPPED:
+        # Nothing is running to disagree with, so the whole cluster can move
+        # together. This is what lets an existing cluster ever pick up a new
+        # Ray: `sky stop` followed by `sky start`.
+        #
+        # Deliberately not INIT: that also covers a cluster whose launch failed
+        # partway, whose nodes may still be running the old Ray. Upgrading
+        # those is how the mismatch gets recreated.
+        return constants.SKY_REMOTE_RAY_VERSION
+    old_config = yaml_utils.safe_load(old_yaml_content)
+    if not isinstance(old_config, dict):
+        return constants.SKY_REMOTE_RAY_VERSION
+    # `provider:` with nothing under it parses to None, not {}.
+    recorded = (old_config.get('provider') or {}).get(_RAY_VERSION_KEY)
+    # Clusters created before the marker existed carry no record, and are all
+    # on the legacy version.
+    return recorded if recorded else _LEGACY_RAY_VERSION
+
+
+def _log_pinned_ray_version(cluster_name: str, ray_version: str,
+                            cloud: clouds.Cloud,
+                            resources: 'resources_lib.Resources',
+                            region: Optional[str]) -> None:
+    """Say why the cluster is not on the Ray this SkyPilot ships.
+
+    How to move it depends on the cloud: `sky stop` + `sky start` is the only
+    in-place path, and a good many clouds -- Kubernetes, Slurm, RunPod, Lambda,
+    and AWS/GCP for spot, among others -- cannot stop at all, so there the
+    version is fixed for the life of the cluster.
+
+    `region` is passed through because asking Kubernetes without one makes it
+    enumerate every allowed context and probe each cluster's API, none of which
+    the STOP answer depends on.
+    """
+    if ray_version == constants.SKY_REMOTE_RAY_VERSION:
+        return
+    preamble = (f'Cluster {cluster_name!r} stays on Ray {ray_version}; this '
+                f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
+    controller = controller_utils.Controllers.from_prefix(cluster_name)
+    if controller is not None:
+        # `sky stop` rejects controllers (core.stop); the CLI's `sky down`
+        # refuses one that still has work.
+        if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+            idle = 'no managed jobs in progress and no pools'
+        else:
+            idle = 'no services'
+        logger.info(f'{preamble} A controller moves to it the next time it '
+                    'is launched after an autostop or autodown, or when '
+                    f'recreated: `sky down {cluster_name}` once it has '
+                    f'{idle}.')
+        return
+    try:
+        cloud.check_features_are_supported(
+            resources, {clouds.CloudImplementationFeatures.STOP}, region)
+    except exceptions.NotSupportedError:
+        logger.info(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
+                    f'that version until it is recreated (`sky down '
+                    f'{cluster_name}`, then `sky launch`).')
+        return
+    except Exception:  # pylint: disable=broad-except
+        # Deciding the wording is not worth failing a launch over. The check
+        # reaches the cloud on some providers -- Kubernetes probes every
+        # allowed context -- so it can fail for reasons that have nothing to
+        # do with the question being asked.
+        logger.debug(
+            f'{preamble} Could not tell whether {cloud} can stop a '
+            'cluster.',
+            exc_info=True)
+        return
+    logger.info(f'{preamble} Run `sky stop {cluster_name}` and `sky start '
+                f'{cluster_name}` to move the whole cluster to it.')
+
+
 def _replace_yaml_dicts(
         new_yaml: str, old_yaml: str, restore_key_names: Set[str],
         restore_key_names_exceptions: Sequence[Tuple[str, ...]]) -> str:
@@ -710,6 +824,43 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     path_hash = hashlib.md5(path.encode(),
                             usedforsecurity=False).hexdigest()[:6]
     return f'{cluster_name_on_cloud}-{path_hash}'
+
+
+def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
+                             description: str, remove_hint: str) -> None:
+    """Raises if a volume about to be mounted is not usable.
+
+    Runs on every launch, not once per task: a volume that was ready when a
+    task was submitted can have become unusable since. A managed job resolves
+    its volumes once and then relaunches for as long as its recovery strategy
+    allows, so without this the same broken volume is retried for hours.
+
+    Args:
+        description: how the volume reached this launch, for the message
+            ('Volume' or 'Auto-mount volume').
+        remove_hint: how to stop mounting it, for the message.
+
+    Raises:
+        exceptions.VolumeNotReadyError: if the volume is not ready.
+    """
+    if record.get('status') != status_lib.VolumeStatus.NOT_READY:
+        return
+    if volume_utils.volume_error_may_resolve(record.get('error_message')):
+        # Being provisioned is not a reason to refuse a launch: waiting is all
+        # it needs, and the wait loop is the component built to do that -- with
+        # the minutes a network filesystem takes already in its timeout. Doing
+        # otherwise would fail a managed job's relaunch over a volume that was
+        # about to work, and a job that fails prechecks does not retry.
+        logger.debug(f'{description} {volume_name!r} is not ready yet but may '
+                     f'resolve: {record.get("error_message")}. Leaving it to '
+                     f'the provisioning wait.')
+        return
+    error_message = (record.get('error_message') or
+                     'The last status refresh found it unusable.')
+    raise exceptions.VolumeNotReadyError(
+        f'{description} {volume_name!r} is not ready, so it cannot be '
+        f'mounted. Error: {error_message}. Check it with `sky volumes ls`, '
+        f'or {remove_hint}.')
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
@@ -875,7 +1026,8 @@ def write_cluster_config(
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
-    logging_agent = logs.get_logging_agent()
+    logging_agent = logs.get_logging_agent(cloud=str(cloud).lower(),
+                                           region=region.name)
     if logging_agent:
         for k, v in logging_agent.get_credential_file_mounts().items():
             assert k not in credentials, f'{k} already in credentials'
@@ -981,7 +1133,7 @@ def write_cluster_config(
         labels.update(to_provision.labels)
 
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
-                                               True)
+                                               False)
 
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
@@ -989,6 +1141,14 @@ def write_cluster_config(
                            else 'false')
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
+
+    # Create the default user Python environment on VMs and bare Slurm nodes
+    # when conda is not installed. Kubernetes images bake it in, and custom
+    # docker images manage their own Python. On Slurm, $HOME is the
+    # cluster-specific directory, so each cluster gets its own env (created the
+    # same way as the SkyPilot runtime env under the same $HOME).
+    create_user_env = (not install_conda and is_custom_docker == 'false' and
+                       not isinstance(cloud, clouds.Kubernetes))
 
     # Check if the cluster name is a controller name.
     is_remote_controller = False
@@ -1024,6 +1184,24 @@ def write_cluster_config(
                                        volume_desc='ephemeral volume')
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
+                # An ephemeral volume is created by this launch, so there is
+                # nothing to have gone wrong yet; a volume named on the task
+                # was resolved when the task was submitted, which for a
+                # managed job can be many relaunches ago.
+                #
+                # A missing record means the volume table is not readable from
+                # here -- a jobs controller running its own API server against
+                # its own state DB -- not that the volume is gone. Mounting
+                # works off the config carried in the task, so refusing would
+                # break launches that work today.
+                record = global_user_state.get_volume_by_name(vol.volume_name)
+                if record is not None:
+                    _reject_not_ready_volume(
+                        vol.volume_name,
+                        record,
+                        description='Volume',
+                        remove_hint=(f'remove {vol.volume_name!r} from the '
+                                     f'task\'s volumes'))
                 volume_info = volume_utils.VolumeInfo(
                     name=vol.volume_name,
                     path=vol.path,
@@ -1043,40 +1221,46 @@ def write_cluster_config(
     # they go through the same Jinja2 template path as user volume mounts
     # (volume definitions, volumeMounts, and permission fixes).
     if isinstance(cloud, clouds.Kubernetes):
-        auto_mounts_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=to_provision.region,
-            keys=('auto_mounts',),
-            default_value=None)
-        if auto_mounts_config:
+        # Resolved a second time here: the provision timeout is computed from
+        # the same list, before this point (see
+        # Kubernetes._calculate_provision_timeout).
+        #
+        # That one resolves against `region.name`, which is the same string as
+        # `to_provision.region`: the caller asserts the latter is set and builds
+        # the Region from it (see _retry_zones in cloud_vm_ray_backend.py), so
+        # the two cannot read different effective configs.
+        auto_mounts = volume_utils.resolve_auto_mounts(to_provision.region)
+        for skipped_mount in auto_mounts.skipped:
+            if skipped_mount.is_warning:
+                logger.warning(skipped_mount.message)
+            else:
+                logger.debug(skipped_mount.message)
+        if auto_mounts.mounted:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
             attached_auto_mount_volumes: Set[str] = set()
-            for entry in auto_mounts_config:
-                volume_name = entry['volume_name']
-                mount_paths = entry.get('mount_paths', [])
-                record = global_user_state.get_volume_by_name(volume_name)
-                if record is None:
-                    logger.warning(
-                        f'Auto-mount volume {volume_name!r} not found in '
-                        f'SkyPilot volume DB. Skipping. '
-                        f'Create it with: sky volumes apply')
-                    continue
-                volume_config = record['handle']
-                # Only hostPath and ReadWriteMany PVC volumes support
-                # concurrent multi-pod access required by auto_mounts.
-                if (volume_config.type == volume_utils.VolumeType.PVC.value and
-                        volume_config.config.get('access_mode') !=
-                        volume_utils.VolumeAccessMode.READ_WRITE_MANY.value):
-                    logger.warning(
-                        f'Auto-mount volume {volume_name!r} has access '
-                        f'mode '
-                        f'{volume_config.config.get("access_mode")!r}, '
-                        f'which does not support concurrent multi-pod '
-                        f'access. Only hostPath volumes and '
-                        f'ReadWriteMany PVC volumes are supported for '
-                        f'auto_mounts. Skipping.')
-                    continue
-                for path in mount_paths:
+            for auto_mount in auto_mounts.mounted:
+                volume_name = auto_mount.volume_name
+                volume_config = auto_mount.volume_config
+                # Reject before a pod is created. Mounting a volume whose
+                # backing storage is not usable does not fail loudly -- the pod
+                # just sits unschedulable or stuck in ContainerCreating -- so
+                # the launch has to be refused here, as it already is for a
+                # volume declared on the task.
+                #
+                # Readiness is checked here rather than in
+                # resolve_auto_mounts() because the entries that resolver
+                # passes over are ones this launch will not mount at all.
+                # Refusing there would refuse a launch over a volume belonging
+                # to someone else's scope, or one that would have been passed
+                # over for its access mode -- and would also raise on the
+                # provision-timeout path.
+                _reject_not_ready_volume(
+                    volume_name,
+                    auto_mount.record,
+                    description='Auto-mount volume',
+                    remove_hint=(f'remove {volume_name!r} from the '
+                                 f'auto_mounts config'))
+                for path in auto_mount.mount_paths:
                     if path.startswith('/'):
                         mount_path = path
                     elif path.startswith('~/'):
@@ -1131,6 +1315,13 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
+    # Read the stored YAML before rendering, not just after (where
+    # _replace_yaml_dicts uses it): an existing cluster has to be rendered with
+    # the Ray version it already runs, or its nodes end up disagreeing.
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    ray_version = _ray_version_for_cluster(cluster_name, old_yaml_content)
+    _log_pinned_ray_version(cluster_name, ray_version, cloud, to_provision,
+                            region.name)
     variables = dict(
         resources_vars,
         **{
@@ -1189,15 +1380,26 @@ def write_cluster_config(
                         '{is_custom_docker}', is_custom_docker)
                 if install_conda else '',
             # UV setup
-            'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
+            'uv_installation_commands':
+                constants.UV_INSTALLATION_COMMANDS +
+                (constants.SKY_USER_ENV_CREATION_COMMANDS
+                 if create_user_env else ''),
             # Currently only used by Slurm. For other clouds, it is
             # already part of ray_skypilot_installation_commands
             'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
             'ray_skypilot_installation_commands':
                 (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
-                    '{sky_wheel_hash}',
-                    wheel_hash).replace('{cloud}',
-                                        str(cloud).lower())),
+                    '{sky_wheel_hash}', wheel_hash).replace(
+                        '{cloud}',
+                        str(cloud).lower()).replace('{ray_version}',
+                                                    ray_version)),
+            # Kubernetes installs Ray from the pod args rather than from
+            # setup_commands, so it needs the same string separately. Built
+            # here, not in Kubernetes.make_deploy_resources_variables, because
+            # only this scope knows which Ray version this cluster is pinned to.
+            'ray_installation_commands':
+                (constants.RAY_INSTALLATION_COMMANDS.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',
@@ -1211,6 +1413,9 @@ def write_cluster_config(
             'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
             'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
             'dump_port_command': instance_setup.DUMP_RAY_PORTS,
+            # Commands raising the open files (nofile) limit for ray.
+            'ray_prlimit_command': instance_setup.RAY_PRLIMIT,
+            'raise_nofile_limit_command': instance_setup.RAISE_NOFILE_LIMIT_CMD,
             # Sky-internal constants.
             'sky_ray_cmd': constants.SKY_RAY_CMD,
             # pip install needs to have python env activated to make sure
@@ -1220,7 +1425,14 @@ def write_cluster_config(
             # cluster, so that ray autoscaler can access cloud SDK and CLIs
             # on remote
             'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-            'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+            # The Ray this cluster is pinned to: what to install.
+            'ray_version': ray_version,
+            # ray_patches_cmd carries its own version check: the patches
+            # shipped in the wheel target SKY_REMOTE_RAY_VERSION, not this
+            # cluster's pinned ray_version, and applying them to a different
+            # Ray is what corrupts it.
+            'ray_patches_cmd': instance_setup.ray_patches_cmd(
+                constants.SKY_REMOTE_RAY_VERSION),
             # Command for waiting ray cluster to be ready on head.
             'ray_head_wait_initialized_command':
                 instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
@@ -1262,6 +1474,9 @@ def write_cluster_config(
         variables.update(cloud_specific_failover_overrides)
     if extra_template_variables is not None:
         variables.update(extra_template_variables)
+    # Kubernetes pod fields are merged into the rendered pod below. A template
+    # that also rendered them would apply them twice.
+    pod_fields = variables.pop('pod_fields', None)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -1274,6 +1489,9 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             tmp_yaml_str = f.read()
         cluster_yaml_obj = yaml_utils.safe_load(tmp_yaml_str)
+        # The user's pod_config is merged on top of these.
+        cluster_yaml_obj = kubernetes_utils.combine_pod_fields(
+            cluster_yaml_obj, pod_fields)
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields_and_metadata(
             cluster_yaml_obj,
             cluster_config_overrides=cluster_config_overrides,
@@ -1304,8 +1522,8 @@ def write_cluster_config(
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
-    # Restore the old yaml content for backward compatibility.
-    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    # Restore the old yaml content for backward compatibility. old_yaml_content
+    # was read before rendering, since _ray_version_for_cluster needs it too.
     if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
@@ -1321,6 +1539,13 @@ def write_cluster_config(
     # correctly. See #8232.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
+
+    # Record the Ray version this cluster is set up with, so a later launch
+    # renders the same one rather than whatever SKY_REMOTE_RAY_VERSION has
+    # become. Written after the restore above, which would otherwise put back
+    # the old 'provider' block wholesale and discard it.
+    yaml_config.setdefault('provider', {})[_RAY_VERSION_KEY] = ray_version
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
@@ -1418,6 +1643,23 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
     return datetime.strptime(
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
+
+
+def _summarize_probe_failure(e: exceptions.CommandError) -> str:
+    """Extract a concise, user-facing reason from a failed health probe.
+
+    str(e) embeds the entire remote ray-status command, which is too noisy
+    for the cluster event surfaced on the dashboard and CLI. The actionable
+    part is the last stderr line (e.g. 'ssh: connect to host 1.2.3.4 port
+    22: Operation timed out').
+    """
+    for source in (e.detailed_reason, e.error_msg):
+        if not source:
+            continue
+        lines = [line.strip() for line in source.splitlines() if line.strip()]
+        if lines:
+            return f'health probe failed: {lines[-1]}'
+    return f'health probe failed with return code {e.returncode}'
 
 
 def _count_healthy_nodes_from_ray(output: str,
@@ -2196,12 +2438,15 @@ def _check_owner_identity_with_record(cluster_name: str,
     cluster_workspace = record.get('workspace',
                                    constants.SKYPILOT_DEFAULT_WORKSPACE)
     if active_workspace != cluster_workspace:
+        cluster_label = workspaces_core.workspace_label_for_caller(
+            cluster_workspace)
+        active_name = skypilot_config.get_workspace_name(active_workspace)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{colorama.Fore.YELLOW}'
                 f'The cluster {cluster_name!r} is in workspace '
-                f'{cluster_workspace!r}, but the active workspace is '
-                f'{active_workspace!r}.{colorama.Fore.RESET}')
+                f'{cluster_label!r}, but the active workspace is '
+                f'{active_name!r}.{colorama.Fore.RESET}')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
@@ -2592,18 +2837,24 @@ def _update_cluster_status(
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
-        rc, output, stderr = runner.run(
-            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        cmd = instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND
+        rc, output, stderr = runner.run(cmd,
+                                        stream_logs=False,
+                                        require_outputs=True,
+                                        separate_stderr=True)
         if rc:
             raise exceptions.CommandError(
-                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                f'Failed to check ray cluster\'s healthiness.\n'
+                rc, cmd, f'Failed to check ray cluster\'s healthiness.\n'
                 '-- stdout --\n'
                 f'{output}\n', stderr)
-        return (*_count_healthy_nodes_from_ray(output), output, stderr)
+        match = instance_setup.RAY_ALIVE_NODES_PATTERN.search(output)
+        if match is None:
+            raise exceptions.CommandError(
+                rc, cmd, 'Failed to read the alive node count from the ray '
+                f'cluster.\n-- stdout --\n{output}\n', stderr)
+        # The head is one of them; the caller compares head + workers.
+        alive = int(match.group(1))
+        return (min(alive, 1), max(alive - 1, 0), output, stderr)
 
     ray_status_details: Optional[str] = None
 
@@ -2637,7 +2888,27 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
-            for i in range(5):
+            timeout = skypilot_config.get_nested(
+                ('provision', 'health_check_timeout'),
+                DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS)
+            if not math.isfinite(timeout):
+                logger.warning('Ignoring non-finite '
+                               f'provision.health_check_timeout: {timeout}')
+                timeout = DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
+            # Counted from the first failure, so a probe that hangs until the
+            # SSH connect timeout still gets retried.
+            retry_deadline: Optional[float] = None
+
+            def wait_for_retry() -> bool:
+                nonlocal retry_deadline
+                if retry_deadline is None:
+                    retry_deadline = time.monotonic() + timeout
+                if time.monotonic() >= retry_deadline:
+                    return False
+                time.sleep(1)
+                return True
+
+            for i in itertools.count():
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
@@ -2645,6 +2916,11 @@ def _update_cluster_status(
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
+                        # Retry transient SSH failures; a missing runtime
+                        # will not come back on its own.
+                        if (_RAY_CLUSTER_NOT_FOUND_MESSAGE not in e.error_msg
+                                and wait_for_retry()):
+                            continue
                         # Non-k8s clusters can be manually restarted and:
                         # 1. Get new IP addresses, or
                         # 2. Not have the SkyPilot runtime setup
@@ -2668,13 +2944,22 @@ def _update_cluster_status(
                                 f'If the cluster was restarted manually, try running: '
                                 f'{reset}{bright}sky start {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
+                            # Record the probe failure so the cluster event
+                            # explains the INIT transition instead of showing
+                            # 'ray cluster is unhealthy (None)'.
+                            ray_status_details = _summarize_probe_failure(e)
                             return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
-                    time.sleep(1)
-                    continue
-                if ready_head + ready_workers == total_nodes:
+                    if wait_for_retry():
+                        continue
+                    break
+                # The cloud already reported every node up. Nodes removed by a
+                # resize stay alive in the GCS for ~30s, so `==` would set
+                # INIT after every scale-down; `>=` instead misses a node
+                # dying within those ~30s until the next refresh.
+                if ready_head + ready_workers >= total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
                              f'{i}: ray status not showing all nodes '
@@ -2689,7 +2974,8 @@ def _update_cluster_status(
                 #   (not preempted), but
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
-                time.sleep(1)
+                if not wait_for_retry():
+                    break
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')
@@ -2706,6 +2992,13 @@ def _update_cluster_status(
             if ray_status_details is None:
                 ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
+        except exceptions.CommandError as e:
+            # The health probe command itself failed (e.g. SSH to the head
+            # node is unreachable). Record the concise failure instead of
+            # str(e), which embeds the whole remote command.
+            ray_status_details = _summarize_probe_failure(e)
+            logger.debug(f'Refreshing status ({cluster_name!r}) probe failed: ',
+                         exc_info=e)
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
@@ -2769,8 +3062,33 @@ def _update_cluster_status(
     # from cloud -> provision layer.
     should_check_ray = (cloud is not None and cloud.uses_ray() and
                         handle.provision_runtime_metadata.has_ray)
-    if (all_nodes_up and (not should_check_ray or
-                          run_ray_status_to_check_ray_cluster_healthy()) and
+    # A handle without cached IPs is the bare pre-provision handle that
+    # `sky launch` persists (at INIT) before provisioning starts; the
+    # completed handle (with IPs and has_ray=True) is only persisted after
+    # runtime setup finishes. If the launch is interrupted in that window
+    # (process death, cancellation, a lost cluster lock) while the nodes
+    # keep running, all_nodes_up can be True here — e.g. Kubernetes pods
+    # report Running long before the runtime is set up. Never mark such a
+    # cluster UP: with has_ray=False the ray health check (which fails
+    # closed on missing IPs) is skipped entirely, and every operation on
+    # an UP cluster requires handle.head_ip (see check_cluster_available),
+    # so promoting would only trade INIT for a ClusterNotUpError later.
+    # Fall through to the abnormal-cluster handling below to keep it INIT.
+    #
+    # Only apply this gate when the ray health check is skipped. When it
+    # runs, it is the authority: it already fails closed when there is no
+    # way to reach the head node, and it is what surfaces the recovery hint
+    # for a cluster restarted outside SkyPilot. Stopping a cluster clears
+    # head_ip on purpose (see global_user_state.remove_cluster), so a
+    # stopped-then-manually-restarted cluster also has head_ip=None here;
+    # gating it on head_ip would skip the probe and drop that hint.
+    handle_has_cached_ips = handle.head_ip is not None
+    if all_nodes_up and not should_check_ray and not handle_has_cached_ips:
+        ray_status_details = ('no cached IPs on the cluster handle; the '
+                              'last launch was likely interrupted before '
+                              'the SkyPilot runtime was set up')
+    if (all_nodes_up and (run_ray_status_to_check_ray_cluster_healthy()
+                          if should_check_ray else handle_has_cached_ips) and
             not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
@@ -2925,6 +3243,7 @@ def _update_cluster_status(
         #   once the container is running again, so a snapshot that raced the
         #   restart misses it -> re-read the pods' current+previous states.
         # Bounded: only on an abnormal k8s cluster with no status reason.
+        recovered_cause = False
         if not status_reason and isinstance(launched_resources.cloud,
                                             clouds.Kubernetes):
             try:
@@ -2932,11 +3251,31 @@ def _update_cluster_status(
                     handle.cluster_yaml)
                 if ray_config and 'provider' in ray_config:
                     pod_names = list(node_statuses.keys())
+                    # Only read events from this cluster's launch onwards.
+                    # Pod names are a function of the cluster name and
+                    # Kubernetes keeps Events for an hour, so a cluster that
+                    # reuses the name of one that was torn down would
+                    # otherwise be told why the pods of that earlier cluster
+                    # were deleted. launched_at is the right bound: it is
+                    # written again every time the cluster is launched, and
+                    # the earlier cluster's record has to be removed before
+                    # its name can be reused, so everything that cluster left
+                    # behind was written before this one was launched. The
+                    # pods themselves are not in hand here to give a tighter
+                    # bound -- the status query returns a status and a reason
+                    # per pod, not the pod objects.
+                    launched_at = record.get('launched_at')
+                    since = (datetime.fromtimestamp(launched_at,
+                                                    tz=timezone.utc)
+                             if launched_at is not None else None)
                     status_reason = (
                         k8s_instance.get_cluster_failure_reason_from_events(
-                            ray_config['provider'], pod_names) or
+                            ray_config['provider'], pod_names, since=since) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
+                    # Lands in status_reason, not node_statuses, so the
+                    # supersede check below cannot see it otherwise.
+                    recovered_cause = bool(status_reason)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to get pod failure reason for '
                              f'{cluster_name!r}: {e}')
@@ -2952,6 +3291,36 @@ def _update_cluster_status(
         ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+            # Say where the node went. The pods are gone, so their live status
+            # explains nothing, but the Kubernetes nodes they were placed on
+            # still do: a node that no longer exists, or that is NotReady or
+            # cordoned, points at a cluster/cloud-side failure rather than a
+            # user-initiated teardown. K8s-only; other clouds keep the generic
+            # reason. Best-effort -- fall back to the generic message when the
+            # nodes are unknown or all look fine.
+            #
+            # Skipped once the cluster is already INIT, mirroring the guard on
+            # the event write below: a cluster stays INIT with the pod missing
+            # until it is downed or relaunched, so without this we would poll
+            # the K8s API once per node every refresh to build a string that
+            # is then discarded.
+            if (status != status_lib.ClusterStatus.INIT and
+                    not status_reason and
+                    isinstance(launched_resources.cloud, clouds.Kubernetes)):
+                try:
+                    cluster_info = handle.cached_cluster_info
+                    node_names = (cluster_info.get_node_names()
+                                  if cluster_info is not None else None)
+                    if node_names:
+                        ray_config = global_user_state.get_cluster_yaml_dict(
+                            handle.cluster_yaml)
+                        if ray_config and 'provider' in ray_config:
+                            status_reason = (
+                                k8s_instance.get_missing_node_reason(
+                                    node_names, ray_config['provider']) or '')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to get node state for '
+                                 f'{cluster_name!r}: {e}')
         elif ray_cluster_unhealthy:
             if status_reason:
                 # K8s diagnostics explain the issue — lead with that
@@ -3090,9 +3459,18 @@ def _update_cluster_status(
             hint = kubernetes_utils.match_kubernetes_failure_hint_text(
                 log_message)
             if hint:
-                log_message += f' {hint}'
-        # Do not add event if the cluster is already in INIT status.
-        if status != status_lib.ClusterStatus.INIT:
+                # Own line so the remedy reads separately from the cause.
+                log_message += f'\n{hint}'
+        # A refresh during a node outage sees stale pod status and can only
+        # record a generic reason; the guard below would then freeze that in.
+        # add_cluster_event() dedups, so a stable cause is recorded once.
+        identified_cause = False
+        if isinstance(launched_resources.cloud, clouds.Kubernetes):
+            identified_cause = recovered_cause or any(
+                k8s_instance.pod_reason_identifies_cause(pod_reason)
+                for _, pod_reason in node_statuses.values())
+        # Skip if already INIT, unless this refresh explained why.
+        if (status != status_lib.ClusterStatus.INIT or identified_cause):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,
@@ -3875,8 +4253,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
-        include_credentials: If True, include cluster ssh credentials in the
-            return value.
+        include_credentials: If True, include ssh credentials in the records of
+            the clusters the current user owns.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -3884,7 +4262,10 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+    # Visibility, not usability: a non-member of a read-only workspace can see
+    # its clusters (that is the point of read-only visibility).
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
 
     # Defense-in-depth: even if some caller bypasses the HTTP layer's
     # role_filter shim and reaches here with include_credentials=True
@@ -3943,12 +4324,17 @@ def get_clusters(
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
+        """Add the credentials to the records of clusters the caller owns.
 
         This is useful for the client side to setup the ssh config of the
-        cluster.
+        cluster. The credentials carry the cluster owner's SSH private key, so
+        the records of other users' clusters get none.
         """
-        records_with_handle = _get_records_with_handle(records)
+        caller_user_hash = common_utils.get_current_user().id
+        records_with_handle = [
+            record for record in _get_records_with_handle(records)
+            if record['user_hash'] == caller_user_hash
+        ]
         if len(records_with_handle) == 0:
             return
 
@@ -4463,9 +4849,35 @@ def workspace_lock_id(workspace_name: str) -> str:
     return f'{workspace_name}_workspace'
 
 
+@functools.lru_cache(maxsize=1)
+def skylet_tunnel_owner_id() -> str:
+    """Identifies this host among API servers that share one database.
+
+    A skylet tunnel is a process on the host that opened it, so tunnel
+    bookkeeping and locking are keyed by this id.
+    """
+    return socket.gethostname()
+
+
 def cluster_tunnel_lock_id(cluster_name: str) -> str:
-    """Get the lock ID for cluster tunnel operations."""
-    return f'{cluster_name}_ssh_tunnel'
+    """Get the lock ID for this host's tunnel operations on the cluster."""
+    return f'{cluster_name}_{skylet_tunnel_owner_id()}_ssh_tunnel'
+
+
+def _drain_tunnel_pipe(pipe: IO[str],
+                       tail: Deque[str],
+                       first_line: Optional[queue_lib.Queue] = None) -> None:
+    """Reads a tunnel process pipe until EOF, keeping its last lines in tail.
+
+    If first_line is given, the first line read is also put on it.
+    """
+    # Iteration ends at EOF, which arrives when the tunnel process exits and
+    # its end of the pipe closes, so the thread lives as long as the process.
+    for line in pipe:
+        if first_line is not None:
+            first_line.put(line)
+            first_line = None
+        tail.append(line)
 
 
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
@@ -4499,14 +4911,38 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                                        stderr=subprocess.PIPE,
                                        start_new_session=True,
                                        text=True)
+    # The tunnel process writes to stdout and stderr for its whole lifetime
+    # (kubectl port-forward prints a line for every accepted connection before
+    # forwarding it), so both pipes are read until EOF to keep the process
+    # from blocking on a full pipe.
+    queue: queue_lib.Queue = queue_lib.Queue()
+    stdout_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+    stderr_tail: Deque[str] = collections.deque(
+        maxlen=_TUNNEL_OUTPUT_TAIL_LINES)
+
+    assert ssh_tunnel_proc.stdout is not None
+    assert ssh_tunnel_proc.stderr is not None
+
+    def _drain_stderr(pipe: IO[str]) -> None:
+        _drain_tunnel_pipe(pipe, stderr_tail)
+        if stderr_tail:
+            last_lines = ''.join(stderr_tail)
+            logger.debug(f'Port forward process {ssh_tunnel_proc.pid} closed '
+                         f'stderr. Last lines:\n{last_lines}')
+
+    drain_threads = [
+        threading.Thread(target=_drain_tunnel_pipe,
+                         args=(ssh_tunnel_proc.stdout, stdout_tail, queue),
+                         daemon=True),
+        threading.Thread(target=_drain_stderr,
+                         args=(ssh_tunnel_proc.stderr,),
+                         daemon=True),
+    ]
+    for thread in drain_threads:
+        thread.start()
     # Wait until we receive an ack from the remote cluster or
     # the SSH connection times out.
-    queue: queue_lib.Queue = queue_lib.Queue()
-    stdout_thread = threading.Thread(
-        target=lambda queue, stdout: queue.put(stdout.readline()),
-        args=(queue, ssh_tunnel_proc.stdout),
-        daemon=True)
-    stdout_thread.start()
     while ssh_tunnel_proc.poll() is None:
         try:
             ack = queue.get_nowait()
@@ -4532,11 +4968,14 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             # We did not observe this with real Kubernetes clusters.
             timeout = 5
             port_check_cmd = (
-                # We install netcat in our ray-node container,
-                # so we can use it here.
-                # (See kubernetes-ray.yml.j2)
+                # Poll the port with bash's /dev/tcp so no netcat is required:
+                # RHEL/UBI images ship nmap-ncat, whose `nc` has no `-z` flag.
+                # Fall back to `nc -w 1` (portable, no `-z`) for the rare bash
+                # built --disable-net-redirections. (See kubernetes-ray.yml.j2.)
                 f'end=$((SECONDS+{timeout})); '
-                f'while ! nc -z -w 1 localhost {remote_port}; do '
+                f'while ! (timeout 1 bash -c '
+                f'": < /dev/tcp/localhost/{remote_port}" 2>/dev/null || '
+                f'nc -w 1 localhost {remote_port} < /dev/null 2>/dev/null); do '
                 'if (( SECONDS >= end )); then exit 1; fi; '
                 'sleep 0.1; '
                 'done')
@@ -4561,7 +5000,10 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             break
 
     if ssh_tunnel_proc.poll() is not None:
-        stdout, stderr = ssh_tunnel_proc.communicate()
+        for thread in drain_threads:
+            thread.join(timeout=5)
+        stdout = ''.join(stdout_tail)
+        stderr = ''.join(stderr_tail)
         error_msg = 'Port forward failed'
         if stdout:
             error_msg += f'\n-- stdout --\n{stdout}\n'

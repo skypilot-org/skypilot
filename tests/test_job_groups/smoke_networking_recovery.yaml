@@ -1,0 +1,42 @@
+# JobGroup networking recovery smoke test.
+# Two long-running tasks curl each other's hostname in a loop, logging
+# epoch-tagged CONNECT_OK lines. The test deletes one task's pod and
+# asserts both directions reconnect after recovery. Task names are
+# uniquified via {{suffix}} because they become the managed cluster names
+# (the `skypilot-cluster-name` pod annotation), which the test greps to
+# pick its deletion target in a shared namespace.
+---
+name: {{name}}
+execution: parallel
+---
+name: srv{{suffix}}
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  python3 -m http.server 8080 &
+  PEER="png{{suffix}}-0.${SKYPILOT_JOBGROUP_NAME}"
+  for i in $(seq 1 600); do
+    if curl -s --connect-timeout 5 http://$PEER:8080/ > /dev/null 2>&1; then
+      echo "CONNECT_OK peer=$PEER attempt=$i epoch=$(date +%s)"
+    else
+      echo "CONNECT_FAIL peer=$PEER attempt=$i"
+    fi
+    sleep 3
+  done
+---
+name: png{{suffix}}
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  python3 -m http.server 8080 &
+  PEER="srv{{suffix}}-0.${SKYPILOT_JOBGROUP_NAME}"
+  for i in $(seq 1 600); do
+    if curl -s --connect-timeout 5 http://$PEER:8080/ > /dev/null 2>&1; then
+      echo "CONNECT_OK peer=$PEER attempt=$i epoch=$(date +%s)"
+    else
+      echo "CONNECT_FAIL peer=$PEER attempt=$i"
+    fi
+    sleep 3
+  done

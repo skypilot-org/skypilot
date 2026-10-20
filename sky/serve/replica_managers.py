@@ -4,6 +4,7 @@ import functools
 from multiprocessing import pool as mp_pool
 import os
 import pathlib
+import re
 import threading
 import time
 import traceback
@@ -26,6 +27,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
 from sky.serve import spot_placer
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -59,6 +61,36 @@ _WAIT_LAUNCH_THREAD_TIMEOUT_SECONDS = 15
 # back-compat callers like ReplicaInfo.__repr__.
 _NOT_PROVIDED: Any = object()
 
+# LAUNCH_PROGRESS cluster events written by the provisioners read
+# 'Launching (<detail>)', e.g. 'Launching (waiting for queue admission)' while
+# a Kubernetes pod is held by Kueue until quota frees up. The detail is
+# surfaced next to a PROVISIONING replica's status, so a worker parked on
+# quota can be told apart from one that is actually being provisioned.
+_LAUNCH_PROGRESS_DETAIL_RE = re.compile(r'^Launching \((?P<detail>.+)\)$')
+
+# Minimum interval between the cloud status refreshes that failed probes of a
+# non-spot replica trigger while it has never been ready. Such a replica
+# fails its probes routinely (setup still running, service still loading), so
+# the refresh is rate limited instead of costing one cloud API call per probe.
+# See SkyPilotReplicaManager._handle_preemption.
+_NEVER_READY_TERMINATION_CHECK_INTERVAL_SECONDS = 60
+
+
+def launch_progress_detail(launch_progress: Optional[str]) -> Optional[str]:
+    """Extracts the human-readable detail of a LAUNCH_PROGRESS reason.
+
+    Returns None for reasons that carry no parenthesized detail (e.g.
+    'Provisioning on kubernetes in ctx'), which would only duplicate the
+    replica's PROVISIONING status.
+    """
+    if launch_progress is None:
+        return None
+    match = _LAUNCH_PROGRESS_DETAIL_RE.match(launch_progress)
+    if match is None:
+        return None
+    return match.group('detail')
+
+
 # TODO(tian): Backward compatibility. Remove this after 3 minor release, i.e.
 # 0.13.0. We move the ProcessStatus to common_utils.ProcessStatus in #6666, but
 # old ReplicaInfo in database will still tries to unpickle using ProcessStatus
@@ -80,11 +112,18 @@ def launch_cluster(replica_id: int,
                        int, bool],
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
-                   max_retry: int = 3) -> None:
+                   max_retry: int = 3,
+                   file_mounts_blob_id: Optional[str] = None) -> None:
     """Launch a sky serve replica cluster.
 
     This function will not wait for the job starts running. It will return
     immediately after the job is submitted.
+
+    Args:
+        file_mounts_blob_id: The blob that the task's local workdir and file
+            mount sources point into, if any. It is passed on with the launch
+            so the API server extracts the blob on whichever host handles the
+            launch; the sources may not exist on this controller's host.
 
     Raises:
         RuntimeError: If failed to launch the cluster after max_retry retries,
@@ -108,6 +147,12 @@ def launch_cluster(replica_id: int,
             ]
             task.set_resources(type(resources)(overrided_resources))
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
+        # Once the task's sources are cloud URLs (e.g. after an update that
+        # went through a bucket), the blob is not needed for this launch.
+        if (file_mounts_blob_id is not None and
+                not server_common.local_file_mounts_required(
+                    task.to_yaml_config())):
+            file_mounts_blob_id = None
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
                     f'{cluster_name} with resources: {task.resources}')
@@ -137,7 +182,8 @@ def launch_cluster(replica_id: int,
             request_id = sdk.launch(task,
                                     cluster_name,
                                     retry_until_up=retry_until_up,
-                                    _is_launched_by_sky_serve_controller=True)
+                                    _is_launched_by_sky_serve_controller=True,
+                                    _file_mounts_blob_id=file_mounts_blob_id)
             logger.info(f'Replica cluster {cluster_name} launch requested '
                         f'with request_id: {request_id}.')
             replica_to_request_id[replica_id] = request_id
@@ -302,7 +348,10 @@ class ReplicaStatusProperty:
     sky_down_status: Optional[common_utils.ProcessStatus] = None
     # Whether the termination is caused by autoscaler's decision
     is_scale_down: bool = False
-    # The replica's spot instance was preempted.
+    # The replica's cluster was preempted or otherwise terminated from the
+    # outside: a spot instance reclaimed by the cloud, a pod evicted by
+    # Kueue for a higher-priority workload, etc. The replica is recycled and
+    # the autoscaler launches a replacement.
     preempted: bool = False
     # Whether the replica is purged.
     purged: bool = False
@@ -535,7 +584,8 @@ class ReplicaInfo:
     def to_info_dict(self,
                      with_handle: bool,
                      with_url: bool = True,
-                     cluster_record: Any = _NOT_PROVIDED) -> Dict[str, Any]:
+                     cluster_record: Any = _NOT_PROVIDED,
+                     launch_progress: Optional[str] = None) -> Dict[str, Any]:
         """Build the dashboard/CLI view dict for this replica.
 
         Args:
@@ -550,6 +600,10 @@ class ReplicaInfo:
                 ``_NOT_PROVIDED`` (the default) to fall back to the
                 self-fetch path for backward compatibility (e.g. ``__repr__``
                 still works without changes).
+            launch_progress: the cluster's latest LAUNCH_PROGRESS event
+                reason, if any. For a PROVISIONING replica its detail (e.g.
+                'waiting for queue admission') is exposed as
+                ``status_detail``.
         """
         if cluster_record is _NOT_PROVIDED:
             cluster_record = global_user_state.get_cluster_from_name(
@@ -567,6 +621,10 @@ class ReplicaInfo:
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
+        if info_dict['status'] == serve_state.ReplicaStatus.PROVISIONING:
+            status_detail = launch_progress_detail(launch_progress)
+            if status_detail is not None:
+                info_dict['status_detail'] = status_detail
         # Resolve the handle once. When the cluster row is missing, the
         # handle is also missing (they live in the same row), so
         # short-circuit to avoid an extra DB lookup.
@@ -780,6 +838,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert yaml_content is not None, (
             f'yaml content not found for {service_name} version {version}')
         self.yaml_content: str = yaml_content
+        # Set when the task's local sources point into the client's upload
+        # blob (consolidation mode without a cloud bucket).
+        self._file_mounts_blob_id: Optional[str] = (
+            serve_state.get_service_file_mounts_blob_id(service_name))
         task = task_lib.Task.from_yaml_str(self.yaml_content)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
@@ -793,6 +855,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, bool] = thread_utils.ThreadSafeDict()
         self._down_thread_pool: thread_utils.ThreadSafeDict[
             int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
+        # replica_id -> time of the last cloud status refresh triggered by a
+        # failed probe of a never-ready non-spot replica. See
+        # _handle_preemption.
+        self._last_termination_check: Dict[int, float] = {}
 
         # Run recovery synchronously before launching the daemon threads.
         #
@@ -907,6 +973,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                   self._replica_to_request_id,
                   self._replica_to_launch_cancelled, resources_override,
                   retry_until_up),
+            kwargs={'file_mounts_blob_id': self._file_mounts_blob_id},
         )
         replica_port = _get_resources_ports(self.yaml_content)
 
@@ -966,6 +1033,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         'failure detected.')
             serve_state.add_or_update_replica(self._service_name,
                                               info.replica_id, info)
+        self._last_termination_check.pop(info.replica_id, None)
         if removal_reason is not None:
             serve_state.remove_replica(self._service_name, info.replica_id)
             logger.info(f'Replica {info.replica_id} removed from the '
@@ -1125,33 +1193,70 @@ class SkyPilotReplicaManager(ReplicaManager):
             is_scale_down=True,
             purge=purge)
 
+    def _should_check_termination(self, info: ReplicaInfo) -> bool:
+        """Whether a failed probe of a non-spot replica warrants a refresh.
+
+        A replica that was ready before and now fails its probe is rare, so
+        its cluster status is refreshed right away. A replica that has never
+        been ready fails its probes routinely while its setup or service is
+        still starting, so its refreshes are rate limited to one per
+        _NEVER_READY_TERMINATION_CHECK_INTERVAL_SECONDS.
+        """
+        first_ready_time = info.status_property.first_ready_time
+        if first_ready_time is not None and first_ready_time >= 0:
+            return True
+        now = time.time()
+        last_check = self._last_termination_check.get(info.replica_id)
+        if (last_check is not None and now - last_check <
+                _NEVER_READY_TERMINATION_CHECK_INTERVAL_SECONDS):
+            return False
+        self._last_termination_check[info.replica_id] = now
+        return True
+
     # We don't need to add lock here since every caller of this function
     # will acquire the lock.
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
-        """Handle preemption of the replica if any error happened.
+        """Recycle the replica if its cluster was terminated externally.
+
+        Covers a spot instance reclaimed by the cloud provider as well as any
+        other termination SkyPilot did not initiate, e.g. Kueue evicting a
+        pool worker's pod to make room for a higher-priority workload, or a
+        node failure. The replica is marked preempted and torn down as a
+        scale-down, so its record is dropped and the autoscaler launches a
+        replacement (which re-enters the queue when one is configured),
+        instead of the replica lingering as a FAILED_PROBING record.
+
+        Spot replicas refresh their cluster status on every failed probe;
+        non-spot replicas are gated by _should_check_termination to keep the
+        cloud API calls bounded.
 
         Returns:
             bool: Whether the replica is preempted.
         """
-        if not info.is_spot:
+        if not info.is_spot and not self._should_check_termination(info):
             return False
 
-        # Get cluster handle first for zone information. The following
-        # backend_utils.refresh_cluster_status_handle might delete the
-        # cluster record from the cluster table.
+        # The refresh below may delete the cluster record, so look the
+        # record up first.
         handle = global_user_state.get_handle_from_cluster_name(
             info.cluster_name)
         if handle is None:
-            logger.error(f'Cannot find cluster {info.cluster_name} for '
-                         f'replica {info.replica_id} in the cluster table. '
-                         'Skipping preemption handling.')
-            return False
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        # Pull the actual cluster status from the cloud provider to
-        # determine whether the cluster is preempted.
-        cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-            info.cluster_name,
-            force_refresh_statuses=set(status_lib.ClusterStatus))
+            # The replica launched successfully (only launched replicas are
+            # probed) and SkyPilot has not torn it down, yet its cluster
+            # record is gone: a status refresh (e.g. the API server's
+            # periodic one) already saw the cluster disappear and dropped
+            # the record. That is an external termination too.
+            logger.info(f'Cluster {info.cluster_name} of replica '
+                        f'{info.replica_id} no longer exists in the cluster '
+                        'table; treating it as preempted.')
+            cluster_status = None
+        else:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            # Pull the actual cluster status from the cloud provider to
+            # determine whether the cluster is preempted.
+            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                info.cluster_name,
+                force_refresh_statuses=set(status_lib.ClusterStatus))
 
         if cluster_status in (status_lib.ClusterStatus.UP,
                               status_lib.ClusterStatus.AUTOSTOPPING):
@@ -1160,10 +1265,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         # based on the interruption behavior of the cloud.
         cluster_status_str = ('' if cluster_status is None else
                               f' (status: {cluster_status.value})')
-        logger.info(
-            f'Replica {info.replica_id} is preempted{cluster_status_str}.')
+        kind = 'spot instance' if info.is_spot else 'cluster'
+        logger.info(f'Replica {info.replica_id} is preempted: its {kind} is '
+                    f'no longer up{cluster_status_str}. Recycling the '
+                    'replica.')
         info.status_property.preempted = True
-        if self._spot_placer is not None:
+        if self._spot_placer is not None and info.is_spot:
             spot_location = info.get_spot_location()
             assert spot_location is not None
             self._spot_placer.set_preemptive(spot_location)

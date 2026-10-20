@@ -1,21 +1,20 @@
-version: '3.9'
+version: '3.8'
 
 services:
-  model:
-    image: berkeleyskypilot/stable-diffusion
+  invokeai:
+    image: ghcr.io/invoke-ai/invokeai:v6.14.2-cuda
+    container_name: invokeai
     restart: on-failure
     ports:
-      - "7860:7860"
+      - "9090:9090"
     volumes:
-      - ./cache:/cache
-      - ./output:/output
-      - ./models:/models
+      - ~/invokeai:/invokeai
     environment:
-      - CLI_ARGS=--extra-models-cpu --optimized-turbo
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
     deploy:
       resources:
         reservations:
           devices:
-              - driver: nvidia
-                device_ids: ['0']
-                capabilities: [gpu]
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

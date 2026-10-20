@@ -20,8 +20,8 @@ class TestRoleEnum:
 
 
 class TestGetRolePermissions:
-    """GET /workspaces/config is admin-only only when opted in via
-    rbac.restrict_config_to_admins; POST is always admin-only."""
+    """GET /workspaces/config is admin-only unless opted out via
+    rbac.restrict_config_to_admins: false; POST is always admin-only."""
 
     @staticmethod
     def _user_blocklist(restrict):
@@ -43,8 +43,9 @@ class TestGetRolePermissions:
             'method': 'POST'
         } in self._user_blocklist(False)
 
-    def test_config_get_not_blocked_by_default(self):
-        # Default (flag off): reads are allowed for the user role.
+    def test_config_get_not_blocked_when_opted_out(self):
+        # rbac.restrict_config_to_admins=false: reads are allowed for the user
+        # role.
         assert {
             'path': '/workspaces/config',
             'method': 'GET'
@@ -56,6 +57,15 @@ class TestGetRolePermissions:
             'path': '/workspaces/config',
             'method': 'GET'
         } in self._user_blocklist(True)
+
+    def test_restrict_config_to_admins_defaults_to_true(self):
+        # With nothing set in config, reads default to admin-only.
+        def fake_get_nested(keys, default_value=None, *args, **kwargs):
+            return default_value
+
+        with mock.patch('sky.skypilot_config.get_nested',
+                        side_effect=fake_get_nested):
+            assert rbac.restrict_config_to_admins() is True
 
     def test_config_get_blocked_even_when_user_role_customized(self):
         # Security: a custom user role in config must not bypass the

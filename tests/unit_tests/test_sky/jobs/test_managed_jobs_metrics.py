@@ -22,18 +22,51 @@ class TestManagedJobsCollector:
             # Terminal status is included.
             ('ws', 'u', 'AWS', 'SUCCEEDED', 10),
         ]
+        mock_recovery_rows = [
+            ('EMERGENCY', 'ws', 2),
+            # LEFT JOIN miss: NULL workspace → 'default' label.
+            ('FAILURE', None, 5),
+        ]
+        mock_episode_rows = [
+            (42, 'train-llm', 'ws', 2),
+            # NULL job name → empty label.
+            (43, None, None, 1),
+        ]
 
         collector = metrics.ManagedJobsCollector()
         with patch.object(collector, '_refresh') as mock_refresh:
 
             def side_effect():
                 collector._cached_rows = mock_rows
+                collector._cached_recovery_rows = mock_recovery_rows
+                collector._cached_episode_rows = mock_episode_rows
 
             mock_refresh.side_effect = side_effect
 
             families = list(collector.collect())
 
-        assert len(families) == 1
+        assert len(families) == 3
+
+        recovery_family = families[1]
+        assert recovery_family.name == 'sky_managed_job_recovery_events_count'
+        recovery_samples = {(s.labels['recovery_source'],
+                             s.labels['workspace']): s.value
+                            for s in recovery_family.samples}
+        assert recovery_samples == {
+            ('EMERGENCY', 'ws'): 2,
+            ('FAILURE', 'default'): 5,
+        }
+
+        episode_family = families[2]
+        assert (episode_family.name ==
+                'sky_managed_job_emergency_recovery_attempts')
+        episode_samples = {(s.labels['job_id'], s.labels['job_name'],
+                            s.labels['workspace']): s.value
+                           for s in episode_family.samples}
+        assert episode_samples == {
+            ('42', 'train-llm', 'ws'): 2,
+            ('43', '', 'default'): 1,
+        }
 
         status_family = families[0]
         assert status_family.name == 'sky_managed_jobs_count'
@@ -88,12 +121,12 @@ class TestManagedJobsCollector:
         with patch.object(collector, '_refresh', side_effect=failing_refresh):
             # First collect fails, should yield empty metrics
             families = list(collector.collect())
-            assert len(families) == 1
-            assert list(families[0].samples) == []
+            assert len(families) == 3
+            assert all(list(f.samples) == [] for f in families)
 
             # Second collect retries (not skipped by zero TTL)
             families = list(collector.collect())
-            assert len(families) == 1
+            assert len(families) == 3
             samples = {s.labels['status']: s.value for s in families[0].samples}
             assert samples == {'RUNNING': 1}
 
@@ -105,6 +138,8 @@ class TestManagedJobsCollector:
         families = list(collector.describe())
         names = [f.name for f in families]
         assert 'sky_managed_jobs_count' in names
+        assert 'sky_managed_job_recovery_events_count' in names
+        assert 'sky_managed_job_emergency_recovery_attempts' in names
 
 
 class TestManagedJobsLimitMetrics:

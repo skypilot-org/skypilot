@@ -59,9 +59,10 @@ export function SidebarProvider({ children }) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState(null);
   const [userRole, setUserRole] = useState(null);
-  // Server-side opt-in (rbac.restrict_config_to_admins) surfaced via
-  // /api/health, so the config UI can be hidden for non-admins.
-  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(false);
+  // Server-side flag (rbac.restrict_config_to_admins, default true) surfaced
+  // via /api/health, so the config UI can be hidden for non-admins. Default to
+  // restricted before /api/health resolves.
+  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(true);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -83,37 +84,33 @@ export function SidebarProvider({ children }) {
         setRestrictConfigToAdmins(!!data.restrict_config_to_admins);
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
+        }
 
-          // Get role from direct API endpoint to avoid cache interference
-          // Using cache would cause race condition, which leads to unexpected
-          // behavior in workspaces and users page.
-          const getUserRole = async () => {
-            try {
-              const response = await fetch(`${fullEndpoint}/users/role`);
-              if (response.ok) {
-                const roleData = await response.json();
-                // Fall back to the least-privileged role if the payload has no
-                // role, so admin-gated views (e.g. the Config page) never hang
-                // waiting on a null role.
-                setUserRole(roleData.role || 'user');
-              } else {
-                setUserRole('user');
-              }
-            } catch (error) {
-              // On any failure, resolve to the least-privileged role rather
-              // than leaving it null (which would hang admin-gated views).
-              console.log('Could not fetch user role:', error);
+        // Always resolve the role from /users/role rather than inferring it
+        // from the presence of a user in /api/health.
+        // Fetch directly (no cache) to avoid a race that misbehaves on
+        // the workspaces and users pages.
+        const getUserRole = async () => {
+          try {
+            const response = await fetch(`${fullEndpoint}/users/role`);
+            if (response.ok) {
+              const roleData = await response.json();
+              // Fall back to the least-privileged role if the payload has no
+              // role, so admin-gated views (e.g. the Config page) never hang
+              // waiting on a null role.
+              setUserRole(roleData.role || 'user');
+            } else {
               setUserRole('user');
             }
-          };
+          } catch (error) {
+            // On any failure, resolve to the least-privileged role rather
+            // than leaving it null (which would hang admin-gated views).
+            console.log('Could not fetch user role:', error);
+            setUserRole('user');
+          }
+        };
 
-          getUserRole();
-        } else {
-          // No user info (e.g. auth disabled or anonymous): resolve the role
-          // to the least-privileged value instead of leaving it null, which
-          // would hang admin-gated views (e.g. the Config page) forever.
-          setUserRole('user');
-        }
+        getUserRole();
       })
       .catch((error) => {
         console.error('Error fetching user data:', error);
@@ -269,13 +266,23 @@ export function TopBar() {
   // Function to determine if a path is active
   const isActivePath = (path) => {
     // Special case: highlight workspaces for both /workspaces and /workspace paths
-    if (path === '/workspaces') {
-      return (
-        router.pathname.startsWith('/workspaces') ||
-        router.pathname.startsWith('/workspace')
-      );
+    const builtInMatch =
+      path === '/workspaces'
+        ? router.pathname.startsWith('/workspaces') ||
+          router.pathname.startsWith('/workspace')
+        : router.pathname.startsWith(path);
+    if (builtInMatch) {
+      return true;
     }
-    return router.pathname.startsWith(path);
+    // Plugin routes are served by a catch-all page, so router.pathname is
+    // '/[...path]' for all of them. A plugin route may declare the nav link
+    // it belongs under via `navHref`; match those against the real URL.
+    const currentPath = router.asPath.split(/[?#]/)[0];
+    return pluginRoutes.some(
+      (route) =>
+        route.navHref === path &&
+        (currentPath === route.path || currentPath.startsWith(`${route.path}/`))
+    );
   };
 
   // Modify the getLinkClasses function to handle mobile styles
@@ -516,7 +523,7 @@ export function TopBar() {
 
             <Link
               href="/"
-              className="flex items-center px-1 pt-1 h-full"
+              className="flex items-center px-1 h-full"
               prefetch={false}
             >
               <div className={`h-20 w-20 flex items-center justify-center`}>
@@ -609,7 +616,7 @@ export function TopBar() {
                 {/* Ungrouped plugin links - positioned on the right */}
                 {ungrouped.map((link) => renderDesktopPluginNavLink(link))}
 
-                {/* Grouped dropdown menus (e.g., Enterprise) - positioned on the right */}
+                {/* Grouped dropdown menus - positioned on the right */}
                 {Object.entries(groups).map(([groupName, links]) =>
                   renderDesktopDropdownMenu(groupName, links)
                 )}

@@ -295,6 +295,20 @@ def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
         _get_df(), instance_type)
 
 
+def get_efa_count_for_accelerator(
+        acc_name: str, acc_count: Union[int, float]) -> Optional[int]:
+    """EFA interfaces to request for ``acc_count`` of ``acc_name``, or None.
+
+    Sized from the lowest EFA-per-accelerator ratio among the EFA-capable
+    variants that can host the request, so the count is satisfiable on whatever
+    variant a cold cluster's autoscaler provisions and never strands GPUs. See
+    ``common.get_efa_count_for_accelerator_impl``. None when the catalog lacks
+    the ``MaximumEfaInterfaces`` column or no hosting-capable variant matches.
+    """
+    return common.get_efa_count_for_accelerator_impl(_get_df(), acc_name,
+                                                     acc_count)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,

@@ -49,7 +49,8 @@ ALL_REGIONS = [
     'eu-south-2',
     'eu-west-3',
     'eu-north-1',
-    'me-south-1',
+    # 'me-south-1', # currently unreachable, so skip it to avoid
+    # failing the whole fetch. Re-enable once connectivity is restored.
     'me-central-1',
     'af-south-1',
     'ap-east-1',
@@ -82,6 +83,7 @@ USEFUL_COLUMNS = [
     'NVMeSupported',
     'LocalDiskSize',
     'LocalDiskCount',
+    'MaximumEfaInterfaces',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -321,6 +323,18 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 info['LocalDiskCount'] = disk_info['Count']
             return info
 
+        def get_efa_interface_count(row) -> Optional[int]:
+            # Max EFA (Elastic Fabric Adapter) network interfaces for the
+            # instance type, from EC2 DescribeInstanceTypes. EfaInfo is only
+            # present when EfaSupported is true; non-EFA instances yield None
+            # (stored as NaN, same convention as LocalDiskCount).
+            net_info = row.get('NetworkInfo')
+            if isinstance(net_info, dict) and net_info.get('EfaSupported'):
+                efa_info = net_info.get('EfaInfo')
+                if isinstance(efa_info, dict):
+                    return efa_info.get('MaximumEfaInterfaces')
+            return None
+
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS instance type workarounds for incorrect/missing GPU info.
@@ -361,6 +375,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
                 'Arch': get_arch(row),
+                'MaximumEfaInterfaces': get_efa_interface_count(row),
                 **get_local_disk_info(row)
             })
 

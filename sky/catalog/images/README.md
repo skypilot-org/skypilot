@@ -21,6 +21,14 @@ FYI time to packer build images:
 | Azure | GPU  | 35 min          |
 | Azure | CPU  | 25 min          |
 
+The bake installs SkyPilot to apply its Ray patches, then removes it. By
+default that is the latest `skypilot-nightly`; to bake from a specific commit,
+e.g. one that changes the Ray version before it reaches a nightly, add this to
+any `packer build` below:
+```bash
+-var "skypilot_src=git+https://github.com/skypilot-org/skypilot@<full 40-char sha, pushed>"
+```
+
 ### GCP
 1. Build a single global image.
 ```bash
@@ -63,10 +71,23 @@ export IMAGE_ID=ami-0989556a89639b1bb   # Update this
 export BASE_IMAGE_ID=ami-01b2110eef525172b   # Update this
 python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE} --base-image-id ${BASE_IMAGE_ID} --arch arm64
 ```
+Pass `--tag-suffix` to name a new tag rather than add rows to an existing one,
+e.g. `--tag-suffix=-cuda13-ray256` (with `=`: argparse reads a separate
+leading-dash value as another flag). Older SkyPilot versions read the same
+catalog, so an existing tag must keep pointing at images they can run. The
+tags must match `_DEFAULT_*_IMAGE_ID` in `sky/clouds/aws.py` (GCP rows are
+written by hand; match `sky/clouds/gcp.py`).
+
 3. Add fallback images if any region failed \
 Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use public [ubuntu images](https://cloud-images.ubuntu.com/locator/ec2/) as fallback.)
 
 ### Azure
+The catalog points at gallery image definitions without a version, so every
+SkyPilot version launches the latest version of each definition. Publishing
+into an existing definition (the `image_name` in the templates) rolls the new
+image out to all of them at once; publish a change of Ray or driver into new
+definitions instead, with new tags.
+
 1. Generate a client secret for packer [here](https://portal.azure.com/?feature.msaljs=true#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/1d249f23-c22e-4d02-b62b-a6827bd113fe/isMSAApp~/false).
 ```bash
 export SECRET=xxxxxx  # Update this
@@ -82,10 +103,22 @@ packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid
 ### Kubernetes
 1. Build the image
 ```bash
-export REGION=europe  # Update this: us, europe, asia
-./skypilot-k8s-image.sh -p -l -r ${REGION}
-./skypilot-k8s-image.sh -p -l -g -r ${REGION}
+export REGION=us  # Update this: us, europe, asia
+./skypilot-k8s-image.sh -p -r ${REGION}
+./skypilot-k8s-image.sh -p -g -r ${REGION}
 ```
+2. To rebuild the same recipe on a different base, e.g. Ubuntu 24.04 for a newer
+glibc, pass `-b` for the base and `-s` for a tag suffix. Without `-b` the build
+uses the `BASE_IMAGE` pinned in `Dockerfile_k8s{,_gpu}`, which is what the
+default images ship on.
+```bash
+./skypilot-k8s-image.sh -p -r ${REGION} -b ubuntu:24.04 -s ubuntu2404
+./skypilot-k8s-image.sh -p -g -r ${REGION} \
+    -b nvidia/cuda:12.8.1-runtime-ubuntu24.04 -s ubuntu2404
+```
+Pass both: `-s` is what keeps the variant off the default build's tag, giving
+`<date>-ubuntu2404` above. Keep the CPU and GPU bases on the same Ubuntu
+release, since the GPU base is layered on the CPU one.
 
 ## Test Images
 1. Minimal GPU test: `sky launch --image ${IMAGE_ID} --gpus=L4:1 --cloud ${CLOUD}` then run `nvidia-smi` in the launched instance.
@@ -114,3 +147,7 @@ python aws_utils/image_delete.py --tag ${TAG}
 
 ### Azure
 1. Update Catalog with new images: [example PR](https://github.com/skypilot-org/skypilot-catalog/pull/92)
+
+### Kubernetes
+1. Add rows for the new tag to Catalog's `kubernetes/images.csv`, then point
+`Kubernetes.IMAGE_CPU` / `IMAGE_GPU` in `sky/clouds/kubernetes.py` at them.

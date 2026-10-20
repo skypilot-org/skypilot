@@ -14,6 +14,43 @@ const cleanErrorMessage = (error) => {
   return message;
 };
 
+// Render a message string, turning fenced code blocks (```lang\n...```) into
+// monospace <pre> blocks and leaving the surrounding text untouched. Server
+// error messages occasionally embed a well-formatted config example (e.g. the
+// expected YAML shape); a plain whitespace-pre-wrap render shows it in the
+// proportional body font, so isolate the fence into a code block instead.
+const renderMessageWithCodeBlocks = (text) => {
+  if (typeof text !== 'string' || !text.includes('```')) return text;
+  const fenceRegex = /```[^\n]*\n([\s\S]*?)```/g;
+  const parts = [];
+  let lastIndex = 0;
+  let key = 0;
+  let match;
+  const pushText = (str) => {
+    if (str) {
+      parts.push(<React.Fragment key={`text-${key++}`}>{str}</React.Fragment>);
+    }
+  };
+  while ((match = fenceRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      pushText(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <pre
+        key={`code-${key++}`}
+        className="mt-1 mb-0.5 p-2 bg-red-100 rounded font-mono text-xs overflow-x-auto whitespace-pre"
+      >
+        {match[1].replace(/\n$/, '')}
+      </pre>
+    );
+    lastIndex = fenceRegex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    pushText(text.slice(lastIndex));
+  }
+  return parts;
+};
+
 // Error display component
 export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
   const [isDismissed, setIsDismissed] = useState(false);
@@ -60,7 +97,8 @@ export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
                 (e.g. demotion failure with per-workspace bullets) keep
                 their \n line breaks instead of collapsing to one line. */}
             <div className="text-sm text-red-800 whitespace-pre-wrap">
-              <strong>{title}:</strong> {displayError}
+              <strong>{title}:</strong>{' '}
+              {renderMessageWithCodeBlocks(displayError)}
             </div>
           </div>
         </div>

@@ -38,16 +38,17 @@ var (
 )
 
 func usage() {
-	// Usage copied from libfuse:
-	// https://github.com/libfuse/libfuse/blob/1b86fe4c4de96daa4e766425193595f1c6b88a73/util/fusermount.c#L1435
-	fmt.Printf(`%s: [options] mountpoint
+	// Same flag set as fusermount(1) so callers can use the shim as a
+	// drop-in replacement.
+	fmt.Printf(`Usage: %s [options] <mountpoint>
+
 Options:
- -h		    %s
- -V		    %s
- -o opt[,opt...]    %s
- -u		    %s
- -q		    %s
- -z		    %s
+  -h, --help              %s
+  -V, --version           %s
+  -o, --options <opts>    %s
+  -u, --unmount           %s
+  -q, --quiet             %s
+  -z, --lazy              %s
 `, os.Args[0], helpDescription, versionDescription, optionsDescription, unmountDescription, quietDescription, lazyDescription)
 }
 

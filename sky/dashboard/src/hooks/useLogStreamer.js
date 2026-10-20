@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stripAnsiCodes, shouldDropLogLine } from '@/components/utils';
 
+const TRUNCATION_MARK = ' … [truncated]';
+
+// Ceiling on the raw carry, as a multiple of the visible cap. Only reached
+// by output whose visible length barely grows - a writer emitting mostly
+// escape sequences - where the visible cap alone would never trip.
+const RAW_CARRY_FACTOR = 4;
+
 /**
  * Shared log streaming hook used by both managed job and cluster pages.
  */
@@ -24,6 +31,8 @@ export function useLogStreamer({
 
   const bufferRef = useRef([]);
   const partialLineRef = useRef('');
+  // True while discarding the tail of a line already emitted truncated.
+  const overLongLineRef = useRef(false);
   const progressMapRef = useRef(new Map());
   const flushTimerRef = useRef(null);
   const controllerRef = useRef(null);
@@ -37,6 +46,7 @@ export function useLogStreamer({
   const resetState = useCallback(() => {
     bufferRef.current = [];
     partialLineRef.current = '';
+    overLongLineRef.current = false;
     progressMapRef.current = new Map();
     hasFirstChunkRef.current = false;
     setLogLines([]);
@@ -73,6 +83,8 @@ export function useLogStreamer({
     const controller = new AbortController();
     controllerRef.current = controller;
 
+    const maxRawCarryChars = maxLineChars * RAW_CARRY_FACTOR;
+
     const scheduleFlush = () => {
       if (flushTimerRef.current) return;
       flushTimerRef.current = setTimeout(() => {
@@ -98,38 +110,96 @@ export function useLogStreamer({
       }
     };
 
+    // Everything a completed line goes through. The last line of a stream
+    // has no trailing newline and used to bypass all of it.
+    const finalizeLine = (line) => {
+      const cleanLine = stripAnsiCodes(line);
+      if (shouldDropLogLine(cleanLine)) return null;
+      return cleanLine.length > maxLineChars
+        ? cleanLine.slice(0, maxLineChars) + TRUNCATION_MARK
+        : cleanLine;
+    };
+
+    // Where a finished line lands: a progress bar collapses onto its
+    // previous update, everything else appends. Shared with the
+    // stream-completion path below, so a final progress update replaces its
+    // predecessor instead of appearing beside it.
+    const emitLine = (cleanLine) => {
+      const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+      if (isProgressBar) {
+        appendProgressLine(cleanLine);
+        return;
+      }
+      bufferRef.current.push(cleanLine);
+      if (bufferRef.current.length > maxRenderLines * 2) {
+        bufferRef.current = bufferRef.current.slice(
+          bufferRef.current.length - maxRenderLines
+        );
+      }
+    };
+
     const processChunk = (chunk) => {
       const parts = chunk.split('\n');
       parts[0] = partialLineRef.current + parts[0];
       const endsWithNewline = chunk.endsWith('\n');
       partialLineRef.current = endsWithNewline ? '' : parts.pop() || '';
 
+      // maxLineChars only ever applied to lines that had already arrived
+      // whole, so output with no newline in it - one very long line, or a
+      // writer that only emits carriage returns - grew the carry for the
+      // length of the stream. Emit such a line once, truncated, then
+      // discard the rest of it until its newline shows up: carrying the
+      // remainder instead would both regrow the carry and make the dropped
+      // tail reappear as a line of its own.
+      if (overLongLineRef.current) {
+        if (parts.length > 0) {
+          parts.shift();
+          overLongLineRef.current = false;
+        } else {
+          partialLineRef.current = '';
+        }
+      }
       const newLines = parts.filter((line) => line.trim());
-      if (!hasFirstChunkRef.current && newLines.length > 0) {
+
+      // Bound the carry on both axes. maxLineChars is a cap on what the
+      // reader sees, so measuring the raw string cuts a colour-heavy line
+      // short of it; but output that is almost entirely escape sequences
+      // keeps a short visible length while the raw string grows without
+      // limit, which is the unbounded carry this is here to prevent.
+      // Whichever bound trips, the rest of the line is dropped, so what is
+      // emitted always says it was truncated.
+      let forcedLine = null;
+      if (!overLongLineRef.current) {
+        const visible = stripAnsiCodes(partialLineRef.current);
+        if (
+          visible.length > maxLineChars ||
+          partialLineRef.current.length > maxRawCarryChars
+        ) {
+          if (!shouldDropLogLine(visible)) {
+            forcedLine = visible.slice(0, maxLineChars) + TRUNCATION_MARK;
+          }
+          partialLineRef.current = '';
+          overLongLineRef.current = true;
+        }
+      }
+
+      if (
+        !hasFirstChunkRef.current &&
+        (newLines.length > 0 || forcedLine !== null)
+      ) {
         hasFirstChunkRef.current = true;
         setHasReceivedFirstChunk(true);
       }
 
       for (const line of newLines) {
-        let cleanLine = stripAnsiCodes(line);
-        if (shouldDropLogLine(cleanLine)) {
-          continue;
+        const cleanLine = finalizeLine(line);
+        if (cleanLine !== null) {
+          emitLine(cleanLine);
         }
-        if (cleanLine.length > maxLineChars) {
-          cleanLine = cleanLine.slice(0, maxLineChars) + ' … [truncated]';
-        }
-
-        const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-        if (isProgressBar) {
-          appendProgressLine(cleanLine);
-        } else {
-          bufferRef.current.push(cleanLine);
-          if (bufferRef.current.length > maxRenderLines * 2) {
-            bufferRef.current = bufferRef.current.slice(
-              bufferRef.current.length - maxRenderLines
-            );
-          }
-        }
+      }
+      // After this chunk's completed lines: the carry sits behind them.
+      if (forcedLine !== null) {
+        emitLine(forcedLine);
       }
       scheduleFlush();
     };
@@ -147,10 +217,17 @@ export function useLogStreamer({
     })
       .then(() => {
         if (!active) return;
-        if (partialLineRef.current) {
-          bufferRef.current.push(partialLineRef.current);
-          partialLineRef.current = '';
+        // The stream's last line has no trailing newline; give it the same
+        // treatment as every other line rather than pushing it raw. Nothing
+        // to emit if it is only the tail of an already-truncated line.
+        if (partialLineRef.current && !overLongLineRef.current) {
+          const finalLine = finalizeLine(partialLineRef.current);
+          if (finalLine !== null) {
+            emitLine(finalLine);
+          }
         }
+        partialLineRef.current = '';
+        overLongLineRef.current = false;
         flushBufferedLines();
         setIsLoading(false);
       })
@@ -179,6 +256,7 @@ export function useLogStreamer({
       }
       bufferRef.current = [];
       partialLineRef.current = '';
+      overLongLineRef.current = false;
       progressMapRef.current.clear();
     };
   }, [
