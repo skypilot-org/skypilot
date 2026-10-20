@@ -93,7 +93,7 @@ def _post_provision_setup(monkeypatch, head_runner, start_head):
 
     with pytest.raises(_Joined):
         provisioner._post_provision_setup(
-            SimpleNamespace(cloud=clouds.Kubernetes()),
+            SimpleNamespace(cloud=clouds.Kubernetes(), region=None),
             resources_utils.ClusterName('cluster', 'cluster'), '/cluster.yaml',
             record, None)
     return told or None
