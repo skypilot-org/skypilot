@@ -865,12 +865,7 @@ class JobController:
     async def _pool_task_never_got_worker(
             self, task_status: Optional['managed_job_state.ManagedJobStatus']
     ) -> bool:
-        """Whether a resumed pool task stopped before any worker was picked.
-
-        Such a task was waiting in the launch loop, which keeps it STARTING
-        or PENDING (RECOVERING once emergency recovery has marked it), and
-        has no worker recorded.
-        """
+        """Whether a resumed pool task stopped before any worker was picked."""
         if self._pool is None or task_status not in (
                 managed_job_state.ManagedJobStatus.STARTING,
                 managed_job_state.ManagedJobStatus.RECOVERING):
