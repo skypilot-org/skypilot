@@ -1160,7 +1160,7 @@ done < <(enroot list)
                 snapshot_dir, snapshot_manifest)
             restore_lines = [
                 'mapfile -t SKY_NODES < <(scontrol show hostnames '
-                '"$SLURM_JOB_NODELIST")',
+                '"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)")',
                 f'if [ "${{#SKY_NODES[@]}}" -ne "{num_nodes}" ]; then',
                 '  echo "[container] ERROR: Allocation node count does not '
                 'match snapshot."',
@@ -1286,9 +1286,10 @@ exit 1
                    f'fi; '
                    f'sleep 5; done')
     skylet_keeper_block = (
-        'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
-        '| head -n1)\n'
         f'( while true; do '
+        f'SKY_HEAD_NODE=$(scontrol show hostnames '
+        f'"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)" | head -n1); '
+        f'[ -n "$SKY_HEAD_NODE" ] && '
         f'srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
         f'--job-name={_SKYLET_KEEPER_STEP_NAME} '
         f'--nodelist=$SKY_HEAD_NODE '

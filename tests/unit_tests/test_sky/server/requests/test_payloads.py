@@ -93,3 +93,27 @@ def test_create_debug_dump_body_ignores_unknown_field():
     reloaded = payloads.CreateDebugDumpBody.model_validate_json(
         body.model_dump_json())
     assert reloaded.managed_job_ids == [37]
+
+
+def test_no_request_body_can_choose_the_kubernetes_identity():
+    """execution.launch kwargs that decide a pod's service account stay
+    in-process only: skipping the controller-name check (the controller
+    account is picked by that prefix), or naming the account outright."""
+    in_process_only = ('disable_controller_check', 'kubernetes_identity')
+    for obj in vars(payloads).values():
+        if isinstance(obj, type) and issubclass(obj, payloads.BasePayload):
+            for field in in_process_only:
+                assert field not in obj.model_fields, (obj, field)
+
+
+def test_launch_body_drops_disable_controller_check(monkeypatch):
+    """An old client (or a hand-written request) still sending the field."""
+    monkeypatch.setattr(payloads.common, 'process_mounts_in_task_on_api_server',
+                        lambda *args, **kwargs: 'dag')
+    body = payloads.LaunchBody(task='task-yaml',
+                               cluster_name='sky-jobs-controller-attacker',
+                               disable_controller_check=True)
+    kwargs = body.to_kwargs()
+    assert kwargs['cluster_name'] == 'sky-jobs-controller-attacker'
+    assert '_disable_controller_check' not in kwargs
+    assert 'disable_controller_check' not in kwargs

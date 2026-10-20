@@ -5194,10 +5194,17 @@ class TestKubernetesSpotLabelContext(unittest.TestCase):
         self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
         for call_args in mock_get_spot_label.call_args_list:
             self.assertEqual(call_args, mock.call('test-context'))
-        # ...and the resolved label must flow into the pod template vars.
-        self.assertEqual(deploy_vars['k8s_spot_label_key'],
-                         'karpenter.sh/capacity-type')
-        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':

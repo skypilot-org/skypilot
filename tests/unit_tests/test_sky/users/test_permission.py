@@ -2142,6 +2142,24 @@ class TestWorkspaceReadOnlyAccess:
         # A single scan of the policy backs both sets.
         assert enf.get_policy.call_count == 1
 
+    @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
+    def test_get_readable_workspace_names(self, mock_ro_names, monkeypatch):
+        service, enf = self._service()
+        enf.get_policy.return_value = [
+            ('u1', 'ws-mine', '*'),
+            ('*', 'ws-pub', '*'),
+        ]
+        mock_ro_names.return_value = {'ws-ro'}
+        names = {'ws-mine', 'ws-ro', 'ws-pub', 'ws-other'}
+        assert service.get_readable_workspace_names(
+            'u1', names) == {'ws-mine', 'ws-ro', 'ws-pub'}
+        # Unrestricted is None, not every requested workspace.
+        service.get_user_roles.return_value = ['admin']
+        assert service.get_readable_workspace_names('u1', names) is None
+        monkeypatch.delenv(constants.ENV_VAR_IS_SKYPILOT_SERVER)
+        service.get_user_roles.return_value = ['user']
+        assert service.get_readable_workspace_names('u1', names) is None
+
     def test_add_workspace_policy_only_member_grants(self):
         service, enf = self._service()
         with mock.patch('sky.users.permission._policy_lock'):

@@ -363,8 +363,16 @@ class StrategyExecutor:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        emergency_reattach: bool = False,
     ) -> Optional[bool]:
         """Strategy-owned monitoring loop override.
+
+        ``emergency_reattach``: the task kept its cluster through an
+        emergency and its latest job event is EMERGENCY-sourced. A strategy
+        that owns the loop must close that episode the way
+        ``JobController._monitor_one_task`` does: call
+        ``state.record_emergency_reattached_async`` once, on the first
+        status poll the job answers with a non-terminal status.
 
         # TODO(kevin): The default monitor (JobController._monitor_one_task)
         # bakes in cluster-level detection logic (skylet polling, cluster
@@ -380,6 +388,12 @@ class StrategyExecutor:
         FAILED_SETUP with the exception message and return False. Letting
         it escape gets swallowed into the group's monitor results with no
         terminal state set for the task.
+
+        A strategy that checks the network before each poll should call
+        ``sky.jobs.controller.check_network_connection()`` rather than
+        ``backend_utils.async_check_network_connection()``: it shares one
+        check across every monitor loop in the controller process, where the
+        latter sends one request per job per poll.
 
         Returns:
             None: fall back to OSS default monitor.

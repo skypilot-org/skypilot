@@ -138,6 +138,27 @@ def get_workspace_access_sets() -> Tuple[Set[str], Set[str]]:
         common_utils.get_current_user().id, set(workspaces.keys()))
 
 
+def get_readable_workspace_names() -> Optional[Set[str]]:
+    """Returns workspace names the current user can read; None means all.
+
+    See `PermissionService.get_readable_workspace_names`.
+    """
+    workspaces = _load_workspaces()
+    return permission.permission_service.get_readable_workspace_names(
+        common_utils.get_current_user().id, set(workspaces.keys()))
+
+
+def readable_workspace_members_in_memory(user_id: str) -> Optional[Set[str]]:
+    """Returns the user plus the members of the workspaces they can read.
+
+    None means everyone. See
+    `PermissionService.readable_workspace_members_in_memory`.
+    """
+    workspaces = _load_workspaces()
+    return permission.permission_service.readable_workspace_members_in_memory(
+        user_id, set(workspaces.keys()))
+
+
 def _update_workspaces_config(
         workspace_modifier_fn: Callable[[Dict[str, Any]],
                                         None]) -> Dict[str, Any]:

@@ -1508,6 +1508,94 @@ def test_cluster_labels_in_status(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def test_cluster_job_spec(generic_cloud: str):
+    """Each cluster job's task YAML and entrypoint are recorded and returned.
+
+    Covers a YAML `sky launch` (job 1), a YAML `sky exec` with `--env`,
+    `--name` and `--num-nodes` overrides (job 2) and an inline `sky exec`
+    command (job 3), that the recorded YAML carries the overrides and has
+    secrets redacted, and that the specs are dropped with the cluster on
+    `sky down`. The file asks for 2 nodes and both submissions override it to
+    1, so the cluster stays a single node.
+    """
+    from sky.client import sdk
+
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'spec-marker-{name}'
+    override_marker = f'override-{name}'
+    inline_marker = f'inline-{name}'
+    renamed = f'renamed-{name}'
+    secret_value = f'secret-{name}'
+
+    def get_spec(job_id: int):
+        return sdk.stream_and_get(sdk.cluster_job_spec(name, job_id))
+
+    def check_specs():
+        expected = {
+            1: ('sky launch', marker),
+            2: ('sky exec', override_marker),
+            3: ('sky exec', inline_marker),
+        }
+        for job_id, (command, yaml_text) in expected.items():
+            spec = get_spec(job_id)
+            assert spec is not None, f'No spec recorded for job {job_id}'
+            assert spec['entrypoint'].startswith(command), spec
+            assert name in spec['entrypoint'], spec
+            assert yaml_text in spec['task_yaml'], spec
+            assert secret_value not in spec['task_yaml'], (
+                f'Secret leaked into the recorded YAML of job {job_id}: '
+                f'{spec["task_yaml"]}')
+        assert get_spec(4) is None, 'Spec returned for a job that never ran'
+
+        # `--num-nodes 1` on a file asking for 2, and `--name` on job 2.
+        for job_id in (1, 2):
+            recorded = yaml_utils.safe_load(get_spec(job_id)['task_yaml'])
+            assert recorded['num_nodes'] == 1, (job_id, recorded)
+        assert yaml_utils.safe_load(get_spec(2)['task_yaml'])['name'] == renamed
+
+    def check_specs_dropped():
+        assert get_spec(1) is None, 'Spec outlived the terminated cluster'
+
+    yaml_content = textwrap.dedent(f"""\
+        name: spec-file-name
+
+        resources:
+          cpus: 2+
+
+        num_nodes: 2
+
+        envs:
+          SPEC_MARKER: {marker}
+
+        secrets:
+          SPEC_SECRET: {secret_value}
+
+        run: |
+          echo "$SPEC_MARKER"
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_job_spec',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} --env SPEC_MARKER={override_marker} --name {renamed} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} "echo {inline_marker}"',
+                lambda: check_specs(),
+                f'sky down -y {name}',
+                lambda: check_specs_dropped(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes

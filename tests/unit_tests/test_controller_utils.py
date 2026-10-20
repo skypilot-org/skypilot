@@ -1308,3 +1308,26 @@ def test_shared_bucket_upload_paths_are_scoped_per_workspace(
             f'gs://file-mounts-bucket/{prefix}/tmp-files/file-0')
 
     assert paths_by_workspace['team-a'] != paths_by_workspace['team-b']
+
+
+@pytest.mark.parametrize('name', [
+    'sky-jobs-controller-attacker',
+    'sky-serve-controller-attacker',
+    'sky-jobs-controller-a_b',
+])
+def test_rejected_controller_name_does_not_replace_the_real_one(
+        name, monkeypatch):
+    """API-server workers are reused across requests: a rejected name must not
+    become the controller name the next `jobs launch` in that worker uses."""
+    controllers = (controller_utils.Controllers.JOBS_CONTROLLER,
+                   controller_utils.Controllers.SKY_SERVE_CONTROLLER)
+    for controller in controllers:
+        # Restored on teardown even if the guard does overwrite it.
+        monkeypatch.setattr(controller.value, '_cluster_name_from_server',
+                            controller.value._cluster_name_from_server)
+    real_names = [c.value.cluster_name for c in controllers]
+
+    with pytest.raises(exceptions.NotSupportedError, match=name):
+        controller_utils.check_cluster_name_not_controller(name)
+
+    assert [c.value.cluster_name for c in controllers] == real_names

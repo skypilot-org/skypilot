@@ -975,12 +975,13 @@ def get_engine(
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
             # so we should not put it in the cache. Instead, just return.
             async_sqlite_engine = sqlalchemy_async.create_async_engine(
-                'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
+                'sqlite+aiosqlite:///' + db_path,
+                connect_args={'timeout': _DB_TIMEOUT_S})
             sql_metrics.install(async_sqlite_engine, f'sqlite_{db_name}')
             return async_sqlite_engine
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
-                'sqlite:///' + db_path)
+                'sqlite:///' + db_path, connect_args={'timeout': _DB_TIMEOUT_S})
             sql_metrics.install(_sqlite_engine_cache[db_path],
                                 f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]

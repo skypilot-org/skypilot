@@ -25,9 +25,10 @@ jest.mock('@/components/elements/layout', () => ({
 }));
 jest.mock('@/components/ui/yaml-editor', () => ({
   __esModule: true,
-  YamlEditor: ({ value, onChange }) => (
+  YamlEditor: ({ value, onChange, disabled }) => (
     <textarea
       aria-label="workspace yaml"
+      readOnly={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -44,26 +45,36 @@ jest.mock('@/data/connectors/workspaces', () => ({
   deleteWorkspace: jest.fn(),
   getEnabledClouds: jest.fn(async () => []),
 }));
+const mockGetUserRole = jest.fn(async () => ({ role: 'admin', name: 'root' }));
 jest.mock('@/data/connectors/users', () => ({
   __esModule: true,
+  getUserRole: (...args) => mockGetUserRole(...args),
   getUsers: jest.fn(async () => [
     { userId: 'u-alice', username: 'alice', role: 'user' },
     { userId: 'u-bob', username: 'bob', role: 'user' },
   ]),
 }));
+const mockApiFetch = jest.fn(async () => ({ ok: true }));
+jest.mock('@/data/connectors/client', () => ({
+  __esModule: true,
+  apiClient: { fetch: (...args) => mockApiFetch(...args) },
+}));
+const mockGetClusters = jest.fn(async () => []);
 jest.mock('@/data/connectors/clusters', () => ({
   __esModule: true,
-  getClusters: jest.fn(async () => []),
+  getClusters: (...args) => mockGetClusters(...args),
 }));
 jest.mock('@/data/connectors/jobs', () => ({
   __esModule: true,
   getManagedJobs: jest.fn(async () => ({ jobs: [] })),
 }));
+const mockInvalidate = jest.fn();
+const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
 jest.mock('@/lib/cache', () => ({
   __esModule: true,
   dashboardCache: {
-    get: (fn, args = []) => fn(...args),
-    invalidate: jest.fn(),
+    get: (...args) => mockCacheGet(...args),
+    invalidate: (...args) => mockInvalidate(...args),
     invalidateFunction: jest.fn(),
   },
 }));
@@ -233,6 +244,7 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
   async function renderEditor() {
     render(<WorkspaceEditor workspaceName="ws" />);
     await screen.findByText('Allowed Users (1)', {}, { timeout: 3000 });
+    await screen.findByText('Apply');
   }
 
   async function pluginRefresh() {
@@ -370,5 +382,244 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
       { private: true, allowed_users: ['alice'], gcp: { project_id: 'mine' } },
       { private: true, allowed_users: ['alice'] }
     );
+  });
+});
+
+describe('WorkspaceEditor for a non-admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'user',
+      name: 'alice',
+    }));
+    mockComponents['workspaces.detail.allowedUsers.actions'] = [
+      {
+        id: 'actions',
+        component: () => <span>plugin controls</span>,
+      },
+    ];
+  });
+
+  afterEach(() => {
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'admin',
+      name: 'root',
+    }));
+  });
+
+  test('shows the workspace read-only, with plugin controls', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.getByText('Allowed Users (1)')).toBeTruthy();
+    expect(screen.getByText('plugin controls')).toBeTruthy();
+    expect(screen.getByText('Workspace YAML')).toBeTruthy();
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
+  });
+
+  test('shows a non-member only the badges the server sends', async () => {
+    // A non-member of a read-only-visible workspace gets its flags, not its
+    // configuration.
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { read_only: true, writable: false },
+    }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    const yamlText = screen.getByLabelText('workspace yaml').value;
+    expect(yamlText).not.toContain('read_only');
+    expect(yamlText).not.toContain('writable');
+  });
+
+  test('Refresh reloads the data without re-checking infra', async () => {
+    mockApiFetch.mockClear();
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  test('Refresh drops the cached stats and refetches them', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    mockInvalidate.mockClear();
+    const fetched = mockGetClusters.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    // Clusters, managed jobs and enabled infra; the refetch goes through the
+    // cache so the next visit sees the new numbers too.
+    expect(mockInvalidate).toHaveBeenCalledTimes(3);
+    expect(mockGetClusters.mock.calls.length).toBe(fetched + 1);
+  });
+
+  test('a stalled role lookup does not hold up Refresh', async () => {
+    mockGetUserRole.mockImplementation(() => new Promise(() => {}));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    expect(screen.queryByText('Loading...')).toBeNull();
+  });
+
+  test('treats a failed role lookup as non-admin', async () => {
+    mockGetUserRole.mockImplementation(async () => {
+      throw new Error('boom');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    console.error.mockRestore();
+  });
+});
+
+describe('WorkspaceEditor Refresh for an admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockApiFetch.mockReset();
+  });
+
+  test('re-checks infra, then reloads', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  test('still reloads when the infra check fails', async () => {
+    mockApiFetch.mockImplementation(async () => {
+      throw new Error('check failed');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    console.error.mockRestore();
+  });
+
+  test('asks for the role when it is still loading', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    // The page's own role lookup never answers; Refresh asks again.
+    mockGetUserRole
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(async () => ({ role: 'admin', name: 'root' }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    expect(screen.queryByText('Apply')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+  });
+
+  test('a slower, older stats request does not overwrite newer stats', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's own stats request answers last with an old view; the one made
+    // after the infra check is newer and must win.
+    let releaseOld;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseOld = () =>
+              resolve([{ cluster: 'old', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => []);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseOld();
+    });
+    expect(screen.getByText('0 / 0')).toBeTruthy();
+    expect(screen.queryByText('1 / 1')).toBeNull();
+  });
+
+  test('a failed newer stats request keeps an older success', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's request succeeds after the newer post-check request fails.
+    let releaseFirst;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseFirst();
+    });
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+    console.error.mockRestore();
+  });
+
+  test('stats for a workspace the page left are dropped', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+      other: { private: true, allowed_users: ['alice'] },
+    }));
+    let releaseWs;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseWs = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    const { rerender } = render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Switch workspaces; the new workspace's stats request fails, then the
+    // old one answers.
+    await act(async () => {
+      rerender(<WorkspaceEditor workspaceName="other" />);
+    });
+    await act(async () => {
+      releaseWs();
+    });
+    expect(screen.queryByText('1 / 1')).toBeNull();
+    console.error.mockRestore();
   });
 });

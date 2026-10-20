@@ -8,6 +8,7 @@ from sky import backends
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
@@ -229,6 +230,8 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
             return_value=[])
 @mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
             return_value=['skypilot.co/accelerator'])
+@mock.patch('sky.provision.kubernetes.utils.get_spot_label',
+            return_value=('cloud.google.com/gke-spot', 'true'))
 @mock.patch('sky.utils.common_utils.fill_template',
             wraps=common_utils.fill_template)
 def test_write_cluster_config_merges_pod_fields_kubernetes(
@@ -241,7 +244,8 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
 
     config_dict = backend_utils.write_cluster_config(
         to_provision=Resources(cloud=clouds.Kubernetes(),
-                               instance_type='4CPU--16GB'),
+                               instance_type='4CPU--16GB',
+                               use_spot=True),
         num_nodes=1,
         cluster_config_template='kubernetes-ray.yml.j2',
         cluster_name="display",
@@ -258,6 +262,12 @@ def test_write_cluster_config_merges_pod_fields_kubernetes(
     assert pod_spec['affinity'][
         'nodeAffinity'] == kubernetes_utils.get_node_affinity(
             None, None, ['skypilot.co/accelerator'])
+    # A spot pod is pinned to spot nodes and tolerates their taint.
+    assert pod_spec['nodeSelector'] == {'cloud.google.com/gke-spot': 'true'}
+    assert pod_spec['tolerations'] == [
+        kubernetes_utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                             'true')
+    ]
     # They get there through the merge, not as a template variable.
     assert 'pod_fields' not in mock_fill_template.call_args[0][1]
 
@@ -356,6 +366,70 @@ def test_get_clusters_launch_refresh(monkeypatch):
 
     assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+
+def test_get_clusters_credentials_only_for_caller_clusters(
+        monkeypatch, tmp_path):
+    key_paths = {}
+    for user_hash in ('alice', 'bob'):
+        key_path = tmp_path / f'{user_hash}-key'
+        key_path.write_text(f'{user_hash}-private-key')
+        key_paths[user_hash] = str(key_path)
+
+    def _mock_cluster(user_hash):
+        handle = mock.MagicMock()
+        handle.cluster_name_on_cloud = f'{user_hash}-cluster-cloud'
+        handle.launched_nodes = 1
+        handle.launched_resources = None
+        handle.ssh_private_key = key_paths[user_hash]
+        return {
+            'name': f'{user_hash}-cluster',
+            'launched_at': '0',
+            'handle': handle,
+            'last_use': 'sky launch',
+            'status': status_lib.ClusterStatus.UP,
+            'autostop': 0,
+            'to_down': False,
+            'cluster_hash': '00000',
+            'cluster_ever_up': True,
+            'status_updated_at': 0,
+            'user_hash': user_hash,
+            'user_name': user_hash,
+            'workspace': 'default',
+            'is_managed': False,
+        }
+
+    def ssh_credentials_from_handles(handles):
+        return [{
+            'ssh_user': 'sky',
+            'ssh_private_key': handle.ssh_private_key
+        } for handle in handles]
+
+    monkeypatch.setattr(
+        'sky.global_user_state.get_clusters',
+        lambda *args, **kwargs: [_mock_cluster('alice'),
+                                 _mock_cluster('bob')])
+    monkeypatch.setattr(
+        'sky.utils.resources_utils.get_readable_resources_repr',
+        lambda handle, simplified_only: ('', None)
+        if simplified_only else ('', ''))
+    monkeypatch.setattr(
+        'sky.backends.backend_utils.ssh_credentials_from_handles',
+        ssh_credentials_from_handles)
+    monkeypatch.setattr('sky.utils.common_utils.get_current_user',
+                        lambda: models.User(id='alice', name='alice'))
+
+    records = backend_utils.get_clusters(refresh=common.StatusRefreshMode.NONE,
+                                         all_users=True,
+                                         include_credentials=True)
+
+    records_by_name = {record['name']: record for record in records}
+    assert records_by_name['alice-cluster']['credentials'] == {
+        'ssh_user': 'sky',
+        'ssh_private_key': key_paths['alice'],
+        'ssh_private_key_content': 'alice-private-key',
+    }
+    assert 'credentials' not in records_by_name['bob-cluster']
 
 
 def test_kubeconfig_upload_with_kubernetes_exclusion():
