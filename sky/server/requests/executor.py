@@ -66,6 +66,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
@@ -740,6 +741,11 @@ def override_request_env_and_config(
                     if k.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
             ]:
                 request_body.env_vars.pop(env_var, None)
+            # The job's config also arrives as the override, merged below.
+            if (skypilot_config.ENV_VAR_SKYPILOT_CONFIG in request_body.env_vars
+                    and controller_utils.effective_jobs_consolidation_mode()):
+                request_body.env_vars.pop(
+                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
