@@ -49,13 +49,7 @@ _DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 # This is used by Azure GPU VMs that use grid drivers (e.g. A10).
-# TEMP(zpoint): DO NOT MERGE. Boot A10s from the private test build of PR
-# #10469 (GRID 570.237) so smoke tests can validate it before it is published.
-_DEFAULT_GPU_GRID_IMAGE_ID = (
-    '/subscriptions/59d8c23c-7ef5-42c7-b2f3-a919ad8026a7/resourceGroups/'
-    'skypilot-images/providers/Microsoft.Compute/galleries/'
-    'skypilot_test_images/images/skypilot-gpu-gen2-grid-pr10469/versions/'
-    '26.10.20')
+_DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid'
 
 _COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
 
