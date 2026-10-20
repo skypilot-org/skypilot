@@ -2453,6 +2453,13 @@ def get_config_schema():
                 }
             },
         },
+        'lambda': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            # `remote_identity` is added below.
+            'properties': {},
+        },
         'vast': {
             'type': 'object',
             'required': [],

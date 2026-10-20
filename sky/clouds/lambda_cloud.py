@@ -4,10 +4,12 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import schemas
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -65,8 +67,48 @@ class Lambda(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        if cls.remote_identity_is_no_upload(region, resources):
+            # Autostop/autodown run on the cluster itself and terminate it via
+            # the Lambda API. With NO_UPLOAD the cluster has no API key, so the
+            # request would fail on the node and the instance would keep
+            # running (and billing). Reject it up front instead.
+            reason = ('Autostop/autodown need the cluster to terminate itself '
+                      'through the Lambda Cloud API, and '
+                      '`lambda.remote_identity: NO_UPLOAD` gives it no API '
+                      'key. Tear the cluster down with `sky down`, use '
+                      'managed jobs, or use `remote_identity: '
+                      'LOCAL_CREDENTIALS`.')
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTOSTOP] = reason
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTODOWN] = reason
+        return unsupported_features
+
+    @classmethod
+    def remote_identity_is_no_upload(
+        cls,
+        region: Optional[str],
+        resources: 'resources_lib.Resources',
+    ) -> bool:
+        """Whether clusters for `resources` get no Lambda Cloud API key.
+
+        A `NO_UPLOAD` in the API server's own config always wins: a request or
+        task may tighten to `NO_UPLOAD`, never loosen it.
+        """
+        region = region if region is not None else resources.region
+        no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
+        server = skypilot_config.get_server_workspace_region_config(
+            cloud='lambda', region=region, keys=('remote_identity',))
+        requested = skypilot_config.get_effective_workspace_region_config(
+            cloud='lambda',
+            region=region,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('lambda'),
+            override_configs=resources.cluster_config_overrides)
+        return any(
+            isinstance(value, str) and value.upper() == no_upload
+            for value in (server, requested))
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

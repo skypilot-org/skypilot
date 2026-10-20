@@ -758,6 +758,35 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
+def cluster_lacks_identity_to_autodown(
+        resources: 'resources_lib.Resources') -> bool:
+    """Whether a cluster for `resources` has no credentials to delete itself.
+
+    Autodown runs on the cluster and calls the cloud API, so it cannot work
+    under Kubernetes `remote_identity: NONE` or Lambda `NO_UPLOAD`.
+    """
+    if isinstance(resources.cloud, clouds.Kubernetes):
+        return clouds.Kubernetes.remote_identity_is_none(
+            resources.region, resources)
+    if isinstance(resources.cloud, clouds.Lambda):
+        return clouds.Lambda.remote_identity_is_no_upload(
+            resources.region, resources)
+    return False
+
+
+def _normalize_remote_identity_option(remote_identity: str) -> str:
+    """Upper-cases the built-in remote_identity options.
+
+    The config schema accepts them case-insensitively, so `no_upload` must not
+    silently fall through to uploading credentials. Other strings (e.g. an AWS
+    role or Kubernetes service account name) are returned unchanged.
+    """
+    upper = remote_identity.upper()
+    if upper in (option.value for option in schemas.RemoteIdentityOptions):
+        return upper
+    return remote_identity
+
+
 def write_cluster_config(
     to_provision: 'resources_lib.Resources',
     num_nodes: int,
@@ -849,7 +878,8 @@ def write_cluster_config(
         override_configs=to_provision.cluster_config_overrides)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
-        remote_identity = remote_identity_config
+        remote_identity = _normalize_remote_identity_option(
+            remote_identity_config)
     if isinstance(remote_identity_config, list):
         # Some clouds (e.g., AWS) support specifying multiple service accounts
         # chosen based on the cluster name. Do the matching here to pick the
@@ -912,10 +942,19 @@ def write_cluster_config(
             region=region.name,
             keys=('remote_identity',),
             default_value=None)
-        if remote_identity_config:
-            if (remote_identity_config ==
-                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.add(cloud_obj)
+        # A NO_UPLOAD in the API server's own config cannot be loosened by the
+        # client config merged into a request.
+        server_remote_identity_config = (
+            skypilot_config.get_server_workspace_region_config(
+                cloud=cloud_str.lower(),
+                region=region.name,
+                keys=('remote_identity',)))
+        if any(
+                isinstance(value, str) and _normalize_remote_identity_option(
+                    value) == schemas.RemoteIdentityOptions.NO_UPLOAD.value
+                for value in (remote_identity_config,
+                              server_remote_identity_config)):
+            excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
