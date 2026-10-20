@@ -78,8 +78,7 @@ def force_caller_scope_cancel_body(
     scope = request_owner_scope(request)
     if scope is not None:
         request_cancel_body.user_id = scope
-    elif request_cancel_body.request_ids is not None:
-        request_cancel_body.user_id = None
+    # TEMP twist A: keep the client's user hash for named ids, do not merge
     return request_cancel_body
 
 
