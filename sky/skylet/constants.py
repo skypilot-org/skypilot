@@ -432,7 +432,16 @@ RAY_INSTALLATION_COMMANDS = (
     # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
     # with another ray it also bumps unrelated packages (cryptography,
     # urllib3, ...) that other Python environments on the image rely on.
-    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" '  # pylint: disable=line-too-long
+    # Fail loudly: carrying on would leave the node on another Ray, with the
+    # patches skipped. The usual cause is a runtime env older than the Python
+    # this Ray supports (Ray 2.52+ needs 3.10+), on a cluster set up before
+    # the env was pinned to Python 3.10.
+    '|| { echo "SkyPilot could not install Ray {ray_version} into its runtime '
+    f'env ($({SKY_PYTHON_CMD} -V 2>&1)). Ray 2.52 '
+    'and later need Python 3.10 or newer. If that Python is older, recreate '
+    'the cluster (sky down, then sky launch), or rebuild the custom image '
+    'that ships this runtime env." >&2; exit 1; }; '
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:

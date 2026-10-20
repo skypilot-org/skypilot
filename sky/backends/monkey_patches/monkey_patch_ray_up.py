@@ -36,7 +36,10 @@ from ray.autoscaler._private import util as ray_autoscaler_util
 # disagree with the hash Ray's own node_launcher writes for worker nodes.
 def monkey_patch_hash_launch_conf(node_conf, auth):
     # NOTE: skypilot change -- exclude ssh_proxy_command from the hash.
-    auth = {k: v for k, v in auth.items() if k != 'ssh_proxy_command'}
+    # No literal braces besides the format fields at the bottom: this file is
+    # rendered with str.format().
+    auth = dict(auth)
+    auth.pop('ssh_proxy_command', None)
     return ray_autoscaler_util.hash_launch_conf(node_conf, auth)
 
 

@@ -370,16 +370,18 @@ RAY_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
 # Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
 # the constants.RAY_STATUS literal — the probe picks a dynamic port.
 _RAY_HEAD_WAIT_TIMEOUT_SECONDS = 120
-# Keyed on the exit status, not on a message: Ray 2.9.3 printed "No cluster
-# status." when the GCS was not up yet, 2.56.1 raises instead, which turned
-# this wait into a no-op. Deadline rather than an iteration count, because a
-# failing `ray status` takes ~35s to return on 2.56.1.
+# After `ray start --head`, `ray status` exits non-zero until the GCS is up,
+# then exits 0 printing "No cluster status." until the autoscaler first
+# reports (a few seconds, on both Ray 2.9.3 and 2.56.1). Wait past both.
+# Deadline rather than an iteration count, because a failing `ray status`
+# takes ~35s to return on 2.56.1.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     f'_sky_deadline=$(( $(date +%s) + {_RAY_HEAD_WAIT_TIMEOUT_SECONDS} )); '
     'while [ $(date +%s) -lt $_sky_deadline ]; do '
-    'RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    '_sky_ray_status=$(RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
     f'{constants.SKY_REMOTE_RAY_PORT}}} '
-    f'{constants.SKY_RAY_CMD} status > /dev/null 2>&1 && break; '
+    f'{constants.SKY_RAY_CMD} status 2>&1) && '
+    'case "$_sky_ray_status" in *"No cluster status."*) ;; *) break ;; esac; '
     'echo "Waiting ray cluster to be initialized"; '
     'sleep 0.5; '
     'done;')
