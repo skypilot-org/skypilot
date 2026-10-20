@@ -21,7 +21,6 @@ ROOT_DIR = os.path.dirname(
 RAY_PATCHES_DIR = os.path.join(ROOT_DIR, 'sky', 'skylet', 'ray_patches')
 
 _PIP_PIN = r"ray\[default\]==([0-9][^'\"\s]*)"
-_SH_PIN = r'RAY_VERSION=([0-9][^\s]*)'
 # Prose, e.g. "Ray version is set to ``2.56.1`` in ``SKY_REMOTE_RAY_VERSION``".
 _PROSE_PIN = r'``([0-9][0-9.]*)`` in ``SKY_REMOTE_RAY_VERSION``'
 
@@ -30,7 +29,6 @@ _PROSE_PIN = r'``([0-9][0-9.]*)`` in ``SKY_REMOTE_RAY_VERSION``'
 _PINNED_VERSION_FILES = [
     ('Dockerfile_k8s', _PIP_PIN),
     ('Dockerfile_k8s_gpu', _PIP_PIN),
-    ('sky/catalog/images/provisioners/skypilot.sh', _SH_PIN),
     ('docs/source/reference/kubernetes/kubernetes-getting-started.rst',
      _PIP_PIN),
     ('docs/source/reference/architecture/internals.rst', _PROSE_PIN),
@@ -54,6 +52,24 @@ def test_pinned_ray_version_matches_constant(rel_path, pattern):
         assert version == constants.SKY_REMOTE_RAY_VERSION, (
             f'{rel_path} pins ray {version} but SKY_REMOTE_RAY_VERSION is '
             f'{constants.SKY_REMOTE_RAY_VERSION}')
+
+
+def test_vm_image_bake_reads_ray_version_from_the_installed_skypilot():
+    """The VM image bake patches Ray with the installed SkyPilot's patches.
+
+    A hardcoded Ray version there can disagree with those patches: baking
+    with a SkyPilot that targets another Ray applies the wrong hunks and
+    leaves Ray's worker.py unparseable, with no error at bake time.
+    """
+    script = _read(
+        os.path.join(ROOT_DIR, 'sky', 'catalog', 'images', 'provisioners',
+                     'skypilot.sh'))
+    assert not re.search(r'^\s*RAY_VERSION=[0-9]', script, re.MULTILINE), (
+        'skypilot.sh hardcodes RAY_VERSION; read it from the installed '
+        'sky.skylet.constants instead')
+    assert re.search(
+        r'^\s*RAY_VERSION=\$\(.*constants\.SKY_REMOTE_RAY_VERSION', script,
+        re.MULTILINE), 'skypilot.sh no longer reads the Ray version it bakes'
 
 
 def test_templates_do_not_hardcode_ray_version():
