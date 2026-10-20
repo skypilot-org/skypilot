@@ -648,7 +648,7 @@ def _log_pinned_ray_version(cluster_name: str, ray_version: str,
         logger.info(f'{preamble} A controller moves to it after it is '
                     'autostopped and restarted, where its cloud can stop, or '
                     f'when recreated: `sky down {cluster_name}` once it has no '
-                    'jobs or services running.')
+                    'managed jobs in progress and no services.')
         return
     try:
         cloud.check_features_are_supported(

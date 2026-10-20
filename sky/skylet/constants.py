@@ -439,8 +439,9 @@ RAY_INSTALLATION_COMMANDS = (
     # the env was pinned to Python 3.10.
     '|| { echo "SkyPilot could not install Ray {ray_version} into its runtime '
     f'env ($({SKY_PYTHON_CMD} -V 2>&1)). Ray 2.52 '
-    'and later need Python 3.10 or newer; recreate the cluster with sky down '
-    'and sky launch." >&2; exit 1; }; '
+    'and later need Python 3.10 or newer. If that Python is older, recreate '
+    'the cluster (sky down, then sky launch), or rebuild the custom image '
+    'that ships this runtime env." >&2; exit 1; }; '
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:

@@ -389,24 +389,30 @@ def test_the_ray_install_does_not_upgrade_unrelated_packages():
     assert not {'-U', '--upgrade', '--reinstall'} & set(args), install.group(0)
 
 
-def _run_ray_install(tmp_path, install_rc):
+def _run_ray_install(tmp_path,
+                     install_rc,
+                     installed_ray='',
+                     ray_cluster_running=False):
     """Runs the Ray install step of RAY_INSTALLATION_COMMANDS with a fake
-    `uv pip` whose install exits `install_rc`, on a node with no Ray and no Ray
-    cluster. Only that step: the commands before it install uv from the
-    network."""
+    `uv pip`: `list` prints `installed_ray`, `install` exits `install_rc` and
+    is counted in tmp_path/installs. Only that step: the commands before it
+    install uv from the network."""
     fake_uv_pip = tmp_path / 'uv-pip'
-    fake_uv_pip.write_text('#!/bin/bash\n'
-                           f'[ "$1" = install ] && exit {install_rc}\n'
-                           'exit 0\n')
+    fake_uv_pip.write_text(
+        '#!/bin/bash\n'
+        f'if [ "$1" = install ]; then echo x >> {tmp_path}/installs; '
+        f'exit {install_rc}; fi\n'
+        f'[ "$1" = list ] && echo "{installed_ray}"\n'
+        'exit 0\n')
     fake_uv_pip.chmod(0o755)
     full = constants.RAY_INSTALLATION_COMMANDS
     start = full.index(f'{constants.SKY_UV_PIP_CMD} list | grep "ray "')
     end = full.index('exit 1; };', start) + len('exit 1; };')
     cmd = (full[start:end].replace('{ray_version}', '9.9.9').replace(
-        constants.SKY_UV_PIP_CMD,
-        str(fake_uv_pip)).replace(constants.RAY_STATUS,
-                                  'false').replace(constants.SKY_PYTHON_CMD,
-                                                   'python3'))
+        constants.SKY_UV_PIP_CMD, str(fake_uv_pip)).replace(
+            constants.RAY_STATUS,
+            'true' if ray_cluster_running else 'false').replace(
+                constants.SKY_PYTHON_CMD, 'python3'))
     return subprocess.run(['bash', '-c', cmd],
                           env={
                               'HOME': str(tmp_path),
@@ -416,6 +422,11 @@ def _run_ray_install(tmp_path, install_rc):
                           text=True,
                           timeout=60,
                           check=False)
+
+
+def _installs(tmp_path):
+    path = tmp_path / 'installs'
+    return len(path.read_text().splitlines()) if path.exists() else 0
 
 
 def test_a_failed_ray_install_fails_the_setup_loudly(tmp_path):
@@ -433,4 +444,25 @@ def test_a_failed_ray_install_fails_the_setup_loudly(tmp_path):
 
 def test_a_successful_ray_install_does_not_report_a_failure(tmp_path):
     proc = _run_ray_install(tmp_path, install_rc=0)
+    assert proc.returncode == 0, proc.stderr
     assert 'could not install Ray' not in proc.stderr
+    assert _installs(tmp_path) == 1
+
+
+def test_a_node_already_on_the_version_does_not_install(tmp_path):
+    proc = _run_ray_install(tmp_path,
+                            install_rc=1,
+                            installed_ray='ray        9.9.9')
+    assert proc.returncode == 0, proc.stderr
+    assert _installs(tmp_path) == 0
+
+
+def test_a_running_ray_cluster_on_another_version_is_left_alone(tmp_path):
+    """An existing cluster keeps its Ray: the install must not run, let alone
+    fail the setup, while a Ray cluster answers on the port."""
+    proc = _run_ray_install(tmp_path,
+                            install_rc=1,
+                            installed_ray='ray        2.4.0',
+                            ray_cluster_running=True)
+    assert proc.returncode == 0, proc.stderr
+    assert _installs(tmp_path) == 0
