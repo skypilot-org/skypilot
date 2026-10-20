@@ -708,8 +708,9 @@ def test_check_owner_identity_k8s_context_points_at_other_cluster(monkeypatch):
     record = _k8s_owner_check_record(['ctx-a_user-a_default'])
     record['handle'].cluster_yaml = 'my-cluster.yml'
 
-    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
-                       match='different Kubernetes cluster'):
+    with pytest.raises(
+            exceptions.ClusterOwnerIdentityMismatchError,
+            match='different Kubernetes cluster.*--purge my-cluster'):
         backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
             'my-cluster', record)
 
@@ -723,9 +724,23 @@ def test_check_owner_identity_k8s_context_missing(monkeypatch):
     record['handle'].cluster_yaml = 'my-cluster.yml'
 
     with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
-                       match='not available'):
+                       match='not available.*--purge my-cluster'):
         backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
             'my-cluster', record)
+    get_uid.assert_not_called()
+
+
+def test_check_owner_identity_k8s_without_any_context_skips(monkeypatch):
+    """No Kubernetes credentials at all leaves nothing to check against."""
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, [], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
     get_uid.assert_not_called()
 
 

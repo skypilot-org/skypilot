@@ -3874,8 +3874,7 @@ def read_cluster_uid(core, timeout: float) -> Optional[str]:
     return namespace.metadata.uid
 
 
-def get_cluster_uid(context: Optional[str],
-                    use_cache: bool = True) -> Optional[str]:
+def get_cluster_uid(context: Optional[str]) -> Optional[str]:
     """Returns the UID of the cluster `context` points at.
 
     Returns None when kube-system cannot be read (e.g. no RBAC grant, the
@@ -3885,12 +3884,10 @@ def get_cluster_uid(context: Optional[str],
     """
     now = time.monotonic()
     fingerprint = _kubeconfig_fingerprint()
-    if use_cache:
-        with _cluster_uid_cache_lock:
-            cached = _cluster_uid_cache.get(context)
-        if (cached is not None and cached[0] == fingerprint and
-                now < cached[2]):
-            return cached[1]
+    with _cluster_uid_cache_lock:
+        cached = _cluster_uid_cache.get(context)
+    if cached is not None and cached[0] == fingerprint and now < cached[2]:
+        return cached[1]
     uid: Optional[str] = None
     try:
         # The in-cluster name, unlike None, never falls back to kubeconfig.

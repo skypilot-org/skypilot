@@ -2323,12 +2323,19 @@ def _check_kubernetes_cluster_target(cluster_name: str, cloud: clouds.Cloud,
         exceptions.ClusterOwnerIdentityMismatchError: if the context is gone or
             now points at a different cluster.
     """
-    if context not in kubernetes_utils.get_all_kube_context_names():
+    context_names = kubernetes_utils.get_all_kube_context_names()
+    if not context_names:
+        # No Kubernetes credentials at all: nothing to check against.
+        return
+    purge_hint = ('If the cluster no longer exists, remove its record with '
+                  f'`sky down --purge {cluster_name}`.')
+    if context not in context_names:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) was launched on Kubernetes '
                 f'context {context!r}, which is not available. Check your '
-                'kubeconfig file and make sure the context is available.')
+                'kubeconfig file and make sure the context is available. '
+                f'{purge_hint}')
     if recorded_uid is None:
         return
     current_uid = kubernetes_utils.get_cluster_uid(context)
@@ -2340,7 +2347,7 @@ def _check_kubernetes_cluster_target(cluster_name: str, cloud: clouds.Cloud,
                 f'at now (the {kubernetes_utils.CLUSTER_IDENTITY_NAMESPACE!r} '
                 f'namespace UID is {current_uid!r}, {recorded_uid!r} at '
                 'launch). Check your kubeconfig file and make sure the '
-                'context points at the original cluster.')
+                f'context points at the original cluster. {purge_hint}')
 
 
 def _check_owner_identity_with_record(cluster_name: str,
@@ -2367,8 +2374,15 @@ def _check_owner_identity_with_record(cluster_name: str,
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
     is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
-    user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+    if is_k8s_cloud and owner_identity is not None:
+        provider_config = _get_kubernetes_provider_config(handle) or {}
+        context = provider_config.get('context')
+        if context is not None:
+            _check_kubernetes_cluster_target(cluster_name, cloud, context,
+                                             provider_config.get('cluster_uid'))
+            return
+    user_identities = cloud.get_user_identities()
 
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
@@ -2411,13 +2425,6 @@ def _check_owner_identity_with_record(cluster_name: str,
         return
 
     assert isinstance(owner_identity, list)
-    if is_k8s_cloud:
-        provider_config = _get_kubernetes_provider_config(handle) or {}
-        context = provider_config.get('context')
-        if context is not None:
-            _check_kubernetes_cluster_target(cluster_name, cloud, context,
-                                             provider_config.get('cluster_uid'))
-            return
     # It is OK if the owner identity is shorter, which will happen when
     # the cluster is launched before #1808. In that case, we only check
     # the same length (zip will stop at the shorter one).
