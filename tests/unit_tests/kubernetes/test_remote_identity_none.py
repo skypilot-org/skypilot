@@ -689,7 +689,7 @@ class TestTaskNoneBeatsEveryLayer:
             _identity(task_config=_TASK_NONE)
 
     def test_a_controller_still_ignores_it(self, server_config):
-        server_config({})
+        server_config(_per_context('named-sa'))
         v = _deploy_vars(task_config=_TASK_NONE,
                          display_name='sky-jobs-controller-abcd1234')
         assert v['k8s_service_account_name'] == (
@@ -703,6 +703,39 @@ class TestTaskNoneBeatsEveryLayer:
                                                              False)
         assert not kubernetes_cloud.Kubernetes.remote_identity_is_none(
             _CTX, _resources(_TASK_NONE, kubernetes_identity='fixed-sa'))
+
+    def test_an_existing_cluster_keeps_its_launch_record(self, server_config):
+        # Launched with a token before the task asked for NONE: what the pods
+        # got still holds.
+        server_config({})
+        resources = _resources(_TASK_NONE)
+        resources.remote_identity_none_at_launch = False
+        assert not kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, resources)
+
+    @pytest.mark.parametrize('overrides,context,expected', [
+        (None, _CTX, False),
+        ({}, _CTX, False),
+        (_k8s(remote_identity='none'), _CTX, True),
+        (_k8s(remote_identity=_NONE), None, True),
+        (_k8s(remote_identity={'test-*': _NONE}), _CTX, True),
+        (_k8s(remote_identity={'other-*': _NONE}), _CTX, False),
+        (_per_context(_NONE), _CTX, True),
+        (_k8s(remote_identity='SERVICE_ACCOUNT'), _CTX, False),
+        ({
+            'ssh': {
+                'remote_identity': _NONE
+            }
+        }, _CTX, False),
+    ],
+                             ids=[
+                                 'no-overrides', 'empty', 'lowercase',
+                                 'no-context', 'pattern-match', 'pattern-miss',
+                                 'per-context', 'other-value', 'ssh-key'
+                             ])
+    def test_task_requests_none(self, overrides, context, expected):
+        assert kubernetes_cloud.Kubernetes.task_requests_none(
+            context, overrides) is expected
 
     def test_submit_check_accepts_it_over_a_client_per_context_value(
             self, server_config):
@@ -725,9 +758,13 @@ class _CredentialsChosen(Exception):
 class TestNoKubeconfigForATaskNone:
     """The credential upload follows the same rule as the pod's identity."""
 
-    def _kubeconfig_uploaded(self, task_config=None, cluster_name='c-1'):
+    def _kubeconfig_uploaded(self,
+                             task_config=None,
+                             cluster_name='c-1',
+                             kubernetes_identity=None):
         to_provision = mock.MagicMock()
         to_provision.cloud = _K8S
+        to_provision.kubernetes_identity = kubernetes_identity
         to_provision.region = _CTX
         to_provision.cluster_config_overrides = task_config or {}
         to_provision.make_deploy_variables.return_value = {}
@@ -760,6 +797,11 @@ class TestNoKubeconfigForATaskNone:
     def test_a_task_none_uploads_nothing(self, server_config):
         server_config(_per_context('LOCAL_CREDENTIALS'))
         assert not self._kubeconfig_uploaded(_TASK_NONE)
+
+    def test_an_in_process_identity_keeps_its_kubeconfig(self, server_config):
+        server_config(_per_context('LOCAL_CREDENTIALS'))
+        assert self._kubeconfig_uploaded(_TASK_NONE,
+                                         kubernetes_identity='fixed-sa')
 
     def test_a_controller_keeps_its_kubeconfig(self, server_config):
         server_config(_per_context('LOCAL_CREDENTIALS'))

@@ -4508,7 +4508,7 @@ def resolve_effective_pod_config(
 def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
     """The settings in a ``pod_config`` spec that hand the pod an API identity.
 
-    `remote_identity: NONE` refuses any of them, so callers that decide
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
     whether NONE can apply share this one list.
     """
     conflicts = [
