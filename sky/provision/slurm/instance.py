@@ -688,7 +688,7 @@ def _skypilot_runtime_dir(tmpdir: Optional[str],
 
 
 def _enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
-    """Get enroot container name when container_scope=global."""
+    """Get enroot container name when container_scope=global (the default)."""
     # Not publicly documented, but see:
     # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
     # Added in commit:
@@ -698,7 +698,7 @@ def _enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
 
 def _enroot_container_name_job_scope(cluster_name_on_cloud: str,
                                      job_id: str) -> str:
-    """Get enroot container name when container_scope=job (the default)."""
+    """Get enroot container name when container_scope=job."""
     return (f'pyxis_{job_id}_'
             f'{slurm_utils.pyxis_container_name(cluster_name_on_cloud)}')
 
@@ -1134,12 +1134,26 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
                       f'--container-writable')
         global_enroot_name = _enroot_container_name_global_scope(
             cluster_name_on_cloud)
+        remove_stale_container_script = f"""\
+while IFS= read -r candidate; do
+    if [ "$candidate" = {shlex.quote(global_enroot_name)} ]; then
+        enroot remove -f "$candidate" || exit 1
+    fi
+done < <(enroot list)
+"""
+        remove_stale_container_step = (
+            f'srun --overlap --unbuffered --nodes={num_nodes} '
+            f'--ntasks-per-node=1 bash -c '
+            f'{shlex.quote(remove_stale_container_script)} || '
+            '{ echo "[container] ERROR: Failed to remove stale container '
+            f'{global_enroot_name}." >&2; exit 1; }}')
         if snapshot_manifest is None:
             container_cmd = shlex.quote(
                 f'{container_init_script}'
                 f'touch {container_init_done_dir}/$SLURM_PROCID && '
                 'sleep infinity')
             container_launch_block = (
+                f'{remove_stale_container_step}\n'
                 f'CONTAINER_PIDS=()\n'
                 f'srun --overlap '
                 f'--job-name={_CONTAINER_KEEPER_STEP_NAME} '
@@ -1149,13 +1163,6 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
                 f'{pyxis_args} bash -c {container_cmd} &\n'
                 f'CONTAINER_PIDS+=("$!")')
         else:
-            remove_stale_container_script = f"""\
-while IFS= read -r candidate; do
-    if [ "$candidate" = {shlex.quote(global_enroot_name)} ]; then
-        enroot remove -f "$candidate"
-    fi
-done < <(enroot list)
-"""
             snapshot_rank_paths, snapshot_job_db_path = _manifest_paths(
                 snapshot_dir, snapshot_manifest)
             restore_lines = [
@@ -1179,9 +1186,7 @@ done < <(enroot list)
                     '-w "${SKY_NODES[0]}" bash -c '
                     f'{shlex.quote(restore_job_db_script)}')
             restore_lines.extend([
-                f'srun --overlap --unbuffered --nodes={num_nodes} '
-                f'--ntasks-per-node=1 bash -c '
-                f'{shlex.quote(remove_stale_container_script)}',
+                remove_stale_container_step,
                 'CONTAINER_PIDS=()',
             ])
             for rank, snapshot_path in enumerate(snapshot_rank_paths):

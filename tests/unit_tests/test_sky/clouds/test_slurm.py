@@ -1777,6 +1777,49 @@ srun() {{
                                 check=False)
         assert result.returncode == exit_code, result.stderr
 
+    @pytest.mark.parametrize('remove_rc', [0, 1])
+    def test_container_launch_removes_stale_container_first(
+            self, tmp_path, remove_rc):
+        script = (SBATCH_TESTDATA_DIR / 'containers.sh').read_text()
+        start = script.index("srun --overlap --unbuffered --nodes=1 "
+                             "--ntasks-per-node=1 bash -c 'while")
+        end = script.index('CONTAINER_PIDS+=("$!")', start)
+        launch = script[start:end]
+        log = tmp_path / 'calls.log'
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        (fake_bin / 'enroot').write_text(
+            '#!/bin/bash\n'
+            'case "$1" in\n'
+            '  list) echo pyxis_test-cluster ;;\n'
+            f'  remove) echo "remove $3" >> {log}; exit {remove_rc} ;;\n'
+            'esac\n')
+        os.chmod(fake_bin / 'enroot', 0o755)
+        stub = f"""
+srun() {{
+    case "$*" in
+        *--container-name=*) echo create >> {log} ;;
+        *) bash -c "${{@: -1}}" ;;
+    esac
+}}
+"""
+        result = subprocess.run(
+            ['bash', '-c', stub + launch + '\nwait'],
+            env={
+                **os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}'
+            },
+            capture_output=True,
+            text=True,
+            check=False)
+        calls = log.read_text().splitlines()
+        if remove_rc == 0:
+            assert result.returncode == 0, result.stderr
+            assert calls == ['remove pyxis_test-cluster', 'create']
+        else:
+            assert result.returncode == 1
+            assert calls == ['remove pyxis_test-cluster']
+            assert 'Failed to remove stale container' in result.stderr
+
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
         written_script = None
