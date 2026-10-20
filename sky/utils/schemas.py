@@ -1510,9 +1510,34 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+# Slurm's time_str2secs grammar (src/common/parse_time.c), case-insensitive.
+SLURM_SBATCH_TIME_PATTERN = (
+    r'(?ai)^(?:-1|infinite|unlimited|\d+|\d+:\d+|'
+    r'\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+)\Z')
+
+_SBATCH_TIME_SCHEMA = {
+    'oneOf': [
+        {
+            'type': 'string',
+            'pattern': SLURM_SBATCH_TIME_PATTERN
+        },
+        {
+            'type': 'integer',
+            'minimum': -1
+        },
+        {
+            'enum': [None, False]
+        },
+    ]
+}
+
 _SBATCH_OPTIONS_SCHEMA = {
     'type': 'object',
     'required': [],
+    'properties': {
+        'time': _SBATCH_TIME_SCHEMA,
+        't': _SBATCH_TIME_SCHEMA,
+    },
     'additionalProperties': {
         'oneOf': [
             {
@@ -2727,6 +2752,11 @@ def get_config_schema():
                 'read_access': {
                     'type': 'string',
                     'enum': ['allowed_users', 'all'],
+                },
+                # User-facing name; the key is the workspace's immutable id.
+                # Defaults to the id when unset.
+                'name': {
+                    'type': 'string',
                 },
                 'gcp': {
                     'type': 'object',

@@ -10,7 +10,7 @@ from sky import clouds
 from sky.backends import backend_utils
 from sky.utils import status_lib
 
-_HEALTHY = (0, 'Healthy:\n 1 node_aaaa\n', '')
+_HEALTHY = (0, 'SKY_ALIVE_NODES 1 1\n', '')
 _SSM_NOT_CONNECTED = (255, '', 'TargetNotConnected: i-0123 is not connected.')
 _BANNER_TIMEOUT = (255, '', 'Connection timed out during banner exchange')
 _RAY_NOT_FOUND = (1, 'Ray cluster is not found at 127.0.0.1:6380', '')

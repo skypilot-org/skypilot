@@ -167,7 +167,12 @@ class TestBackwardCompatibility:
             # Keep the base environment on the legacy client; the current
             # environment should exercise the latest supported client.
             # Remove once the base version supports v37.
-            'uv pip install "kubernetes<36.0.0"')
+            'uv pip install "kubernetes<36.0.0" && '
+            # FastAPI 0.145.0 rejects the unused `prefix` argument that
+            # older API servers pass to FastAPI(), so they exit on start.
+            # TODO: Remove once the base version tested against no longer
+            # passes `prefix`.
+            'uv pip install "fastapi<0.145"')
 
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
         # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
