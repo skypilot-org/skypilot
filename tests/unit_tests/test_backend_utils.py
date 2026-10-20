@@ -784,6 +784,32 @@ def test_replace_yaml_dicts_restores_new_nested_field_for_legacy_cluster():
     assert result['provider']['security_group']['GroupName'] == 'new-name'
 
 
+@pytest.mark.parametrize('new_uid,old_uid,expected', [
+    ('uid-new', None, 'uid-new'),
+    (None, 'uid-old', 'uid-old'),
+    ('uid-new', 'uid-old', 'uid-new'),
+])
+def test_replace_yaml_dicts_records_cluster_uid_on_relaunch(
+        new_uid, old_uid, expected):
+    """A relaunch records a freshly read UID and keeps one it cannot read."""
+
+    def _yaml(uid):
+        lines = [
+            'cluster_name: c', 'provider:', '  type: external',
+            '  context: ctx-a'
+        ]
+        if uid is not None:
+            lines.append(f'  cluster_uid: {uid}')
+        return '\n'.join(lines) + '\n'
+
+    out = backend_utils._replace_yaml_dicts(  # pylint: disable=protected-access
+        _yaml(new_uid),
+        _yaml(old_uid),
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,  # pylint: disable=protected-access
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)  # pylint: disable=protected-access
+    assert yaml_utils.read_yaml_str(out)['provider']['cluster_uid'] == expected
+
+
 def test_replace_yaml_dicts_preserves_old_subfield_on_restart():
     """Existing cluster restart keeps old sibling subfields, takes new GroupName."""
     new_yaml = ('cluster_name: c\n'

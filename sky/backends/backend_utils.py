@@ -220,6 +220,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # and our latest code need this field to be set to distinguish the node, so
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
+    # Kubernetes clusters launched before the UID was recorded, or whose
+    # kube-system was unreadable at launch, record it on their next launch.
+    ('provider', 'cluster_uid'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'IamInstanceProfile'),

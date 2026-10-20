@@ -3892,10 +3892,9 @@ def get_cluster_uid(context: Optional[str],
                 now < cached[2]):
             return cached[1]
     uid: Optional[str] = None
-    api_context = (None if context == kubernetes.in_cluster_context_name() else
-                   context)
     try:
-        uid = read_cluster_uid(kubernetes.core_api(api_context),
+        # The in-cluster name, unlike None, never falls back to kubeconfig.
+        uid = read_cluster_uid(kubernetes.core_api(context),
                                _CLUSTER_UID_READ_TIMEOUT_SECONDS)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '

@@ -6328,15 +6328,16 @@ def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
             assert utils.get_cluster_uid('ctx-a') == 'uid-a'
 
 
-def test_get_cluster_uid_in_cluster_uses_in_cluster_auth(monkeypatch):
+def test_get_cluster_uid_in_cluster_never_falls_back_to_kubeconfig(monkeypatch):
+    """None would fall back to the kubeconfig current-context."""
     monkeypatch.setattr(utils, '_cluster_uid_cache', {})
     core = mock.MagicMock()
     core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    in_cluster = kubernetes_adaptor.in_cluster_context_name()
     with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
                return_value=core) as mock_core_api:
-        assert utils.get_cluster_uid(
-            kubernetes_adaptor.in_cluster_context_name()) == 'uid-a'
-        mock_core_api.assert_called_once_with(None)
+        assert utils.get_cluster_uid(in_cluster) == 'uid-a'
+        mock_core_api.assert_called_once_with(in_cluster)
 
 
 def test_get_cluster_uid_rereads_after_kubeconfig_changes(
