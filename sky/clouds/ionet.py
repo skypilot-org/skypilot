@@ -5,12 +5,10 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.provision.ionet import utils as ionet_utils
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -262,19 +260,6 @@ class IONet(clouds.Cloud):
                 f'io.net offer {resources.instance_type!r} provides '
                 f'{storage_gib} GiB storage, below the requested '
                 f'{resources.disk_size} GiB.')
-        # io.net bills a VM for a fixed lifetime, so the user must choose it.
-        duration_hours = skypilot_config.get_effective_region_config(
-            cloud='ionet',
-            region=None,
-            keys=('duration_hours',),
-            default_value=None)
-        if (not isinstance(duration_hours, int) or
-                isinstance(duration_hours, bool) or duration_hours < 1):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'io.net bills each VM for a fixed number of hours. Set '
-                    '`ionet.duration_hours` to a positive integer in '
-                    '~/.sky/config.yaml.')
 
         return {
             'instance_type': resources.instance_type,
@@ -282,7 +267,6 @@ class IONet(clouds.Cloud):
             'gpus_per_vm': gpus_per_vm,
             'custom_resources': custom_resources,
             'region': region.name,
-            'duration_hours': duration_hours,
         }
 
     def _get_feasible_launchable_resources(

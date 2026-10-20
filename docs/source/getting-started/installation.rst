@@ -1372,14 +1372,7 @@ Create an API key in the `io.net Cloud <https://cloud.io.net/>`_ console (associ
   echo "<your_api_key_here>" > ~/.ionet/api_key
   chmod 600 ~/.ionet/api_key
 
-io.net VMs are billed for a fixed lifetime. Set the number of hours in :code:`~/.sky/config.yaml` (see :ref:`config-yaml-ionet`):
-
-.. code-block:: yaml
-
-  ionet:
-    duration_hours: 1
-
-The VM expires when the duration ends, and SkyPilot does not extend the reservation.
+io.net VMs are billed pay-as-you-go until they are terminated. Use :code:`sky down` or autodown (:code:`sky launch -i <idle_minutes> --down`) to stop billing.
 
 Verify that SkyPilot can access io.net:
 

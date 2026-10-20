@@ -17,7 +17,6 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import provision
-from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as catalog_common
@@ -437,36 +436,15 @@ def _deploy_variables(resources=None):
 
 def test_deploy_variables(catalog_df):
     del catalog_df
-    with skypilot_config.override_skypilot_config(
-        {'ionet': {
-            'duration_hours': 3
-        }}):
-        variables = _deploy_variables()
+    # Pay-as-you-go needs no io.net settings in ~/.sky/config.yaml.
+    variables = _deploy_variables()
     assert variables == {
         'instance_type': '1x_RTX4090_24GB',
         'hardware_id': 12,
         'gpus_per_vm': 1,
         'custom_resources': json.dumps({'RTX4090': 1}, separators=(',', ':')),
         'region': 'US',
-        'duration_hours': 3,
     }
-
-
-@pytest.mark.parametrize('duration_hours', [None, 0, -1, True, 1.5])
-def test_deploy_variables_require_positive_duration(catalog_df, duration_hours):
-    del catalog_df
-    get_config = skypilot_config.get_effective_region_config
-
-    # The config schema rejects these values, so bypass it to test the guard.
-    def get_effective_region_config(**kwargs):
-        if kwargs['cloud'] == 'ionet' and kwargs['keys'] == ('duration_hours',):
-            return duration_hours
-        return get_config(**kwargs)
-
-    with mock.patch.object(skypilot_config, 'get_effective_region_config',
-                           get_effective_region_config):
-        with pytest.raises(ValueError, match='ionet.duration_hours'):
-            _deploy_variables()
 
 
 def test_deploy_variables_check_disk_size(catalog_df):
@@ -618,7 +596,6 @@ def _config():
             'InstanceType': 'io-h100',
             'HardwareId': 'hardware-1',
             'GpusPerVm': 1,
-            'DurationHours': 4,
             'PublicKey': 'ssh-ed25519 example',
         },
         count=1,
@@ -639,7 +616,8 @@ def test_lifecycle_preserves_vm_identity_and_ssh_details(fake_api):
     request = next(value for kind, value in fake_api.calls if kind == 'deploy')
     assert request == {
         'resource_private_name': 'sky-test',
-        'duration_hours': 4,
+        'billing_model': 'payg',
+        'duration_hours': 1,
         'hardware_id': 'hardware-1',
         'gpus_per_vm': 1,
         'location_ids': ['US'],
@@ -672,7 +650,7 @@ def test_existing_remote_deployment_is_reused(fake_api):
     assert not any(kind == 'deploy' for kind, *_ in fake_api.calls)
 
 
-def test_expired_duration_does_not_keep_stale_ownership(fake_api):
+def test_completed_deployment_does_not_keep_stale_ownership(fake_api):
     instance.run_instances('US', 'test', 'sky-test', _config())
     fake_api.status = 'completed'
     assert instance.query_instances('test', 'sky-test', {}) == {}
@@ -780,7 +758,7 @@ def test_terminated_deployment_without_vm_stays_terminal(fake_api, monkeypatch):
 
 def test_local_deployment_missing_remotely_is_cleared(fake_api):
     instance.run_instances('US', 'test', 'sky-test', _config())
-    # The deployment has expired: io.net neither lists it nor knows its ID.
+    # io.net has removed the deployment: it neither lists it nor knows its ID.
     fake_api.deployment = None
 
     def gone(deployment_id):
@@ -1097,24 +1075,20 @@ def test_inventory_to_template_to_lifecycle(monkeypatch, tmp_path):
     monkeypatch.setattr(auth_utils, 'get_or_generate_keys', lambda:
                         (str(private_path), str(public_path)))
 
-    with skypilot_config.override_skypilot_config(
-        {'ionet': {
-            'duration_hours': 2
-        }}):
-        offerings = ionet_catalog.list_accelerators(gpus_only=True,
-                                                    name_filter=None,
-                                                    region_filter=None,
-                                                    quantity_filter=None)
-        offering = offerings['RTX4090'][0]
-        assert offering.instance_type == '1x_RTX4090_24GB'
-        cloud = clouds.IONet()
-        resources = sky.Resources(cloud=cloud,
-                                  instance_type=offering.instance_type,
-                                  region='US')
-        resources.validate()
-        variables = cloud.make_deploy_resources_variables(
-            resources, resources_utils.ClusterName('ionet-smoke', cloud_name),
-            clouds.Region('US'), None, 1)
+    offerings = ionet_catalog.list_accelerators(gpus_only=True,
+                                                name_filter=None,
+                                                region_filter=None,
+                                                quantity_filter=None)
+    offering = offerings['RTX4090'][0]
+    assert offering.instance_type == '1x_RTX4090_24GB'
+    cloud = clouds.IONet()
+    resources = sky.Resources(cloud=cloud,
+                              instance_type=offering.instance_type,
+                              region='US')
+    resources.validate()
+    variables = cloud.make_deploy_resources_variables(
+        resources, resources_utils.ClusterName('ionet-smoke', cloud_name),
+        clouds.Region('US'), None, 1)
     assert not state['creates']
     # Optimization and deploy variables must not query live inventory.
     assert state['hardware_calls'] == 1
@@ -1192,13 +1166,13 @@ def test_inventory_to_template_to_lifecycle(monkeypatch, tmp_path):
     assert payload['hardware_id'] == 12
     assert payload['gpus_per_vm'] == 1
     assert payload['location_ids'] == ['US']
-    assert payload['duration_hours'] == 2
+    assert payload['billing_model'] == 'payg'
     assert public_key in payload['ssh_keys'].values()
     # The vendor's deploy schema rejects fields it does not define.
     assert set(payload) == {
-        'resource_private_name', 'duration_hours', 'hardware_id', 'gpus_per_vm',
-        'location_ids', 'vms_qty', 'vm_image_type', 'ssh_keys',
-        'network_services'
+        'resource_private_name', 'billing_model', 'duration_hours',
+        'hardware_id', 'gpus_per_vm', 'location_ids', 'vms_qty',
+        'vm_image_type', 'ssh_keys', 'network_services'
     }
     with pytest.raises(utils.IONetError, match='workers'):
         provision.terminate_instances('ionet',

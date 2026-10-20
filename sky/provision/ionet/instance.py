@@ -165,7 +165,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         if deployment_id is None:
             request = {
                 'resource_private_name': cluster_name_on_cloud,
-                'duration_hours': node['DurationHours'],
+                # Pay-as-you-go VMs run until terminated. The API still
+                # requires duration_hours but ignores it for this model.
+                'billing_model': 'payg',
+                'duration_hours': 1,
                 'hardware_id': node['HardwareId'],
                 'gpus_per_vm': node['GpusPerVm'],
                 'location_ids': [region],
