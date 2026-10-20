@@ -161,6 +161,7 @@ export async function getClusters({
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        workspace_name: cluster.workspace_name || cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
