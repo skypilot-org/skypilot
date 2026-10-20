@@ -1019,6 +1019,71 @@ class TestTaskCleanup:
         cleanup_patches['terminate'].assert_not_called()
 
 
+def _resumed_pool_task(monkeypatch, task_status, submit_info):
+    """A pool JobController whose task 0 resumes with the given state.
+
+    The executor's launch() records a submission on worker-1 (job ID 7).
+    Returns (controller, task, executor, state mocks).
+    """
+    jc = JobController.__new__(JobController)
+    jc._job_id = 1
+    jc._dag = MagicMock()
+    jc._pool = 'p'
+    jc._backend = MagicMock()
+    jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+    jc.starting = set()
+    jc.starting_lock = asyncio.Lock()
+    jc.starting_signal = MagicMock()
+    task = MagicMock()
+    task.name = 'task0'
+    task.metadata = {}
+    task.run = 'echo hi'
+    task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+    task.resources = None
+    executor = MagicMock()
+    executor.cluster_name = None
+    executor.job_id_on_pool_cluster = None
+    executor.on_resume = AsyncMock()
+    executor.monitor_task = AsyncMock(return_value=None)
+    jc._monitor_one_task = AsyncMock(return_value=True)
+
+    submit_infos = [submit_info]
+
+    async def launch():
+        submit_infos[0] = ('worker-1', 7)
+        return 123.0
+
+    executor.launch = AsyncMock(side_effect=launch)
+
+    mjs = 'sky.jobs.controller.managed_job_state'
+    state = {
+        'set_restarting_async': AsyncMock(),
+        'set_starting_async': AsyncMock(),
+        'set_started_async': AsyncMock(),
+    }
+    for name, mock in state.items():
+        monkeypatch.setattr(f'{mjs}.{name}', mock)
+    monkeypatch.setattr(f'{mjs}.get_job_status_with_task_id_async',
+                        AsyncMock(return_value=task_status))
+    monkeypatch.setattr(f'{mjs}.get_pool_submit_info_async',
+                        AsyncMock(side_effect=lambda job_id: submit_infos[0]))
+    monkeypatch.setattr(f'{mjs}.has_open_emergency_episode_async',
+                        AsyncMock(return_value=False))
+    monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id', lambda job_id: None)
+    monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                        lambda task, job_id: None)
+    monkeypatch.setattr(
+        'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+        MagicMock(return_value=executor))
+    monkeypatch.setattr(
+        'sky.jobs.controller.managed_job_utils.event_callback_func',
+        MagicMock(return_value=AsyncMock()))
+    monkeypatch.setattr(
+        'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+        lambda *args, **kwargs: None)
+    return jc, task, executor, state
+
+
 class TestPoolSubmissionKeptInMemory:
     """A resumed pool task's executor carries the persisted submission, so
     cleanup can still cancel it if the job's record goes away."""
@@ -1026,53 +1091,73 @@ class TestPoolSubmissionKeptInMemory:
     @pytest.mark.asyncio
     async def test_resume_copies_the_submission_into_the_executor(
             self, monkeypatch):
-        jc = JobController.__new__(JobController)
-        jc._job_id = 1
-        jc._dag = MagicMock()
-        jc._pool = 'p'
-        jc._backend = MagicMock()
-        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
-        jc.starting = set()
-        jc.starting_lock = asyncio.Lock()
-        jc.starting_signal = MagicMock()
-        task = MagicMock()
-        task.name = 'task0'
-        task.metadata = {}
-        task.run = 'echo hi'
-        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
-        task.resources = None
-        executor = MagicMock()
-        executor.cluster_name = None
-        executor.job_id_on_pool_cluster = None
-        executor.on_resume = AsyncMock()
-        executor.monitor_task = AsyncMock(return_value=None)
-        jc._monitor_one_task = AsyncMock(return_value=True)
-
-        mjs = 'sky.jobs.controller.managed_job_state'
-        monkeypatch.setattr(
-            f'{mjs}.get_job_status_with_task_id_async',
-            AsyncMock(return_value=managed_job_state.ManagedJobStatus.RUNNING))
-        monkeypatch.setattr(f'{mjs}.get_pool_submit_info_async',
-                            AsyncMock(return_value=('worker-1', 7)))
-        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
-                            lambda job_id: None)
-        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
-                            lambda task, job_id: None)
-        monkeypatch.setattr(
-            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
-            MagicMock(return_value=executor))
-        monkeypatch.setattr(
-            'sky.jobs.controller.managed_job_utils.event_callback_func',
-            MagicMock(return_value=AsyncMock()))
-        monkeypatch.setattr(
-            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
-            lambda *args, **kwargs: None)
+        jc, task, executor, _ = _resumed_pool_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.RUNNING,
+            ('worker-1', 7))
 
         assert await jc._run_one_task(0, task) is True
 
         assert executor.cluster_name == 'worker-1'
         assert executor.job_id_on_pool_cluster == 7
         assert jc.pool_submission == ('worker-1', 7)
+
+
+class TestPoolTaskResumedBeforeWorker:
+    """A pool task whose controller stopped while it waited for a worker is
+    launched again on resume instead of recovered."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('task_status', [
+        managed_job_state.ManagedJobStatus.STARTING,
+        managed_job_state.ManagedJobStatus.RECOVERING,
+    ])
+    async def test_no_worker_launches_again(self, monkeypatch, task_status):
+        jc, task, executor, state = _resumed_pool_task(monkeypatch, task_status,
+                                                       (None, None))
+
+        assert await jc._run_one_task(0, task) is True
+
+        state['set_restarting_async'].assert_awaited_once_with(1,
+                                                               0,
+                                                               recovering=False)
+        state['set_starting_async'].assert_not_awaited()
+        executor.launch.assert_awaited_once()
+        state['set_started_async'].assert_awaited_once()
+        assert state['set_started_async'].await_args.kwargs[
+            'start_time'] == 123.0
+        executor.on_resume.assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['cluster_name'] == 'worker-1'
+        assert monitor_kwargs['job_id_on_pool_cluster'] == 7
+        assert monitor_kwargs['force_transit_to_recovering'] is False
+
+    @pytest.mark.asyncio
+    async def test_with_worker_is_recovered(self, monkeypatch):
+        jc, task, executor, state = _resumed_pool_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.STARTING,
+            ('worker-1', None))
+
+        assert await jc._run_one_task(0, task) is True
+
+        state['set_restarting_async'].assert_not_awaited()
+        executor.launch.assert_not_awaited()
+        state['set_started_async'].assert_not_awaited()
+        executor.on_resume.assert_awaited_once_with('worker-1')
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['cluster_name'] == 'worker-1'
+        assert monitor_kwargs['force_transit_to_recovering'] is True
+
+    @pytest.mark.asyncio
+    async def test_cancelling_without_worker_is_cancelled(self, monkeypatch):
+        jc, task, executor, state = _resumed_pool_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.CANCELLING,
+            (None, None))
+
+        with pytest.raises(asyncio.CancelledError):
+            await jc._run_one_task(0, task)
+
+        state['set_restarting_async'].assert_not_awaited()
+        executor.launch.assert_not_awaited()
 
 
 class TestDownloadLogsForCancelledJob:
