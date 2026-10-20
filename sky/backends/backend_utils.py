@@ -643,15 +643,20 @@ def _log_pinned_ray_version(cluster_name: str, ray_version: str,
         return
     preamble = (f'Cluster {cluster_name!r} stays on Ray {ray_version}; this '
                 f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
+        # `sky stop` rejects controllers (core.stop).
+        logger.info(f'{preamble} A controller moves to it after it is '
+                    'autostopped and restarted, where its cloud can stop, or '
+                    f'when recreated: `sky down {cluster_name}` once it has no '
+                    'jobs or services running.')
+        return
     try:
         cloud.check_features_are_supported(
             resources, {clouds.CloudImplementationFeatures.STOP}, region)
     except exceptions.NotSupportedError:
-        # Not actionable in place, and permanent for this cluster, so keep it
-        # out of every launch's output and leave it for whoever is asking why.
-        logger.debug(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
-                     f'that version until it is recreated (`sky down '
-                     f'{cluster_name}`).')
+        logger.info(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
+                    f'that version until it is recreated (`sky down '
+                    f'{cluster_name}`, then `sky launch`).')
         return
     except Exception:  # pylint: disable=broad-except
         # Deciding the wording is not worth failing a launch over. The check

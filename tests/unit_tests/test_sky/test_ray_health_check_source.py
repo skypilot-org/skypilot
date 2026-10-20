@@ -4,7 +4,6 @@ Ray 2.56.1 leaves a node under `Active:` after the GCS has marked it dead
 (measured: still listed 174s later), so counting `ray status` lines gets node
 loss wrong in both directions while the cloud still reports every machine up.
 """
-import re
 import shlex
 import socket
 import subprocess
@@ -13,6 +12,7 @@ import time
 from unittest import mock
 
 import pytest
+import yaml
 
 from sky import backends
 from sky import clouds
@@ -207,14 +207,64 @@ def test_the_probe_counts_alive_nodes_of_either_ray_version(tmp_path, node):
     assert out.strip() == 'SKY_ALIVE_NODES 2 3'
 
 
-def test_the_head_wait_does_not_depend_on_a_ray_message():
-    """2.9.3 printed "No cluster status."; 2.56.1 raises instead.
+def _run_head_wait(tmp_path, answers, timeout_seconds=None):
+    """Runs the real head wait against a fake `ray status`.
 
-    Keyed on a message, the wait silently became a no-op on 2.56.1.
+    `answers` are (rc, output) per call, the last one repeating. Returns how
+    many times `ray status` was called.
     """
+    steps = tmp_path / 'steps'
+    steps.write_text(''.join(f'{rc}|{out}\n' for rc, out in answers))
+    calls = tmp_path / 'calls'
+    fake_ray = tmp_path / 'ray'
+    fake_ray.write_text(
+        '#!/bin/bash\n'
+        f'n=$(cat {calls} 2>/dev/null || echo 0); echo $((n+1)) > {calls}\n'
+        f'line=$(sed -n "$((n+1))p" {steps}); '
+        f'[ -z "$line" ] && line=$(tail -n 1 {steps})\n'
+        'echo "${line#*|}"; exit "${line%%|*}"\n')
+    fake_ray.chmod(0o755)
+    cmd = instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND.replace(
+        instance_setup.constants.SKY_RAY_CMD,
+        str(fake_ray)).replace('sleep 0.5', 'sleep 0.01')
+    if timeout_seconds is not None:
+        cmd = cmd.replace(
+            f'+ {instance_setup._RAY_HEAD_WAIT_TIMEOUT_SECONDS} ',  # pylint: disable=protected-access
+            f'+ {timeout_seconds} ')
+    subprocess.run(['bash', '-c', cmd],
+                   capture_output=True,
+                   text=True,
+                   timeout=30,
+                   check=True)
+    return int(calls.read_text())
+
+
+def test_the_head_wait_outlasts_no_cluster_status(tmp_path):
+    """Measured on a real Ray 2.56.1 head right after `ray start --head`: exit
+    1 while the GCS comes up, then exit 0 with "No cluster status." for a few
+    seconds, then the real status. Breaking on the first exit 0 waited for
+    nothing."""
+    calls = _run_head_wait(tmp_path, [
+        (1, 'Traceback (most recent call last):'),
+        (0, 'No cluster status. It may take a few seconds for the Ray '
+         'internal services to start up.'),
+        (0, 'No cluster status. It may take a few seconds for the Ray '
+         'internal services to start up.'),
+        (0, '======== Autoscaler status: 2026-10-19 22:05:48 ========'),
+    ])
+    assert calls == 4
+
+
+def test_the_head_wait_gives_up_at_the_deadline(tmp_path):
+    """Bounded: a failing `ray status` takes ~35s to return on 2.56.1, so the
+    loop counts time, not iterations."""
+    start = time.monotonic()
+    _run_head_wait(tmp_path, [(0, 'No cluster status.')], timeout_seconds=2)
+    assert time.monotonic() - start < 10
+
+
+def test_the_head_wait_survives_the_ibm_yaml_template():
+    """ibm-ray.yml.j2 embeds the command as a plain YAML scalar."""
     cmd = instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND
-    assert 'No cluster status.' not in cmd
-    assert re.search(r'status\s*>\s*/dev/null 2>&1 && break', cmd), cmd
-    # Bounded: a failing `ray status` takes ~35s to return on 2.56.1.
-    assert '_sky_deadline' in cmd
+    assert yaml.safe_load(f'- {cmd}') == [cmd]
     assert shlex.split(cmd)

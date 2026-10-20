@@ -7,6 +7,7 @@ mismatched default_worker.py.
 """
 import os
 import re
+import subprocess
 from unittest import mock
 
 import pytest
@@ -15,6 +16,7 @@ from sky import clouds
 from sky import resources as resources_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
+from sky.utils import controller_utils
 from sky.utils import status_lib
 
 CURRENT = constants.SKY_REMOTE_RAY_VERSION
@@ -209,14 +211,14 @@ def test_the_marker_does_not_move_the_config_hash(tmp_path):
     assert _hash(base) == _hash(base + f'  {KEY}: {LEGACY}\n')
 
 
-def _notice(cloud, pinned='2.4.0', **resource_kwargs):
+def _notice(cloud, pinned='2.4.0', cluster_name='c', **resource_kwargs):
     """What _log_pinned_ray_version says, split by level."""
     resources = resources_lib.Resources(cloud=cloud,
                                         instance_type='fake-type',
                                         **resource_kwargs)
     with mock.patch.object(backend_utils, 'logger') as log:
         backend_utils._log_pinned_ray_version(  # pylint: disable=protected-access
-            'c', pinned, cloud, resources, 'fake-region')
+            cluster_name, pinned, cloud, resources, 'fake-region')
     join = lambda calls: ' '.join(str(c) for c in calls)
     return join(log.info.call_args_list), join(log.debug.call_args_list)
 
@@ -227,12 +229,12 @@ def test_a_stoppable_cluster_is_told_to_stop_and_start():
     assert 'sky stop c' in info and 'sky start c' in info
 
 
-def test_a_cluster_that_cannot_stop_is_not_told_to_stop():
+def test_a_cluster_that_cannot_stop_is_told_to_recreate_it():
     """Kubernetes, Slurm, RunPod, Lambda and friends have no `sky stop`.
 
-    Naming it would send the user at a command that errors out, and the
-    condition is permanent for such a cluster, so it does not belong in every
-    launch's output either.
+    Naming it would send the user at a command that errors out. The cluster
+    stays on the old Ray (the one the CVE fix moves away from) until it is
+    recreated, so say so where the user sees it.
 
     Only the cloud I/O is stubbed -- that STOP really is unsupported is the
     cloud's own declaration, asserted just below.
@@ -241,10 +243,17 @@ def test_a_cluster_that_cannot_stop_is_not_told_to_stop():
     with mock.patch.object(clouds.Kubernetes,
                            '_unsupported_features_for_resources',
                            return_value={stop: 'no stop on Kubernetes'}):
-        info, debug = _notice(clouds.Kubernetes())
-    assert not info, f'told a Kubernetes user to stop the cluster: {info}'
-    assert 'sky stop' not in debug
-    assert 'recreated' in debug and 'sky down c' in debug
+        info, _ = _notice(clouds.Kubernetes())
+    assert 'sky stop' not in info, info
+    assert 'recreated' in info and 'sky down c' in info
+
+
+def test_a_controller_is_not_told_to_stop():
+    """`sky stop` rejects controllers (core.stop), on every cloud."""
+    name = controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name
+    info, _ = _notice(clouds.AWS(), cluster_name=name)
+    assert 'sky stop' not in info, info
+    assert f'sky down {name}' in info and 'autostopped' in info
 
 
 def test_kubernetes_really_does_declare_stop_unsupported():
@@ -257,9 +266,9 @@ def test_whether_a_cluster_can_stop_depends_on_the_resources_too():
     """AWS stops on-demand instances but not spot ones."""
     on_demand, _ = _notice(clouds.AWS())
     assert 'sky stop c' in on_demand
-    spot_info, spot_debug = _notice(clouds.AWS(), use_spot=True)
-    assert not spot_info, f'told a spot user to stop the cluster: {spot_info}'
-    assert 'sky down c' in spot_debug
+    spot_info, _ = _notice(clouds.AWS(), use_spot=True)
+    assert 'sky stop' not in spot_info, spot_info
+    assert 'sky down c' in spot_info
 
 
 def test_nothing_is_said_when_the_cluster_is_already_current():
@@ -378,3 +387,50 @@ def test_the_ray_install_does_not_upgrade_unrelated_packages():
     assert install is not None, constants.RAY_INSTALLATION_COMMANDS
     args = install.group(0).split()
     assert not {'-U', '--upgrade', '--reinstall'} & set(args), install.group(0)
+
+
+def _run_ray_install(tmp_path, install_rc):
+    """Runs the Ray install step of RAY_INSTALLATION_COMMANDS with a fake
+    `uv pip` whose install exits `install_rc`, on a node with no Ray and no Ray
+    cluster. Only that step: the commands before it install uv from the
+    network."""
+    fake_uv_pip = tmp_path / 'uv-pip'
+    fake_uv_pip.write_text('#!/bin/bash\n'
+                           f'[ "$1" = install ] && exit {install_rc}\n'
+                           'exit 0\n')
+    fake_uv_pip.chmod(0o755)
+    full = constants.RAY_INSTALLATION_COMMANDS
+    start = full.index(f'{constants.SKY_UV_PIP_CMD} list | grep "ray "')
+    end = full.index('exit 1; };', start) + len('exit 1; };')
+    cmd = (full[start:end].replace('{ray_version}', '9.9.9').replace(
+        constants.SKY_UV_PIP_CMD,
+        str(fake_uv_pip)).replace(constants.RAY_STATUS,
+                                  'false').replace(constants.SKY_PYTHON_CMD,
+                                                   'python3'))
+    return subprocess.run(['bash', '-c', cmd],
+                          env={
+                              'HOME': str(tmp_path),
+                              'PATH': os.environ['PATH']
+                          },
+                          capture_output=True,
+                          text=True,
+                          timeout=60,
+                          check=False)
+
+
+def test_a_failed_ray_install_fails_the_setup_loudly(tmp_path):
+    """Ray 2.52+ needs Python 3.10, and the commands are joined with `;`.
+
+    A runtime env from before it was pinned to 3.10 cannot install the new
+    Ray. Carrying on silently left the node on the old Ray with the patches
+    skipped.
+    """
+    proc = _run_ray_install(tmp_path, install_rc=1)
+    assert proc.returncode == 1, proc.stderr
+    assert 'could not install Ray 9.9.9' in proc.stderr
+    assert 'Python 3.' in proc.stderr
+
+
+def test_a_successful_ray_install_does_not_report_a_failure(tmp_path):
+    proc = _run_ray_install(tmp_path, install_rc=0)
+    assert 'could not install Ray' not in proc.stderr
