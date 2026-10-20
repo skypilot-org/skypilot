@@ -484,7 +484,8 @@ function normalizeTableColumn(config) {
         : undefined,
       // The value to sort a row by under this column's sortKey, for a column
       // whose value is not a field on the row itself. Without it, the row is
-      // sorted by row[sortKey].
+      // sorted by row[sortKey]. A row whose value is null sorts last in
+      // either direction.
       sortValue:
         typeof config.header.sortValue === 'function'
           ? config.header.sortValue

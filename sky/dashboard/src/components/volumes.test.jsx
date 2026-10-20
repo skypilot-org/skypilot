@@ -298,18 +298,23 @@ describe('VolumesTable sorting by a plugin column', () => {
     useTableColumns.mockImplementation(() => [
       mountColumn({
         sortKey: 'mount_path',
-        sortValue: (v) => mountPaths[v.name] || '',
+        sortValue: (v) => mountPaths[v.name] ?? null,
       }),
     ]);
-    const { container } = await renderTable([volume('vol-a'), volume('vol-b')]);
-    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+    // vol-0 has no mount path, and sorts last in either direction.
+    const { container } = await renderTable([
+      volume('vol-0'),
+      volume('vol-a'),
+      volume('vol-b'),
+    ]);
+    expect(rowNames(container)).toEqual(['vol-0', 'vol-a', 'vol-b']);
 
     fireEvent.click(screen.getByText('Mount Path'));
-    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a', 'vol-0']);
     expect(headers(container)).toContain('Mount Path ↑');
 
     fireEvent.click(screen.getByText(/Mount Path/));
-    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b', 'vol-0']);
     expect(headers(container)).toContain('Mount Path ↓');
   });
 

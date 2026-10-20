@@ -23,11 +23,16 @@ export function sortData(data, accessor, direction) {
   }
   // A function accessor computes the value to sort a row by; a string one
   // names the row's field.
-  const valueOf =
-    typeof accessor === 'function' ? accessor : (row) => row[accessor];
+  const computed = typeof accessor === 'function';
+  const valueOf = computed ? accessor : (row) => row[accessor];
   return [...data].sort((a, b) => {
     const valueA = valueOf(a);
     const valueB = valueOf(b);
+    // A computed value of null means the row has none: it goes last in either
+    // direction, so a sparse column does not open on a page of blanks.
+    if (computed && (valueA == null || valueB == null)) {
+      return (valueA == null) - (valueB == null);
+    }
     if (valueA < valueB) return direction === 'ascending' ? -1 : 1;
     if (valueA > valueB) return direction === 'ascending' ? 1 : -1;
     return 0;
