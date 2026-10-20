@@ -11,7 +11,7 @@ Benefits of using volumes:
 * **Data persistence**: Volumes can persist data independently of task life cycles, making it easy to share data between different tasks (e.g., datasets, caches) or preserve results.
 * **Size control**: You can set volume size limits to manage costs and limit storage usage.
 
-Volumes are currently supported on Kubernetes clusters and RunPod.
+Volumes are currently supported on Kubernetes clusters, RunPod and :ref:`Lambda <volumes-on-lambda>`.
 
 
 .. _volumes-quickstart:
@@ -878,6 +878,71 @@ Quickstart
 
      run: |
        echo "Hello, RunPod!" > /workspace/hello.txt
+
+Managing volumes
+~~~~~~~~~~~~~~~~
+
+Same as Kubernetes volumes, refer to :ref:`volumes-on-kubernetes-manage` for more details.
+
+.. _volumes-on-lambda:
+
+Volumes on Lambda
+-----------------
+
+`Lambda Cloud filesystems <https://docs.lambda.ai/public-cloud/filesystems/>`_ are
+regional, persistent filesystems that can be mounted on instances in the same
+region. SkyPilot supports creating and managing them via the same three commands:
+
+- ``sky volumes apply``: Create a new filesystem, or register an existing one
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a filesystem
+
+Notes specific to Lambda:
+
+- ``infra`` must specify the region, e.g. ``lambda/us-east-1``. Tasks that mount
+  the volume are launched in that region.
+- Lambda filesystems have no fixed size, so ``size`` is not supported.
+- Lambda can only mount filesystems under ``/home``, ``/data`` or ``/lambda/nfs``,
+  so the mount path in the task YAML must start with one of them.
+- ``sub_path`` and labels are not supported.
+- A filesystem cannot be deleted while it is mounted.
+
+Quickstart
+~~~~~~~~~~
+
+1. Prepare a volume YAML file:
+
+   .. code-block:: yaml
+
+     # lambda-volume.yaml
+     name: lfs
+     type: lambda-filesystem
+     infra: lambda/us-east-1
+     # If the filesystem already exists, set `use_existing` to true and set
+     # `name` to the existing filesystem name.
+     # use_existing: true
+
+2. Create the volume with ``sky volumes apply lambda-volume.yaml``:
+
+   .. code-block:: console
+
+     $ sky volumes apply lambda-volume.yaml
+     Proceed to create volume 'lfs'? [Y/n]: Y
+     Created Lambda filesystem lfs-43dbb4ab-15e906 (id=398578a2336b49079e74043f0bd2cfe8) in us-east-1.
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     # task.yaml
+     resources:
+       infra: lambda
+
+     volumes:
+       /data/models: lfs
+
+     run: |
+       echo "Hello, Lambda!" > /data/models/hello.txt
 
 Managing volumes
 ~~~~~~~~~~~~~~~~

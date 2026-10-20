@@ -161,6 +161,11 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
+    elif volume_type == volume_utils.VolumeType.LAMBDA_FILESYSTEM.value:
+        if not cloud.is_same_cloud(clouds.Lambda()):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Lambda filesystem is only supported on Lambda')
     # Validate here rather than trusting each client to call /validate first:
     # the dashboard posts straight to this endpoint.
     with _volume_errors_as_400():
