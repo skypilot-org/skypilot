@@ -25,8 +25,11 @@ run: |
   for h in $HOSTS; do echo "$h slots=1" >> ~/mpi_hostfile; done
   cat ~/mpi_hostfile
   # The other task's setup (installing openmpi) can still be running.
+  # OpenMPI shortens hostnames to the part before the first dot by default,
+  # which turns mpia-1.<group> into the unresolvable mpia-1.
   for i in $(seq 1 30); do
     mpirun --hostfile ~/mpi_hostfile -np 4 \
+      --mca orte_keep_fqdn_hostnames 1 \
       bash -c 'echo "MPI_RANK_OK rank=$OMPI_COMM_WORLD_RANK host=$(hostname)"' \
       > ~/mpi_out 2>&1 && break
     echo "mpirun attempt $i failed:"; cat ~/mpi_out
