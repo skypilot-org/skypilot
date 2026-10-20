@@ -1484,11 +1484,11 @@ class TestDownloadLogAndStreamLoggingAgentGate:
     def _run(self, agent_configured, reader, undelivered_reason=None):
         controller = self._make_controller()
         handle = MagicMock()
-        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+        with patch('sky.jobs.utils.logs.is_logging_agent_configured',
                    return_value=agent_configured), \
-             patch('sky.jobs.controller.logs.get_log_reader',
+             patch('sky.jobs.utils.logs.get_log_reader',
                    return_value=reader), \
-             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+             patch('sky.jobs.utils.LogDeliverySource.undelivered_reason',
                    return_value=undelivered_reason), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
@@ -1542,9 +1542,9 @@ class TestDownloadLogAndStreamLoggingAgentGate:
         # patching its lookup, so a future default other than None is caught.
         assert not LogDeliverySource.is_registered()
         controller = self._make_controller()
-        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+        with patch('sky.jobs.utils.logs.is_logging_agent_configured',
                    return_value=True), \
-             patch('sky.jobs.controller.logs.get_log_reader',
+             patch('sky.jobs.utils.logs.get_log_reader',
                    return_value=MagicMock()), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \

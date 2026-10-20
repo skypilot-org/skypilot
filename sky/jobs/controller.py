@@ -23,7 +23,6 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -60,7 +59,6 @@ from sky.utils import ux_utils
 from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
-from sky.utils.plugin_extensions import LogDeliverySource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -655,20 +653,16 @@ class JobController:
         were not delivered; we then keep the local copy instead of skipping
         it.
         """
-        if (logs.is_logging_agent_configured() and
-                logs.get_log_reader() is not None):
-            undelivered_reason = None
-            if handle is not None:
-                undelivered_reason = LogDeliverySource.undelivered_reason(
-                    cluster_name=handle.cluster_name,
-                    cluster_name_on_cloud=handle.cluster_name_on_cloud)
-            if undelivered_reason is None:
-                logger.info(
-                    f'Logging agent and log reader are configured for job '
-                    f'{self._job_id}; logs are forwarded to the external store '
-                    'and read back on demand. Skipping downloading and '
-                    'streaming the logs to the controller.')
-                return
+        in_store, undelivered_reason = managed_job_utils.logs_in_external_store(
+            handle)
+        if in_store:
+            logger.info(
+                f'Logging agent and log reader are configured for job '
+                f'{self._job_id}; logs are forwarded to the external store '
+                'and read back on demand. Skipping downloading and '
+                'streaming the logs to the controller.')
+            return
+        if undelivered_reason is not None:
             logger.warning(
                 f'Logs of job {self._job_id} are not confirmed to have reached '
                 f'the external log store ({undelivered_reason}); keeping a '
