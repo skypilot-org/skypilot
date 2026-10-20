@@ -3289,11 +3289,14 @@ def test_job_group_networking_recovery():
     get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
                       f'awk \'{{print $1}}\'')
     delete_server_pod_cmd = (
-        'kubectl get pods -l skypilot-cluster-name --no-headers '
+        'POD=$(kubectl get pods -l skypilot-cluster-name --no-headers '
         '-o custom-columns="NAME:.metadata.name,'
         'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
         f'grep -- "{srv_task}-" | grep -v -- "-cloud-cmd" | '
-        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
+        'awk \'{print $1}\' | head -1); '
+        'if [ -z "$POD" ]; then '
+        f'echo "No pod of task {srv_task} found in this context"; exit 1; fi; '
+        'kubectl delete pod "$POD"')
 
     def wait_connect_after(task: str, epoch_file: str, timeout: int) -> str:
         """Poll a task's logs for a CONNECT_OK whose epoch is newer than
@@ -3312,7 +3315,6 @@ def test_job_group_networking_recovery():
     test = smoke_tests_utils.Test(
         'job_group_networking_recovery',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             f'sky jobs launch {yaml_path} -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -3327,10 +3329,17 @@ def test_job_group_networking_recovery():
              'if [ $(date +%s) -gt $END ]; then '
              'echo "Timed out waiting for initial connectivity"; exit 1; fi; '
              'sleep 10; done'),
-            # Record the deletion epoch, then preempt the server task's pod.
-            f'date +%s | tee {epoch_file}',
+            # Pin the cloud-cmd helper to the context the server task landed
+            # on so its in-cluster kubectl can see the task's pod.
+            smoke_tests_utils.resolve_managed_job_k8s_context_cmd(
+                name, srv_task),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
+            # Preempt the server task's pod, then record the deletion epoch
+            # once the delete has returned, so connects to the old pod (e.g.
+            # while the helper boots) do not count as post-recovery.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, cmd=delete_server_pod_cmd),
+            f'date +%s | tee {epoch_file}',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
