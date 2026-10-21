@@ -6,32 +6,39 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
-	mfcputil "github.com/pfnet-research/meta-fuse-csi-plugin/pkg/util"
 	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/common"
 	log "k8s.io/klog/v2"
 )
 
-const (
-	// FUSE device major and minor numbers
-	FuseMajor = 10
-	FuseMinor = 229
-)
-
 // Server represents the fusermount-server
 type Server struct {
-	fusermountPath string
-	listener       net.Listener
-	socketPath     string
+	helperPath string
+	listener   net.Listener
+	socketPath string
+
+	// nsLocks serialises requests per target mount namespace.
+	nsLocks sync.Map
+}
+
+// request is a fusermount request in either wire format.
+type request struct {
+	unmount     bool
+	lazy        bool
+	mountpoint  string
+	options     []string
+	hasTargetFD bool
 }
 
 // NewServer creates a new server instance
-func NewServer(fusermountPath, socketPath string) *Server {
+func NewServer(helperPath, socketPath string) *Server {
 	return &Server{
-		fusermountPath: fusermountPath,
-		socketPath:     socketPath,
+		helperPath: helperPath,
+		socketPath: socketPath,
 	}
 }
 
@@ -82,165 +89,213 @@ func (s *Server) handleConnection(conn net.Conn) {
 		log.Error("Connection is not a Unix domain socket connection")
 		return
 	}
-	req := &common.Request{}
-	// Receive the namespace fd and fusermount request
-	nsFd, msg, err := mfcputil.RecvMsg(unixConn)
+
+	// The mount namespace, then optionally the mountpoint.
+	fds, msg, err := common.RecvFds(unixConn, 2)
 	if err != nil {
-		log.Errorf("Failed to receive namespace fd: %v", err)
+		log.Errorf("Failed to receive request: %v", err)
 		return
 	}
-	// Close fd to avoid holding reference to the mnt namespace, which will
-	// block the ephmeral storage cleanup.
-	defer func() {
-		if err := syscall.Close(nsFd); err != nil {
-			log.Errorf("Failed to close ns fd %d: %v", nsFd, err)
-		} else {
-			log.Infof("Closed ns fd %d", nsFd)
-		}
-	}()
+	files := common.WrapFds(fds)
+	// A held namespace descriptor blocks ephemeral storage cleanup.
+	defer common.CloseFiles(files)
+
+	req := &common.Request{}
 	if err := json.Unmarshal(msg, req); err != nil {
 		log.Errorf("Failed to unmarshal request: %v", err)
 		return
 	}
-	log.Infof("Received ns fd %d, request: %+v, start mount", nsFd, req)
-	// Do fusermount and return mounted fd for mount request
-	fd, err := s.handleFusermount(req, nsFd)
-	resp := &common.Response{
-		Success: err == nil,
-	}
+	log.Infof("Received %d fd(s), handling request: %+v", len(files), req)
+
+	fuseFile, err := s.handle(req, files)
+	resp := &common.Response{Success: err == nil}
 	if err != nil {
-		resp.Error = err.Error()
+		log.Errorf("Request failed: %v", err)
+		resp.Error = common.TruncateError(err.Error())
 	}
-	b, err := json.Marshal(resp)
-	if err != nil {
-		log.Errorf("Failed to marshal response: %v", err)
-	}
-	// Close the /dev/fuse fd after SendMsg hands it to the client via
-	// SCM_RIGHTS. If we keep ours open, the kernel's fuse_dev_release
-	// never sees dev_count drop to 0 when rclone dies, so fuse_conn_kill
-	// is skipped and in-flight FUSE requests stay wedged in
-	// request_wait_answer — making the pod un-killable.
-	if fd > 0 {
-		defer func() {
-			if err := syscall.Close(fd); err != nil {
-				log.Errorf("Failed to close fuse fd %d: %v", fd, err)
-			} else {
-				log.Infof("Closed fuse fd %d", fd)
-			}
-		}()
-	}
-	if err := mfcputil.SendMsg(unixConn, fd, b); err != nil {
-		log.Errorf("Failed to send response: %v", err)
+	b, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		log.Errorf("Failed to marshal response: %v", marshalErr)
 		return
 	}
+
+	var sendFds []int
+	if fuseFile != nil {
+		// Close the /dev/fuse fd after SendFds hands it to the client
+		// via SCM_RIGHTS. If we keep ours open, the kernel's
+		// fuse_dev_release never sees dev_count drop to 0 when rclone
+		// dies, so fuse_conn_kill is skipped and in-flight FUSE
+		// requests stay wedged in request_wait_answer -- making the pod
+		// un-killable.
+		defer func() {
+			if err := fuseFile.Close(); err != nil {
+				log.Errorf("Failed to close fuse fd: %v", err)
+			} else {
+				log.Info("Closed fuse fd")
+			}
+		}()
+		sendFds = append(sendFds, int(fuseFile.Fd()))
+	}
+	if err := common.SendFds(unixConn, sendFds, b); err != nil {
+		log.Errorf("Failed to send response: %v", err)
+	}
 }
 
-func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
-	nsPath := fmt.Sprintf("/proc/self/fd/%d", nsFd)
-	// Ensure /dev/fuse exists in the container's mnt namespace
-	if err := s.ensureFuseDevice(nsPath); err != nil {
-		return 0, fmt.Errorf("failed to ensure /dev/fuse exists: %w", err)
+// handle performs one request and, for a mount, returns the /dev/fuse
+// descriptor to hand back to the caller.
+func (s *Server) handle(req *common.Request, files []*os.File) (*os.File, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("request carried no mount namespace fd")
 	}
-	// Create socket pair for FD passing
-	socks, err := createSocketPair()
+	nsFile := files[0]
+
+	parsed, err := resolveRequest(req)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create socket pair: %w", err)
+		return nil, err
 	}
-	defer socks[0].Close()
-	defer socks[1].Close()
+	if parsed.mountpoint == "" && !parsed.hasTargetFD {
+		return nil, fmt.Errorf("request has no mountpoint")
+	}
 
-	// Get the underlying file for the second socket
-	sock1File, err := socks[1].(*net.UnixConn).File()
+	var targetFile *os.File
+	if parsed.hasTargetFD {
+		if len(files) < 2 {
+			return nil, fmt.Errorf("request claims a mountpoint fd but carried none")
+		}
+		targetFile = files[1]
+	}
+
+	unlock := s.lockNamespace(nsFile)
+	defer unlock()
+
+	if parsed.unmount {
+		if parsed.mountpoint == "" {
+			return nil, fmt.Errorf("unmount request has no mountpoint")
+		}
+		return nil, s.runUnmount(nsFile, parsed)
+	}
+	return s.runMount(nsFile, targetFile, parsed)
+}
+
+func (s *Server) runMount(nsFile, targetFile *os.File, req *request) (*os.File, error) {
+	params, err := BuildMountParams(req.options)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get socket file: %w", err)
+		return nil, err
 	}
-	defer sock1File.Close()
-	// Prepare nsenter command to run fusermount in container's namespace
-	nsenterArgs := []string{
-		"--mount=" + nsPath,
-		s.fusermountPath,
+
+	fuseFile, err := openFuseDev()
+	if err != nil {
+		return nil, err
 	}
-	nsenterArgs = append(nsenterArgs, req.Args...)
 
-	cmd := exec.Command("nsenter", nsenterArgs...)
+	// ExtraFiles start at descriptor 3 in the helper.
+	extra := []*os.File{nsFile, fuseFile}
+	// user_id and group_id 0 match the ownership of existing mounts.
+	args := []string{
+		"mount",
+		"--ns-fd=3",
+		"--fuse-fd=4",
+		"--flags=" + strconv.FormatUint(uint64(params.Flags), 10),
+		"--opts=" + params.KernelOpts,
+		"--type=" + params.Type,
+		"--source=" + params.Source,
+		"--user-id=0",
+		"--group-id=0",
+		"--ensure-dev",
+	}
+	if targetFile != nil {
+		extra = append(extra, targetFile)
+		args = append(args, "--target-fd=5")
+	} else {
+		args = append(args, "--target="+req.mountpoint)
+	}
 
-	// Pass the socket FD to fusermount
-	cmd.ExtraFiles = []*os.File{sock1File}
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("%s=3", common.EnvFuseCommFD), // FD 3 is the first extra file
-	)
-	// Capture command output for error reporting
+	if err := s.runHelper(args, extra); err != nil {
+		fuseFile.Close()
+		return nil, err
+	}
+	return fuseFile, nil
+}
+
+func (s *Server) runUnmount(nsFile *os.File, req *request) error {
+	// By path: stat-ing a descriptor blocks on a FUSE mount whose daemon died.
+	args := []string{
+		"umount",
+		"--ns-fd=3",
+		"--target=" + req.mountpoint,
+	}
+	if req.lazy {
+		args = append(args, "--lazy")
+	}
+	return s.runHelper(args, []*os.File{nsFile})
+}
+
+// runHelper executes the privileged helper.
+func (s *Server) runHelper(args []string, extra []*os.File) error {
+	cmd := exec.Command(s.helperPath, args...)
+	cmd.ExtraFiles = extra
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("fusermount failed: %w, output: %s", err, string(output))
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}
-	// For mount operations, we need to transfer the fd back to the caller
-	isUmount := isUmount(req.Args)
-	if !isUmount {
-		fd, _, err := mfcputil.RecvMsg(socks[0])
-		if err != nil {
-			return 0, fmt.Errorf("failed to receive FD: %w", err)
-		}
-		return fd, nil
+	if len(output) > 0 {
+		log.Infof("helper output: %s", strings.TrimSpace(string(output)))
 	}
-	return 0, nil
-}
-
-// ensureFuseDevice ensures that /dev/fuse exists in the container's namespace
-func (s *Server) ensureFuseDevice(nspath string) error {
-	// First check if /dev/fuse exists in the container's namespace
-	checkCmd := exec.Command("nsenter", "--mount="+nspath, "stat", "/dev/fuse")
-	if err := checkCmd.Run(); err == nil {
-		// Device exists, no need to create
-		return nil
-	}
-
-	// Device doesn't exist, create it
-	// Note: We need to create the device with mknod in the container's namespace
-	createCmd := exec.Command("nsenter",
-		"--mount="+nspath,
-		"mknod",
-		"/dev/fuse",
-		"c",
-		fmt.Sprintf("%d", FuseMajor),
-		fmt.Sprintf("%d", FuseMinor),
-	)
-
-	if output, err := createCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create /dev/fuse: %w, output: %s", err, string(output))
-	}
-
-	// Set permissions to allow user access
-	chmodCmd := exec.Command("nsenter",
-		"--mount="+nspath,
-		"chmod",
-		"666",
-		"/dev/fuse",
-	)
-
-	if output, err := chmodCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to set permissions on /dev/fuse: %w, output: %s", err, string(output))
-	}
-
 	return nil
 }
 
-// createSocketPair creates a pair of connected Unix domain sockets
-func createSocketPair() ([2]net.Conn, error) {
-	// Create a pair of socket file descriptors
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+// resolveRequest prefers the structured fields and parses Args otherwise.
+func resolveRequest(req *common.Request) (*request, error) {
+	switch req.Op {
+	case common.OpMount, common.OpUmount:
+		return &request{
+			unmount:     req.Op == common.OpUmount,
+			lazy:        req.Lazy,
+			mountpoint:  req.Mountpoint,
+			options:     req.Options,
+			hasTargetFD: req.HasTargetFD,
+		}, nil
+	case "":
+		parsed, err := common.ParseFusermountArgs(req.Args)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse fusermount arguments: %w", err)
+		}
+		return &request{
+			unmount:    parsed.Unmount,
+			lazy:       parsed.Lazy,
+			mountpoint: parsed.Mountpoint,
+			options:    parsed.Options,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown operation %q", req.Op)
+	}
+}
+
+// openFuseDev opens /dev/fuse in blocking mode: the Go runtime would otherwise
+// try to drive it with the poller, which /dev/fuse does not support.
+func openFuseDev() (*os.File, error) {
+	fd, err := syscall.Open("/dev/fuse", syscall.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return [2]net.Conn{}, fmt.Errorf("socketpair failed: %w", err)
+		return nil, fmt.Errorf("failed to open /dev/fuse: %w", err)
 	}
-	// Convert the file descriptors to net.Conn
-	conn1, err1 := net.FileConn(os.NewFile(uintptr(fds[0]), ""))
-	if err1 != nil {
-		return [2]net.Conn{}, fmt.Errorf("failed to create first connection: %w", err1)
+	return os.NewFile(uintptr(fd), "/dev/fuse"), nil
+}
+
+// lockNamespace serialises requests that target the same mount namespace.
+func (s *Server) lockNamespace(nsFile *os.File) func() {
+	key := namespaceKey(nsFile)
+	value, _ := s.nsLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func namespaceKey(nsFile *os.File) string {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(nsFile.Fd()), &st); err != nil {
+		log.Errorf("Failed to stat namespace fd: %v", err)
+		// Fall back to a single lock rather than running unserialised.
+		return "unknown"
 	}
-	conn2, err2 := net.FileConn(os.NewFile(uintptr(fds[1]), ""))
-	if err2 != nil {
-		conn1.Close()
-		return [2]net.Conn{}, fmt.Errorf("failed to create second connection: %w", err2)
-	}
-	return [2]net.Conn{conn1, conn2}, nil
+	return fmt.Sprintf("%d:%d", st.Dev, st.Ino)
 }

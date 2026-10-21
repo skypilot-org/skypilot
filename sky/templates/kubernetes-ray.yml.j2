@@ -1790,6 +1790,7 @@ available_node_types:
           {% if k8s_fuse_device_required %}
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
+            readOnly: true
           {% endif %}
           {% if k8s_enable_docker_all %}
           - name: docker-sock
