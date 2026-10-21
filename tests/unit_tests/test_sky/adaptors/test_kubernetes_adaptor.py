@@ -420,7 +420,11 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
         original_set_level(original_level)
 
 
-def test_ssh_node_pool_error_names_the_pool(monkeypatch):
+@pytest.mark.parametrize('context, pool', [
+    ('ssh-my-pool', 'my-pool'),
+    ('ssh-ssh-foo', 'ssh-foo'),
+])
+def test_ssh_node_pool_error_names_the_pool(monkeypatch, context, pool):
     """The `sky ssh up` hint should name the pool, not a placeholder."""
 
     def raise_no_context(*args, **kwargs):
@@ -430,5 +434,5 @@ def test_ssh_node_pool_error_names_the_pool(monkeypatch):
     monkeypatch.setattr(kubernetes.kubernetes.config, 'new_client_from_config',
                         raise_no_context)
     with pytest.raises(ValueError) as exc_info:
-        kubernetes._get_api_client(context='ssh-my-pool')  # pylint: disable=protected-access
-    assert 'sky ssh up --infra my-pool' in str(exc_info.value)
+        kubernetes._get_api_client(context=context)  # pylint: disable=protected-access
+    assert f'sky ssh up --infra {pool}`' in str(exc_info.value)
