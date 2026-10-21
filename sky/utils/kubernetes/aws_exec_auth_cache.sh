@@ -10,6 +10,8 @@
 FRESH_SECONDS=300
 # An entry is never served within this many seconds of its expiry.
 MIN_REMAINING_SECONDS=60
+# After a failed refresh, a stale entry is served without retrying for this long.
+RETRY_SECONDS=30
 LOCK_WAIT_SECONDS=30
 
 prev=''
@@ -62,6 +64,12 @@ is_fresh() {
     (( EPOCHSECONDS < fetched + FRESH_SECONDS )) && is_usable
 }
 
+retry_due() {
+    local retry_at=''
+    { read -r retry_at; } 2>/dev/null < "$entry.retry"
+    [[ ! "$retry_at" =~ ^[0-9]+$ ]] || (( EPOCHSECONDS >= retry_at ))
+}
+
 serve() {
     printf '%s' "$body"
     exit 0
@@ -90,6 +98,7 @@ exec {lock_fd}>>"$entry.lock" || exec "$REAL_AWS" "$@"
 
 if [[ -n "$body" ]] && is_usable; then
     # Stale but usable: one process refreshes, the others keep serving it.
+    retry_due || serve
     flock -n "$lock_fd" || serve
     if load_entry && is_fresh; then
         serve
@@ -97,14 +106,20 @@ if [[ -n "$body" ]] && is_usable; then
 else
     # Nothing usable: wait for an in-flight refresh, then fetch if still needed.
     flock -w "$LOCK_WAIT_SECONDS" "$lock_fd"
+    locked=$?
     if load_entry && is_usable; then
         serve
+    fi
+    if (( locked != 0 )); then
+        echo "Timed out waiting for another aws eks get-token to finish." >&2
+        exit 1
     fi
 fi
 
 refresh "$@" && serve
 rc=$?
 if [[ -n "$body" ]] && is_usable; then
+    printf '%s\n' "$(( EPOCHSECONDS + RETRY_SECONDS ))" > "$entry.retry"
     echo "aws eks get-token failed (exit $rc); using the cached token," \
         "which expires in $(( expiry - EPOCHSECONDS ))s." >&2
     serve

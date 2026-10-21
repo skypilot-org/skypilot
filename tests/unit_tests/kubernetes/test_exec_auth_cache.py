@@ -1,4 +1,5 @@
 """Tests for the API server's shared `aws eks get-token` cache."""
+import fcntl
 import os
 import stat
 import subprocess
@@ -69,7 +70,7 @@ class _Rig:
         return [
             os.path.join(self.cache_dir, name)
             for name in os.listdir(self.cache_dir)
-            if not name.endswith(('.lock', '.tmp'))
+            if not name.endswith(('.lock', '.retry', '.tmp'))
         ]
 
     def set_entry_times(self, fetched_ago: int, expires_in: int) -> None:
@@ -170,6 +171,40 @@ def test_failed_refresh_serves_the_stale_token(rig):
     assert '"token": "token-1"' in result.stdout
     assert 'using the cached token' in result.stderr
     assert len(rig.calls()) == 2
+
+
+def test_failed_refresh_backs_off(rig):
+    rig.run()
+    rig.set_entry_times(fetched_ago=400, expires_in=440)
+    rig.fail_with(255)
+    rig.run()
+    for _ in range(3):
+        result = rig.run()
+        assert result.returncode == 0
+        assert '"token": "token-1"' in result.stdout
+    assert len(rig.calls()) == 2
+    [entry] = rig.entries()
+    with open(f'{entry}.retry', 'w', encoding='utf-8') as f:
+        f.write(f'{int(time.time()) - 1}\n')
+    rig.run()
+    assert len(rig.calls()) == 3
+
+
+def test_lock_timeout_fails_without_fetching(rig):
+    rig.run()
+    rig.set_entry_times(fetched_ago=800, expires_in=30)
+    front = os.path.join(exec_auth_cache.bin_dir(), 'aws')
+    with open(front, 'r', encoding='utf-8') as f:
+        script = f.read()
+    with open(front, 'w', encoding='utf-8') as f:
+        f.write(script.replace('LOCK_WAIT_SECONDS=30', 'LOCK_WAIT_SECONDS=1'))
+    [entry] = rig.entries()
+    with open(f'{entry}.lock', 'a', encoding='utf-8') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = rig.run()
+    assert result.returncode == 1
+    assert 'Timed out waiting' in result.stderr
+    assert len(rig.calls()) == 1
 
 
 def test_entry_near_expiry_is_not_served(rig):
