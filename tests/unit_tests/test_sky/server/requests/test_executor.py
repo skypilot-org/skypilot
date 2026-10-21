@@ -13,6 +13,7 @@ from unittest import mock
 import weakref
 
 import pytest
+import yaml
 
 from sky import exceptions
 from sky import global_user_state
@@ -1599,6 +1600,65 @@ def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
         assert (global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
                 == expected_timeouts)
     assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
+
+
+@pytest.mark.parametrize('consolidation_mode', [True, False])
+def test_consolidation_mode_keeps_server_owned_keys(
+        stub_override_request_env_deps, monkeypatch, tmp_path,
+        consolidation_mode):
+    api_server_config = {
+        'slurm': {
+            'cluster_configs': {
+                'c': {
+                    'submit_as_user': True
+                }
+            }
+        }
+    }
+    job_config = {
+        'slurm': {
+            'cluster_configs': {
+                'c': {
+                    'workdir': '/home/$USER'
+                }
+            }
+        },
+        'kubernetes': {
+            'provision_timeout': 7
+        },
+    }
+    api_server_config_path = tmp_path / 'server.yaml'
+    job_config_path = tmp_path / 'job.yaml'
+    api_server_config_path.write_text(yaml.safe_dump(api_server_config))
+    job_config_path.write_text(yaml.safe_dump(job_config))
+    monkeypatch.setattr('sky.server.common.reload_for_new_request',
+                        lambda **_: skypilot_config.reload_config())
+    monkeypatch.setattr(
+        'sky.utils.controller_utils.effective_jobs_consolidation_mode',
+        lambda: consolidation_mode)
+    env_vars = {
+        skypilot_config.ENV_VAR_SKYPILOT_CONFIG: str(job_config_path),
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+    }
+    body = payloads.RequestBody(env_vars=env_vars,
+                                override_skypilot_config=job_config)
+
+    with monkeypatch.context() as env:
+        env.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+        env.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                   str(api_server_config_path))
+        with executor.override_request_env_and_config(
+                body, request_id='not-a-daemon-uuid',
+                request_name='sky.launch'):
+            submit_as_user = skypilot_config.get_nested(
+                ('slurm', 'cluster_configs', 'c', 'submit_as_user'), None)
+            provision_timeout = skypilot_config.get_nested(
+                ('kubernetes', 'provision_timeout'), None)
+    skypilot_config.reload_config()
+
+    assert submit_as_user is (True if consolidation_mode else None)
+    assert provision_timeout == 7
 
 
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
