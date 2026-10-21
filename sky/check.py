@@ -1,5 +1,7 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
+import hashlib
+import json
 import os
 import re
 import traceback
@@ -603,19 +605,25 @@ def _clouds_from_names(names: Iterable[str]) -> List[sky_clouds.Cloud]:
     return [cloud for cloud in clouds_from_names if cloud is not None]
 
 
+def _config_fingerprint() -> str:
+    """A digest of the current request's merged config."""
+    return hashlib.sha256(
+        json.dumps(skypilot_config.to_dict(), sort_keys=True,
+                   default=str).encode()).hexdigest()
+
+
 @annotations.ttl_cache(scope='request', maxsize=64, ttl=60)
-def _unstored_enabled_cloud_names(
-        user_id: str, workspace: str, capability: sky_cloud.CloudCapability,
-        allowed_clouds: Tuple[str, ...]) -> Tuple[str, ...]:
+def _unstored_enabled_cloud_names(user_id: str, workspace: str,
+                                  capability: sky_cloud.CloudCapability,
+                                  config_fingerprint: str) -> Tuple[str, ...]:
     """Probes `workspace`'s enabled clouds without storing them.
 
-    Probed once per request rather than on every call. The key includes the
-    caller, whose request config the probe runs with, and the allowed clouds,
-    whose change makes a writer re-probe too. It does not include the caller's
-    client config overrides: in the API server process, where `/validate` runs
-    inline, concurrent requests of one user can share an answer.
+    Probed once per request rather than on every call. The probe reads the
+    request's merged config (e.g. Kubernetes allowed contexts), and in the API
+    server process `/validate` requests share this cache, so the key carries a
+    fingerprint of that config as well as the caller.
     """
-    del user_id, allowed_clouds
+    del user_id, config_fingerprint
     logger.debug(f'Probing enabled clouds of workspace {workspace!r} without '
                  'storing them: the caller cannot write it.')
     try:
@@ -688,9 +696,9 @@ def get_cached_enabled_clouds_or_refresh(
                 capability, active_workspace)
         else:
             cached_enabled_clouds = _clouds_from_names(
-                _unstored_enabled_cloud_names(
-                    user_id, active_workspace, capability,
-                    tuple(sorted(skypilot_config_allowed_clouds))))
+                _unstored_enabled_cloud_names(user_id,
+                                              active_workspace, capability,
+                                              _config_fingerprint()))
     rechecked = _reader_rechecked(user_id, active_workspace, capability)
     if rechecked:
         known = {repr(cloud) for cloud in cached_enabled_clouds}

@@ -474,7 +474,8 @@ def _probes(monkeypatch, enabled):
     return runs
 
 
-def test_reader_probe_runs_once_per_request_and_user(tmp_path, monkeypatch):
+def test_reader_probe_runs_once_per_request_user_and_config(
+        tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _common_mocks(monkeypatch)
     _restrict_registry(monkeypatch, {'aws'})
@@ -485,15 +486,23 @@ def test_reader_probe_runs_once_per_request_and_user(tmp_path, monkeypatch):
             sky_check.get_cached_enabled_clouds_or_refresh(
                 CloudCapability.COMPUTE)
         assert len(runs) == 1
+        # Nor does a request whose config would change the probe.
+        monkeypatch.setattr(
+            'sky.skypilot_config.to_dict',
+            lambda: {'kubernetes': {
+                'allowed_contexts': ['other']
+            }})
+        sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
+        assert len(runs) == 2
         # Another caller never gets bob's answer.
         monkeypatch.setattr('sky.utils.common_utils.get_current_user',
                             lambda: models.User(id='carol123', name='carol'))
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
-        assert len(runs) == 2
+        assert len(runs) == 3
         # A new request probes again.
         annotations.clear_request_level_cache()
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
-        assert len(runs) == 3
+        assert len(runs) == 4
 
 
 def test_recheck_for_a_reader_returns_without_persisting(tmp_path, monkeypatch):
