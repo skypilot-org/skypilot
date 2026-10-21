@@ -833,6 +833,12 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
 
+# Server-side only: `0` disables the API server's shared cache of
+# `aws eks get-token` output (sky.utils.kubernetes.exec_auth_cache). Read once
+# at server startup.
+ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}EXEC_AUTH_CACHE')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see

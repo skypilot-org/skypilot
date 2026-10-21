@@ -122,6 +122,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import exec_auth_cache
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import constants as workspace_constants
@@ -4549,6 +4550,10 @@ if __name__ == '__main__':
     # is exempt (its legitimate sources are arbitrary local paths). An operator
     # may override this by exporting the env var explicitly before startup.
     common.init_mount_containment_enforced(cmd_args.deploy, cmd_args.host)
+
+    # Changes PATH, so it must run before any worker is spawned and before
+    # capture_clean_server_env().
+    exec_auth_cache.install()
 
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
