@@ -16,6 +16,7 @@ from sky.clouds.cloud import Zone
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.cudo import Cudo
+from sky.clouds.daytona import Daytona
 from sky.clouds.do import DO
 from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
@@ -70,6 +71,7 @@ __all__ = [
     'Nebius',
     'Hyperbolic',
     'Mithril',
+    'Daytona',
     'Seeweb',
     'Yotta',
     # Utility functions

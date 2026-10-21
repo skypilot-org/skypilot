@@ -102,6 +102,7 @@ all_clouds_in_smoke_tests = [
     'slurm',
     'mithril',
     'verda',
+    'daytona',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -136,6 +137,7 @@ cloud_to_pytest_keyword = {
     'slurm': 'slurm',
     'mithril': 'mithril',
     'verda': 'verda',
+    'daytona': 'daytona',
 }
 
 

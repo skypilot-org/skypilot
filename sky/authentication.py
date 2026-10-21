@@ -540,6 +540,25 @@ def setup_mithril_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
+def setup_daytona_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Daytona.
+
+    Daytona authenticates SSH connections with per-sandbox access tokens
+    used as the SSH username against its SSH gateway, so no public key is
+    registered with the cloud. A local key pair is still generated because
+    SkyPilot's SSH machinery expects one; the gateway ignores it.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+
+    config.setdefault('auth', {})
+    # Placeholder; the provisioner overrides the SSH username with a
+    # per-sandbox access token via ClusterInfo.ssh_user.
+    config['auth']['ssh_user'] = 'daytona'
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
 def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Registers the public key with Seeweb and notes the remote name."""
     # 1. local key pair
