@@ -6,6 +6,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky import skypilot_config
+from sky.catalog import config as catalog_config
 from sky.catalog.config import fallback_to_default_catalog
 from sky.skylet import constants
 from sky.utils import resources_utils
@@ -63,15 +64,19 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         # Runs inline, already in the caller's context and workspace.
         results = [_execute_catalog_method(clouds[0])]
     else:
-        # Pool threads start without the request's config context and active
-        # workspace, so carry both over; each thread needs its own copy.
+        # Pool threads start without the request's config context, active
+        # workspace and catalog fallback flag (thread-local), so carry them
+        # over; each thread needs its own context copy.
         workspace = skypilot_config.get_active_workspace()
+        use_default = catalog_config.get_use_default_catalog_if_failed()
         request_context = contextvars.copy_context()
 
         def _execute_in_request_context(cloud: str):
 
             def _run():
-                with skypilot_config.local_active_workspace_ctx(workspace):
+                with skypilot_config.local_active_workspace_ctx(workspace), \
+                        catalog_config.set_use_default_catalog_if_failed(
+                            use_default):
                     return _execute_catalog_method(cloud)
 
             return request_context.copy().run(_run)

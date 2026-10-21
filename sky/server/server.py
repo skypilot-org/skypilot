@@ -1819,7 +1819,10 @@ async def slurm_cluster_names(request: fastapi.Request) -> None:
         request_id=request.state.request_id,
         request_name=request_names.RequestName.SLURM_CLUSTER_NAMES,
         request_body=payloads.RequestBody(),
-        func=visibility.slurm_cluster_names,
+        # Without an authenticated user nothing is scoped: keep listing the
+        # active workspace's clusters.
+        func=(slurm_utils.slurm_cluster_names if request.state.auth_user is None
+              else visibility.slurm_cluster_names),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )

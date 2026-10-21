@@ -11,6 +11,7 @@ from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import skypilot_config
+from sky.catalog import config as catalog_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
@@ -54,14 +55,18 @@ def queried(tmp_path, monkeypatch):
                         lambda: False)
     monkeypatch.setattr(slurm_utils, 'get_all_slurm_cluster_names',
                         lambda: ['sc-a', 'sc-b'])
-    seen = {'kubernetes': [], 'slurm': []}
+    seen = {'kubernetes': [], 'slurm': [], 'use_default_catalog': []}
 
     def check_credentials(ctx, **_):
         seen['kubernetes'].append(ctx)
+        seen['use_default_catalog'].append(
+            catalog_config.get_use_default_catalog_if_failed())
         return False, None  # Stop there: the context is all we need.
 
     def slurm_node_info(slurm_cluster_name=None):
         seen['slurm'].append(slurm_cluster_name)
+        seen['use_default_catalog'].append(
+            catalog_config.get_use_default_catalog_if_failed())
         return []
 
     monkeypatch.setattr(kubernetes_utils, 'check_credentials',
@@ -84,6 +89,8 @@ def test_threads_use_the_active_workspace(queried):
     assert queried['kubernetes'] == ['ctx-a']
     # Only ws-a's clusters, not every cluster in ~/.slurm/config.
     assert queried['slurm'] == ['sc-a']
+    # list_accelerators allows the default catalog; pool threads keep that.
+    assert queried['use_default_catalog'] == [True, True]
 
 
 def test_threads_use_the_request_config(queried):

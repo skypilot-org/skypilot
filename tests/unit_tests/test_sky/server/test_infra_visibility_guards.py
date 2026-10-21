@@ -290,3 +290,9 @@ def test_slurm_cluster_names_lists_every_readable_workspace(scheduled):
     assert _call(server.slurm_cluster_names, 'alice') == 200
     assert (scheduled.await_args.kwargs['func'] is
             visibility.slurm_cluster_names)
+
+
+def test_slurm_cluster_names_unauthenticated_is_unscoped(scheduled):
+    assert _call(server.slurm_cluster_names, None) == 200
+    assert (scheduled.await_args.kwargs['func'] is
+            server.slurm_utils.slurm_cluster_names)
