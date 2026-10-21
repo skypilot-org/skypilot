@@ -1,45 +1,32 @@
-# Stable Diffusion
+# Stable Diffusion Web UI on SkyPilot
 
-## Setup
+Run the [InvokeAI](https://github.com/invoke-ai/InvokeAI) Stable Diffusion web UI on a cloud GPU with SkyPilot, using the official `ghcr.io/invoke-ai/invokeai:v6.14.2-cuda` image (pinned; newer tags are listed in the [InvokeAI releases](https://github.com/invoke-ai/InvokeAI/releases)).
 
-1. Install skypilot package by following these [instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
+## Steps
 
-2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`
+1. Install SkyPilot by following [the instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
+
+2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd skypilot/examples/stable_diffusion`
 
 3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml`
 
-4. Run `ssh -L 7860:localhost:7860 stable-diffusion`
+4. Run `ssh -L 9090:localhost:9090 stable-diffusion`
 
-5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser. If the page doesn't load, try again in a few minutes to allow the container to start.
+5. Open [`http://localhost:9090`](http://localhost:9090) in your browser.
 
-6. Type in text prompt and click "Generate".
+6. On first launch, open **Model Manager** in the UI and install a starter model (for example, a Stable Diffusion 1.5 or SDXL checkpoint). Models and generated images are stored under `~/invokeai` on the cluster, so they survive container restarts.
 
-![Stable Diffusion Web Tool UI](https://i.imgur.com/4MS9pwX.png)
+7. Type in a prompt and click **Invoke** to generate images.
 
-7. Once you are done, run `sky stop stable-diffusion` to stop the VM.
+8. Once you are done, run `sky stop stable-diffusion` to stop the VM, or `sky down stable-diffusion` to delete it.
 
-8. To restart VM, repeat steps 3 and 4.
+If a model you want to install is gated on Hugging Face, pass a token with `sky launch --env HUGGING_FACE_HUB_TOKEN=<token> ...`.
 
+## Tips
 
-## Usage Tips
+- Prompts like `A photo of an astronaut riding a horse, cinematic lighting, highly detailed` work well; use the negative prompt field to exclude things you don't want.
+- The **Canvas** tab supports inpainting and outpainting; **Workflows** exposes the node editor for more advanced pipelines.
 
-- Avoid exceeding 900x900 for image resolution due GPU memory constraints
-- You can toggle "Classifier Free Guidance Scale" to higher value to enforce adherence to prompt
-- Here are some good example text prompts (Classifier Free Guidance Scale = 7.5, sampling steps = 50):
-  - "donkey playing poker"
-  - "UC Berkeley student writing code on a laptop"
-  - "Marvel vs. DC"
-  - "corgi on Golden Gate Bridge"
-  - "desert golf"
-  - "Indian McDonald's"
-  - "Elon Musk robot"
-  - "mechanical heart"
-  - "Batman in San Francisco"
-  - "futuristic city in the sky and clouds"
-  - "bear ballroom dancing"
-  - "wall-e terminator"
-  - "psychedelic Yosemite"
-  - "rap song album cover"
-  - "Wall Street bull rodeo"
-  - "Trump in minecraft"
+## Running locally
 
+`docker-compose.yml` starts the same container on a local machine with an NVIDIA GPU: `docker compose up`.

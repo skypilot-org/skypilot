@@ -205,6 +205,65 @@ The flags do the following:
   scrape both the SkyPilot API server and DCGM-Exporter.
 * ``grafana.enabled`` – deploy Grafana with an out-of-the-box dashboard that will be embedded in the SkyPilot dashboard.
 
+.. _api-server-gpu-metrics-slurm:
+
+GPU metrics for Slurm clusters
+------------------------------
+
+Slurm clusters can surface GPU metrics in the same dashboard. Instead of
+scraping the cluster directly, the API server runs ``GET /federate`` against
+a Prometheus of yours *from the cluster's login node* over SSH, so the API
+server never needs network access to the Prometheus.
+
+Requirements:
+
+* **DCGM-Exporter** runs on each GPU node (port ``9400``) and **Node
+  Exporter** (port ``9100``, optional, for CPU/memory metrics) — for
+  example as containers or system services, since there is no Kubernetes on
+  the nodes.
+* A **Prometheus** (or compatible store, e.g. VictoriaMetrics) scrapes those
+  exporters and is reachable from a login node.
+* The ``Hostname`` label on DCGM series must match the Slurm node name
+  (``sinfo -N``) — the dashboard joins metrics to nodes by hostname. When
+  running DCGM-Exporter in Docker, pass ``--hostname "$(hostname)"``, since
+  the container otherwise reports its container ID as the hostname.
+
+Opt a cluster in via :ref:`config <config-yaml-slurm-cluster-configs>`:
+
+.. code-block:: yaml
+
+  slurm:
+    cluster_configs:
+      mycluster1:
+        prometheus:
+          url: http://prometheus.internal:9090
+
+If the Prometheus aggregates metrics from several clusters, scope each
+cluster's slice with ``filter`` (label matchers applied server-side), and use
+``via`` when the Prometheus is reachable from only some login nodes:
+
+.. code-block:: yaml
+
+  slurm:
+    cluster_configs:
+      mycluster1:
+        prometheus:
+          url: http://prometheus.internal:9090
+          filter:
+            cluster: mycluster1-fleet
+      mycluster2:
+        prometheus:
+          url: http://prometheus.internal:9090
+          # mycluster2's login node cannot reach the Prometheus; run the
+          # /federate request on mycluster1's login node instead. The
+          # series are still attributed to mycluster2.
+          via: mycluster1
+          filter:
+            cluster: mycluster2-fleet
+
+Clusters sharing a ``url`` automatically exclude each other's filtered
+slices, so a fleet is never attributed to two clusters.
+
 What metrics are exposed?
 ---------------------------
 

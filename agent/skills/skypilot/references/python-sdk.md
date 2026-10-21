@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, resize: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, resize: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
@@ -631,6 +631,33 @@ Gets the status of jobs on a cluster.
     sky.exceptions.CloudUserIdentityError: if we fail to get the current
         user identity.
 
+### `sky.cluster_job_spec`
+
+```python
+sky.cluster_job_spec(cluster_name: str, job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]
+```
+
+Gets the task YAML and entrypoint a cluster job was submitted with.
+
+**Args:**
+    cluster_name: name of the cluster.
+    job_id: id of the job on the cluster.
+
+**Returns:**
+    The request ID of the cluster job spec request.
+
+**Request Returns:**
+    spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+        the job's spec was not recorded (e.g. it was submitted by an older
+        API server version), otherwise:
+
+        ```python
+
+            {
+                'task_yaml': (str) the task YAML, with secrets redacted,
+                'entrypoint': (str) the command that submitted the job,
+            }
+
 ### `sky.cancel`
 
 ```python
@@ -908,7 +935,7 @@ Finds the best execution plan for the given DAG.
 ### `sky.validate`
 
 ```python
-sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None) -> None
+sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None, _skip_local_paths: bool = False) -> None
 ```
 
 Validates the tasks.
@@ -925,6 +952,10 @@ Raises exceptions if the DAG is invalid.
     admin_policy_request_options: Request options used for admin policy
         validation. This is only required when a admin policy is in use,
         see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+    _skip_local_paths: Do not check the workdir and file mount sources on
+        this machine. For callers whose sources are API server paths
+        inside an upload blob; the server resolves the blob and checks
+        the paths when it runs the request.
 
 ### `sky.reload_config`
 
@@ -1031,7 +1062,9 @@ Lists all requests.
     all_status: Whether to list all finished requests as well. This argument
         is ignored if request_ids is not None.
     limit: The number of requests to show. If None, show all requests.
-    fields: The fields to get. If None, get all fields.
+    fields: The fields to get. If None, get all fields except
+        return_value and error. This argument is ignored if request_ids
+        is not None.
     cluster_name: Filter requests by cluster name.
         If None, show all requests.
 

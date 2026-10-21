@@ -4,6 +4,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import time
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -11,6 +12,7 @@ from paramiko.config import SSHConfig
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -19,6 +21,7 @@ from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
@@ -27,10 +30,9 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
-_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.+-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -80,6 +82,26 @@ def expand_path_vars(path: str, env: Dict[str, str]) -> str:
         return env.get(name, m.group(0))
 
     return _VAR_PATTERN.sub(_repl, path)
+
+
+def resolve_sky_base_dir(cluster: str, client: 'slurm.SlurmClient') -> str:
+    """Resolve the absolute shared directory used for Slurm cluster state."""
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=cluster,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    if workdir is not None:
+        workdir = expand_path_vars(workdir, client.get_env())
+        if not os.path.isabs(workdir):
+            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
+                               f'{workdir!r}.')
+        return workdir
+
+    remote_home_dir = client.get_remote_home_dir()
+    if not os.path.isabs(remote_home_dir):
+        raise RuntimeError('Slurm remote home directory must be absolute, got '
+                           f'{remote_home_dir!r}.')
+    return remote_home_dir
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -138,14 +160,39 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
     if not enabled:
         return None
 
-    user_name = common_utils.get_current_user_name()
+    user = common_utils.get_current_user()
+    mapping = skypilot_config.get_nested(('slurm', 'username_map'),
+                                         default_value={})
+    cluster_config = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name), default_value={})
+    cluster_mapping = cluster_config.get('username_map', {})
+    submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
+    while submit_user is None and user.is_service_account():
+        creator = global_user_state.get_service_account_creator(user.id)
+        if creator is None:
+            raise ValueError(
+                f'Cannot find the creator of service account {user.name!r} '
+                f'on Slurm cluster {cluster_name!r}. Ask an administrator to '
+                'set slurm.username_map.')
+        user = creator
+        submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
+    if submit_user is not None:
+        if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
+            raise ValueError(
+                f'Invalid Unix user {submit_user!r} configured for SkyPilot '
+                f'user {user.name!r} on Slurm cluster {cluster_name!r}.')
+        return submit_user
+
+    user_name = user.name
+    assert user_name is not None
     submit_user = user_name.split('@', 1)[0]
     if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
         raise ValueError(
             'Cannot derive a valid Unix user from SkyPilot user '
             f'{user_name!r}. Slurm submit users must start with a lowercase '
             'letter or "_" '
-            'and contain only lowercase letters, digits, "_", ".", or "-".')
+            'and contain only lowercase letters, digits, "_", ".", "+", or "-".'
+        )
     return submit_user
 
 
@@ -1057,6 +1104,29 @@ def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
     )
 
 
+def run_on_login_node(slurm_cluster_name: str,
+                      cmd: str,
+                      timeout: Optional[int] = None) -> Tuple[int, str, str]:
+    """Runs a shell command on a Slurm cluster's login node.
+
+    Public entry point for callers outside the provisioner (e.g. the
+    GPU-metrics federation in sky/metrics/utils.py) that need to execute
+    something over the cluster's SSH transport without reaching into the
+    inventory client. See SlurmClient.run_command for the framing and
+    timeout semantics.
+
+    Args:
+        slurm_cluster_name: A Host alias in the Slurm SSH config.
+        cmd: Shell command to run on the login node.
+        timeout: Optional bound in seconds on the whole remote invocation.
+
+    Returns:
+        (returncode, stdout, stderr) of ``cmd``.
+    """
+    client = _get_slurm_inventory_client(slurm_cluster_name)
+    return client.run_command(cmd, timeout=timeout)
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -1288,7 +1358,7 @@ def slurm_node_info(
         try:
             return _get_slurm_node_info_list(
                 slurm_cluster_name=slurm_cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
                 exceptions.NotSupportedError) as e:
             logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []
@@ -1422,11 +1492,8 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
-# Accepted sbatch --time formats:
-#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
 # See: https://slurm.schedmd.com/sbatch.html#OPT_time
-_TIME_FORMAT_RE = re.compile(
-    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_PATTERN)
 
 
 def validate_sbatch_time(value: str) -> None:
@@ -1445,7 +1512,8 @@ def validate_sbatch_time(value: str) -> None:
     if not _TIME_FORMAT_RE.fullmatch(value):
         raise ValueError(
             f'Invalid slurm.sbatch_options.time {value!r}. '
-            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s, '
+            'UNLIMITED, INFINITE, -1.')
 
 
 def srun_sshd_command(
@@ -1507,6 +1575,7 @@ def srun_sshd_command(
             'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
+            '--chdir=/tmp',
             '--overlap',
             '--quiet',
             '--unbuffered',
@@ -1528,6 +1597,7 @@ def srun_sshd_command(
     # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
+        '--chdir=/tmp',
         '--quiet',
         '--unbuffered',
         '--overlap',

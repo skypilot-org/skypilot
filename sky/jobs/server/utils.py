@@ -109,7 +109,7 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
             raise ValueError('Failed to fetch managed jobs with returncode: '
                              f'{returncode}.\n{job_table_payload + stderr}')
 
-        jobs, _, _, _, _ = (
+        jobs, _, _, _, _, _ = (
             managed_job_utils.load_managed_job_queue(job_table_payload))
 
     # Process locally: check version match and filter non-terminal jobs

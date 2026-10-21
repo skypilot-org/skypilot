@@ -728,6 +728,68 @@ run: echo "hello world"
     assert not list(api_server_dir.rglob('*.yaml'))
 
 
+_BLOB_ID = 'a' * 64
+
+
+def test_cloud_urls_skip_blob_resolve(tmp_path, monkeypatch):
+    """A task whose mounts are already cloud URLs must not touch the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', tmp_path)
+    monkeypatch.setattr(
+        common, 'resolve_blob_dir',
+        mock.Mock(side_effect=AssertionError('blob was resolved')))
+    task_yaml = '''
+name: test-task
+file_mounts:
+  /remote/data: gs://bucket/data
+  /remote/code:
+    source: s3://bucket/code
+  /remote/azure: https://account.blob.core.windows.net/container/obj
+run: echo hi
+'''
+    dag = common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    assert dag.tasks[0].file_mounts['/remote/data'] == 'gs://bucket/data'
+    assert not common.dag_requires_local_file_mounts(dag)
+
+
+def test_local_path_still_resolves_blob(tmp_path, monkeypatch):
+    """A task that still names a local path resolves the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    clients = tmp_path / 'clients'
+    blob_dir = clients / 'test-user' / 'file_mounts' / 'blobs' / _BLOB_ID
+    blob_dir.mkdir(parents=True)
+    resolve = mock.Mock(return_value=str(blob_dir))
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', clients)
+    monkeypatch.setattr(common, 'resolve_blob_dir', resolve)
+    task_yaml = '''
+name: test-task
+workdir: /local/workdir
+file_mounts_mapping:
+  /local/workdir: workdir
+run: echo hi
+'''
+    common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    resolve.assert_called_once_with(_BLOB_ID, 'test-user')
+
+
+def test_dag_requires_local_file_mounts_for_local_workdir(tmp_path):
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    dag = sky.Dag()
+    dag.add(sky.Task(workdir=str(workdir)))
+    assert common.dag_requires_local_file_mounts(dag)
+
+
 def _fake_response(status_code, json_body=None, json_raises=False):
     """Build a fake requests.Response for handle_request_error tests."""
     resp = mock.Mock(spec=requests.Response)

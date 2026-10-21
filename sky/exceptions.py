@@ -257,8 +257,35 @@ class ManagedJobStatusError(Exception):
     pass
 
 
+class ManagedJobRecordMissingError(Exception):
+    """Raised when a managed job's database record no longer exists.
+
+    A job-state read or write found no row for the job, so callers should
+    stop retrying bookkeeping that can never be recorded.
+    """
+    pass
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
+    pass
+
+
+class ProvisionUnsupportedError(Exception):
+    """Raised when a provisioner cannot ever satisfy a request.
+
+    Distinct from ResourcesUnavailableError, which means "not enough room
+    right now" and is worth retrying or failing over for. This means the
+    request itself cannot be served by this target no matter how long we
+    wait: an input shape the provisioner does not implement, a feature the
+    target lacks, a combination it has no way to render.
+
+    Provisioners raise it from their own launch path once they can tell,
+    which is often only after the config has been resolved. Failover treats
+    the candidate as permanently unusable rather than capacity-starved, and
+    a caller that retries until resources appear stops instead of waiting
+    for a condition that will never change.
+    """
     pass
 
 
@@ -468,6 +495,21 @@ class InvalidRecipeNameError(Exception):
 
 class InvalidWorkspaceNameError(Exception):
     """Raised when the workspace name is invalid."""
+    pass
+
+
+class InvalidUserIdError(Exception):
+    """Raised when a user id does not have the expected form."""
+    pass
+
+
+class WorkspaceConfigConflictError(Exception):
+    """Raised when a workspace update was based on an outdated config.
+
+    The caller sent the config it started from (``expected_config``) and the
+    workspace no longer holds it, i.e. someone else changed the workspace in
+    the meantime.
+    """
     pass
 
 
@@ -738,8 +780,9 @@ class ExecutionPausedError(ExecutionRetryableError):
     """Pause execution mid-attempt while keeping provisioned resources.
 
     Raised from inside an in-progress attempt waiting on an external condition
-    (e.g. admission or quota). The partially provisioned resources are kept so
-    the request can resume, so teardown layers must not clean up the resources.
+    (e.g. a cluster lock held by another operation). Any partially provisioned
+    resources are kept so the request can resume, so teardown layers must not
+    clean up the resources.
 
     ``continue_condition`` optionally says how to wait for the resume signal
     (see ``continue_condition.py``); it must be picklable, as the error crosses

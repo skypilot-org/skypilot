@@ -48,16 +48,20 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 # Image ID tags
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
-_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64'
+# The -ray256 images have SKY_REMOTE_RAY_VERSION baked in. New tags
+# rather than new rows for the old ones, because older SkyPilot versions read
+# the same catalog and still run the Ray that the old images carry.
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-ray256'
+_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64-ray256'
 # For GPU-related package version,
 # see sky/catalog/images/provisioners/cuda.sh
 # Default GPU image: NVIDIA 580 open kernel module + CUDA 13. Supports Turing
 # and later only.
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-cuda13'
-_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64-cuda13'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-cuda13-ray256'
+_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64-cuda13-ray256'
 # Legacy GPU image: NVIDIA 535 proprietary driver + CUDA 12. Used for pre-Turing
-# GPUs (V100, M60) that the open kernel module does not support.
+# GPUs (V100, M60) that the open kernel module does not support. Not rebuilt
+# for the Ray upgrade: those nodes install Ray at launch.
 _DEFAULT_GPU_CUDA12_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
 _DEFAULT_GPU_CUDA12_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
@@ -861,6 +865,16 @@ class AWS(clouds.Cloud):
             region=region_name,
             keys=('disk_encrypted',),
             default_value=False)
+
+        # Resource types whose tagging must not be silently given up. By
+        # default a refusal to tag volumes degrades to a warning; naming
+        # `volume` here makes it fail the launch instead, for deployments that
+        # have to guarantee tag coverage.
+        enforce_tags = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('enforce_tags',),
+            default_value=[])
         user_security_group_config = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
@@ -905,6 +919,7 @@ class AWS(clouds.Cloud):
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),
             'max_efa_interfaces': max_efa_interfaces,
+            'enforce_tags': enforce_tags,
             'docker_run_options': docker_run_options,
             **AWS._get_disk_specs(resources.disk_tier)
         }

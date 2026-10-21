@@ -36,6 +36,10 @@ class TestValidateSbatchTime:
             '1-12',  # d-h (multi-digit hour)
             '2-23:59',  # d-h:m
             '7-00:00:00',  # d-h:m:s
+            'UNLIMITED',
+            'unlimited',
+            'INFINITE',
+            '-1',
         ])
     def test_accepted_formats(self, value):
         # Should not raise. One sample per grammatical form.
@@ -48,13 +52,15 @@ class TestValidateSbatchTime:
         '1m30s',
         '1:2:3:4',
         '1.5',
-        '-1',
+        '-2',
         '1-2-3',
         ':30',
         '1:',
         ' 5',
         '5 ',
         '5\n',
+        'ınfinite',
+        '٣٠',
     ])
     def test_invalid_formats_raise(self, value):
         with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
@@ -804,3 +810,17 @@ class TestGetSlurmClusterInventory:
 
         with pytest.raises(RuntimeError, match='squeue failed'):
             utils.get_slurm_cluster_inventory('cluster-a')
+
+
+class TestRunOnLoginNode:
+
+    def test_delegates_to_the_inventory_client(self, monkeypatch):
+        client = mock.MagicMock()
+        client.run_command.return_value = (0, 'out\n', '')
+        monkeypatch.setattr(
+            utils, '_get_slurm_inventory_client', lambda name: client
+            if name == 'hpc' else pytest.fail(name))
+
+        assert utils.run_on_login_node('hpc', 'curl x',
+                                       timeout=9) == (0, 'out\n', '')
+        client.run_command.assert_called_once_with('curl x', timeout=9)

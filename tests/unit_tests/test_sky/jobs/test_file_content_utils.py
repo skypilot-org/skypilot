@@ -2,7 +2,7 @@
 
 import contextlib
 import os
-from typing import Dict
+from typing import Dict, Optional
 
 import filelock
 import pytest
@@ -10,6 +10,7 @@ import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from sky import skypilot_config
 from sky.jobs import file_content_utils
 from sky.jobs import state
 
@@ -42,7 +43,8 @@ def _create_basic_job(tmp_path,
                       *,
                       name: str = 'test-job',
                       store_content: bool = True,
-                      set_paths: bool = False) -> Dict[str, str]:
+                      set_paths: bool = False,
+                      config_content: Optional[str] = None) -> Dict[str, str]:
     dag_path = tmp_path / f'{name}.yaml'
     env_path = tmp_path / f'{name}.env'
     user_yaml_path = tmp_path / f'{name}.user.yaml'
@@ -72,7 +74,7 @@ def _create_basic_job(tmp_path,
                                     dag_content,
                                     user_yaml_content,
                                     env_content,
-                                    config_file_content=None,
+                                    config_file_content=config_content,
                                     priority=100)
 
     if set_paths:
@@ -159,3 +161,62 @@ def test_get_job_dag_content_missing_returns_none(_mock_managed_jobs_db_conn,
     os.remove(job_info['dag_path'])
 
     assert file_content_utils.get_job_dag_content(job_id) is None
+
+
+_CONFIG_CONTENT = ('kubernetes:\n'
+                   '  allowed_contexts:\n'
+                   '  - ctx-a\n'
+                   '  - ctx-b\n')
+
+
+def test_restore_job_config_file_writes_content(_mock_managed_jobs_db_conn,
+                                                tmp_path, monkeypatch):
+    config_path = tmp_path / 'job.config_yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    job_info = _create_basic_job(tmp_path,
+                                 name='config-job',
+                                 config_content=_CONFIG_CONTENT)
+
+    file_content_utils.restore_job_config_file(job_info['job_id'])
+
+    assert config_path.read_text(encoding='utf-8') == _CONFIG_CONTENT
+    # The config can carry credentials, so keep it owner-only.
+    assert (config_path.stat().st_mode & 0o777) == 0o600
+
+
+def test_restore_job_config_file_replaces_atomically(_mock_managed_jobs_db_conn,
+                                                     tmp_path, monkeypatch):
+    """A concurrent reader must never observe a truncated config.
+
+    Jobs submitted as one ``--num-jobs`` batch share a single config path
+    and every job's controller restores it. An O_TRUNC rewrite empties the
+    path in place, so another job reading it mid-write loads ``{}`` and
+    silently runs with no config -- which collapses
+    ``allowed_contexts`` and fails the job's prechecks. Restoring must
+    swap in a fully-written file instead.
+    """
+    config_path = tmp_path / 'shared.config_yaml'
+    stale_content = 'kubernetes:\n  allowed_contexts:\n  - ctx-stale\n'
+    config_path.write_text(stale_content, encoding='utf-8')
+    original_inode = config_path.stat().st_ino
+
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    job_info = _create_basic_job(tmp_path,
+                                 name='shared-config-job',
+                                 config_content=_CONFIG_CONTENT)
+
+    # Stand in for another job's controller that opened the shared path
+    # just before this restore starts.
+    with open(config_path, 'r', encoding='utf-8') as concurrent_reader:
+        file_content_utils.restore_job_config_file(job_info['job_id'])
+
+        # The reader holds the pre-restore inode and still sees a whole
+        # file. Under an in-place rewrite it would read '' or a fragment.
+        assert concurrent_reader.read() == stale_content
+
+    assert config_path.read_text(encoding='utf-8') == _CONFIG_CONTENT
+    assert config_path.stat().st_ino != original_inode
+    # No tmp fragments left next to the destination.
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith('.tmp')]

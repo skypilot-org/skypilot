@@ -506,10 +506,21 @@ class StopEvent(SkyletEvent):
 
         if is_cluster_multinode:
             logger.info('Terminating worker nodes first.')
-            operation_fn(provider_name=provider_name,
-                         cluster_name_on_cloud=cluster_name_on_cloud,
-                         provider_config=cluster_config['provider'],
-                         worker_only=True)
+            try:
+                operation_fn(provider_name=provider_name,
+                             cluster_name_on_cloud=cluster_name_on_cloud,
+                             provider_config=cluster_config['provider'],
+                             worker_only=True)
+            except Exception as e:  # pylint: disable=broad-except
+                if not autostop_config.down:
+                    raise
+                # For autodown, a worker-only failure (e.g. a timed-out wait
+                # for a worker that is slow to delete) must not leave the head
+                # running: the full termination below also covers the
+                # workers, while re-raising would hit the same failure on
+                # every retry.
+                logger.warning(f'Failed to terminate worker nodes: {e}. '
+                               'Continuing to terminate the whole cluster.')
         logger.info('Terminating head node.')
         operation_fn(provider_name=provider_name,
                      cluster_name_on_cloud=cluster_name_on_cloud,

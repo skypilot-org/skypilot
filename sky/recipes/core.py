@@ -111,6 +111,21 @@ def _validate_skypilot_yaml(content: str, recipe_type: Union[RecipeType,
         raise ValueError(f'Invalid SkyPilot YAML: {e}') from e
 
 
+def validate_recipe_content(content: str, recipe_type: Union[RecipeType,
+                                                             str]) -> None:
+    """Validate recipe YAML content for the given recipe type.
+
+    Used by callers that store recipes without going through
+    ``create_recipe`` (e.g. externally managed recipes).
+
+    Raises:
+        ValueError: If the recipe type or the content is invalid.
+    """
+    if isinstance(recipe_type, str):
+        recipe_type = RecipeType.from_str(recipe_type)
+    _validate_skypilot_yaml(content, recipe_type)
+
+
 def get_recipe_content(recipe_name: str) -> Tuple[str, str]:
     """Get recipe content and type by name.
 

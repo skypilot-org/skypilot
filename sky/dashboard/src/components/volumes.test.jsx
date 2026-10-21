@@ -176,3 +176,99 @@ describe('VolumesTable details column', () => {
     expect(cellsInColumn).toContain('-');
   });
 });
+
+describe('VolumesTable size column while a resize is pending', () => {
+  // The recorded size is the capacity the volume has now, so a resize that
+  // has not landed is invisible in it, and one waiting on the node can stay
+  // that way indefinitely. What it is waiting for is composed by the server,
+  // so the table just renders it.
+  const resizing = (
+    status,
+    message = 'Resizing to 2Gi. Restart the cluster.'
+  ) => ({
+    ...volume('vol-resizing'),
+    size: 1,
+    resize_status: status,
+    resize_target_size: 2,
+    resize_message: message,
+  });
+
+  it('shows only the current size when nothing is resizing', async () => {
+    const { container } = await renderTable([volume('vol-steady')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).not.toContain('→');
+  });
+
+  it('shows where the size is heading while a resize is pending', async () => {
+    const { container } = await renderTable([resizing('pending_on_node')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).toContain('2Gi');
+  });
+
+  it("shows the server's explanation without hovering, in details", async () => {
+    const { container } = await renderTable([resizing('pending_on_node')]);
+
+    expect(container.textContent).toContain('Restart the cluster');
+  });
+
+  it('leaves the details column to an error when there is one', async () => {
+    // An error means the volume is unusable, which outranks a resize that has
+    // not landed; the resize keeps its tooltip on the size cell.
+    const withBoth = {
+      ...resizing('pending_on_node'),
+      status: 'NOT_READY',
+      error_message: 'PVC is pending. ProvisioningFailed: no capacity',
+    };
+    const { container } = await renderTable([withBoth]);
+
+    const details =
+      container.querySelector('table tbody tr').lastElementChild
+        .previousElementSibling;
+    expect(details.textContent).toContain('ProvisioningFailed');
+    expect(details.textContent).not.toContain('Restart the cluster');
+  });
+
+  it('expands a resize explanation, not only an error', async () => {
+    // The expanded row used to be gated on the error message, so "show more"
+    // flipped to "show less" with nothing revealed.
+    const long = `Waiting for user to (re-)start a pod to finish file system resize of volume on node. Restart the cluster or job using this volume to finish the resize.`;
+    const { container } = await renderTable([
+      resizing('pending_on_node', long),
+    ]);
+
+    fireEvent.click(screen.getByText('... show more'));
+
+    const expanded = container.querySelector('tr.expanded-details');
+    expect(expanded).toBeTruthy();
+    expect(expanded.textContent).toContain('finish the resize.');
+  });
+
+  it('ignores a target that rounds to the size already shown', async () => {
+    // Sizes are whole GiB on both sides, so a resize smaller than that -- or
+    // one whose space has landed while the state has not cleared -- would
+    // render an arrow pointing at the size next to it.
+    const { container } = await renderTable([
+      { ...resizing('pending_on_node'), resize_target_size: 1 },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+    // The reason still reaches the user through the details column.
+    expect(container.textContent).toContain('Restart the cluster');
+  });
+
+  it('ignores a status from a server that reports no target size', async () => {
+    // An older server sends none of these fields; a half-populated row must
+    // not render a dangling arrow.
+    const { container } = await renderTable([
+      { ...volume('vol-half'), resize_status: 'in_progress' },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+  });
+});
