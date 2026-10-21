@@ -10,6 +10,7 @@ import pytest
 
 from sky import catalog
 from sky.catalog import common as catalog_common
+from sky.catalog import runpod_catalog
 from sky.utils import annotations
 
 
@@ -826,3 +827,27 @@ def test_efa_count_duplicate_index_safe():
     df.index = [0] * len(df)
     assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
                                                              8) == 32
+
+
+@pytest.mark.parametrize('zone,use_spot,expected', [
+    ('US-CA-1', False, 1.0),
+    ('US-CA-2', True, 0.5),
+    ('US-CA-1,US-CA-2', False, 1.0),
+    ('US-CA-1,US-CA-2', True, 0.4),
+    ('US-CA-1,REMOVED-ZONE', False, 1.0),
+    (None, False, 1.0),
+])
+def test_runpod_cost_candidate_zones(monkeypatch, zone, use_spot, expected):
+    df = pd.DataFrame({
+        'InstanceType': ['1x_L40S_SECURE'] * 4,
+        'Region': ['US', 'US', 'US', 'CA'],
+        'AvailabilityZone': ['US-CA-1', 'US-CA-2', 'US-TX-1', 'CA-MTL-1'],
+        'Price': [1.0, 1.0, 1.0, 0.1],
+        'SpotPrice': [0.4, 0.5, 0.2, 0.1],
+    })
+    monkeypatch.setattr(runpod_catalog, '_df', df)
+    assert runpod_catalog.get_hourly_cost('1x_L40S_SECURE', use_spot, 'US',
+                                          zone) == expected
+    with pytest.raises(ValueError, match='not found'):
+        runpod_catalog.get_hourly_cost('1x_L40S_SECURE', use_spot, 'US',
+                                       'MISSING-1,MISSING-2')
