@@ -22,12 +22,12 @@ from sky.clouds.utils import gpu_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
 from sky.utils import annotations
+from sky.utils import cache_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils import cache_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
