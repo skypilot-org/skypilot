@@ -962,6 +962,53 @@ class TestTaskCleanup:
         assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
 
     @pytest.mark.asyncio
+    async def test_storage_teardown_retries_a_transient_error(
+            self, cleanup_patches):
+        """A storage delete that fails briefly (e.g. the credential fetch
+        timing out) is retried, so the finished job is not failed for it."""
+        teardown = (
+            cleanup_patches['backend'].return_value.teardown_ephemeral_storage)
+        teardown.side_effect = [
+            exceptions.StorageBucketDeleteError('Read timeout'),
+            exceptions.StorageBucketDeleteError('Read timeout'),
+            None,
+        ]
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag), \
+                patch('sky.utils.common_utils.time.sleep') as sleep:
+            await manager._cleanup(job_id=1)
+
+        assert teardown.call_count == 3
+        assert sleep.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_storage_teardown_fails_after_its_attempts(
+            self, cleanup_patches):
+        """A storage delete that keeps failing still fails the cleanup."""
+        teardown = (
+            cleanup_patches['backend'].return_value.teardown_ephemeral_storage)
+        teardown.side_effect = exceptions.StorageBucketDeleteError(
+            'AccessDenied')
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag), \
+                patch('sky.utils.common_utils.time.sleep'), \
+                pytest.raises(exceptions.StorageBucketDeleteError):
+            await manager._cleanup(job_id=1)
+
+        assert (
+            teardown.call_count == controller_module._STORAGE_TEARDOWN_ATTEMPTS)
+
+    @pytest.mark.asyncio
     async def test_record_gone_pool_job_cancels_the_known_submission(
             self, cleanup_patches):
         """A pool job's worker and pool-side job ID live in the missing
@@ -1484,11 +1531,11 @@ class TestDownloadLogAndStreamLoggingAgentGate:
     def _run(self, agent_configured, reader, undelivered_reason=None):
         controller = self._make_controller()
         handle = MagicMock()
-        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+        with patch('sky.jobs.utils.logs.is_logging_agent_configured',
                    return_value=agent_configured), \
-             patch('sky.jobs.controller.logs.get_log_reader',
+             patch('sky.jobs.utils.logs.get_log_reader',
                    return_value=reader), \
-             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+             patch('sky.jobs.utils.LogDeliverySource.undelivered_reason',
                    return_value=undelivered_reason), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
@@ -1542,9 +1589,9 @@ class TestDownloadLogAndStreamLoggingAgentGate:
         # patching its lookup, so a future default other than None is caught.
         assert not LogDeliverySource.is_registered()
         controller = self._make_controller()
-        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+        with patch('sky.jobs.utils.logs.is_logging_agent_configured',
                    return_value=True), \
-             patch('sky.jobs.controller.logs.get_log_reader',
+             patch('sky.jobs.utils.logs.get_log_reader',
                    return_value=MagicMock()), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \

@@ -23,7 +23,6 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -60,7 +59,6 @@ from sky.utils import ux_utils
 from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
-from sky.utils.plugin_extensions import LogDeliverySource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -202,6 +200,13 @@ _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 # How many overdue jobs one deadline check cancels; later checks take the rest.
 # Each cancel is a cluster teardown, so as many as a process launches at once.
 _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
+
+# Attempts at deleting a finished job's ephemeral storage, and the first wait
+# between them (it grows ~1.6x per attempt, with jitter: about 15, 24 and 38 s).
+# A failed delete marks the job FAILED_CONTROLLER, while the usual causes, a
+# credential fetch or network call timing out, clear within seconds.
+_STORAGE_TEARDOWN_ATTEMPTS = 4
+_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
 
 
 async def create_background_task(coro: typing.Coroutine) -> None:
@@ -655,20 +660,16 @@ class JobController:
         were not delivered; we then keep the local copy instead of skipping
         it.
         """
-        if (logs.is_logging_agent_configured() and
-                logs.get_log_reader() is not None):
-            undelivered_reason = None
-            if handle is not None:
-                undelivered_reason = LogDeliverySource.undelivered_reason(
-                    cluster_name=handle.cluster_name,
-                    cluster_name_on_cloud=handle.cluster_name_on_cloud)
-            if undelivered_reason is None:
-                logger.info(
-                    f'Logging agent and log reader are configured for job '
-                    f'{self._job_id}; logs are forwarded to the external store '
-                    'and read back on demand. Skipping downloading and '
-                    'streaming the logs to the controller.')
-                return
+        in_store, undelivered_reason = managed_job_utils.logs_in_external_store(
+            handle)
+        if in_store:
+            logger.info(
+                f'Logging agent and log reader are configured for job '
+                f'{self._job_id}; logs are forwarded to the external store '
+                'and read back on demand. Skipping downloading and '
+                'streaming the logs to the controller.')
+            return
+        if undelivered_reason is not None:
             logger.warning(
                 f'Logs of job {self._job_id} are not confirmed to have reached '
                 f'the external log store ({undelivered_reason}); keeping a '
@@ -3887,7 +3888,12 @@ class ControllerManager:
                     'credentials expired/changed, or network connectivity '
                     'issues.')
             try:
-                backend.teardown_ephemeral_storage(task)
+                # Deleting again is safe: a store already removed is skipped.
+                common_utils.retry(
+                    backend.teardown_ephemeral_storage,
+                    max_retries=_STORAGE_TEARDOWN_ATTEMPTS,
+                    initial_backoff=_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS)(
+                        task)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(f'Failed to teardown ephemeral storage: {e}')

@@ -1,4 +1,8 @@
-"""The Ray port handed to workers after the provisioner restarts the head."""
+"""What the provisioner does to Ray when a live cluster is launched again.
+
+Which port the workers are told after a head restart, and whether the
+workers are restarted at all.
+"""
 # pylint: disable=protected-access
 import contextlib
 from types import SimpleNamespace
@@ -8,6 +12,7 @@ import pytest
 
 from sky import clouds
 from sky.provision import common
+from sky.provision import instance_setup
 from sky.provision import provisioner
 from sky.skylet import constants
 from sky.utils import message_utils
@@ -21,7 +26,7 @@ class _Joined(Exception):
 
 
 def _head_runner():
-    """A head whose `ray status` fails until Ray is started on it."""
+    """A head whose Ray probe fails until Ray is started on it."""
     up = {'ray': False}
 
     def run(*_, **__):
@@ -36,7 +41,9 @@ def _head_runner():
     return mock.Mock(run=run), start
 
 
-def test_workers_join_the_port_the_restarted_head_took(monkeypatch):
+def _post_provision_setup(monkeypatch, head_runner, start_head):
+    """Relaunches a live 2-node cluster; returns what the workers were told
+    (ray_port, no_restart), or None if the worker start was skipped."""
     cluster_info = common.ClusterInfo(instances={
         'head': [common.InstanceInfo('head', '10.0.0.1', None, {})],
         'worker1': [common.InstanceInfo('worker1', '10.0.0.2', None, {})],
@@ -48,11 +55,11 @@ def test_workers_join_the_port_the_restarted_head_took(monkeypatch):
     # launched again.
     record = common.ProvisionRecord('kubernetes', 'ctx', None, 'cluster',
                                     'head', [], [])
-    head_runner, start_head = _head_runner()
     told = {}
 
-    def start_workers(*_, ray_port, **__):
+    def start_workers(*_, ray_port, no_restart, **__):
         told['ray_port'] = ray_port
+        told['no_restart'] = no_restart
         raise _Joined
 
     for name, value in {
@@ -80,12 +87,47 @@ def test_workers_join_the_port_the_restarted_head_took(monkeypatch):
                         start_head)
     monkeypatch.setattr(provisioner.instance_setup, 'start_ray_on_worker_nodes',
                         start_workers)
+    # Past the worker start, setup goes on to the skylet; stop there too.
+    monkeypatch.setattr(provisioner.instance_setup, 'start_skylet_on_head_node',
+                        mock.Mock(side_effect=_Joined))
 
     with pytest.raises(_Joined):
         provisioner._post_provision_setup(
-            SimpleNamespace(cloud=clouds.Kubernetes()),
+            SimpleNamespace(cloud=clouds.Kubernetes(), region=None),
             resources_utils.ClusterName('cluster', 'cluster'), '/cluster.yaml',
             record, None)
+    return told or None
 
+
+def test_workers_join_the_port_the_restarted_head_took(monkeypatch):
+    head_runner, start_head = _head_runner()
+    told = _post_provision_setup(monkeypatch, head_runner, start_head)
     assert _ASSIGNED_PORT != constants.SKY_REMOTE_RAY_PORT
     assert told['ray_port'] == _ASSIGNED_PORT
+
+
+@pytest.mark.parametrize('alive,expect_restart', [(1, True), (2, False),
+                                                  (3, True)])
+def test_workers_restart_unless_exactly_all_nodes_are_alive(
+        monkeypatch, alive, expect_restart):
+    """The head is up; only the GCS alive count decides the worker start.
+
+    `ray status` keeps listing a worker whose Ray stopped, so counting its
+    lines skipped the restart and the worker never rejoined.
+    """
+    payload = message_utils.encode_payload({'ray_port': _ASSIGNED_PORT})
+    ray_status = ('Active:\n 1 node_aaaa\n 1 node_bbbb\nPending:\n'
+                  ' (no pending nodes)\n')
+
+    def run(cmd, **_):
+        if cmd == instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND:
+            return 0, f'{payload}\nSKY_ALIVE_NODES {alive} 3\n', ''
+        return 0, f'{payload}\n{ray_status}', ''
+
+    start_head = mock.Mock()
+    told = _post_provision_setup(monkeypatch, mock.Mock(run=run), start_head)
+    assert (told is not None) == expect_restart
+    # A restarted head would kill running jobs; only the workers may restart.
+    start_head.assert_not_called()
+    if told is not None:
+        assert told['no_restart'] is True
