@@ -1,13 +1,15 @@
+"""Thread-safe TTL cache utilities."""
 import functools
 import threading
 import time
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 
 def ttl_cache(ttl_seconds: int = 60) -> Callable:
     """A thread-safe TTL cache decorator for methods and functions."""
+
     def decorator(func: Callable) -> Callable:
-        cache = {}
+        cache: Dict[Tuple[Any, ...], Tuple[Any, float]] = {}
         lock = threading.Lock()
 
         @functools.wraps(func)
@@ -28,7 +30,7 @@ def ttl_cache(ttl_seconds: int = 60) -> Callable:
 
             return result
 
-        wrapper.cache_clear = lambda: cache.clear()  # type: ignore
+        wrapper.cache_clear = cache.clear  # type: ignore
         return wrapper
 
     return decorator

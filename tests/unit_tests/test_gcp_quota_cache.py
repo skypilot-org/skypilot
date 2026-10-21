@@ -1,5 +1,6 @@
 import threading
 import time
+
 from sky.utils import cache_utils
 
 
@@ -34,6 +35,7 @@ def test_ttl_cache_expiration_and_thread_safety():
 
 
 def test_concurrent_cache_access():
+
     @cache_utils.ttl_cache(ttl_seconds=5)
     def compute_expensive_check(x: int) -> int:
         time.sleep(0.05)
