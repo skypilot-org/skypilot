@@ -106,6 +106,24 @@ def test_workers_join_the_port_the_restarted_head_took(monkeypatch):
     assert told['ray_port'] == _ASSIGNED_PORT
 
 
+def test_workers_join_the_port_while_the_head_gcs_is_not_ready(monkeypatch):
+    """Ray was started on the head but its GCS does not answer yet: the probe
+    fails after printing the port, and the workers must still get it, not
+    the port left over from before the restart."""
+    stale = message_utils.encode_payload({'ray_port': _ASSIGNED_PORT + 1})
+    payload = message_utils.encode_payload({'ray_port': _ASSIGNED_PORT})
+    up = {'ray': False}
+
+    def run(*_, **__):
+        return 1, f'{payload if up["ray"] else stale}\n', ''
+
+    def start_head(*_, **__):
+        up['ray'] = True
+
+    told = _post_provision_setup(monkeypatch, mock.Mock(run=run), start_head)
+    assert told == {'ray_port': _ASSIGNED_PORT, 'no_restart': False}
+
+
 @pytest.mark.parametrize('alive,expect_restart', [(1, True), (2, False),
                                                   (3, True)])
 def test_workers_restart_unless_exactly_all_nodes_are_alive(
