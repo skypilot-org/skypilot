@@ -156,17 +156,20 @@ def test_backend_get_job_status_past_deadline_starts_nothing(mock_run_on_head):
 @mock.patch.object(cloud_vm_ray_backend, 'SkyletClient')
 def test_backend_get_job_status_grpc_timeout_bounded_by_deadline(
         mock_client_cls):
+    """Time spent getting the gRPC channel counts against the deadline."""
     handle = _non_grpc_handle()
     handle.is_grpc_enabled_with_flag = True
+    handle.get_grpc_channel.side_effect = lambda: time.sleep(1)
     mock_client_cls.return_value.get_job_status.return_value = mock.MagicMock(
         job_statuses={})
 
     cloud_vm_ray_backend.CloudVmRayBackend().get_job_status(
         handle, [1], deadline=time.monotonic() + 5)
 
+    # 5s deadline, minus 1s spent getting the channel, minus the 1s margin.
     timeout = mock_client_cls.return_value.get_job_status.call_args.kwargs[
         'timeout']
-    assert 1 <= timeout <= 4
+    assert 1 <= timeout <= 3.1
 
 
 @pytest.mark.asyncio

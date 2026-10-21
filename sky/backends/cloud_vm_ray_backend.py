@@ -4924,13 +4924,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 request = jobsv1_pb2.GetJobStatusRequest(job_ids=job_ids)
 
                 def _call_skylet() -> 'jobsv1_pb2.GetJobStatusResponse':
+                    # Get the channel before reading the time left. Getting
+                    # it can wait for the tunnel lock and open a new SSH
+                    # tunnel, and that time must count against the deadline.
+                    channel = handle.get_grpc_channel()
                     left = _seconds_left()
                     grpc_timeout: float = constants.SKYLET_GRPC_TIMEOUT_SECONDS
                     if left is not None:
                         grpc_timeout = min(grpc_timeout, left)
-                    return SkyletClient(
-                        handle.get_grpc_channel()).get_job_status(
-                            request, timeout=grpc_timeout)
+                    return SkyletClient(channel).get_job_status(
+                        request, timeout=grpc_timeout)
 
                 response = backend_utils.invoke_skylet_with_retries(
                     _call_skylet)
