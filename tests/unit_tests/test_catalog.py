@@ -856,6 +856,8 @@ def test_runpod_cost_candidate_zones(monkeypatch, zone, use_spot, expected):
 @pytest.mark.parametrize('region,zone,use_spot,expected', [
     ('US', 'US-CA-1,US-CA-2', False, 0.20),
     ('US', 'US-CA-2,US-CA-1', False, 0.20),
+    ('US', 'US-CA-2, US-CA-1', False, 0.20),
+    ('US', ' US-CA-1 , US-CA-2 ', True, 0.08),
     ('US', 'US-CA-1,US-CA-2', True, 0.08),
     ('US', 'US-CA-2', False, 0.25),
     ('us', 'US-CA-1,CA-MTL-1', False, 0.20),
@@ -875,3 +877,27 @@ def test_runpod_cost_different_zone_prices(monkeypatch, region, zone, use_spot,
     monkeypatch.setattr(runpod_catalog, '_df', df)
     assert runpod_catalog.get_hourly_cost('cpu5c-4-8', use_spot, region,
                                           zone) == expected
+
+
+@pytest.mark.parametrize('instance_type,region,zone', [
+    ('cpu5c-4-8', 'US', 'MISSING-1, MISSING-2'),
+    ('cpu5c-4-8', 'CA', 'US-CA-1, US-CA-2'),
+    ('missing-instance', 'US', 'US-CA-1, US-CA-2'),
+])
+def test_runpod_cost_missing_candidates(monkeypatch, instance_type, region,
+                                        zone):
+    df = pd.DataFrame({
+        'InstanceType': ['cpu5c-4-8'],
+        'Region': ['US'],
+        'AvailabilityZone': ['US-CA-1'],
+        'Price': [0.20],
+        'SpotPrice': [0.09],
+    })
+    monkeypatch.setattr(runpod_catalog, '_df', df)
+    with pytest.raises(ValueError) as exc_info:
+        runpod_catalog.get_hourly_cost(instance_type, region=region, zone=zone)
+    message = str(exc_info.value)
+    assert repr(instance_type) in message
+    assert repr([z.strip() for z in zone.split(',')]) in message
+    assert f'region={region!r}' in message
+    assert 'all regions' not in message
