@@ -283,3 +283,10 @@ def test_listing_without_infra_clouds_skips_the_scope(scheduled, monkeypatch):
                                          env_vars=_ENV)
     assert _call(server.list_accelerators, 'alice', body) == 200
     assert _scheduled_body(scheduled).clouds == 'aws'
+
+
+def test_slurm_cluster_names_lists_every_readable_workspace(scheduled):
+    """The dashboard's Slurm list uses the same rule as the guards."""
+    assert _call(server.slurm_cluster_names, 'alice') == 200
+    assert (scheduled.await_args.kwargs['func'] is
+            visibility.slurm_cluster_names)
