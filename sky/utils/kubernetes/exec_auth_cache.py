@@ -23,6 +23,7 @@ from typing import Optional
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -79,11 +80,7 @@ def _write_front(path: str, bash: str, real_aws: str, cache_dir: str) -> None:
                f'REAL_AWS={shlex.quote(real_aws)}\n'
                f'CACHE_DIR={shlex.quote(cache_dir)}\n'
                f'{script}')
-    tmp_path = f'{path}.{os.getpid()}.tmp'
-    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o700)
-    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-        f.write(content)
-    os.replace(tmp_path, path)
+    common_utils.atomic_write_text(path, content, mode=0o700)
 
 
 def install() -> Optional[str]:

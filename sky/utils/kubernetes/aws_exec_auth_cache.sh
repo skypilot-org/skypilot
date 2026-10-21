@@ -40,9 +40,6 @@ key=$({
 entry="$CACHE_DIR/${key%% *}"
 
 # Entry format: "<fetched epoch> <expiry epoch>\n<aws stdout>\n".
-fetched=''
-expiry=''
-body=''
 load_entry() {
     fetched=''
     expiry=''
@@ -50,7 +47,11 @@ load_entry() {
     [[ -f "$entry" ]] || return 1
     { IFS=' ' read -r fetched expiry; IFS= read -r -d '' body; } \
         2>/dev/null < "$entry"
-    [[ "$fetched" =~ ^[0-9]+$ && "$expiry" =~ ^[0-9]+$ && -n "$body" ]]
+    if [[ "$fetched" =~ ^[0-9]+$ && "$expiry" =~ ^[0-9]+$ && -n "$body" ]]; then
+        return 0
+    fi
+    body=''
+    return 1
 }
 
 is_usable() {
@@ -69,24 +70,16 @@ serve() {
 # Runs the real command; on success sets body and stores it when the output
 # carries an expirationTimestamp. Failures are never stored.
 refresh() {
-    local started=$EPOCHSECONDS out rc expires tmp
+    local started=$EPOCHSECONDS out expires tmp
     local re='"expirationTimestamp":[[:space:]]*"([^"]+)"'
-    out=$("$REAL_AWS" "$@" {lock_fd}>&-)
-    rc=$?
-    if (( rc != 0 )); then
-        return "$rc"
-    fi
+    out=$("$REAL_AWS" "$@" {lock_fd}>&-) || return
     if [[ "$out" =~ $re ]] &&
         expires=$(date -u -d "${BASH_REMATCH[1]}" +%s 2>/dev/null); then
         tmp="$entry.$$.tmp"
-        if printf '%s %s\n%s\n' "$started" "$expires" "$out" > "$tmp"; then
-            mv -f "$tmp" "$entry" || rm -f "$tmp"
-        else
-            rm -f "$tmp"
-        fi
+        { printf '%s %s\n%s\n' "$started" "$expires" "$out" > "$tmp" &&
+            mv -f "$tmp" "$entry"; } || rm -f "$tmp"
     fi
     body="$out"$'\n'
-    return 0
 }
 
 if load_entry && is_fresh; then
@@ -97,37 +90,23 @@ exec {lock_fd}>>"$entry.lock" || exec "$REAL_AWS" "$@"
 
 if [[ -n "$body" ]] && is_usable; then
     # Stale but usable: one process refreshes, the others keep serving it.
-    if ! flock -n "$lock_fd"; then
-        serve
-    fi
+    flock -n "$lock_fd" || serve
     if load_entry && is_fresh; then
         serve
     fi
-    cached_body="$body"
-    cached_expiry="$expiry"
-    refresh "$@"
-    rc=$?
-    if (( rc == 0 )); then
+else
+    # Nothing usable: wait for an in-flight refresh, then fetch if still needed.
+    flock -w "$LOCK_WAIT_SECONDS" "$lock_fd"
+    if load_entry && is_usable; then
         serve
     fi
-    if [[ -n "$cached_body" ]] &&
-        (( EPOCHSECONDS < cached_expiry - MIN_REMAINING_SECONDS )); then
-        echo "aws eks get-token failed (exit $rc); using the cached token," \
-            "which expires in $(( cached_expiry - EPOCHSECONDS ))s." >&2
-        body="$cached_body"
-        serve
-    fi
-    exit "$rc"
 fi
 
-# Nothing usable: wait for an in-flight refresh, then fetch if still needed.
-flock -w "$LOCK_WAIT_SECONDS" "$lock_fd"
-if load_entry && is_usable; then
-    serve
-fi
-refresh "$@"
+refresh "$@" && serve
 rc=$?
-if (( rc == 0 )); then
+if [[ -n "$body" ]] && is_usable; then
+    echo "aws eks get-token failed (exit $rc); using the cached token," \
+        "which expires in $(( expiry - EPOCHSECONDS ))s." >&2
     serve
 fi
 exit "$rc"

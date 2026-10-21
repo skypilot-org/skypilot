@@ -40,12 +40,13 @@ class _Rig:
         self.log.touch()
         self.cache_dir = os.path.join(exec_auth_cache.cache_root(), 'cache')
 
-    def run(self,
-            args: Optional[List[str]] = None,
-            extra_env: Optional[Dict[str, str]] = None,
-            sleep: float = 0) -> subprocess.CompletedProcess:
+    def run(
+        self,
+        args: Optional[List[str]] = None,
+        extra_env: Optional[Dict[str,
+                                 str]] = None) -> subprocess.CompletedProcess:
         return subprocess.run(args or _GET_TOKEN,
-                              env=self.env(extra_env, sleep),
+                              env=self.env(extra_env),
                               capture_output=True,
                               text=True,
                               check=False)
@@ -81,22 +82,28 @@ class _Rig:
 
 
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def fake_aws(tmp_path, monkeypatch):
+    """A fake `aws` first on PATH and a private temp dir; returns its path."""
     fake_bin = tmp_path / 'fake-bin'
     fake_bin.mkdir()
-    fake_aws = fake_bin / 'aws'
-    fake_aws.write_text(_FAKE_AWS)
-    fake_aws.chmod(0o755)
+    fake = fake_bin / 'aws'
+    fake.write_text(_FAKE_AWS)
+    fake.chmod(0o755)
     tmp_root = tmp_path / 'tmp'
     tmp_root.mkdir()
     monkeypatch.setattr(exec_auth_cache.tempfile, 'gettempdir',
                         lambda: str(tmp_root))
     monkeypatch.setenv('PATH', f'{fake_bin}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.delenv(constants.ENV_VAR_SERVER_EXEC_AUTH_CACHE, raising=False)
+    return str(fake)
+
+
+@pytest.fixture
+def rig(tmp_path, fake_aws):
     real_aws = exec_auth_cache.install()
     if real_aws is None:
         pytest.skip('Host lacks bash >= 5, flock, sha256sum or GNU date.')
-    assert real_aws == str(fake_aws)
+    assert real_aws == fake_aws
     assert os.environ['PATH'].split(os.pathsep)[0] == exec_auth_cache.bin_dir()
     return _Rig(tmp_path)
 
@@ -190,9 +197,8 @@ def test_cache_files_are_private(rig):
     assert stat.S_IMODE(os.stat(entry).st_mode) == 0o600
 
 
-def test_disabled_by_env(tmp_path, monkeypatch):
-    monkeypatch.setattr(exec_auth_cache.tempfile, 'gettempdir',
-                        lambda: str(tmp_path))
+@pytest.mark.usefixtures('fake_aws')
+def test_disabled_by_env(monkeypatch):
     monkeypatch.setenv(constants.ENV_VAR_SERVER_EXEC_AUTH_CACHE, '0')
     path_before = os.environ['PATH']
     assert exec_auth_cache.install() is None
@@ -200,14 +206,8 @@ def test_disabled_by_env(tmp_path, monkeypatch):
     assert not os.path.exists(exec_auth_cache.cache_root())
 
 
-def test_refuses_a_shared_cache_root(tmp_path, monkeypatch):
-    fake_bin = tmp_path / 'fake-bin'
-    fake_bin.mkdir()
-    (fake_bin / 'aws').write_text(_FAKE_AWS)
-    (fake_bin / 'aws').chmod(0o755)
-    monkeypatch.setattr(exec_auth_cache.tempfile, 'gettempdir',
-                        lambda: str(tmp_path))
-    monkeypatch.setenv('PATH', f'{fake_bin}{os.pathsep}{os.environ["PATH"]}')
+@pytest.mark.usefixtures('fake_aws')
+def test_refuses_a_shared_cache_root():
     os.mkdir(exec_auth_cache.cache_root(), 0o777)
     os.chmod(exec_auth_cache.cache_root(), 0o777)
     path_before = os.environ['PATH']
