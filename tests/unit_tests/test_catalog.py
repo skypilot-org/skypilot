@@ -851,3 +851,27 @@ def test_runpod_cost_candidate_zones(monkeypatch, zone, use_spot, expected):
     with pytest.raises(ValueError, match='not found'):
         runpod_catalog.get_hourly_cost('1x_L40S_SECURE', use_spot, 'US',
                                        'MISSING-1,MISSING-2')
+
+
+@pytest.mark.parametrize('region,zone,use_spot,expected', [
+    ('US', 'US-CA-1,US-CA-2', False, 0.20),
+    ('US', 'US-CA-2,US-CA-1', False, 0.20),
+    ('US', 'US-CA-1,US-CA-2', True, 0.08),
+    ('US', 'US-CA-2', False, 0.25),
+    ('us', 'US-CA-1,CA-MTL-1', False, 0.20),
+    (None, 'US-CA-1,US-CA-2', False, 0.20),
+])
+def test_runpod_cost_different_zone_prices(monkeypatch, region, zone, use_spot,
+                                           expected):
+    df = pd.DataFrame({
+        'InstanceType': ['cpu5c-4-8'] * 4 + ['other-instance'],
+        'Region': ['US', 'US', 'US', 'CA', 'US'],
+        'AvailabilityZone': [
+            'US-CA-1', 'US-CA-2', 'US-TX-1', 'CA-MTL-1', 'US-CA-1'
+        ],
+        'Price': [0.20, 0.25, 0.10, 0.05, 0.01],
+        'SpotPrice': [0.09, 0.08, 0.04, 0.02, 0.01],
+    })
+    monkeypatch.setattr(runpod_catalog, '_df', df)
+    assert runpod_catalog.get_hourly_cost('cpu5c-4-8', use_spot, region,
+                                          zone) == expected

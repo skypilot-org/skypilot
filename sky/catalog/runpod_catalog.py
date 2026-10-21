@@ -33,13 +33,22 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+    """Returns hourly cost; candidate zone lists use the cheapest estimate.
+
+    For multiple candidate zones, both on-demand and spot costs are estimates,
+    not the price of the actual placement. Single-zone behavior is unchanged.
+    """
     df = _df
     if zone is not None and ',' in zone:
         # RunPod provision records can contain all candidate zones, rather than
         # the actual placement. Preserve that candidate set when estimating
         # costs for existing clusters; do not look up the list as one zone.
         df = df[df['AvailabilityZone'].isin(zone.split(','))]
+        if region is not None:
+            df = df[df['Region'].str.lower() == region.lower()]
+        # RunPod CPU prices can differ within a region. After filtering, let
+        # the shared lookup select the minimum without its equal-price check.
+        region = None
         zone = None
     return common.get_hourly_cost_impl(df, instance_type, use_spot, region,
                                        zone)
