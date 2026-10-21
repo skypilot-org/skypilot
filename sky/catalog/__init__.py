@@ -59,22 +59,26 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
                 f'implement the "{method_name}" method') from None
         return method(*args, **kwargs)
 
-    # Pool threads start without the request's config context and active
-    # workspace, so carry both over; each thread needs its own context copy.
-    workspace = skypilot_config.get_active_workspace()
-    request_context = contextvars.copy_context()
+    if len(clouds) == 1:
+        # Runs inline, already in the caller's context and workspace.
+        results = [_execute_catalog_method(clouds[0])]
+    else:
+        # Pool threads start without the request's config context and active
+        # workspace, so carry both over; each thread needs its own copy.
+        workspace = skypilot_config.get_active_workspace()
+        request_context = contextvars.copy_context()
 
-    def _execute_in_request_context(cloud: str):
+        def _execute_in_request_context(cloud: str):
 
-        def _run():
-            with skypilot_config.local_active_workspace_ctx(workspace):
-                return _execute_catalog_method(cloud)
+            def _run():
+                with skypilot_config.local_active_workspace_ctx(workspace):
+                    return _execute_catalog_method(cloud)
 
-        return request_context.copy().run(_run)
+            return request_context.copy().run(_run)
 
-    results = subprocess_utils.run_in_parallel(_execute_in_request_context,
-                                               args=list(clouds),
-                                               num_threads=len(clouds))
+        results = subprocess_utils.run_in_parallel(_execute_in_request_context,
+                                                   args=list(clouds),
+                                                   num_threads=len(clouds))
     if single:
         return results[0]
     return results

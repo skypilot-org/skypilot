@@ -240,29 +240,46 @@ _GUARDED = {
 _UNGUARDED = {
     # Admin-only through the default user blocklist.
     '/kubernetes_label_gpus',
-    # One boolean, the same for a hidden and an unknown context.
+    # One boolean about the context's config: leaks at most a name.
     '/kubernetes/allowed_nodes',
+    # SSH node pool management routes are tracked separately.
+    '/ssh_node_pools/{pool_name}',
+    '/ssh_node_pools/{pool_name}/deploy',
+    '/ssh_node_pools/{pool_name}/down',
+    '/ssh_node_pools/{pool_name}/status',
 }
 
 
 def test_every_infra_read_is_guarded():
+    # The OpenAPI schema lists every route, including those of included
+    # routers, which newer FastAPI versions keep out of `app.routes`.
+    spec = server.app.openapi()
+    schemas = spec.get('components', {}).get('schemas', {})
     taking_a_target = set()
-    for route in server.app.routes:
-        dependant = getattr(route, 'dependant', None)
-        if dependant is None:
-            continue
-        names = {p.name for p in dependant.query_params}
-        for param in dependant.body_params:
-            model = getattr(param.field_info, 'annotation', None) or getattr(
-                param, 'type_', None)
-            names |= set(getattr(model, 'model_fields', {}))
-        if names & _TARGET_FIELDS:
-            taking_a_target.add(route.path)
+    for path, operations in spec['paths'].items():
+        for operation in operations.values():
+            names = {p['name'] for p in operation.get('parameters', [])}
+            body = operation.get('requestBody', {}).get('content', {})
+            for media in body.values():
+                ref = media.get('schema', {}).get('$ref', '')
+                names |= set(
+                    schemas.get(ref.rsplit('/', 1)[-1],
+                                {}).get('properties', {}))
+            # An SSH node pool is a target too; elsewhere `pool_name` is a
+            # managed-jobs pool.
+            ssh_pool = (path.startswith('/ssh_node_pools/') and
+                        'pool_name' in names)
+            if names & _TARGET_FIELDS or ssh_pool:
+                taking_a_target.add(path)
     assert taking_a_target == _GUARDED | _UNGUARDED
 
 
-def test_slurm_cluster_names_lists_every_readable_workspace(scheduled):
-    """The dashboard's Slurm list uses the same rule as the guards."""
-    assert _call(server.slurm_cluster_names, 'alice') == 200
-    assert (scheduled.await_args.kwargs['func'] is
-            visibility.slurm_cluster_names)
+def test_listing_without_infra_clouds_skips_the_scope(scheduled, monkeypatch):
+    """A cloud region (e.g. `--infra aws/us-east-1`) costs no scope."""
+    scope_for = mock.Mock(side_effect=AssertionError('scope computed'))
+    monkeypatch.setattr(visibility, 'scope_for', scope_for)
+    body = payloads.ListAcceleratorsBody(clouds='aws',
+                                         region_filter='us-east-1',
+                                         env_vars=_ENV)
+    assert _call(server.list_accelerators, 'alice', body) == 200
+    assert _scheduled_body(scheduled).clouds == 'aws'

@@ -83,7 +83,7 @@ def visible_for_workspaces(workspaces: Iterable[str], cloud: str) -> Set[str]:
     configs = skypilot_config.get_nested(('workspaces',), default_value={})
     # The result depends only on a workspace's own value and `disabled`, so
     # evaluate one workspace per distinct pair (each evaluation re-parses the
-    # kubeconfig or ~/.slurm/config): tenants have many workspaces, few values.
+    # kubeconfig or ~/.slurm/config): there are many workspaces, few values.
     representatives: Dict[str, str] = {}
     for workspace in workspaces:
         cloud_config: Dict[str, Any] = ((configs or {}).get(workspace) or

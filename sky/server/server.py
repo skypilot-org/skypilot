@@ -1710,6 +1710,10 @@ async def _scope_accelerator_listing(
     auth_user = request.state.auth_user
     if auth_user is None or body.region_filter is None:
         return
+    # Both endpoints dispatch to the catalog's `list_accelerators`.
+    requested = catalog.normalize_clouds(body.clouds, 'list_accelerators')
+    if not {'kubernetes', 'ssh', 'slurm'} & set(requested):
+        return
     scope = await context_utils.to_thread_with_executor(None,
                                                         visibility.scope_for,
                                                         auth_user)
@@ -1721,8 +1725,6 @@ async def _scope_accelerator_listing(
         'ssh': body.region_filter in scope.kubernetes,
         'slurm': body.region_filter in scope.slurm,
     }
-    # Both endpoints dispatch to the catalog's `list_accelerators`.
-    requested = catalog.normalize_clouds(body.clouds, 'list_accelerators')
     kept = [cloud for cloud in requested if visible.get(cloud, True)]
     if not kept:
         raise visibility.not_found('Kubernetes context or Slurm cluster')
@@ -1806,7 +1808,7 @@ async def slurm_node_info(
 
 @app.post('/slurm_cluster_names')
 async def slurm_cluster_names(request: fastapi.Request) -> None:
-    """Lists the names of the Slurm clusters this server is configured with.
+    """Lists the Slurm clusters of every workspace the caller can read.
 
     Answers from ~/.slurm/config without contacting any login node, so it
     returns promptly and covers clusters that are currently unreachable —
