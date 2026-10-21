@@ -1,8 +1,12 @@
 """Tests for the Lium cloud."""
+import inspect
+
 import pytest
 
 from sky import clouds
+from sky import provision
 from sky.clouds import lium
+from sky.provision.lium import instance
 from sky.provision.lium import lium_utils
 
 
@@ -55,3 +59,10 @@ def test_accelerator_name_ignores_the_vendor_prefix():
 
 def test_accelerator_name_skips_an_unknown_model():
     assert lium_utils.accelerator_name('Some New GPU') is None
+
+
+def test_query_instances_accepts_every_router_argument():
+    # The router in sky.provision passes these by keyword during refresh.
+    router = list(inspect.signature(provision.query_instances).parameters)
+    assert list(inspect.signature(
+        instance.query_instances).parameters) == router[1:]
