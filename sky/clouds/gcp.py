@@ -27,6 +27,7 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import cache_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1384,6 +1385,7 @@ class GCP(clouds.Cloud):
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
 
+    @cache_utils.ttl_cache(ttl_seconds=60)
     @classmethod
     def check_quota_available(cls, resources: 'resources.Resources') -> bool:
         """Check if GCP quota is available based on `resources`.
