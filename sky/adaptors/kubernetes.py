@@ -167,8 +167,8 @@ def _get_api_client(context: Optional[str] = None) -> Any:
                         context_name, 'ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
                                f'{context_name!r}.\n'
-                               '    Run `sky ssh up --infra {context_name}` to '
-                               'set up or repair the cluster.')
+                               f'    Run `sky ssh up --infra {context_name}` '
+                               'to set up or repair the cluster.')
                 else:
                     err_str = (
                         'Failed to load Kubernetes configuration for '
