@@ -4505,6 +4505,26 @@ def resolve_effective_pod_config(
     return kubernetes_config
 
 
+def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
+    """The settings in a ``pod_config`` spec that hand the pod an API identity.
+
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
+    whether NONE can apply share this one list.
+    """
+    conflicts = [
+        f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                             'serviceAccount') if key in spec
+    ]
+    if spec.get('automountServiceAccountToken') is True:
+        conflicts.append('pod_config.spec.automountServiceAccountToken')
+    for volume in spec.get('volumes') or []:
+        sources = (volume.get('projected') or {}).get('sources') or []
+        if any('serviceAccountToken' in src for src in sources):
+            conflicts.append(f'pod_config.spec.volumes[{volume.get("name")}]'
+                             ' (projected serviceAccountToken)')
+    return conflicts
+
+
 def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
                        pod_fields: Dict[str, Any]) -> Dict[str, Any]:
     """Adds the pod fields from get_pod_fields() to the rendered pod.

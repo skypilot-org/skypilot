@@ -965,6 +965,16 @@ def write_cluster_config(
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
+    if (isinstance(cloud, clouds.Kubernetes) and
+            not isinstance(to_provision.kubernetes_identity, str) and
+            not common.is_controller_name(cluster_name) and
+            clouds.Kubernetes.task_requests_none(
+                region.name, to_provision.cluster_config_overrides)):
+        # The task's NONE beats a per-context identity here too: a pod with no
+        # API identity must not be handed the kubeconfig either. A fixed
+        # in-process identity and controllers ignore it, as in
+        # make_deploy_resources_variables.
+        remote_identity = schemas.RemoteIdentityOptions.NONE.value
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
         # excluded_clouds set, but we must also check if the cloud supports

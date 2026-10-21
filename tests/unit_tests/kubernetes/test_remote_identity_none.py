@@ -17,6 +17,7 @@ from sky import exceptions
 from sky import execution
 from sky import resources as resources_lib
 from sky import skypilot_config
+from sky.backends import backend_utils
 from sky.clouds import kubernetes as kubernetes_cloud
 from sky.provision.azure import config as azure_config
 from sky.provision.kubernetes import config as kubernetes_config
@@ -635,6 +636,206 @@ class TestServerConfigView:
                     'kubernetes', ('remote_identity',)) == _NONE
         assert skypilot_config.get_server_workspace_region_config(
             'kubernetes', ('remote_identity',)) == _NONE
+
+
+_TASK_NONE = _k8s(remote_identity=_NONE)
+
+
+def _per_context(identity):
+    return _k8s(context_configs={_CTX: {'remote_identity': identity}})
+
+
+class TestTaskNoneBeatsEveryLayer:
+    """A task's own NONE only takes credentials away, so no config layer --
+    a per-context value included -- keeps them."""
+
+    @pytest.mark.parametrize('server', [
+        _per_context('named-sa'),
+        {
+            'workspaces': {
+                'default': _per_context('named-sa')
+            }
+        },
+    ],
+                             ids=['global-context', 'workspace-context'])
+    def test_over_a_server_per_context_identity(self, server_config, server):
+        server_config(server)
+        assert _identity(task_config=_TASK_NONE) == _NONE_IDENTITY
+        assert kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, _resources(_TASK_NONE))
+
+    def test_over_a_client_per_context_identity(self, server_config):
+        server_config({})
+        assert _identity(
+            task_config=_TASK_NONE,
+            client_config=_per_context('SERVICE_ACCOUNT')) == _NONE_IDENTITY
+
+    def test_only_none_beats_a_per_context_value(self, server_config):
+        server_config(_per_context('named-sa'))
+        assert _identity(task_config=_k8s(
+            remote_identity='SERVICE_ACCOUNT'))[0] == ('named-sa')
+
+    def test_a_server_none_stays_none(self, server_config):
+        # The task's cloud-level value never beats the server's per-context
+        # NONE, so the pod stays without a token.
+        server_config(_per_context(_NONE))
+        assert _identity(task_config=_k8s(
+            remote_identity='SERVICE_ACCOUNT')) == _NONE_IDENTITY
+
+    def test_a_server_pod_config_token_is_still_refused(self, server_config):
+        server_config(_k8s(pod_config={'spec': {'volumes': [_TOKEN_VOLUME]}}))
+        with pytest.raises(exceptions.InvalidCloudConfigs,
+                           match='projected serviceAccountToken'):
+            _identity(task_config=_TASK_NONE)
+
+    def test_a_controller_still_ignores_it(self, server_config):
+        server_config(_per_context('named-sa'))
+        v = _deploy_vars(task_config=_TASK_NONE,
+                         display_name='sky-jobs-controller-abcd1234')
+        assert v['k8s_service_account_name'] == (
+            kubernetes_utils.CONTROLLER_SERVICE_ACCOUNT_NAME)
+        assert v['k8s_remote_identity_none'] is False
+
+    def test_an_in_process_identity_still_comes_first(self, server_config):
+        server_config({})
+        assert _identity(task_config=_TASK_NONE,
+                         kubernetes_identity='fixed-sa') == ('fixed-sa', 'true',
+                                                             False)
+        assert not kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, _resources(_TASK_NONE, kubernetes_identity='fixed-sa'))
+
+    def test_an_existing_cluster_keeps_its_launch_record(self, server_config):
+        # Launched with a token before the task asked for NONE: what the pods
+        # got still holds.
+        server_config({})
+        resources = _resources(_TASK_NONE)
+        resources.remote_identity_none_at_launch = False
+        assert not kubernetes_cloud.Kubernetes.remote_identity_is_none(
+            _CTX, resources)
+
+    @pytest.mark.parametrize('overrides,context,expected', [
+        (None, _CTX, False),
+        ({}, _CTX, False),
+        (_k8s(remote_identity='none'), _CTX, True),
+        (_k8s(remote_identity=_NONE), None, True),
+        (_k8s(remote_identity={'test-*': _NONE}), _CTX, True),
+        (_k8s(remote_identity={'other-*': _NONE}), _CTX, False),
+        (_per_context(_NONE), _CTX, True),
+        (_k8s(remote_identity='SERVICE_ACCOUNT'), _CTX, False),
+        ({
+            'ssh': {
+                'remote_identity': _NONE
+            }
+        }, _CTX, False),
+    ],
+                             ids=[
+                                 'no-overrides', 'empty', 'lowercase',
+                                 'no-context', 'pattern-match', 'pattern-miss',
+                                 'per-context', 'other-value', 'ssh-key'
+                             ])
+    def test_task_requests_none(self, overrides, context, expected):
+        assert kubernetes_cloud.Kubernetes.task_requests_none(
+            context, overrides) is expected
+
+    def test_submit_check_accepts_it_over_a_client_per_context_value(
+            self, server_config):
+        server_config(_k8s(remote_identity=_NONE))
+        resources = _resources(_TASK_NONE)
+        resources.cloud = _K8S
+        with mock.patch.object(kubernetes_cloud.Kubernetes,
+                               'existing_allowed_contexts',
+                               return_value=[_CTX]), \
+                skypilot_config.override_skypilot_config(
+                    _per_context('SERVICE_ACCOUNT')):
+            kubernetes_cloud.Kubernetes.check_resources_keep_server_none(
+                resources)
+
+
+class _CredentialsChosen(Exception):
+    pass
+
+
+class TestNoKubeconfigForATaskNone:
+    """The credential upload follows the same rule as the pod's identity."""
+
+    def _kubeconfig_uploaded(self,
+                             task_config=None,
+                             cluster_name='c-1',
+                             kubernetes_identity=None):
+        to_provision = mock.MagicMock()
+        to_provision.cloud = _K8S
+        to_provision.kubernetes_identity = kubernetes_identity
+        to_provision.region = _CTX
+        to_provision.cluster_config_overrides = task_config or {}
+        to_provision.make_deploy_variables.return_value = {}
+        excluded = []
+
+        def capture(excluded_clouds):
+            excluded.append(excluded_clouds)
+            raise _CredentialsChosen()
+
+        with mock.patch('sky.check.get_cloud_credential_file_mounts',
+                        side_effect=capture), \
+                pytest.raises(_CredentialsChosen):
+            backend_utils.write_cluster_config(
+                to_provision=to_provision,
+                num_nodes=1,
+                cluster_config_template='kubernetes-ray.yml.j2',
+                cluster_name=cluster_name,
+                local_wheel_path=mock.MagicMock(),
+                wheel_hash='h',
+                region=clouds.Region(name=_CTX),
+                zones=None,
+                dryrun=True)
+        return clouds.Kubernetes() not in excluded[0]
+
+    def test_baseline_per_context_local_credentials_uploads(
+            self, server_config):
+        server_config(_per_context('LOCAL_CREDENTIALS'))
+        assert self._kubeconfig_uploaded()
+
+    def test_a_task_none_uploads_nothing(self, server_config):
+        server_config(_per_context('LOCAL_CREDENTIALS'))
+        assert not self._kubeconfig_uploaded(_TASK_NONE)
+
+    def test_an_in_process_identity_keeps_its_kubeconfig(self, server_config):
+        server_config(_per_context('LOCAL_CREDENTIALS'))
+        assert self._kubeconfig_uploaded(_TASK_NONE,
+                                         kubernetes_identity='fixed-sa')
+
+    def test_a_controller_keeps_its_kubeconfig(self, server_config):
+        server_config(_per_context('LOCAL_CREDENTIALS'))
+        assert self._kubeconfig_uploaded(
+            _TASK_NONE, cluster_name='sky-jobs-controller-abcd1234')
+
+
+class TestPodSpecIdentityConflicts:
+
+    def test_lists_every_kind(self):
+        spec = {
+            'serviceAccountName': 'a',
+            'serviceAccount': 'a',
+            'automountServiceAccountToken': True,
+            'volumes': [_TOKEN_VOLUME, {
+                'name': 'data',
+                'emptyDir': {}
+            }],
+        }
+        assert kubernetes_utils.pod_spec_identity_conflicts(spec) == [
+            'pod_config.spec.serviceAccountName',
+            'pod_config.spec.serviceAccount',
+            'pod_config.spec.automountServiceAccountToken',
+            'pod_config.spec.volumes[tok] (projected serviceAccountToken)',
+        ]
+
+    def test_none_for_a_plain_spec(self):
+        assert kubernetes_utils.pod_spec_identity_conflicts({
+            'automountServiceAccountToken': False,
+            'volumes': [{
+                'name': 'data',
+                'emptyDir': {}
+            }],
+        }) == []
 
 
 class TestSchema:
