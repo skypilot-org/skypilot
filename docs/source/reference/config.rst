@@ -3336,7 +3336,8 @@ RBAC configuration (optional).
 ``rbac.default_role``
 ~~~~~~~~~~~~~~~~~~~~~
 
-Default role for users (optional).  Either ``admin`` or ``user``.
+Default role for users (optional).  One of ``admin``, ``user``, or ``viewer``
+(read-only, see :ref:`SkyPilot RBAC <skypilot-rbac>`).
 
 If not specified, the default role is ``admin``.
 

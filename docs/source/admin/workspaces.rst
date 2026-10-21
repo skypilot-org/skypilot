@@ -401,14 +401,15 @@ service account by its token name, just like a human user:
 
 .. important::
 
-   A newly created service account is assigned the **default role**, which is
-   ``admin`` unless you set ``rbac.default_role: user``. **Admins can access
-   every workspace**, so adding an admin service account to ``allowed_users``
-   has no scoping effect.
+   A newly created service account gets the role picked when creating it,
+   which defaults to ``rbac.default_role`` (``admin`` if not set). **Admins
+   can access every workspace**, so adding an admin service account to
+   ``allowed_users`` has no scoping effect.
 
    To restrict a service account to specific workspaces, first assign it the
-   ``user`` role (in the dashboard's **Users** page under the service accounts
-   tab, or via the ``/service-account-tokens/update-role`` API), then add it to
+   ``user`` or ``viewer`` role (in the dashboard's **Users** page under the
+   service accounts tab, or via the ``/service-account-tokens/update-role``
+   API), then add it to
    the ``allowed_users`` of the workspaces it should reach.
 
 Who appears in the user list
