@@ -477,6 +477,7 @@ export function NewWorkspace() {
                 value={workspaceName}
                 onChange={(e) => setWorkspaceName(e.target.value)}
                 placeholder="Enter workspace name"
+                className="placeholder:text-gray-500"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') goNext();
