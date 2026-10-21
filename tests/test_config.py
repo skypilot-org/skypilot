@@ -1818,6 +1818,9 @@ def test_get_effective_kai_value(monkeypatch, tmp_path) -> None:
                         contextA:
                             kai:
                                 queue: workspaceA-contextA-queue
+            workspaceB:
+                kubernetes:
+                    namespace: workspaceB-namespace
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'kai.yaml')
@@ -1845,6 +1848,19 @@ def test_get_effective_kai_value(monkeypatch, tmp_path) -> None:
         region='contextA',
         workspace='workspaceA',
         override_configs=task_queue) == 'workspaceA-contextA-queue'
+    # A global context's queue beats the task's only while the task's
+    # workspace is not listed: a listed one's scope, which the task overrides,
+    # is resolved before the global config.
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='default',
+        override_configs=task_queue) == 'contextA-queue'
+    assert skypilot_config.get_effective_kai_value(
+        'queue',
+        region='contextA',
+        workspace='workspaceB',
+        override_configs=task_queue) == 'task-queue'
 
 
 def test_get_effective_queue_name_workspace_override(monkeypatch,
@@ -2305,6 +2321,48 @@ class TestRemoveQueueNameFromConfig:
                 ]:
                     assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
                         f'Expected {keys} to be removed')
+
+    def test_removes_kai_config(self):
+        """Controllers stay out of KAI queues, at every scope."""
+        kai = {'queue': 'q', 'preemptibility': 'preemptible'}
+        cfg = _make_config({
+            'kubernetes': {
+                'kai': kai,
+                'context_configs': {
+                    'ctx1': {
+                        'kai': kai,
+                        'namespace': 'ns1'
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kai': kai,
+                        'context_configs': {
+                            'ctx2': {
+                                'kai': kai
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                for keys in [
+                    ('kubernetes', 'kai'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kai'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kai'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'kai'),
+                ]:
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
+                assert current.get_nested(
+                    ('kubernetes', 'context_configs', 'ctx1', 'namespace'),
+                    None) == 'ns1'
 
     def test_noop_when_no_queue_name_set(self):
         """No error when queue name keys are absent."""

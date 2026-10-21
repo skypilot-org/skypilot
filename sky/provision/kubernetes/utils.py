@@ -2380,8 +2380,8 @@ _POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
 _POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
 
 
-def _events_since(events: List[Any],
-                  since: Optional[datetime.datetime]) -> List[Any]:
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
     """The events that can be evidence about the pod that exists now.
 
     Events the API server left without a usable timestamp are kept: not
@@ -2420,7 +2420,7 @@ def reason_from_pod_events(
     """
     best_rank = 0
     best_reason: Optional[str] = None
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
         if ranked is None:
             continue
@@ -2443,7 +2443,7 @@ def last_pod_event_context(
     for what they are -- the last thing said about it -- and the caller still
     says plainly that no cause could be derived.
     """
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         # Events arrive newest-first.
         if (event.type == 'Warning' or
                 event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
@@ -2459,6 +2459,22 @@ def _with_failure_hint(message: str, reason: str) -> str:
     if hint is not None:
         message += f'\nHint: {hint}'
     return message
+
+
+def _kai_eviction_reason(context: Optional[str], namespace: str, pod_name: str,
+                         pod: Optional[Any]) -> Optional[str]:
+    """Why KAI evicted the pod, or None; ``pod`` is its object, if it exists."""
+    # In-function import: kai imports this module.
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import kai
+    if pod is None:
+        return kai.eviction_reason(context, namespace, pod_name, since=None)
+    if kai.POD_GROUP_ANNOTATION not in (pod.metadata.annotations or {}):
+        return None
+    return kai.eviction_reason(context,
+                               namespace,
+                               pod_name,
+                               since=pod.metadata.creation_timestamp)
 
 
 def _diagnose_deleted_pod(context: Optional[str], namespace: str,
@@ -2481,6 +2497,8 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     except Exception:  # pylint: disable=broad-except
         return None
     reason = reason_from_pod_events(events)
+    if reason is None:
+        reason = _kai_eviction_reason(context, namespace, pod_name, pod=None)
     if reason is None:
         # A pod that is merely absent is not news: every `sky down` leaves
         # one, and the caller asks about all of them.
@@ -2557,6 +2575,11 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
         return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
+    # Checked first: a pod KAI is deleting may not show as terminated yet, and
+    # once it does, the exit status KAI caused reads as the workload failing.
+    eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
+    if eviction is not None:
+        return f'Pod {pod_name} terminated: {eviction}.'
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)

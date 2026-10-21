@@ -21,6 +21,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1068,13 +1069,15 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
-def _wait_for_pods_to_schedule(namespace,
-                               context,
-                               new_nodes,
-                               timeout: int,
-                               cluster_name: str,
-                               create_pods_start: datetime.datetime,
-                               admission_timeout: Optional[int] = None):
+def _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        new_nodes,
+        timeout: int,
+        cluster_name: str,
+        create_pods_start: datetime.datetime,
+        admission_timeout: Optional[int] = None,
+        scheduling_callback: Optional[kai.SchedulingCallback] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -1292,6 +1295,9 @@ def _wait_for_pods_to_schedule(namespace,
                     LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
+            if scheduling_callback is not None:
+                scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                    cluster_name)
             last_gated_pod_names = gated_pod_names
             # Keep calling the per-poll spinner update while gated, as the
             # ungated loop below does. The message set above is written
@@ -1431,6 +1437,11 @@ def _wait_for_pods_to_schedule(namespace,
                     namespace=namespace,
                     cluster_name_on_cloud=cluster_name_on_cloud,
                     cluster_name=cluster_name)
+
+        # Last, so parking or failing here cannot hide the volume status.
+        if scheduling_callback is not None:
+            scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                cluster_name)
 
         iteration += 1
         time.sleep(1)
@@ -2328,6 +2339,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    uses_kai = kai.uses_kai(provider_config)
+    if uses_kai:
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2755,7 +2771,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         provision_timeout,
         cluster_name,
         create_pods_start,
-        admission_timeout=provider_config.get('queue_admission_timeout'))
+        admission_timeout=provider_config.get('queue_admission_timeout'),
+        scheduling_callback=kai.queued_launch_check() if uses_kai else None)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -3084,6 +3101,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -4765,6 +4784,11 @@ def query_instances(
                 # creation: a relaunch under the same cluster name must not
                 # be told why the pod it replaced was deleted.
                 since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:

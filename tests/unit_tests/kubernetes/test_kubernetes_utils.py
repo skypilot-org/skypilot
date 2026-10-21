@@ -5206,12 +5206,14 @@ def _make_pod(*,
               container_statuses=None,
               reason=None,
               message=None):
-    return kubernetes.client.V1Pod(status=kubernetes.client.V1PodStatus(
-        phase=phase,
-        conditions=conditions,
-        container_statuses=container_statuses,
-        reason=reason,
-        message=message))
+    return kubernetes.client.V1Pod(
+        metadata=kubernetes.client.V1ObjectMeta(name='mypod'),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase,
+            conditions=conditions,
+            container_statuses=container_statuses,
+            reason=reason,
+            message=message))
 
 
 def test_get_condensed_pod_reason_oomkilled():
