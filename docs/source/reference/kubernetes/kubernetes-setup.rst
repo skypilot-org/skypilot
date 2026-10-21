@@ -175,7 +175,7 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
 Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
+If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with (on an API server with user management, only admins can run it):
 
 .. code-block:: console
 
