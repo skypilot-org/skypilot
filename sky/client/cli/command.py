@@ -179,6 +179,10 @@ def _write_ssh_config_for_cluster(handle: Any, credentials: Dict[str, Any],
     have everything we need (handle + credentials) without an extra
     ``/status`` round-trip.
     """
+    if not handle.provision_runtime_metadata.ssh_available:
+        cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+        return
+
     ips = handle.cached_external_ips
     if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
         # Replace the proxy command to proxy through the SkyPilot API
