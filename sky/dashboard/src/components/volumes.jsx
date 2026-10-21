@@ -622,16 +622,29 @@ export function VolumesTable({
   const pluginColumns = useTableColumns('volumes');
 
   // A plugin column whose value is not a field on the volume sorts by the
-  // value it computes instead.
-  const sortAccessor =
-    pluginColumns.find(
-      (col) => col.header.sortKey === sortConfig.key && col.header.sortValue
-    )?.header.sortValue || sortConfig.key;
+  // value it computes instead. Matched by the clicked column, not by key, so a
+  // plugin reusing a built-in key does not take over the built-in column.
+  const sortColumn = sortConfig.columnId
+    ? pluginColumns.find((col) => col.id === sortConfig.columnId)
+    : undefined;
+  const sortAccessor = sortColumn?.header.sortValue || sortConfig.key;
+  const subscribeSortValue = sortColumn?.header.sortValueSubscribe;
+
+  // The values a plugin's sortValue reads can change without the volumes
+  // changing; re-sort when the plugin says so.
+  const [sortValueVersion, setSortValueVersion] = useState(0);
+  useEffect(() => {
+    if (!subscribeSortValue) return undefined;
+    return subscribeSortValue(() => setSortValueVersion((v) => v + 1));
+  }, [subscribeSortValue]);
 
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
     return sortData(filteredData, sortAccessor, sortConfig.direction);
-  }, [filteredData, sortAccessor, sortConfig.direction]);
+    // sortValueVersion is not read here; it is a dependency so the rows are
+    // re-sorted when the plugin's values change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredData, sortAccessor, sortConfig.direction, sortValueVersion]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -670,16 +683,21 @@ export function VolumesTable({
     setCurrentPage(1);
   }, [data.length, filters]);
 
-  const requestSort = (key) => {
+  // columnId names the plugin column that was clicked; built-in headers pass
+  // none.
+  const isSortedBy = (key, columnId) =>
+    sortConfig.key === key && sortConfig.columnId === columnId;
+
+  const requestSort = (key, columnId) => {
     let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+    if (isSortedBy(key, columnId) && sortConfig.direction === 'ascending') {
       direction = 'descending';
     }
-    setSortConfig({ key, direction });
+    setSortConfig({ key, columnId, direction });
   };
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
+  const getSortDirection = (key, columnId) => {
+    if (isSortedBy(key, columnId)) {
       return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
     }
     return '';
@@ -909,12 +927,14 @@ export function VolumesTable({
           className={className}
           onClick={
             col.header.sortKey
-              ? () => requestSort(col.header.sortKey)
+              ? () => requestSort(col.header.sortKey, col.id)
               : undefined
           }
         >
           {col.header.label}
-          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          {col.header.sortKey
+            ? getSortDirection(col.header.sortKey, col.id)
+            : ''}
         </TableHead>
       );
     },

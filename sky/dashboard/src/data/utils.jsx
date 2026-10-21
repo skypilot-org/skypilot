@@ -21,22 +21,26 @@ export function sortData(data, accessor, direction) {
   if (accessor === null) {
     return data;
   }
-  // A function accessor computes the value to sort a row by; a string one
-  // names the row's field.
-  const computed = typeof accessor === 'function';
-  const valueOf = computed ? accessor : (row) => row[accessor];
-  return [...data].sort((a, b) => {
-    const valueA = valueOf(a);
-    const valueB = valueOf(b);
-    // A computed value of null means the row has none: it goes last in either
-    // direction, so a sparse column does not open on a page of blanks.
-    if (computed && (valueA == null || valueB == null)) {
-      return (valueA == null) - (valueB == null);
-    }
+  const compare = (valueA, valueB) => {
     if (valueA < valueB) return direction === 'ascending' ? -1 : 1;
     if (valueA > valueB) return direction === 'ascending' ? 1 : -1;
     return 0;
-  });
+  };
+  if (typeof accessor !== 'function') {
+    return [...data].sort((a, b) => compare(a[accessor], b[accessor]));
+  }
+  // A function accessor computes the value to sort a row by: once per row, as
+  // it may be a lookup. A value of null means the row has none: it goes last
+  // in either direction, so a sparse column does not open on a page of blanks.
+  return data
+    .map((row) => ({ row, value: accessor(row) }))
+    .sort((a, b) => {
+      if (a.value == null || b.value == null) {
+        return (a.value == null) - (b.value == null);
+      }
+      return compare(a.value, b.value);
+    })
+    .map(({ row }) => row);
 }
 
 /**

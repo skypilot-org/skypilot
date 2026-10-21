@@ -19,7 +19,13 @@ jest.mock('@/plugins/PluginProvider', () => ({
   useTableColumns: jest.fn(() => []),
 }));
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
 import { useTableColumns } from '@/plugins/PluginProvider';
 import { VolumesTable } from '@/components/volumes';
@@ -329,5 +335,68 @@ describe('VolumesTable sorting by a plugin column', () => {
 
     fireEvent.click(screen.getByText('Mount Path'));
     expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+  });
+
+  it('re-sorts when the plugin reports that its values changed', async () => {
+    // The plugin's data changes while the volumes do not.
+    const paths = { 'vol-a': '/mnt/b', 'vol-b': '/mnt/c' };
+    let notify = () => {};
+    const columns = [
+      mountColumn({
+        sortKey: 'mount_path',
+        sortValue: (v) => paths[v.name] ?? null,
+        sortValueSubscribe: (onChange) => {
+          notify = onChange;
+          return () => {
+            notify = () => {};
+          };
+        },
+      }),
+    ];
+    useTableColumns.mockImplementation(() => columns);
+    const { container } = await renderTable([volume('vol-a'), volume('vol-b')]);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+
+    paths['vol-b'] = '/mnt/a';
+    act(() => notify());
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+  });
+
+  it('leaves a built-in column to its own field when a plugin reuses its key', async () => {
+    const pluginSizes = { 'vol-a': 1, 'vol-b': 9 };
+    const columns = [
+      mountColumn({ sortKey: 'size', sortValue: (v) => pluginSizes[v.name] }),
+    ];
+    useTableColumns.mockImplementation(() => columns);
+    const { container } = await renderTable([
+      { ...volume('vol-a'), size: 5 },
+      { ...volume('vol-b'), size: 2 },
+    ]);
+
+    // The built-in Size header sorts by the volume's size...
+    fireEvent.click(screen.getByText('Size'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+    expect(headers(container)).toContain('Size ↑');
+    expect(headers(container)).toContain('Mount Path');
+
+    // ...and the plugin's header by its own value, with the arrow on it alone.
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+    expect(headers(container)).toContain('Mount Path ↑');
+    expect(headers(container)).toContain('Size');
+  });
+
+  it('computes the value once per row, not once per comparison', async () => {
+    const sortValue = jest.fn((v) => v.name);
+    const columns = [mountColumn({ sortKey: 'mount_path', sortValue })];
+    useTableColumns.mockImplementation(() => columns);
+    const names = ['vol-e', 'vol-d', 'vol-c', 'vol-b', 'vol-a'];
+    await renderTable(names.map((n) => volume(n)));
+
+    sortValue.mockClear();
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(sortValue).toHaveBeenCalledTimes(names.length);
   });
 });

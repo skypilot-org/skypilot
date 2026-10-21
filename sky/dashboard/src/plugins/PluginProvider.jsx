@@ -490,6 +490,13 @@ function normalizeTableColumn(config) {
         typeof config.header.sortValue === 'function'
           ? config.header.sortValue
           : undefined,
+      // (onChange) => unsubscribe. For a sortValue that reads data the plugin
+      // keeps itself: call onChange when that data changes, and the table
+      // re-sorts.
+      sortValueSubscribe:
+        typeof config.header.sortValueSubscribe === 'function'
+          ? config.header.sortValueSubscribe
+          : undefined,
       className: config.header.className
         ? String(config.header.className)
         : undefined,
