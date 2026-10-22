@@ -409,6 +409,12 @@ ingress:
   # @schema type: [boolean]
   unified: false
   enabled: true
+  # Controller type to use for routing: "ingress" (default) or "gateway" (Kubernetes Gateway API HTTPRoute)
+  # @schema type: [string]; enum: [ingress, gateway]
+  controllerType: "ingress"
+  # Name of the Gateway resource to attach HTTPRoute to when controllerType is "gateway"
+  # @schema type: [string]
+  gatewayName: "skypilot-gateway"
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # Example:
   # WEB_USERNAME=skypilot
