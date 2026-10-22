@@ -1613,6 +1613,11 @@ def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
 def test_client_cannot_redirect_db_pool(stub_override_request_env_deps,
                                         monkeypatch, client_env):
     """A client-supplied pool override must not re-point the server's DB."""
+    # The overlay seeds the caller's role, which would open the state DB; the
+    # test only cares about how the pool env resolves, so stub that out and it
+    # stands alone regardless of whether an engine was primed earlier.
+    monkeypatch.setattr(executor, '_seed_role_if_missing',
+                        lambda *args, **kwargs: None)
     server_uri = 'postgresql://user:secret@db.internal:5432/sky'
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, server_uri)
