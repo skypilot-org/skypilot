@@ -23,7 +23,6 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -60,7 +59,6 @@ from sky.utils import ux_utils
 from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
-from sky.utils.plugin_extensions import LogDeliverySource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -203,6 +201,13 @@ _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 # Each cancel is a cluster teardown, so as many as a process launches at once.
 _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 
+# Attempts at deleting a finished job's ephemeral storage, and the first wait
+# between them (it grows ~1.6x per attempt, with jitter: about 15, 24 and 38 s).
+# A failed delete marks the job FAILED_CONTROLLER, while the usual causes, a
+# credential fetch or network call timing out, clear within seconds.
+_STORAGE_TEARDOWN_ATTEMPTS = 4
+_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
+
 
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
@@ -267,13 +272,14 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
             }
         }
     }
+    resource_type = type(task.resources)
     new_resources_list: List['sky.Resources'] = [
         original_resource.copy(_cluster_config_overrides=annotations_override)
         for original_resource in task.resources
     ]
 
     # Set the new resources back to the task
-    task.set_resources(new_resources_list)
+    task.set_resources(resource_type(new_resources_list))
 
 
 def _task_uses_kubernetes(task: 'sky.Task') -> bool:
@@ -655,20 +661,16 @@ class JobController:
         were not delivered; we then keep the local copy instead of skipping
         it.
         """
-        if (logs.is_logging_agent_configured() and
-                logs.get_log_reader() is not None):
-            undelivered_reason = None
-            if handle is not None:
-                undelivered_reason = LogDeliverySource.undelivered_reason(
-                    cluster_name=handle.cluster_name,
-                    cluster_name_on_cloud=handle.cluster_name_on_cloud)
-            if undelivered_reason is None:
-                logger.info(
-                    f'Logging agent and log reader are configured for job '
-                    f'{self._job_id}; logs are forwarded to the external store '
-                    'and read back on demand. Skipping downloading and '
-                    'streaming the logs to the controller.')
-                return
+        in_store, undelivered_reason = managed_job_utils.logs_in_external_store(
+            handle)
+        if in_store:
+            logger.info(
+                f'Logging agent and log reader are configured for job '
+                f'{self._job_id}; logs are forwarded to the external store '
+                'and read back on demand. Skipping downloading and '
+                'streaming the logs to the controller.')
+            return
+        if undelivered_reason is not None:
             logger.warning(
                 f'Logs of job {self._job_id} are not confirmed to have reached '
                 f'the external log store ({undelivered_reason}); keeping a '
@@ -862,6 +864,18 @@ class JobController:
             logger.debug(f'Failed to retrieve job exit codes: {e}')
             return None
 
+    async def _pool_task_never_got_worker(
+            self, task_status: Optional['managed_job_state.ManagedJobStatus']
+    ) -> bool:
+        """Whether a resumed pool task stopped before any worker was picked."""
+        if self._pool is None or task_status not in (
+                managed_job_state.ManagedJobStatus.STARTING,
+                managed_job_state.ManagedJobStatus.RECOVERING):
+            return False
+        cluster_name, _ = await managed_job_state.get_pool_submit_info_async(
+            self._job_id)
+        return cluster_name is None
+
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -1012,6 +1026,15 @@ class JobController:
             logger.info(f'Submitted managed job {self._job_id} '
                         f'(task: {task_id}, name: {task.name!r}); '
                         f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+        elif await self._pool_task_never_got_worker(task_status):
+            # Nothing reaches a pool worker before one is picked for the job,
+            # so launch the task as a fresh one instead of recovering it.
+            logger.info(f'Task {task_id} was waiting for a pool worker; '
+                        'launching it again.')
+            await managed_job_state.set_restarting_async(self._job_id,
+                                                         task_id,
+                                                         recovering=False)
+            is_resume = False
 
         logger.info('Started monitoring.')
 
@@ -1054,7 +1077,8 @@ class JobController:
                 job_id=self._job_id, task_id=task_id))
             logger.debug(f'Status for job {self._job_id}, task {task_id}:'
                          f'{status}')
-            if status == managed_job_state.ManagedJobStatus.CANCELLED:
+            if status in (managed_job_state.ManagedJobStatus.CANCELLING,
+                          managed_job_state.ManagedJobStatus.CANCELLED):
                 logger.info(f'Job {self._job_id}, task {task_id} has '
                             'been quickly cancelled.')
                 raise asyncio.CancelledError()
@@ -3865,7 +3889,12 @@ class ControllerManager:
                     'credentials expired/changed, or network connectivity '
                     'issues.')
             try:
-                backend.teardown_ephemeral_storage(task)
+                # Deleting again is safe: a store already removed is skipped.
+                common_utils.retry(
+                    backend.teardown_ephemeral_storage,
+                    max_retries=_STORAGE_TEARDOWN_ATTEMPTS,
+                    initial_backoff=_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS)(
+                        task)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(f'Failed to teardown ephemeral storage: {e}')

@@ -1106,10 +1106,17 @@ sky.api_cancel(request_ids: Optional[Union[server_common.RequestId[T], List[serv
 
 Aborts a request or all requests.
 
+With neither request_ids nor all_users, aborts all of the caller's own
+requests.
+
 **Args:**
     request_ids: The request ID(s) to abort. Can be a single string or a
-        list of strings.
-    all_users: Whether to abort all requests from all users.
+        list of strings. On a server with per-user auth, an admin can
+        abort any request by id and other users only their own; on a
+        server without it, anyone can abort any request by id.
+    all_users: Whether to abort all requests from all users. On a server
+        with per-user auth, a non-admin aborts only their own. Cannot be
+        combined with request_ids.
     silent: Whether to suppress the output.
 
 **Returns:**
@@ -1119,8 +1126,7 @@ Aborts a request or all requests.
     A list of request IDs that were cancelled.
 
 **Raises:**
-    click.BadParameter: If no request ID is specified and not all or
-        all_users is not set.
+    ValueError: If both request_ids and all_users are given.
 
 ### `sky.api_server_logs`
 

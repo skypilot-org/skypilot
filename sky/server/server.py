@@ -122,6 +122,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import exec_auth_cache
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import constants as workspace_constants
@@ -1792,7 +1793,8 @@ async def list_accelerator_counts(
 
 
 @app.post('/validate')
-async def validate(validate_body: payloads.ValidateBody) -> None:
+async def validate(validate_body: payloads.ValidateBody,
+                   request: fastapi.Request) -> None:
     """Validates the user's DAG."""
     # TODO: validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
@@ -1805,32 +1807,44 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
-    ctx = context.get()
-    assert ctx is not None
-    # TODO(aylei): generalize this to all requests without a db record.
-    ctx.override_envs(validate_body.env_vars)
+    # The body is stamped as for a scheduled request, so validation runs as the
+    # same user, in the same workspace.
+    try:
+        executor.stamp_request_body(validate_body, request.state.auth_user)
+    except exceptions.InvalidUserIdError as e:
+        # Serialize it as the except block below does, so the client
+        # deserializes it to the same error rather than a plain string.
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
 
-    def validate_dag(dag: dag_utils.dag_lib.Dag):
+    def validate_dag():
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        with admin_policy_utils.apply_and_use_config_in_current_request(
-                dag,
-                request_name=request_names.AdminPolicyRequestName.VALIDATE,
-                request_options=validate_body.get_request_options()) as dag:
-            dag.resolve_and_validate_volumes()
-            # Skip validating workdir and file_mounts, as those need to be
-            # validated after the files are uploaded to the SkyPilot API server
-            # with `upload_mounts_to_api_server`.
-            dag.validate(skip_file_mounts=True, skip_workdir=True)
+        # Apply the client's env and config and resolve the active workspace
+        # as for a scheduled request. Load the DAG inside, so that nothing
+        # reads the client's env vars before they are sanitized.
+        with executor.override_request_env_and_config(
+                validate_body, request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value):
+            dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
+            with admin_policy_utils.apply_and_use_config_in_current_request(
+                    dag,
+                    request_name=request_names.AdminPolicyRequestName.VALIDATE,
+                    request_options=validate_body.get_request_options()) as dag:
+                dag.resolve_and_validate_volumes()
+                # Skip validating workdir and file_mounts, as those need to be
+                # validated after the files are uploaded to the SkyPilot API
+                # server with `upload_mounts_to_api_server`.
+                dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
-        dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await asyncio.to_thread(validate_dag, dag)
+        await asyncio.to_thread(validate_dag)
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -4549,6 +4563,10 @@ if __name__ == '__main__':
     # is exempt (its legitimate sources are arbitrary local paths). An operator
     # may override this by exporting the env var explicitly before startup.
     common.init_mount_containment_enforced(cmd_args.deploy, cmd_args.host)
+
+    # Changes PATH, so it must run before any worker is spawned and before
+    # capture_clean_server_env().
+    exec_auth_cache.install()
 
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will

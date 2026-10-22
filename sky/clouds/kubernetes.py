@@ -32,6 +32,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
@@ -266,8 +267,8 @@ class Kubernetes(clouds.Cloud):
     # same contract. Do not change this string; instead repoint the same tag to
     # the new image (a new concrete datetag) in the catalog, so existing servers
     # pick up the update.
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v2'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v2'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -288,6 +289,24 @@ class Kubernetes(clouds.Cloud):
         return _match_remote_identity(value, context)
 
     @classmethod
+    def task_requests_none(
+            cls, context: Optional[str],
+            cluster_config_overrides: Optional[Dict[str, Any]]) -> bool:
+        """Whether the task's own config asks for `remote_identity: NONE`.
+
+        It beats every config layer, per-context values included: it only
+        takes credentials away, so no layer has a reason to keep them.
+        """
+        value = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides or {},
+            cloud='kubernetes',
+            keys=('remote_identity',),
+            region=context,
+            default_value=None)
+        return (_match_remote_identity(
+            value, context) == schemas.RemoteIdentityOptions.NONE.value)
+
+    @classmethod
     def remote_identity_is_none(cls, context: Optional[str],
                                 resources: 'resources_lib.Resources') -> bool:
         """Whether pods launched for `resources` in `context` get no token."""
@@ -297,7 +316,9 @@ class Kubernetes(clouds.Cloud):
         if isinstance(resources.remote_identity_none_at_launch, bool):
             return resources.remote_identity_none_at_launch
         none = schemas.RemoteIdentityOptions.NONE.value
-        if cls._server_remote_identity(context) == none:
+        if (cls._server_remote_identity(context) == none or
+                cls.task_requests_none(context,
+                                       resources.cluster_config_overrides)):
             return True
         merged = skypilot_config.get_effective_workspace_region_config(
             cloud='kubernetes',
@@ -385,14 +406,17 @@ class Kubernetes(clouds.Cloud):
         for context in contexts:
             if cls._server_remote_identity(context) != none:
                 continue
-            requested = _match_remote_identity(
-                skypilot_config.get_effective_workspace_region_config(
-                    cloud='kubernetes',
-                    region=context,
-                    keys=('remote_identity',),
-                    default_value=schemas.get_default_remote_identity(
-                        'kubernetes'),
-                    override_configs=overrides), context)
+            if cls.task_requests_none(context, overrides):
+                requested: Optional[str] = none
+            else:
+                requested = _match_remote_identity(
+                    skypilot_config.get_effective_workspace_region_config(
+                        cloud='kubernetes',
+                        region=context,
+                        keys=('remote_identity',),
+                        default_value=schemas.get_default_remote_identity(
+                            'kubernetes'),
+                        override_configs=overrides), context)
             if requested is not None:
                 cls._refuse_undoing_none(context, requested, overrides)
 
@@ -409,19 +433,7 @@ class Kubernetes(clouds.Cloud):
                 f'{requested}` from your config or task cannot override it.')
         spec = (kubernetes_utils.resolve_effective_pod_config(
             cluster_config_overrides, cls(), context).get('spec') or {})
-        conflicts = [
-            f'pod_config.spec.{key}' for key in ('serviceAccountName',
-                                                 'serviceAccount')
-            if key in spec
-        ]
-        if spec.get('automountServiceAccountToken') is True:
-            conflicts.append('pod_config.spec.automountServiceAccountToken')
-        for volume in spec.get('volumes') or []:
-            sources = (volume.get('projected') or {}).get('sources') or []
-            if any('serviceAccountToken' in src for src in sources):
-                conflicts.append(
-                    f'pod_config.spec.volumes[{volume.get("name")}]'
-                    ' (projected serviceAccountToken)')
+        conflicts = kubernetes_utils.pod_spec_identity_conflicts(spec)
         if conflicts:
             raise exceptions.InvalidCloudConfigs(
                 f'{prefix}, so pods get no API credentials, but '
@@ -1017,17 +1029,21 @@ class Kubernetes(clouds.Cloud):
             default_value=schemas.get_default_remote_identity('kubernetes'),
             override_configs=resources.cluster_config_overrides)
 
-        k8s_service_account_name = _match_remote_identity(
-            remote_identity, context)
-        if k8s_service_account_name is None:
-            err_msg = (f'Context {context!r} not found in '
-                       'remote identities from config.yaml')
-            raise ValueError(err_msg)
-
         lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
         no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
         none = schemas.RemoteIdentityOptions.NONE.value
+
+        if self.task_requests_none(context, resources.cluster_config_overrides):
+            # A per-context value would otherwise beat the task's NONE.
+            k8s_service_account_name: Optional[str] = none
+        else:
+            k8s_service_account_name = _match_remote_identity(
+                remote_identity, context)
+        if k8s_service_account_name is None:
+            err_msg = (f'Context {context!r} not found in '
+                       'remote identities from config.yaml')
+            raise ValueError(err_msg)
 
         # A controller cluster provisions other clusters, so its pod needs
         # cluster-scoped permissions no pod running user code should hold.
@@ -1423,9 +1439,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
-            'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
-            'ray_patches_cmd': instance_setup.ray_patches_cmd(
-                constants.SKY_REMOTE_RAY_VERSION),
+            # 'ray_installation_commands' and 'ray_patches_cmd' are filled in by
+            # backend_utils.write_cluster_config: both depend on the Ray version
+            # this particular cluster is pinned to, which is not known here.
             'ray_head_start_command': instance_setup.ray_head_start_command(
                 custom_resources, custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -1453,6 +1469,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
             'k8s_context': context,
+            # Uncached: a context can be re-pointed without a kubeconfig change.
+            'k8s_cluster_uid':
+                (None if dryrun else kubernetes_utils.get_cluster_uid(
+                    context, use_cache=False)),
             'k8s_namespace': namespace,
             'k8s_host_network': k8s_host_network,
             'k8s_rdma_host_device_access': k8s_rdma_host_device_access,

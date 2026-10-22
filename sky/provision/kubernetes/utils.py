@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
@@ -3837,6 +3838,74 @@ def get_all_kube_context_names() -> List[str]:
     return context_names
 
 
+# kube-system exists in every cluster and is never recreated, so its UID
+# identifies the cluster a context points at, whatever the credentials or the
+# route (direct, proxy, tunnel) used to reach it.
+CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+_CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
+_CLUSTER_UID_CACHE_TTL_SECONDS = 300
+_CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
+# context -> (kubeconfig fingerprint, uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
+                                              float]] = {}
+_cluster_uid_cache_lock = threading.Lock()
+
+
+def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
+    fingerprint: List[Tuple[Any, ...]] = []
+    for path in get_kubeconfig_paths():
+        if not path:
+            continue
+        try:
+            st = os.stat(path)
+            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            fingerprint.append((path, None))
+    return tuple(fingerprint)
+
+
+def read_cluster_uid(core, timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
+                                    _request_timeout=timeout)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def get_cluster_uid(context: Optional[str],
+                    use_cache: bool = True) -> Optional[str]:
+    """Returns the UID of the cluster `context` points at.
+
+    Returns None when kube-system cannot be read (e.g. no RBAC grant, the
+    cluster is unreachable). Results are cached per process until a file on
+    KUBECONFIG changes, since a rewritten kubeconfig may point `context` at
+    another cluster.
+    """
+    now = time.monotonic()
+    fingerprint = _kubeconfig_fingerprint()
+    if use_cache:
+        with _cluster_uid_cache_lock:
+            cached = _cluster_uid_cache.get(context)
+        if (cached is not None and cached[0] == fingerprint and
+                now < cached[2]):
+            return cached[1]
+    uid: Optional[str] = None
+    try:
+        # The in-cluster name, unlike None, never falls back to kubeconfig.
+        uid = read_cluster_uid(kubernetes.core_api(context),
+                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
+                     f'namespace UID of context {context!r}: {e}')
+    ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
+           if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
+    with _cluster_uid_cache_lock:
+        _cluster_uid_cache[context] = (fingerprint, uid, time.monotonic() + ttl)
+    return uid
+
+
 @annotations.lru_cache(scope='request')
 def get_kube_config_context_namespace(
         context_name: Optional[str] = None) -> str:
@@ -4503,6 +4572,26 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
+    """The settings in a ``pod_config`` spec that hand the pod an API identity.
+
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
+    whether NONE can apply share this one list.
+    """
+    conflicts = [
+        f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                             'serviceAccount') if key in spec
+    ]
+    if spec.get('automountServiceAccountToken') is True:
+        conflicts.append('pod_config.spec.automountServiceAccountToken')
+    for volume in spec.get('volumes') or []:
+        sources = (volume.get('projected') or {}).get('sources') or []
+        if any('serviceAccountToken' in src for src in sources):
+            conflicts.append(f'pod_config.spec.volumes[{volume.get("name")}]'
+                             ' (projected serviceAccountToken)')
+    return conflicts
 
 
 def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
