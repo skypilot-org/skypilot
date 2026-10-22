@@ -439,6 +439,9 @@ class TestReadOnlyWorkspaceColdCache:
     cache is cold."""
 
     def test_validates_without_rewriting_the_cache(self, env):
+        # The unstored probe is cached process-wide; start cold.
+        # pylint: disable-next=protected-access
+        sky_check._unstored_enabled_cloud_names.cache_clear()
         env.configure({
             'default': _private(),
             'ws-ro': _private('alice', read_access='all'),

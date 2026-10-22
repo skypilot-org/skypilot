@@ -19,6 +19,13 @@ from sky.utils import annotations
 from sky.utils.db import db_utils
 
 
+@pytest.fixture(autouse=True)
+def _clear_unstored_probe_cache():
+    # Process-wide, unlike the request caches conftest clears.
+    # pylint: disable-next=protected-access
+    sky_check._unstored_enabled_cloud_names.cache_clear()
+
+
 def _fresh_db(tmp_path, monkeypatch):
     """Mirror the fixture used in test_global_user_state_check_results.py."""
     monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
@@ -476,7 +483,8 @@ def _probes(monkeypatch, enabled):
     return runs
 
 
-def test_reader_probe_runs_once_per_request_and_config(tmp_path, monkeypatch):
+def test_reader_probe_is_shared_per_config_until_it_expires(
+        tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _common_mocks(monkeypatch)
     _restrict_registry(monkeypatch, {'aws'})
@@ -509,10 +517,13 @@ def test_reader_probe_runs_once_per_request_and_config(tmp_path, monkeypatch):
             sky_check.get_cached_enabled_clouds_or_refresh(
                 CloudCapability.COMPUTE)
         assert len(runs) == 2
-        # A new request probes again.
+        # A later request shares it too, until it expires.
         monkeypatch.setattr('sky.workspaces.core.get_workspace_access_sets',
                             lambda: ({'default', 'ws-ro'}, {'default'}))
         annotations.clear_request_level_cache()
+        sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
+        assert len(runs) == 2
+        _age_request_caches(61)
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
         assert len(runs) == 3
 
@@ -575,7 +586,7 @@ def test_pinned_cloud_for_a_reader_is_judged_on_the_fresh_answer(
 
 
 def _age_request_caches(seconds):
-    """Moves request-scoped TTL caches forward, as a long request would."""
+    """Moves the probe caches forward, as a long request would."""
     # pylint: disable=protected-access
     for func in (sky_check._unstored_enabled_cloud_names,
                  sky_check._reader_rechecked):
@@ -661,6 +672,25 @@ def test_writer_reads_add_no_reader_recheck_entries(tmp_path, monkeypatch):
 
     # pylint: disable-next=protected-access
     assert sky_check._reader_rechecked() == {}
+
+
+def test_config_fingerprint_accepts_keys_of_mixed_types(monkeypatch):
+    """A valid config may key a mapping by both strings and numbers."""
+    labels = {'team': 'ml', 8080: 'web'}
+    monkeypatch.setattr(
+        'sky.skypilot_config.to_dict', lambda:
+        {'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'labels': labels
+                }
+            }
+        }})
+    # pylint: disable-next=protected-access
+    first = sky_check._config_fingerprint()
+    labels[8080] = 'api'
+    # pylint: disable-next=protected-access
+    assert sky_check._config_fingerprint() != first
 
 
 def test_reader_with_a_warm_cache_does_not_probe(tmp_path, monkeypatch):

@@ -612,22 +612,28 @@ def _clouds_from_names(names: Iterable[str]) -> List[sky_clouds.Cloud]:
 
 def _config_fingerprint() -> str:
     """A digest of the current request's merged config."""
-    return hashlib.sha256(
-        json.dumps(skypilot_config.to_dict(), sort_keys=True,
-                   default=str).encode()).hexdigest()
+    config = skypilot_config.to_dict()
+    try:
+        text = json.dumps(config, sort_keys=True, default=str)
+    except TypeError:
+        # Keys of mixed types (e.g. a label keyed by a number) cannot be sorted.
+        text = repr(config)
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
-@annotations.ttl_cache(scope='request', maxsize=64, ttl=60)
+# Process-wide rather than per request: `/validate` runs in the API server
+# process, which clears request caches at the start of every request.
+@annotations.ttl_cache(scope='global', maxsize=64, ttl=60)
 def _unstored_enabled_cloud_names(workspace: str,
                                   capability: sky_cloud.CloudCapability,
                                   config_fingerprint: str) -> Tuple[str, ...]:
     """Probes `workspace`'s enabled clouds without storing them.
 
-    Probed once per request rather than on every call. The probe uses the
-    server's credentials and the request's merged config (e.g. Kubernetes
-    allowed contexts), not the caller, so callers whose requests share a config
-    share one probe. A hit skips `check_capabilities`' access check: callers
-    must check that the caller can read `workspace` first.
+    Probed at most once a minute per config rather than on every call. The
+    probe uses the server's credentials and the request's merged config (e.g.
+    Kubernetes allowed contexts), not the caller, so requests that share a
+    config share one probe. A hit skips `check_capabilities`' access check:
+    callers must check that the caller can read `workspace` first.
     """
     del config_fingerprint
     logger.debug(f'Probing enabled clouds of workspace {workspace!r} without '
@@ -652,7 +658,9 @@ def _reader_rechecked(
 
     Keyed by workspace, capability and config fingerprint. `recheck_clouds`
     adds to it, so later reads in the same request see what the re-check found
-    without it being stored. Reads only look up, so they add no entries.
+    without it being stored. Reads only look up, so they add no entries. This
+    relies on the re-check and those reads running in one request in one
+    process under one config, as they do within `Optimizer.optimize`.
     """
     return {}
 
