@@ -585,16 +585,21 @@ def check_for_request(
                  workspace_ref=workspace_ref)
 
 
+def _caller_access_sets() -> Tuple[Set[str], Set[str]]:
+    """The workspaces the caller can read, and those it can write."""
+    # Import here to avoid circular import:
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.get_workspace_access_sets()
+
+
 def _caller_may_store(workspace: str) -> bool:
     """Whether a refresh by the caller may rewrite `workspace`'s cached rows.
 
     Only its writers may. A caller who can only read it (e.g. a non-member of a
     read-only workspace) gets fresh answers that are not stored.
     """
-    # Import here to avoid circular import:
-    # pylint: disable=import-outside-toplevel
-    from sky.workspaces import core as workspaces_core
-    _, writable = workspaces_core.get_workspace_access_sets()
+    _, writable = _caller_access_sets()
     return workspace in writable
 
 
@@ -613,17 +618,18 @@ def _config_fingerprint() -> str:
 
 
 @annotations.ttl_cache(scope='request', maxsize=64, ttl=60)
-def _unstored_enabled_cloud_names(user_id: str, workspace: str,
+def _unstored_enabled_cloud_names(workspace: str,
                                   capability: sky_cloud.CloudCapability,
                                   config_fingerprint: str) -> Tuple[str, ...]:
     """Probes `workspace`'s enabled clouds without storing them.
 
-    Probed once per request rather than on every call. The probe reads the
-    request's merged config (e.g. Kubernetes allowed contexts), and in the API
-    server process `/validate` requests share this cache, so the key carries a
-    fingerprint of that config as well as the caller.
+    Probed once per request rather than on every call. The probe uses the
+    server's credentials and the request's merged config (e.g. Kubernetes
+    allowed contexts), not the caller, so callers whose requests share a config
+    share one probe. A hit skips `check_capabilities`' access check: callers
+    must check that the caller can read `workspace` first.
     """
-    del user_id, config_fingerprint
+    del config_fingerprint
     logger.debug(f'Probing enabled clouds of workspace {workspace!r} without '
                  'storing them: the caller cannot write it.')
     try:
@@ -637,18 +643,18 @@ def _unstored_enabled_cloud_names(user_id: str, workspace: str,
         return ()
 
 
-# No TTL: this holds state, not a recomputable result, so it must last until
-# the request ends however long the optimizer runs.
-@annotations.lru_cache(scope='request', maxsize=64)
-def _reader_rechecked(user_id: str, workspace: str,
-                      capability: sky_cloud.CloudCapability) -> Set[str]:
-    """Clouds a non-storing caller's re-check found enabled in this request.
+# One plain dict per request: it holds state rather than a recomputable result,
+# so nothing may expire or evict an entry before the request ends.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _reader_rechecked(
+) -> Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]:
+    """Clouds that non-storing callers' re-checks found enabled in this request.
 
-    `recheck_clouds` adds to the returned set, so later reads in the same
-    request see what the re-check found without it being stored.
+    Keyed by workspace, capability and config fingerprint. `recheck_clouds`
+    adds to it, so later reads in the same request see what the re-check found
+    without it being stored. Reads only look up, so they add no entries.
     """
-    del user_id, workspace, capability
-    return set()
+    return {}
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -677,10 +683,10 @@ def get_cached_enabled_clouds_or_refresh(
 
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
         capability, active_workspace)
-    user_id = common_utils.get_current_user().id
     may_store: Optional[bool] = None
     if not cached_enabled_clouds or allowed_clouds_changed:
-        may_store = _caller_may_store(active_workspace)
+        readable, writable = _caller_access_sets()
+        may_store = active_workspace in writable
         if may_store:
             try:
                 check_capability(capability,
@@ -697,11 +703,19 @@ def get_cached_enabled_clouds_or_refresh(
             cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
                 capability, active_workspace)
         else:
+            if active_workspace not in readable:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _workspace_not_checkable_message(
+                            active_workspace, readable, writable))
             cached_enabled_clouds = _clouds_from_names(
-                _unstored_enabled_cloud_names(user_id,
-                                              active_workspace, capability,
+                _unstored_enabled_cloud_names(active_workspace, capability,
                                               _config_fingerprint()))
-    rechecked = _reader_rechecked(user_id, active_workspace, capability)
+    rechecked: Set[str] = set()
+    reader_rechecked = _reader_rechecked()
+    if reader_rechecked:  # Skips the fingerprint in the usual, empty case.
+        rechecked = reader_rechecked.get(
+            (active_workspace, capability, _config_fingerprint()), set())
     if rechecked:
         known = {repr(cloud) for cloud in cached_enabled_clouds}
         cached_enabled_clouds = cached_enabled_clouds + _clouds_from_names(
@@ -739,8 +753,9 @@ def recheck_clouds(capability: sky_cloud.CloudCapability,
                          workspace=workspace,
                          persist=persist).get(workspace, []))
     if not persist:
-        _reader_rechecked(common_utils.get_current_user().id, workspace,
-                          capability).update(enabled)
+        _reader_rechecked().setdefault(
+            (workspace, capability, _config_fingerprint()),
+            set()).update(enabled)
     return enabled
 
 

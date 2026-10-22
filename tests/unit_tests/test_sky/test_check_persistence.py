@@ -476,8 +476,7 @@ def _probes(monkeypatch, enabled):
     return runs
 
 
-def test_reader_probe_runs_once_per_request_user_and_config(
-        tmp_path, monkeypatch):
+def test_reader_probe_runs_once_per_request_and_config(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _common_mocks(monkeypatch)
     _restrict_registry(monkeypatch, {'aws'})
@@ -496,15 +495,26 @@ def test_reader_probe_runs_once_per_request_user_and_config(
             }})
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
         assert len(runs) == 2
-        # Another caller never gets bob's answer.
+        # Another reader with the same config shares the probe.
         monkeypatch.setattr('sky.utils.common_utils.get_current_user',
                             lambda: models.User(id='carol123', name='carol'))
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
-        assert len(runs) == 3
+        assert len(runs) == 2
+        # A caller who cannot read the workspace never gets the shared answer.
+        monkeypatch.setattr('sky.utils.common_utils.get_current_user',
+                            lambda: models.User(id='dave1234', name='dave'))
+        monkeypatch.setattr('sky.workspaces.core.get_workspace_access_sets',
+                            lambda: ({'default'}, {'default'}))
+        with pytest.raises(ValueError, match='not found or not accessible'):
+            sky_check.get_cached_enabled_clouds_or_refresh(
+                CloudCapability.COMPUTE)
+        assert len(runs) == 2
         # A new request probes again.
+        monkeypatch.setattr('sky.workspaces.core.get_workspace_access_sets',
+                            lambda: ({'default', 'ws-ro'}, {'default'}))
         annotations.clear_request_level_cache()
         sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
-        assert len(runs) == 4
+        assert len(runs) == 3
 
 
 def test_recheck_for_a_reader_returns_without_persisting(tmp_path, monkeypatch):
@@ -609,6 +619,48 @@ def test_reader_recheck_is_seen_by_later_reads_in_the_request(
 
     assert {repr(c) for c in enabled} == {'AWS', 'GCP'}
     assert not writes
+
+
+def test_reader_recheck_is_kept_per_config(tmp_path, monkeypatch):
+    """A re-check made under one config is not seen under another."""
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'aws', 'gcp'})
+    _probes(monkeypatch, {repr(sky_clouds.AWS()), repr(sky_clouds.GCP())})
+    monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                        lambda *args, **kwargs: [sky_clouds.AWS()])
+    monkeypatch.setattr(
+        'sky.global_user_state.get_allowed_clouds',
+        # pylint: disable-next=protected-access
+        sky_check._get_workspace_allowed_clouds)
+    config = {'kubernetes': {'allowed_contexts': ['a']}}
+    monkeypatch.setattr('sky.skypilot_config.to_dict', lambda: config)
+
+    def enabled():
+        return {
+            repr(c) for c in sky_check.get_cached_enabled_clouds_or_refresh(
+                CloudCapability.COMPUTE)
+        }
+
+    with skypilot_config.local_active_workspace_ctx('ws-ro'):
+        sky_check.recheck_clouds(CloudCapability.COMPUTE, ['GCP'])
+        assert enabled() == {'AWS', 'GCP'}
+        config = {'kubernetes': {'allowed_contexts': ['b']}}
+        assert enabled() == {'AWS'}
+
+
+def test_writer_reads_add_no_reader_recheck_entries(tmp_path, monkeypatch):
+    """Only re-checks add entries, so a writer's reads cannot crowd them out."""
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'aws'})
+    _probes(monkeypatch, {repr(sky_clouds.AWS())})
+
+    for _ in range(3):
+        sky_check.get_cached_enabled_clouds_or_refresh(CloudCapability.COMPUTE)
+
+    # pylint: disable-next=protected-access
+    assert sky_check._reader_rechecked() == {}
 
 
 def test_reader_with_a_warm_cache_does_not_probe(tmp_path, monkeypatch):
