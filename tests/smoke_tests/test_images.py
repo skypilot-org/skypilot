@@ -128,6 +128,49 @@ def test_azure_private_image():
 
 
 @pytest.mark.azure
+def test_azure_a10_grid_gpu():
+    # A10 VMs (NVadsA10_v5) boot the default GRID image
+    # (skypilot:custom-gpu-ubuntu-v2-grid). Its guest GRID driver must match
+    # the vGPU branch on Azure's hosts; otherwise the kernel logs Xid 78 and
+    # neither the host nor Docker sees the GPU (#10468). A10 quota is only in
+    # East US, so the region is pinned below.
+    name = smoke_tests_utils.get_cluster_name()
+    no_xid_78 = ('sudo dmesg | grep -i xid; '
+                 '! sudo dmesg | grep -q "Xid.*: 78,"')
+    host_gpu = 'nvidia-smi && nvidia-smi -L | grep -q A10'
+    torch_gpu = ('python -c "import torch; assert torch.cuda.is_available(); '
+                 'x = torch.randn(1024, 1024).cuda(); print((x @ x).sum())"')
+    docker_gpu = ('sudo docker run --rm --gpus all '
+                  'nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi')
+    test = smoke_tests_utils.Test(
+        'azure_a10_grid_gpu',
+        [
+            f'sky launch -y -c {name} --gpus A10:1 --infra azure/eastus '
+            'echo hi',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} \'{no_xid_78}\'',
+            f'sky logs {name} 2 --status',
+            f'sky exec {name} --gpus A10:1 \'{host_gpu}\'',
+            f'sky logs {name} 3 --status',
+            f'sky exec {name} --gpus A10:1 \'{torch_gpu}\'',
+            f'sky logs {name} 4 --status',
+            f'sky exec {name} \'{docker_gpu}\'',
+            f'sky logs {name} 5 --status',
+            # The driver must survive a reboot.
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            f'sky exec {name} --gpus A10:1 \'{host_gpu}\'',
+            f'sky logs {name} 6 --status',
+            f'sky exec {name} \'{docker_gpu}\'',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
 def test_azure_acr_managed_identity_image():
     """Pulls a private ACR image authenticated by the VM's managed identity.
 
