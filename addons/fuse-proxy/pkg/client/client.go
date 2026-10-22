@@ -74,9 +74,11 @@ func (c *Client) Fusermount(req *common.Request) (int, error) {
 		common.CloseFds(recvFds)
 		return 0, fmt.Errorf("fusermount failed: %s", resp.Error)
 	}
-	if len(recvFds) == 0 {
+	if req.Op != common.OpMount || len(recvFds) == 0 {
+		common.CloseFds(recvFds)
 		return 0, nil
 	}
+	common.CloseFds(recvFds[1:])
 	return recvFds[0], nil
 }
 

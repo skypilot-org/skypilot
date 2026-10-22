@@ -135,6 +135,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 		}()
 		sendFds = append(sendFds, int(fuseFile.Fd()))
+	} else {
+		// Older shims cannot parse a response that carries no descriptor.
+		devNull, err := os.Open(os.DevNull)
+		if err != nil {
+			log.Errorf("Failed to open %s: %v", os.DevNull, err)
+		} else {
+			defer devNull.Close()
+			sendFds = append(sendFds, int(devNull.Fd()))
+		}
 	}
 	if err := common.SendFds(unixConn, sendFds, b); err != nil {
 		log.Errorf("Failed to send response: %v", err)
