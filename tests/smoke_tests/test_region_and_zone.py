@@ -134,10 +134,8 @@ def test_aws_with_ssh_proxy_command():
             smoke_tests_utils.RESTORE_API_SERVER_CONFIG),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
-    try:
-        smoke_tests_utils.run_one_test(test)
-    finally:
-        os.unlink(proxy_config)
+    smoke_tests_utils.run_one_test(test)
+    os.unlink(proxy_config)
 
 
 @pytest.mark.gcp
