@@ -482,6 +482,21 @@ function normalizeTableColumn(config) {
       sortKey: config.header.sortKey
         ? String(config.header.sortKey)
         : undefined,
+      // The value to sort a row by under this column's sortKey, for a column
+      // whose value is not a field on the row itself. Without it, the row is
+      // sorted by row[sortKey]. A row whose value is null sorts last in
+      // either direction.
+      sortValue:
+        typeof config.header.sortValue === 'function'
+          ? config.header.sortValue
+          : undefined,
+      // (onChange) => unsubscribe. For a sortValue that reads data the plugin
+      // keeps itself: call onChange when that data changes, and the table
+      // re-sorts.
+      sortValueSubscribe:
+        typeof config.header.sortValueSubscribe === 'function'
+          ? config.header.sortValueSubscribe
+          : undefined,
       className: config.header.className
         ? String(config.header.className)
         : undefined,
