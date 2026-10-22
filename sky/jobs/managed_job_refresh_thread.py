@@ -191,7 +191,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         logger.error(f'Lost consolidation mode lock {self._lock}; stepping '
                      'down')
         server_state.set_shutting_down()
-        drain_seconds = _step_down_drain_seconds()
+        drain_seconds = server_constants.STEP_DOWN_DRAIN_SECONDS
         _exit_after(drain_seconds + server_constants.GRACE_PERIOD_SECONDS +
                     _STEP_DOWN_EXIT_MARGIN_SECONDS)
         # Re-touch the recovery signal file so no new controllers will be
@@ -218,25 +218,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         os.kill(os.getpid(), signal.SIGTERM)
 
 
-def _step_down_drain_seconds() -> int:
-    raw = os.environ.get(constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, '0')
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        logger.warning('Ignoring invalid '
-                       f'{constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS}='
-                       f'{raw!r}')
-        return 0
-
-
 def _exit_after(seconds: int) -> None:
     """Exit the process if it is still running ``seconds`` from now."""
 
     def _force_exit() -> None:
-        logger.error(f'API server did not exit within {seconds}s of stepping '
-                     'down; forcing exit. Thread stacks:')
-        faulthandler.dump_traceback(all_threads=True)
-        os._exit(1)  # pylint: disable=protected-access
+        try:
+            logger.error(f'API server did not exit within {seconds}s of '
+                         'stepping down; forcing exit. Thread stacks:')
+            faulthandler.dump_traceback(all_threads=True)
+        finally:
+            os._exit(1)  # pylint: disable=protected-access
 
     timer = threading.Timer(seconds, _force_exit)
     timer.daemon = True

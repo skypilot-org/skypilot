@@ -38,8 +38,7 @@ def exit_after_mock(monkeypatch):
     exit_after = mock.Mock()
     monkeypatch.setattr(mjrt, '_exit_after', exit_after)
     monkeypatch.setattr(mjrt.server_state, '_shutting_down', False)
-    monkeypatch.delenv(mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS,
-                       raising=False)
+    monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS', 0)
     return exit_after
 
 
@@ -179,8 +178,9 @@ class TestSuicideOnLockLoss:
         kill_mock.assert_called_once_with(12345, signal.SIGTERM)
 
     @staticmethod
-    def _step_down_recording(order):
+    def _step_down_recording():
         """Run a step-down, recording readiness, drain sleeps and SIGTERM."""
+        order = []
         thread = mjrt.ManagedJobRefreshDaemonThread()
         thread._lock = mock.create_autospec(locks.PostgresLock,
                                             instance=True,
@@ -202,36 +202,24 @@ class TestSuicideOnLockLoss:
                     side_effect=lambda *a: order.append(('sigterm', a))), \
                 mock.patch.object(mjrt.os, 'getpid', return_value=12345):
             thread._suicide_on_lock_loss()
+        return order
 
-    def test_marks_shutting_down_before_anything_else(self):
-        order = []
-        self._step_down_recording(order)
-        assert order == [('kill_controllers', True),
-                         ('sigterm', (12345, signal.SIGTERM))]
-
-    def test_waits_for_the_drain_before_sigterm(self, monkeypatch):
-        monkeypatch.setenv(
-            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, '50')
-        order = []
-        self._step_down_recording(order)
-        assert order == [('kill_controllers', True), ('sleep', 50),
-                         ('sigterm', (12345, signal.SIGTERM))]
-
-    @pytest.mark.parametrize('raw', ['-5', 'abc'])
-    def test_invalid_drain_sends_sigterm_at_once(self, monkeypatch, raw):
-        monkeypatch.setenv(
-            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, raw)
-        order = []
-        self._step_down_recording(order)
-        assert order == [('kill_controllers', True),
-                         ('sigterm', (12345, signal.SIGTERM))]
+    @pytest.mark.parametrize('drain,sleeps', [(0, []), (50, [('sleep', 50)])])
+    def test_marks_shutting_down_then_drains_then_sigterms(
+            self, monkeypatch, drain, sleeps):
+        monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS',
+                            drain)
+        assert self._step_down_recording() == [
+            ('kill_controllers', True), *sleeps,
+            ('sigterm', (12345, signal.SIGTERM))
+        ]
 
     def test_forced_exit_covers_drain_and_grace_period(self, monkeypatch,
                                                        exit_after_mock):
-        monkeypatch.setenv(
-            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, '50')
+        monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS',
+                            50)
         monkeypatch.setattr(mjrt.server_constants, 'GRACE_PERIOD_SECONDS', 60)
-        self._step_down_recording([])
+        self._step_down_recording()
         exit_after_mock.assert_called_once_with(
             50 + 60 + mjrt._STEP_DOWN_EXIT_MARGIN_SECONDS)
 
@@ -239,12 +227,19 @@ class TestSuicideOnLockLoss:
 class TestExitAfter:
     """The forced exit fires on its own thread and never blocks shutdown."""
 
-    def test_exits_with_stacks_dumped(self):
+    @pytest.mark.parametrize('dump_error', [None, ValueError('no stderr fd')])
+    def test_exits_after_dumping_stacks(self, dump_error):
         exited = threading.Event()
-        exit_mock = mock.Mock(side_effect=lambda code: exited.set())
+
+        def fake_exit(code):
+            exited.set()
+            # Ends the timer thread quietly, as the real os._exit would.
+            raise SystemExit(code)
+
+        exit_mock = mock.Mock(side_effect=fake_exit)
         with mock.patch.object(mjrt.os, '_exit', exit_mock), \
-                mock.patch.object(mjrt.faulthandler,
-                                  'dump_traceback') as dump_mock:
+                mock.patch.object(mjrt.faulthandler, 'dump_traceback',
+                                  side_effect=dump_error) as dump_mock:
             _REAL_EXIT_AFTER(0.01)
             assert exited.wait(timeout=10)
         exit_mock.assert_called_once_with(1)
@@ -255,8 +250,12 @@ class TestExitAfter:
         script = textwrap.dedent("""
             import subprocess, sys
             from sky.jobs import managed_job_refresh_thread as mjrt
+            # DEVNULL: an inherited stdout would hold the test's pipe open.
             child = subprocess.Popen(
-                [sys.executable, '-c', 'import time; time.sleep(600)'])
+                [sys.executable, '-c', 'import time; time.sleep(600)'],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
             print(f'CHILD_PID={child.pid}', flush=True)
             mjrt._exit_after(1)
             child.wait()
