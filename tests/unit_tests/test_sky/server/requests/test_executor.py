@@ -29,6 +29,7 @@ from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils import timeline
 from sky.utils.db import db_utils
 
 
@@ -1630,6 +1631,24 @@ def test_client_cannot_redirect_db_pool(stub_override_request_env_deps,
         # pylint: disable=protected-access
         assert db_utils._resolve_conn_string(direct=False) == server_uri
     assert not set(client_env) & set(body.env_vars)
+
+
+def test_client_cannot_choose_timeline_path(stub_override_request_env_deps,
+                                            monkeypatch, tmp_path):
+    """The timeline written at request end never goes to a client's path."""
+    monkeypatch.delenv(timeline.TIMELINE_FILE_PATH_ENV_VAR, raising=False)
+    target = tmp_path / 'client-chosen' / 'timeline.json'
+    body = payloads.RequestBody(
+        env_vars={
+            timeline.TIMELINE_FILE_PATH_ENV_VAR: str(target),
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        pass
+    assert not target.exists()
 
 
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,

@@ -15,9 +15,11 @@ from sky.utils import common_utils
 
 _events = []
 
+TIMELINE_FILE_PATH_ENV_VAR = 'SKYPILOT_TIMELINE_FILE_PATH'
+
 
 def _get_events_file_path():
-    return os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+    return os.environ.get(TIMELINE_FILE_PATH_ENV_VAR)
 
 
 class Event:
