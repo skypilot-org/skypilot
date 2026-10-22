@@ -1,6 +1,6 @@
 """Nebius library wrapper for SkyPilot."""
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 import uuid
 
 from sky import sky_logging
@@ -52,15 +52,16 @@ def retry(func):
     return wrapper
 
 
-def list_projects() -> List[Any]:
-    """Lists all projects in the current tenant.
+def list_projects() -> Iterator[Any]:
+    """Yields every project in the current tenant.
 
     ListProjects returns 10 projects per page by default, so a tenant with
-    more projects than that needs to follow next_page_token.
+    more projects than that needs to follow next_page_token. Pages are
+    fetched as they are consumed, so a caller that stops early never
+    requests the later ones.
     """
     service = nebius.iam().ProjectServiceClient(nebius.sdk())
     tenant_id = nebius.get_tenant_id()
-    projects: List[Any] = []
     page_token = ''
     while True:
         resp = nebius.sync_call(
@@ -69,11 +70,10 @@ def list_projects() -> List[Any]:
                 page_token=page_token,
             ),
                          timeout=nebius.READ_TIMEOUT))
-        projects.extend(resp.items)
+        yield from resp.items
         if not resp.next_page_token:
-            break
+            return
         page_token = resp.next_page_token
-    return projects
 
 
 def get_project_by_region(region: str) -> str:

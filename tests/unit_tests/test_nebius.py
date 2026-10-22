@@ -374,6 +374,22 @@ class TestNebiusProjectListing:
         assert [r['page_token'] for r in requests] == ['', 'token-2']
         assert all(r['parent_id'] == 'tenant-1' for r in requests)
 
+    def test_get_project_by_region_stops_at_first_match(self,
+                                                        list_projects_pages):
+        """Later pages are not fetched once the region's project is found.
+
+        A failure on a page after the match must not break a lookup that
+        the first page already answers.
+        """
+        pages = [
+            _fake_projects_page([_fake_project('project-e00a', 'eu-north1')],
+                                next_page_token='token-2'),
+        ]
+        with list_projects_pages(pages) as service:
+            assert nebius_utils.get_project_by_region(
+                'eu-north1') == 'project-e00a'
+        assert service.list.call_count == 1
+
     def test_get_project_by_region_raises_when_no_page_matches(
             self, list_projects_pages):
         pages = [

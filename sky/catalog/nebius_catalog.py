@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.catalog import common
 from sky.clouds import Nebius
+from sky.provision.nebius import utils as nebius_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -196,11 +197,8 @@ def _load_existing_catalog(catalog_file) -> Optional[common.LazyDataFrame]:
     return common.read_catalog(catalog_file)
 
 
-# pylint: disable=import-outside-toplevel
 def _get_region_projects() -> Dict[str, str]:
     """Returns a mapping from region to project ID for the current tenant."""
-    from sky.provision.nebius import utils as nebius_utils
-
     region_to_project_id: Dict[str, str] = {}
     for project in nebius_utils.list_projects():
         region = project.status.region
