@@ -73,7 +73,7 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
             workspaces:
                 ws-train:
                     gcp:
-                        vpc_name: test-vpc
+                        project_id: test-project
 
             """))
 
@@ -615,11 +615,11 @@ def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'config.yaml'
     config_path.write_text(
         textwrap.dedent("""\
-        aws:
-          ssh_proxy_command: ssh -W %h:%p server-bastion
-        gcp:
-          vpc_name: test-vpc
-        """))
+            aws:
+              ssh_proxy_command: ssh -W %h:%p server-bastion
+            gcp:
+              vpc_name: test-vpc
+            """))
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     skypilot_config.reload_config()
 
@@ -643,7 +643,8 @@ def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
             region='us-central1',
             keys=('ssh_proxy_command',),
             default_value=None) is None
-        # A non-command override on the same cloud still applies.
+
+    # A non-command override on the same cloud still applies.
     with skypilot_config.override_skypilot_config({
             'gcp': {
                 'ssh_proxy_command': 'touch /tmp/pwned',
@@ -775,8 +776,9 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
         # Check values are overridden
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
+        # ssh_proxy_command is server-owned, so its override is ignored.
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+                                          None) == original_proxy
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
@@ -823,8 +825,9 @@ def test_override_skypilot_config_without_original_config(
     with skypilot_config.override_skypilot_config(override_configs):
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
-        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+        # ssh_proxy_command is server-owned; with no server value it stays None.
+        assert skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None) is None
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
@@ -1530,13 +1533,11 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
     skypilot_config.reload_config()
 
     # nebius: test project_id property
-    eu_n1_proj = skypilot_config.get_effective_region_config(cloud='nebius',
-                                                             region='eu-north1',
-                                                             keys=('vpc_name',))
+    eu_n1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('project_id',))
     assert eu_n1_proj == 'project-e00'
-    eu_w1_proj = skypilot_config.get_effective_region_config(cloud='nebius',
-                                                             region='eu-west1',
-                                                             keys=('vpc_name',))
+    eu_w1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('project_id',))
     assert eu_w1_proj == 'project-e01'
 
     # nebius: test fabric property
