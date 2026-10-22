@@ -81,8 +81,9 @@ def test_aws_with_ssh_proxy_command():
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         jobs_controller_proxy_test_cmds = [
             # The controller is already up (created before the proxy restart),
-            # so this job reuses it and only its worker cluster goes through
-            # the proxy.
+            # so this job reuses it instead of launching a controller through
+            # the proxy. The controller clears aws.ssh_proxy_command for its
+            # own launches, so the job's worker is not proxied either.
             f'sky jobs launch -n {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} -yd echo hi',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(

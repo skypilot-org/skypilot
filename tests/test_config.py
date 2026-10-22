@@ -663,6 +663,40 @@ def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
             default_value=None) is None
 
 
+def test_ssh_proxy_command_kept_for_controller_launch(monkeypatch,
+                                                      tmp_path) -> None:
+    """A jobs/serve controller launches through its local API server with the
+    job config in SKYPILOT_CONFIG; the server loads it as its own config, so
+    the job's ssh_proxy_command survives the client-override strip."""
+    job_config = {
+        'gcp': {
+            'ssh_proxy_command': 'ssh -W %h:%p bastion'
+        },
+        # The controller's own cloud, restricted to the controller's regions.
+        'aws': {
+            'ssh_proxy_command': {
+                'us-east-1': None
+            }
+        },
+    }
+    config_path = tmp_path / 'job_config.yaml'
+    yaml_utils.dump_yaml(str(config_path), job_config)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(copy.deepcopy(job_config)):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p bastion'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == {
+                                              'us-east-1': None
+                                          }
+
+
 def test_config_with_invalid_override(monkeypatch, tmp_path,
                                       enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
