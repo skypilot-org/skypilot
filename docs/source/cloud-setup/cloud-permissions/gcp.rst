@@ -327,7 +327,7 @@ The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-fir
 Using internal IPs
 -----------------------
 For security reason, users may only want to use internal IPs for SkyPilot instances.
-To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+To do so, you can use the API server's config file (``~/.sky/config.yaml`` for a local API server) to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
 
 .. code-block:: yaml
 

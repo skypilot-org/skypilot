@@ -7,6 +7,7 @@
 # Terminate failed clusters after test finishes
 # > pytest tests/smoke_tests/test_ssm.py --terminate-on-failure
 
+import os
 import tempfile
 import textwrap
 
@@ -152,7 +153,10 @@ def test_ssm_private_custom_ami():
         smoke_tests_utils.run_one_test(test)
 
 
+# ssh_proxy_command is an API server setting, so the config is set on the
+# server, which requires a local-server restart.
 @pytest.mark.aws
+@pytest.mark.no_remote_server
 def test_ssm_private_proxy_command_and_use_ssm():
     """Test that ssm errors if ssh_proxy_command and use_ssm are set.
     """
@@ -176,30 +180,25 @@ def test_ssm_private_proxy_command_and_use_ssm():
 
     vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
 
-    config = textwrap.dedent(f"""
-    aws:
-        use_internal_ips: true
-        vpc_name: {vpc}
-        use_ssm: true
-        ssh_proxy_command: {ssm_proxy_command!r}
-        security_group_name: lloyd-airgap-gw-sg
-    """)
+    server_config = smoke_tests_utils.write_api_server_config({
+        'aws': {
+            'use_internal_ips': True,
+            'vpc_name': vpc,
+            'use_ssm': True,
+            'ssh_proxy_command': ssm_proxy_command,
+            'security_group_name': 'lloyd-airgap-gw-sg',
+        }
+    })
 
-    with tempfile.NamedTemporaryFile(delete=True) as f:
-        f.write(config.encode('utf-8'))
-        f.flush()
-
-        test = smoke_tests_utils.Test(
-            'ssm_private_proxy_command_and_use_ssm',
-            [
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml | tee /dev/stderr) && {VALIDATE_SSM_OUTPUT}',
-            ],
-            teardown=f'sky down -y {name}',
-            timeout=smoke_tests_utils.get_timeout('aws'),
-            env={
-                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
-                constants.SKY_API_SERVER_URL_ENV_VAR:
-                    sky.server.common.get_server_url()
-            },
-        )
-        smoke_tests_utils.run_one_test(test)
+    test = smoke_tests_utils.Test(
+        'ssm_private_proxy_command_and_use_ssm',
+        [
+            smoke_tests_utils.restart_api_server_with_config(server_config),
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml | tee /dev/stderr) && {VALIDATE_SSM_OUTPUT}',
+        ],
+        teardown=smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}', smoke_tests_utils.RESTORE_API_SERVER_CONFIG),
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    smoke_tests_utils.run_one_test(test)
+    os.unlink(server_config)
