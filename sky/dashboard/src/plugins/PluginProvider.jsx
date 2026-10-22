@@ -31,6 +31,7 @@ const PluginContext = createContext({
   dataProviders: {},
   recipeTypes: [],
   accessChecks: {},
+  flowSteps: {},
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -74,6 +75,7 @@ const initialState = {
   dataProviders: {}, // Map of provider id → provider config (with useHook)
   recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
   accessChecks: {}, // Map of action → array of { id, action, check }
+  flowSteps: {}, // Map of flow → array of { id, flow, label, order, ... }
 };
 
 const actions = {
@@ -87,6 +89,7 @@ const actions = {
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
   REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
   REGISTER_ACCESS_CHECK: 'REGISTER_ACCESS_CHECK',
+  REGISTER_FLOW_STEP: 'REGISTER_FLOW_STEP',
 };
 
 function pluginReducer(state, action) {
@@ -202,6 +205,16 @@ function pluginReducer(state, action) {
             state.accessChecks[checkAction] || [],
             action.payload
           ),
+        },
+      };
+    }
+    case actions.REGISTER_FLOW_STEP: {
+      const { flow } = action.payload;
+      return {
+        ...state,
+        flowSteps: {
+          ...state.flowSteps,
+          [flow]: upsertById(state.flowSteps[flow] || [], action.payload),
         },
       };
     }
@@ -908,6 +921,53 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    // Lets a plugin add a step to one of the dashboard's multi-step flows.
+    // The flow owns the step list, the order, Back/Next and the final
+    // action; the step owns what it renders and what it contributes.
+    //
+    // Flows:
+    // - `workspaces.create`: the new-workspace wizard. Built-in steps are
+    //   Name (order 10) and Configure (order 30). The step's component is
+    //   rendered with { workspaceName, value, onChange }, where
+    //   `onChange({ value, ready, configPatch })` keeps the step's draft
+    //   (`value`), gates Next (`ready`) and contributes a workspace config
+    //   fragment (`configPatch`) that is deep-merged into the YAML the
+    //   Configure step starts from. `commit({ workspaceName, config, value })`
+    //   runs on Create, before the workspace is created, with the final
+    //   parsed config; it may return { errors: [...], value } to stop the
+    //   create and update the draft. `isApplicable()` resolves to whether
+    //   the step shows at all; the flow waits for it before rendering.
+    registerFlowStep(config) {
+      if (
+        !config?.id ||
+        !config.flow ||
+        !config.label ||
+        typeof config.component !== 'function'
+      ) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid flow step registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        flow: String(config.flow),
+        label: String(config.label),
+        order: Number.isFinite(config.order) ? config.order : 100,
+        component: config.component,
+        isApplicable:
+          typeof config.isApplicable === 'function'
+            ? config.isApplicable
+            : null,
+        commit: typeof config.commit === 'function' ? config.commit : null,
+      };
+      dispatch({
+        type: actions.REGISTER_FLOW_STEP,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -1162,6 +1222,18 @@ export function anyAccessCheckAllows(checks, context) {
 export function usePluginRecipeTypes() {
   const { recipeTypes } = usePluginState();
   return recipeTypes;
+}
+
+const EMPTY_FLOW_STEPS = [];
+
+// The steps plugins registered for a flow, in order. See
+// `registerFlowStep` for the step contract.
+export function usePluginFlowSteps(flow) {
+  const { flowSteps } = usePluginState();
+  return useMemo(() => {
+    const steps = (flowSteps && flowSteps[flow]) || EMPTY_FLOW_STEPS;
+    return [...steps].sort((a, b) => a.order - b.order);
+  }, [flow, flowSteps]);
 }
 
 export function usePluginRoute(pathname) {
