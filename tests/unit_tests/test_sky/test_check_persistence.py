@@ -1,4 +1,6 @@
 """Verify sky.check.check persists cloud2ctx2text into check_results."""
+import time
+
 import pytest
 
 from sky import clouds as sky_clouds
@@ -562,12 +564,25 @@ def test_pinned_cloud_for_a_reader_is_judged_on_the_fresh_answer(
             assert error in str(e.value).lower()
 
 
+def _age_request_caches(seconds):
+    """Moves request-scoped TTL caches forward, as a long request would."""
+    # pylint: disable=protected-access
+    for func in (sky_check._unstored_enabled_cloud_names,
+                 sky_check._reader_rechecked):
+        # pylint: enable=protected-access
+        cache = getattr(func, 'cache', None)
+        if cache is not None:
+            cache.expire(time.monotonic() + seconds)
+
+
+@pytest.mark.parametrize('elapsed', [0, 120])
 def test_reader_recheck_is_seen_by_later_reads_in_the_request(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, elapsed):
     """A writer's warm cache lists AWS only; GCP has since become usable.
 
     The reader's re-check finds GCP and is not stored, yet later reads in the
-    same request (the optimizer's feasibility pass) must still see it.
+    same request (the optimizer's feasibility pass) must still see it, even
+    when the optimizer runs for minutes in between.
     """
     _fresh_db(tmp_path, monkeypatch)
     _common_mocks(monkeypatch)
@@ -588,6 +603,7 @@ def test_reader_recheck_is_seen_by_later_reads_in_the_request(
     with skypilot_config.local_active_workspace_ctx('ws-ro'):
         # pylint: disable-next=protected-access
         optimizer._check_specified_clouds(dag)
+        _age_request_caches(elapsed)
         enabled = sky_check.get_cached_enabled_clouds_or_refresh(
             CloudCapability.COMPUTE)
 

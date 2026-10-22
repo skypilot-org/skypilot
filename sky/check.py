@@ -637,7 +637,9 @@ def _unstored_enabled_cloud_names(user_id: str, workspace: str,
         return ()
 
 
-@annotations.ttl_cache(scope='request', maxsize=64, ttl=60)
+# No TTL: this holds state, not a recomputable result, so it must last until
+# the request ends however long the optimizer runs.
+@annotations.lru_cache(scope='request', maxsize=64)
 def _reader_rechecked(user_id: str, workspace: str,
                       capability: sky_cloud.CloudCapability) -> Set[str]:
     """Clouds a non-storing caller's re-check found enabled in this request.
