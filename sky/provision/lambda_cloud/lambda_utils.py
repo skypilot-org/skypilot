@@ -5,6 +5,7 @@ import os
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple
+import urllib.parse
 
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
@@ -114,6 +115,8 @@ def _try_request_with_backoff(method: str,
             response = requests.post(url, headers=headers, data=data)
         elif method == 'put':
             response = requests.put(url, headers=headers, data=data)
+        elif method == 'delete':
+            response = requests.delete(url, headers=headers)
         else:
             raise ValueError(f'Unsupported requests method: {method}')
         # If rate limited, wait and try again
@@ -146,8 +149,15 @@ class LambdaCloudClient:
         quantity: int = 1,
         name: str = '',
         ssh_key_name: str = '',
+        file_system_mounts: Optional[List[Dict[str, str]]] = None,
     ) -> List[str]:
-        """Launch new instances."""
+        """Launch new instances.
+
+        Args:
+            file_system_mounts: Filesystems to attach, as
+                ``{'file_system_id': ..., 'mount_point': ...}`` dicts. They
+                must be in `region`.
+        """
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
@@ -168,13 +178,16 @@ class LambdaCloudClient:
                                     f'{aval_reg}'))
 
         # Try to launch instance
-        data = json.dumps({
+        payload: Dict[str, Any] = {
             'region_name': region,
             'instance_type_name': instance_type,
             'ssh_key_names': [ssh_key_name],
             'quantity': quantity,
             'name': name,
-        })
+        }
+        if file_system_mounts:
+            payload['file_system_mounts'] = file_system_mounts
+        data = json.dumps(payload)
         response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/launch',
@@ -200,6 +213,29 @@ class LambdaCloudClient:
                                              f'{API_ENDPOINT}/instances',
                                              headers=self.headers)
         return response.json().get('data', [])
+
+    def list_filesystems(self) -> List[Dict[str, Any]]:
+        """List the account's filesystems."""
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/filesystems',
+                                             headers=self.headers)
+        return response.json().get('data', [])
+
+    def create_filesystem(self, name: str, region: str) -> Dict[str, Any]:
+        """Create a filesystem in `region`."""
+        data = json.dumps({'name': name, 'region': region})
+        response = _try_request_with_backoff('post',
+                                             f'{API_ENDPOINT}/filesystems',
+                                             data=data,
+                                             headers=self.headers)
+        return response.json().get('data', {})
+
+    def delete_filesystem(self, filesystem_id: str) -> None:
+        """Delete a filesystem. Fails while it is mounted."""
+        _try_request_with_backoff(
+            'delete',
+            f'{API_ENDPOINT}/filesystems/{urllib.parse.quote(filesystem_id)}',
+            headers=self.headers)
 
     def list_ssh_keys(self) -> List[Dict[str, str]]:
         """List ssh keys."""
