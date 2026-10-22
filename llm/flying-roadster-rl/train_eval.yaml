@@ -101,6 +101,7 @@ run: |
   mkdir -p $OUT
 
   cd ~/SkyRL
+  GIVEN_MODEL=$MODEL   # as passed in (a Hub id or a bucket path), before any local copy
   if [ "$SFT_FLIGHTS" -gt 0 ]; then
     uv run -q --isolated --extra fsdp python ~/sky_workdir/skyrl_roadster/make_pilot_sft_data.py \
       --out $HOME/data/pilot_sft.parquet --per-kind $SFT_FLIGHTS --model $MODEL --round $SFT_ROUND --weathers $SFT_WEATHERS \
@@ -118,7 +119,7 @@ run: |
       ckpt_path="" ckpt_interval=0 resume_from="" \
       hf_save_interval=100000 export_path=$HOME/sft_export
     MODEL=$(ls -d $HOME/sft_export/global_step_*/policy | sort -V | tail -1)
-    mkdir -p $OUT/sft_model && cp -r $MODEL/. $OUT/sft_model/ && touch $OUT/SFT_DONE   # the inference task and the evals serve this
+    mkdir -p $OUT/sft_model && cp -r $MODEL/. $OUT/sft_model/   # the inference task and the evals serve this
     mkdir -p $HOME/models/base && cp -r $MODEL/. $HOME/models/base/ && MODEL=$HOME/models/base   # same path as on the inference task
     echo "RL starts from the warm-started model: $MODEL"
   fi
@@ -134,6 +135,9 @@ run: |
     MODEL=$HOME/models/init_merged
     mkdir -p $OUT/sft_model && cp -r $MODEL/. $OUT/sft_model/   # the eval serves this as the base
   fi
+  # Tell the inference task and the eval watcher which model RL starts from, so all tasks use the same base.
+  if [ "$SFT_FLIGHTS" -gt 0 ] || [ -n "$INIT_LORA" ]; then RL_BASE=$OUT/sft_model; else RL_BASE=$GIVEN_MODEL; fi
+  echo "$RL_BASE" > $OUT/RL_BASE
   uv run -q --isolated --with datasets python ~/sky_workdir/skyrl_roadster/make_dataset.py \
     --out $DATA ${HANDOVER:+--handover $HANDOVER} --val-seeds $VAL_SEEDS --train-weathers $TRAIN_WEATHERS \
     ${KIND_WEIGHTS:+--kind-weights $KIND_WEIGHTS} --hard-frac $HARD_FRAC
@@ -209,7 +213,7 @@ file_mounts:
 envs:
   OUTPUT_BUCKET: my-roadster-bucket
   RUN: pilot-run1
-  BASE_MODEL: ""               # the model RL starts from; "" = /outputs/$RUN/sft_model, written by the trainer's warm start
+  BASE_MODEL: ""               # the model RL starts from; "" = whatever the trainer publishes in /outputs/$RUN/RL_BASE
   LORA_RANK: 64
   SKYRL_COMMIT: c2a5ce0d68e3c21ce4aa4b098174f88a55e5a638
   HF_HUB_ENABLE_HF_TRANSFER: "1"
@@ -218,9 +222,10 @@ setup: |
 run: |
   set -ex
   bash ~/sky_workdir/skyrl_roadster/install_skyrl.sh   # in run, not setup: group networking waits for every task's setup
-  BASE=${BASE_MODEL:-/outputs/$RUN/sft_model}
-  if [ -z "$BASE_MODEL" ]; then
-    until [ -f /outputs/$RUN/SFT_DONE ]; do sleep 60; done   # written by the trainer after the warm start
+  BASE=$BASE_MODEL
+  if [ -z "$BASE" ]; then   # the trainer writes RL_BASE once the warm start (if any) is done
+    until [ -s /outputs/$RUN/RL_BASE ]; do sleep 60; done
+    BASE=$(cat /outputs/$RUN/RL_BASE)
   fi
   if [[ "$BASE" == /* ]]; then   # a path in the bucket: wait for it to show up on the mount, then copy it off
     for i in $(seq 1 60); do [ -f $BASE/config.json ] && break; sleep 10; done
@@ -272,6 +277,8 @@ setup: |
   python3 -m pip install -q requests
 run: |
   cd ~/sky_workdir
+  BASE=$BASE_MODEL
+  if [ -z "$BASE" ]; then until [ -s /outputs/$RUN/RL_BASE ]; do sleep 60; done; BASE=$(cat /outputs/$RUN/RL_BASE); fi
   python3 tools/eval_watcher.py --run $RUN --bucket $OUTPUT_BUCKET \
-    --base ${BASE_MODEL:-/outputs/$RUN/sft_model} --eval-yaml eval.yaml \
+    --base $BASE --eval-yaml eval.yaml \
     --weathers "$WEATHERS" --val-per-kind $VAL_PER_KIND --test-per-kind $TEST_PER_KIND

@@ -31,13 +31,21 @@ def log(msg):
     print(time.strftime('%H:%M:%S'), msg, flush=True)
 
 
+_sizes = {}
+
+
 def ready_steps(out):
-    """Checkpoints whose LoRA adapter has fully landed in the bucket."""
+    """Checkpoints whose LoRA adapter has fully landed in the bucket: both files present, non-empty,
+    and the same size as on the previous poll (so a copy still in progress is not picked up)."""
     steps = []
     for d in glob.glob(f'{out}/export/global_step_*/policy'):
         files = [os.path.join(d, f) for f in ('adapter_config.json', 'adapter_model.safetensors')]
-        if all(os.path.exists(f) and os.path.getsize(f) > 0 for f in files):
+        if not all(os.path.exists(f) for f in files):
+            continue
+        sizes = tuple(os.path.getsize(f) for f in files)
+        if all(sizes) and _sizes.get(d) == sizes:
             steps.append(int(d.split('global_step_')[1].split('/')[0]))
+        _sizes[d] = sizes
     return sorted(steps)
 
 
@@ -60,8 +68,17 @@ def launch(args, name, step, tag, seeds, per_kind, modes, concurrency):
 
 
 def summaries(out, tag):
-    return {os.path.basename(os.path.dirname(p)): json.load(open(p))
-            for p in glob.glob(f'{out}/pilot_eval_{tag}/*/summary.json') if 'latency_c1' not in p}
+    """Finished results of one eval, by weather. A summary still being written is skipped until the next poll."""
+    found = {}
+    for p in glob.glob(f'{out}/pilot_eval_{tag}/*/summary.json'):
+        if 'latency_c1' in p:
+            continue
+        try:
+            with open(p) as f:
+                found[os.path.basename(os.path.dirname(p))] = json.load(f)
+        except (OSError, ValueError):
+            pass
+    return found
 
 
 def success(found):
