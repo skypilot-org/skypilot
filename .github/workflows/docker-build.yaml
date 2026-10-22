@@ -177,6 +177,34 @@ jobs:
           fi
           cat $GITHUB_OUTPUT
 
+      # Image tags are immutable once published, mirroring PyPI (which the
+      # publish step uploads with skip-existing). Nightly versions are
+      # date-based, so a same-day re-run (e.g. re-running a failed scheduled
+      # nightly) resolves to a tag that is already out, possibly built from a
+      # different commit. Overwriting it would make the image disagree with
+      # the wheel on PyPI, so fail before building anything. To replace a tag
+      # deliberately, delete it on Docker Hub first.
+      - name: Fail if image tag already exists
+        env:
+          IMAGE_REPO: ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}
+          VERSION: ${{ steps.version.outputs.latest_version }}
+        run: |
+          URL="https://hub.docker.com/v2/repositories/${IMAGE_REPO}/tags/${VERSION}/"
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 --retry-all-errors "$URL")
+          case "$STATUS" in
+            404)
+              echo "${IMAGE_REPO}:${VERSION} does not exist yet; proceeding."
+              ;;
+            200)
+              echo "::error::${IMAGE_REPO}:${VERSION} already exists on Docker Hub; refusing to overwrite it. Delete the tag first if the overwrite is intended."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected HTTP ${STATUS} checking ${URL}; cannot tell whether the tag exists."
+              exit 1
+              ;;
+          esac
+
       # Upload complete build context (source code + wheels) for build jobs
       - name: Upload build context
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
