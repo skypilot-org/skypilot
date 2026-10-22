@@ -4,11 +4,13 @@ import hashlib
 import json
 import os
 import re
+import threading
 import traceback
 from types import ModuleType
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
+import cachetools
 import click
 import colorama
 
@@ -622,8 +624,10 @@ def _config_fingerprint() -> str:
 
 
 # Process-wide rather than per request: `/validate` runs in the API server
-# process, which clears request caches at the start of every request.
-@annotations.ttl_cache(scope='global', maxsize=64, ttl=60)
+# process, which clears request caches at the start of every request. Locked
+# because the server's request threads share it.
+@cachetools.cached(cachetools.TTLCache(maxsize=64, ttl=60),
+                   lock=threading.Lock())
 def _unstored_enabled_cloud_names(workspace: str,
                                   capability: sky_cloud.CloudCapability,
                                   config_fingerprint: str) -> Tuple[str, ...]:
@@ -632,8 +636,10 @@ def _unstored_enabled_cloud_names(workspace: str,
     Probed at most once a minute per config rather than on every call. The
     probe uses the server's credentials and the request's merged config (e.g.
     Kubernetes allowed contexts), not the caller, so requests that share a
-    config share one probe. A hit skips `check_capabilities`' access check:
-    callers must check that the caller can read `workspace` first.
+    config share one probe. An answer may be up to a minute old, and only
+    while the workspace has no stored rows. A hit skips `check_capabilities`'
+    access check: callers must check that the caller can read `workspace`
+    first.
     """
     del config_fingerprint
     logger.debug(f'Probing enabled clouds of workspace {workspace!r} without '

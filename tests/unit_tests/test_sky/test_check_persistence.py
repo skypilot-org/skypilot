@@ -19,13 +19,6 @@ from sky.utils import annotations
 from sky.utils.db import db_utils
 
 
-@pytest.fixture(autouse=True)
-def _clear_unstored_probe_cache():
-    # Process-wide, unlike the request caches conftest clears.
-    # pylint: disable-next=protected-access
-    sky_check._unstored_enabled_cloud_names.cache_clear()
-
-
 def _fresh_db(tmp_path, monkeypatch):
     """Mirror the fixture used in test_global_user_state_check_results.py."""
     monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
@@ -478,8 +471,10 @@ def _probes(monkeypatch, enabled):
                         lambda *args, **kwargs: None)
     monkeypatch.setattr(sky_check, '_summary_message',
                         lambda *args, **kwargs: '')
-    # The unstored probe is cached per request; start from an empty cache.
+    # Start from empty probe caches.
     annotations.clear_request_level_cache()
+    # pylint: disable-next=protected-access
+    sky_check._unstored_enabled_cloud_names.cache_clear()
     return runs
 
 
@@ -688,6 +683,8 @@ def test_config_fingerprint_accepts_keys_of_mixed_types(monkeypatch):
         }})
     # pylint: disable-next=protected-access
     first = sky_check._config_fingerprint()
+    # pylint: disable-next=protected-access
+    assert sky_check._config_fingerprint() == first
     labels[8080] = 'api'
     # pylint: disable-next=protected-access
     assert sky_check._config_fingerprint() != first
