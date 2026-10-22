@@ -6,7 +6,8 @@ by a callback is logged and swallowed so it cannot affect the originating
 operation.
 """
 import copy
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import (Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple,
+                    TYPE_CHECKING)
 
 from sky import sky_logging
 
@@ -30,7 +31,9 @@ AdminPolicyAppliedHook = Callable[[
 
 _VOLUME_DELETED_HOOKS: Dict[str, VolumeDeletedHook] = {}
 _MANAGED_JOB_SUBMITTED_HOOKS: Dict[str, ManagedJobSubmittedHook] = {}
-_ADMIN_POLICY_APPLIED_HOOKS: Dict[str, AdminPolicyAppliedHook] = {}
+# hook_id -> (callback, request names it observes; None observes all).
+_ADMIN_POLICY_APPLIED_HOOKS: Dict[str, Tuple[AdminPolicyAppliedHook,
+                                             Optional[FrozenSet[str]]]] = {}
 
 
 def register_volume_deleted_hook(hook_id: str, fn: VolumeDeletedHook) -> None:
@@ -107,19 +110,28 @@ def fire_managed_job_submitted(job_ids: List[int], dag: 'dag_lib.Dag',
                            f'for jobs {job_ids!r}: {e}')
 
 
-def register_admin_policy_applied_hook(hook_id: str,
-                                       fn: AdminPolicyAppliedHook) -> None:
+def register_admin_policy_applied_hook(
+    hook_id: str,
+    fn: AdminPolicyAppliedHook,
+    request_names: Optional[
+        Iterable['request_names.AdminPolicyRequestName']] = None,
+) -> None:
     """Register a callback to run after the server applies the admin policy.
 
-    Callbacks run synchronously each time the server resolves the effective
-    request for a DAG (``admin_policy_utils.apply``), whether or not an admin
-    policy is configured. They receive the effective DAG, the effective
-    SkyPilot config, the request name and the request options. Each callback
-    gets its own deep copy of these, so nothing a callback does (even one that
-    raises) changes the request or what later callbacks see. The config is the
-    full resolved config and may hold credentials. Callbacks should return
-    promptly. They do not run for client-side policy application, nor for
-    requests the policy rejects.
+    Callbacks run synchronously each time the server applies the admin policy
+    to a DAG (``admin_policy_utils.apply``), whether or not a policy is
+    configured. They receive the DAG and the SkyPilot config as the policy
+    returned them, the request name and the request options. This is the
+    request right after the policy: later server-side steps may still adjust
+    the DAG (e.g. volume resolution in ``execution.launch``).
+
+    Each callback gets its own deep copy of these arguments, so it cannot
+    alter the request through them, except for constructed storage stores,
+    which ``deepcopy`` shares (``AbstractStore.__deepcopy__`` returns the
+    store itself). Callbacks must treat every argument as read-only. The
+    config is the full resolved config and may hold credentials. Callbacks
+    should return promptly. They do not run for client-side policy
+    application, nor for requests the policy rejects.
 
     Registrations are per process, and the policy is applied in the process
     that handles the request: request executor workers for launches and other
@@ -131,11 +143,16 @@ def register_admin_policy_applied_hook(hook_id: str,
         hook_id: A stable, unique identifier. Re-registering with the same ID
             replaces the previous callback.
         fn: The callback to invoke.
+        request_names: The request names to observe, e.g.
+            ``AdminPolicyRequestName.CLUSTER_LAUNCH``. Other applications skip
+            this callback without copying anything. None observes all.
     """
     if hook_id in _ADMIN_POLICY_APPLIED_HOOKS:
         logger.debug(
             f'Replacing existing admin-policy-applied hook for id {hook_id!r}.')
-    _ADMIN_POLICY_APPLIED_HOOKS[hook_id] = fn
+    names = (None if request_names is None else frozenset(
+        name.value for name in request_names))
+    _ADMIN_POLICY_APPLIED_HOOKS[hook_id] = (fn, names)
 
 
 def fire_admin_policy_applied(
@@ -145,7 +162,9 @@ def fire_admin_policy_applied(
     """Invoke applied callbacks, isolating callback failures from the request.
     """
     # Snapshot the registry so callbacks can register hooks during dispatch.
-    for hook_id, fn in list(_ADMIN_POLICY_APPLIED_HOOKS.items()):
+    for hook_id, (fn, names) in list(_ADMIN_POLICY_APPLIED_HOOKS.items()):
+        if names is not None and request_name.value not in names:
+            continue
         try:
             # A private copy per callback: the caller goes on to execute this
             # request, so a callback must not be able to alter it.

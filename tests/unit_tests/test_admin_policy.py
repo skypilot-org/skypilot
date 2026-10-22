@@ -1135,3 +1135,33 @@ def test_applied_hook_mutation_does_not_alter_request(task, monkeypatch,
     assert 'TAMPERED' not in dag.tasks[0].envs
     assert config.get_nested(('allowed_clouds',), None) == ['aws']
     assert seen == [(original_run, dict(dag.tasks[0].envs), ['aws'], 'test')]
+
+
+def test_applied_hook_observes_only_its_request_names(task, monkeypatch):
+    """A hook registered for some request names is skipped, without copying
+    anything, for the others."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    launches = mock.Mock()
+    everything = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'launches',
+        launches,
+        request_names=[request_names.AdminPolicyRequestName.CLUSTER_LAUNCH])
+    plugin_hooks.register_admin_policy_applied_hook('everything', everything)
+    dag = sky.Dag()
+    dag.add(task)
+    config = config_utils.Config({'allowed_clouds': ['aws']})
+    deepcopy = mock.Mock(side_effect=copy.deepcopy)
+    monkeypatch.setattr(plugin_hooks.copy, 'deepcopy', deepcopy)
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.OPTIMIZE, None)
+    launches.assert_not_called()
+    everything.assert_called_once()
+    assert deepcopy.call_count == 3  # dag, config, options: one hook only
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.CLUSTER_LAUNCH, None)
+    launches.assert_called_once()
+    assert everything.call_count == 2
+    assert deepcopy.call_count == 9
