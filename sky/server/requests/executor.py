@@ -714,6 +714,10 @@ def override_request_env_and_config(
             # Remove the db connection uri from client supplied env vars, as
             # the client should not set the db string on server side.
             request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # The pooled-connection overrides rewrite that string too.
+            request_body.env_vars.pop(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                                      None)
+            request_body.env_vars.pop(constants.ENV_VAR_DB_POOL_HOSTPORT, None)
             # Likewise the auth DB deadline: `add_or_update_user` below derives
             # the server-side timeouts on its own transaction from it, and a
             # client (in particular an older one that still forwards the

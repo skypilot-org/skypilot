@@ -1601,6 +1601,37 @@ def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
     assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
 
 
+@pytest.mark.parametrize('client_env', [
+    {
+        constants.ENV_VAR_DB_POOL_CONNECTION_URI: 'postgresql://u:p@evil:5432/db'
+    },
+    {
+        constants.ENV_VAR_DB_POOL_HOSTPORT: 'evil:5432'
+    },
+])
+def test_client_cannot_redirect_db_pool(stub_override_request_env_deps,
+                                        monkeypatch, client_env):
+    """A client-supplied pool override must not re-point the server's DB."""
+    server_uri = 'postgresql://user:secret@db.internal:5432/sky'
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, server_uri)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI, raising=False)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_HOSTPORT, raising=False)
+
+    body = payloads.RequestBody(
+        env_vars={
+            **client_env,
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        # pylint: disable=protected-access
+        assert db_utils._resolve_conn_string(direct=False) == server_uri
+    assert not set(client_env) & set(body.env_vars)
+
+
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
                                                monkeypatch):
     """Daemon env mutations inside the with block must be reverted on exit.
