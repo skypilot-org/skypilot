@@ -15,7 +15,6 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
@@ -1675,11 +1674,8 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(
-                sky_cloud.CloudCapability.COMPUTE,
-                quiet=True,
-                clouds=clouds_to_check_again,
-                workspace=skypilot_config.get_active_workspace())
+            sky_check.recheck_clouds(sky_cloud.CloudCapability.COMPUTE,
+                                     clouds_to_check_again)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)

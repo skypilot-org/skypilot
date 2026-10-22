@@ -13,7 +13,6 @@ from sky.client.cli import command
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.cloud import CloudCapability
 from sky.utils import config_utils
-from sky.workspaces import constants as workspace_constants
 
 
 def strip_ansi(s: str) -> str:
@@ -272,14 +271,11 @@ def _mock_k8s_env(monkeypatch,
         'ws1': {}
     })
 
-    # check writes each visited workspace's cached rows, so it must ask for the
-    # writable set; assert that rather than swallowing the argument.
-    def _accessible_workspace_names(action):
-        assert action == workspace_constants.WORKSPACE_ACTION_WRITE, action
-        return {'default', 'ws1'}
-
-    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
-                        _accessible_workspace_names)
+    # check writes each visited workspace's cached rows, so it must visit the
+    # writable set only; 'ws-ro' is readable but not writable.
+    monkeypatch.setattr(
+        'sky.workspaces.core.get_workspace_access_sets', lambda:
+        ({'default', 'ws1', 'ws-ro'}, {'default', 'ws1'}))
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
@@ -364,6 +360,9 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
     assert 'ctx-b' not in ws1_section
+
+    # Readable but not writable, so its cached rows are not rewritten.
+    assert 'workspace: \'ws-ro\'' not in out
 
 
 def test_workspace_cloud_capabilities():
