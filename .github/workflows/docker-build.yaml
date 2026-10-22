@@ -43,6 +43,13 @@ on:
       DOCKER_PASSWORD:
         required: true
 
+# Serialize publishes of the same package so the tag-exists check below and the
+# final manifest push run as one unit: a second run waits here, then sees the
+# tag the first one pushed and fails instead of overwriting it.
+concurrency:
+  group: docker-build-${{ inputs.package_name }}
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
