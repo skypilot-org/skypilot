@@ -1003,11 +1003,13 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 @metrics_lib.time_me
 def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+    # Chunked like the cluster lookups; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
+    if not user_ids:
+        return {}
     engine = _db_manager.get_engine()
     ids = sorted(user_ids)
     rows = []
     with orm.Session(engine) as session:
-        # Chunked IN; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
         for offset in range(0, len(ids), _CLUSTER_IN_QUERY_CHUNK_SIZE):
             batch = ids[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
             rows.extend(
