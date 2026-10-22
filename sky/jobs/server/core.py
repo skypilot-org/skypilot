@@ -2586,6 +2586,13 @@ def get_job_events(
     implementation answers from the jobs database and the cluster's own
     events; see ``_job_events`` for the arguments and the row shape.
     """
+    readable = workspaces_core.get_readable_workspace_names()
+    if (readable is not None and
+            managed_job_state.get_workspace(job_id) not in readable):
+        # Answer as for a job that does not exist.
+        if task is not None:
+            raise ValueError(f'Managed job {job_id} not found.')
+        return []
     runner = managed_job_runner.current()
     # A runner that predates this method: the plugins that register one are
     # distributed separately from the server, so an older one can be
