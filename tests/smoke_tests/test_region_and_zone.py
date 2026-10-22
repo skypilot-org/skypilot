@@ -75,7 +75,7 @@ def test_aws_with_ssh_proxy_command():
     })
 
     jobs_controller_proxy_test_cmds = []
-    jobs_controller_proxy_test_cmds_down = ''
+    jobs_controller_proxy_test_cmds_down = []
     # Disable controller related tests for consolidation mode, as there will
     # not be any controller VM to launch.
     if not smoke_tests_utils.server_side_is_consolidation_mode():
@@ -93,8 +93,11 @@ def test_aws_with_ssh_proxy_command():
                 ],
                 timeout=300),
         ]
-        jobs_controller_proxy_test_cmds_down = (
-            f'sky jobs cancel -y -n {name} -n {name}-0')
+        # `--name` is single-valued, so cancel each job separately.
+        jobs_controller_proxy_test_cmds_down = [
+            f'sky jobs cancel -y -n {name}',
+            f'sky jobs cancel -y -n {name}-0',
+        ]
 
     controller_warmup_cmds = []
     if not smoke_tests_utils.server_side_is_consolidation_mode():
@@ -125,13 +128,16 @@ def test_aws_with_ssh_proxy_command():
             f'sky logs {name} 2 --status',
             *jobs_controller_proxy_test_cmds,
         ],
-        f'sky down -y {name} jump-{name}; '
-        f'{jobs_controller_proxy_test_cmds_down}; '
-        f'{smoke_tests_utils.RESTORE_API_SERVER_CONFIG}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name} jump-{name}',
+            *jobs_controller_proxy_test_cmds_down,
+            smoke_tests_utils.RESTORE_API_SERVER_CONFIG),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
-    smoke_tests_utils.run_one_test(test)
-    os.unlink(proxy_config)
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(proxy_config)
 
 
 @pytest.mark.gcp
