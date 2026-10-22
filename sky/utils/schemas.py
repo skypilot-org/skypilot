@@ -2511,6 +2511,9 @@ def get_config_schema():
                             'image_tag_gpu': {
                                 'type': 'string',
                             },
+                            'oci_config_profile': {
+                                'type': 'string',
+                            },
                             'vcn_ocid': {
                                 'type': 'string',
                             },
