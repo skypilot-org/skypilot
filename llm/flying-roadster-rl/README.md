@@ -5,6 +5,8 @@ is the pilot: every 0.2 s of simulated time it reads one line of telemetry and r
 JSON command, and the car keeps moving while it thinks. We use it to compare the latest LLMs
 against an open 4B model, and to RL post-train that 4B (SkyRL, GRPO + LoRA) with SkyPilot.
 
+> **Note:** Much of this example (code, prompts and docs) was generated with AI. Please review it and use it with caution.
+
 Everything here is simulation. It is not affiliated with Tesla and is not based on any
 real vehicle's software or data; "roadster" just means a generic two-seat car.
 
