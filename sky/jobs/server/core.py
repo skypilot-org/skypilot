@@ -291,6 +291,38 @@ class _DefaultManagedJobRunner:
                   for the dashboard's Infra filter to offer. Empty from a
                   controller that predates the field.
         """
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                (jobs, total, status_counts, total_no_filter, infra_options
+                ) = _fetch_managed_job_queue_via_skylet(
+                    handle=handle,
+                    skip_finished=skip_finished,
+                    accessible_workspaces=accessible_workspaces,
+                    job_ids=job_ids,
+                    include_tree=include_tree,
+                    workspace_match=workspace_match,
+                    name_match=name_match,
+                    pool_match=pool_match,
+                    infra_match=infra_match,
+                    page=page,
+                    limit=limit,
+                    user_hashes=user_hashes,
+                    statuses=statuses,
+                    fields=fields,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    submitted_after=submitted_after,
+                    submitted_before=submitted_before,
+                    # queue_v2 adds None to user_hashes exactly when jobs
+                    # without a user hash should be shown.
+                    show_jobs_without_user_hash=(user_hashes is not None and
+                                                 None in user_hashes),
+                )
+                return (jobs, total,
+                        managed_job_utils.ManagedJobQueueResultType.DICT,
+                        total_no_filter, status_counts, infra_options)
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
         with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
             # By name: the parameter list is long enough that inserting one
             # in the middle would silently shift every argument after it.
@@ -1682,8 +1714,7 @@ def _fetch_managed_job_queue_in_process(
     jobs = result['jobs']
     # Same post-processing as the codegen path's load_managed_job_queue:
     # status comes back as ManagedJobStatus, and user_hash becomes user_name.
-    # pylint: disable-next=protected-access
-    managed_job_utils._restore_managed_job_queue_jobs(jobs)
+    managed_job_utils.restore_managed_job_queue_jobs(jobs)
     return (jobs, result['total'], result['status_counts'],
             result['total_no_filter'], result['infra_options'])
 
@@ -1963,13 +1994,11 @@ def queue_v2(
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
-    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
         # For backwards compatibility, we show jobs that do not have a
         # user_hash. TODO(cooperc): Remove before 0.12.0.
         user_hashes.append(None)
-        show_jobs_without_user_hash = True
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
@@ -1984,8 +2013,8 @@ def queue_v2(
 
     # A plugin runner owns the read, including a subclass of the default
     # runner. Otherwise consolidation reads the jobs database in this
-    # process. The gRPC flag still sends the read to the controller skylet,
-    # and an old skylet falls back to codegen.
+    # process, and a separate controller is read through the default runner
+    # (skylet gRPC, falling back to codegen on an old skylet).
     runner = managed_job_runner.current()
     queue_kwargs: _ManagedJobQueueQuery = {
         'skip_finished': skip_finished,
@@ -2009,18 +2038,9 @@ def queue_v2(
     # type() so a plugin that subclasses the default runner is not treated
     # as the stock implementation.
     # pylint: disable-next=unidiomatic-typecheck
-    if type(runner) is _DefaultManagedJobRunner:
-        if managed_job_utils.is_consolidation_mode():
-            return _fetch_managed_job_queue_in_process(**queue_kwargs)
-        if handle.is_grpc_enabled_with_flag:
-            try:
-                return _fetch_managed_job_queue_via_skylet(
-                    handle=handle,
-                    show_jobs_without_user_hash=show_jobs_without_user_hash,
-                    **queue_kwargs,
-                )
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
+    if (type(runner) is _DefaultManagedJobRunner and
+            managed_job_utils.is_consolidation_mode()):
+        return _fetch_managed_job_queue_in_process(**queue_kwargs)
     (jobs, total, result_type, total_no_filter, status_counts,
      infra_options) = _fetch_managed_job_queue_via_runner(runner=runner,
                                                           handle=handle,

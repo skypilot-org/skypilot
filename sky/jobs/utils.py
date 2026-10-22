@@ -3738,26 +3738,31 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    _restore_managed_job_queue_jobs(jobs)
+    restore_managed_job_queue_jobs(jobs)
     return jobs, total, result_type, total_no_filter, status_counts, \
         infra_options
 
 
-def _restore_managed_job_queue_jobs(jobs: List[Dict[str, Any]]) -> None:
-    """Restore the status enum and owner name on queue rows.
+def restore_managed_job_queue_jobs(jobs: List[Dict[str, Any]]) -> None:
+    """Restore the status enum and owner name on queue rows, in place.
 
     ``get_managed_job_queue`` stringifies ``status`` so a controller payload
     can be encoded. ``queue_v2`` callers receive ``ManagedJobStatus``, and
     ``user_name`` looked up from ``user_hash``. A missing user stays None.
+    A ``ManagedJobRunner`` that returns ``DICT`` rows in the controller's
+    serialized form should pass them through this before returning.
     """
-    all_users = global_user_state.get_all_users()
-    all_users_map = {user.id: user.name for user in all_users}
+    # Skip jobs that do not have user_hash info.
+    # TODO(cooperc): Remove check before 0.12.0.
+    user_hashes = {
+        job['user_hash'] for job in jobs if job.get('user_hash') is not None
+    }
+    users = global_user_state.get_users(user_hashes) if user_hashes else {}
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = all_users_map.get(job['user_hash'])
+        if job.get('user_hash') is not None:
+            user = users.get(job['user_hash'])
+            job['user_name'] = user.name if user is not None else None
 
 
 def _get_job_status_from_tasks(
