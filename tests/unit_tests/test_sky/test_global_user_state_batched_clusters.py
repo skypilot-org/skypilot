@@ -5,6 +5,7 @@ replicas) can avoid the per-name DB round-trip that would otherwise show up
 as a double N+1 inside ReplicaInfo.to_info_dict.
 """
 from sky import global_user_state
+from sky import models
 from sky.skylet import constants
 from sky.utils.db import db_utils
 
@@ -149,3 +150,21 @@ def test_get_clusters_from_names_matches_single_helper(tmp_path, monkeypatch):
             assert type(batched[key]) is type(single[key])  # noqa: E721
         else:
             assert batched[key] == single[key], f'mismatch on {key}'
+
+
+def test_get_users_chunks_large_input(tmp_path, monkeypatch):
+    """`get_users` shares the IN-chunking knob, so a page with more owners
+    than SQLite's parameter cap still resolves every user."""
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    ids = [f'u-{i}' for i in range(5)]
+    for user_id in ids:
+        global_user_state.add_or_update_user(
+            models.User(id=user_id, name=f'name-{user_id}'))
+
+    result = global_user_state.get_users(set(ids) | {'missing'})
+
+    assert set(result.keys()) == set(ids)
+    for user_id in ids:
+        assert result[user_id].name == f'name-{user_id}'
+    assert not global_user_state.get_users(set())

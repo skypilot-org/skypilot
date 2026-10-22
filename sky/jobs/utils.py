@@ -3757,7 +3757,7 @@ def restore_managed_job_queue_jobs(jobs: List[Dict[str, Any]]) -> None:
     user_hashes = {
         job['user_hash'] for job in jobs if job.get('user_hash') is not None
     }
-    users = global_user_state.get_users(user_hashes) if user_hashes else {}
+    users = global_user_state.get_users(user_hashes)
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if job.get('user_hash') is not None:
