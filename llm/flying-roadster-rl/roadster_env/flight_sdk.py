@@ -17,10 +17,10 @@ import math
 
 G = 9.81
 ARM_Y, ARM_X = 0.85, 1.5
-SIGN_Y = (1, -1, 1, -1)   # thrusters FL, FR, RL, RR: +1 = left side
-SIGN_X = (1, 1, -1, -1)   # +1 = front
-ROLL_ACCEL_MAX = 25.0     # rad/s^2 with one side at full thrust
-PITCH_ACCEL_MAX = 10.0    # rad/s^2 with one end at full thrust
+SIGN_Y = (1, -1, 1, -1)  # thrusters FL, FR, RL, RR: +1 = left side
+SIGN_X = (1, 1, -1, -1)  # +1 = front
+ROLL_ACCEL_MAX = 25.0  # rad/s^2 with one side at full thrust
+PITCH_ACCEL_MAX = 10.0  # rad/s^2 with one end at full thrust
 
 
 def _wrap(a):
@@ -34,8 +34,10 @@ def mix(total, tau_roll, tau_pitch, obs):
     before attitude authority is lost.
     """
     fmax = max(obs['thrust_max_now'], 1.0)
-    d = [tau_roll * SIGN_Y[i] / (4 * ARM_Y) - tau_pitch * SIGN_X[i] / (4 * ARM_X)
-         for i in range(4)]
+    d = [
+        tau_roll * SIGN_Y[i] / (4 * ARM_Y) - tau_pitch * SIGN_X[i] / (4 * ARM_X)
+        for i in range(4)
+    ]
     spread = max(d) - min(d)
     if spread > fmax:
         d = [x * fmax / spread for x in d]
@@ -43,7 +45,11 @@ def mix(total, tau_roll, tau_pitch, obs):
     return [min(1.0, max(0.0, (c + x) / fmax)) for x in d]
 
 
-def hold_attitude(obs, roll_target=0.0, pitch_target=0.0, kp=25000.0, kd=6000.0):
+def hold_attitude(obs,
+                  roll_target=0.0,
+                  pitch_target=0.0,
+                  kp=25000.0,
+                  kd=6000.0):
     """PD torques toward a target roll/pitch (radians). Angle errors wrap, so
     it also works from upside down (it takes the short way round)."""
     e_r = _wrap(obs['roll'] - roll_target)
@@ -57,7 +63,8 @@ def vz_thrust(obs, vz_target, gain=4.0):
     down or on its side (thrust would push it down or sideways)."""
     if obs['up_z'] < 0.3:
         return 0.0
-    return max(0.0, obs['mass'] * (G + gain * (vz_target - obs['vz'])) / obs['up_z'])
+    return max(0.0,
+               obs['mass'] * (G + gain * (vz_target - obs['vz'])) / obs['up_z'])
 
 
 def landing_vz(obs, decel=6.0, touchdown=1.5):

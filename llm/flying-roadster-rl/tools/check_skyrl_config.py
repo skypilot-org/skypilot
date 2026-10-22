@@ -14,7 +14,9 @@ import sys
 
 import yaml
 
-ENTRY = re.compile(r'uv run --isolated --extra \w+ -m examples\.train\.roadster\.main_roadster')
+ENTRY = re.compile(
+    r'uv run --isolated --extra \w+ -m examples\.train\.roadster\.main_roadster'
+)
 
 
 def validate(argv):
@@ -23,9 +25,11 @@ def validate(argv):
     cfg = SkyRLTrainConfig.from_cli_overrides(argv)
     validate_cfg(cfg)
     g, t = cfg.generator, cfg.trainer
-    print(f'OK colocate={t.placement.colocate_all} local_engines={g.inference_engine.run_engines_locally} '
-          f'lora_r={t.policy.model.lora.rank} sync={t.policy.model.lora.lora_sync_path} '
-          f'gen_len={g.sampling_params.max_generate_length} max_turns={g.max_turns} logger={t.logger}')
+    print(
+        f'OK colocate={t.placement.colocate_all} local_engines={g.inference_engine.run_engines_locally} '
+        f'lora_r={t.policy.model.lora.rank} sync={t.policy.model.lora.lora_sync_path} '
+        f'gen_len={g.sampling_params.max_generate_length} max_turns={g.max_turns} logger={t.logger}'
+    )
 
 
 def main():
@@ -37,13 +41,24 @@ def main():
     trainer = next((d for d in docs if d.get('name') == 'trainer'), docs[-1])
     run = trainer['run']
     m = ENTRY.search(run)
-    cmd = f'{sys.executable} {os.path.abspath(__file__)} --validate' + run[m.end():]
-    env = {**os.environ, **{k: str(v) for k, v in (trainer.get('envs') or {}).items()},
-           'DATA': '/tmp/data', 'OUT': '/outputs/x', 'GW': 'http://gw:8000',
-           'SKYPILOT_JOBGROUP_NAME': 'g', 'PROXY': 'http://10.0.0.1:8001',
-           'SERVERS': "['http://10.0.0.1:8000']", **extra}
-    r = subprocess.run(['bash', '-c', 'set -e\n' + cmd], env=env, capture_output=True, text=True)
-    print(path, extra, '->', r.stdout.strip() or r.stderr.strip().splitlines()[-1])
+    cmd = f'{sys.executable} {os.path.abspath(__file__)} --validate' + run[
+        m.end():]
+    env = {
+        **os.environ,
+        **{k: str(v) for k, v in (trainer.get('envs') or {}).items()}, 'DATA': '/tmp/data',
+        'OUT': '/outputs/x',
+        'GW': 'http://gw:8000',
+        'SKYPILOT_JOBGROUP_NAME': 'g',
+        'PROXY': 'http://10.0.0.1:8001',
+        'SERVERS': "['http://10.0.0.1:8000']",
+        **extra
+    }
+    r = subprocess.run(['bash', '-c', 'set -e\n' + cmd],
+                       env=env,
+                       capture_output=True,
+                       text=True)
+    print(path, extra, '->',
+          r.stdout.strip() or r.stderr.strip().splitlines()[-1])
     sys.exit(r.returncode)
 
 

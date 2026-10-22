@@ -22,17 +22,22 @@ import os
 import sys
 from typing import Any, Dict
 
-from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput
+from skyrl_gym.envs.base_text_env import BaseTextEnv
+from skyrl_gym.envs.base_text_env import BaseTextEnvStepOutput
 
 # The demo root (roadster_env/) is put on PYTHONPATH by the launcher; fall back
 # to the sky_workdir layout.
 sys.path.insert(0, os.path.expanduser('~/sky_workdir'))
-from roadster_env.pilot import ActionError, handover, obs_text, parse_action  # noqa: E402
+from roadster_env.pilot import ActionError  # noqa: E402
+from roadster_env.pilot import handover
+from roadster_env.pilot import obs_text
+from roadster_env.pilot import parse_action
 
 
 class PilotEnv(BaseTextEnv):
 
-    def __init__(self, env_config: Dict[str, Any] = None,
+    def __init__(self,
+                 env_config: Dict[str, Any] = None,
                  extras: Dict[str, Any] = None):
         super().__init__()
         extras = extras or {}
@@ -54,11 +59,22 @@ class PilotEnv(BaseTextEnv):
                 self.ep.step(None)
         if self.ep.done:
             reward = float(self.ep.result.get('reward', 0.0))
-            return BaseTextEnvStepOutput(observations=[], reward=reward, done=True,
-                                         metadata={'reward': reward, 'crashed': self.ep.result.get('crashed')})
+            return BaseTextEnvStepOutput(
+                observations=[],
+                reward=reward,
+                done=True,
+                metadata={
+                    'reward': reward,
+                    'crashed': self.ep.result.get('crashed')
+                })
         obs = obs_text(self.ep.obs, self.task, self.ep.action)
-        return BaseTextEnvStepOutput(observations=[{'role': 'user', 'content': obs}],
-                                     reward=0.0, done=False, metadata={})
+        return BaseTextEnvStepOutput(observations=[{
+            'role': 'user',
+            'content': obs
+        }],
+                                     reward=0.0,
+                                     done=False,
+                                     metadata={})
 
     def get_metrics(self) -> Dict[str, Any]:
         r = self.ep.result or {}

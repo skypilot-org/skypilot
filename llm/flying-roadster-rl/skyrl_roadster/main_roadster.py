@@ -9,7 +9,8 @@ import sys
 
 import ray
 from skyrl.train.config import SkyRLTrainConfig
-from skyrl.train.entrypoints.main_base import BasePPOExp, validate_cfg
+from skyrl.train.entrypoints.main_base import BasePPOExp
+from skyrl.train.entrypoints.main_base import validate_cfg
 from skyrl.train.utils import initialize_ray
 from skyrl_gym.envs import register
 
@@ -17,7 +18,8 @@ from skyrl_gym.envs import register
 @ray.remote(num_cpus=1)
 def skyrl_entrypoint(cfg: SkyRLTrainConfig):
     # Register inside the Ray task so no change to the skyrl-gym package is needed.
-    register(id='roadster_pilot', entry_point='examples.train.roadster.pilot_env:PilotEnv')
+    register(id='roadster_pilot',
+             entry_point='examples.train.roadster.pilot_env:PilotEnv')
     BasePPOExp(cfg).run()
 
 

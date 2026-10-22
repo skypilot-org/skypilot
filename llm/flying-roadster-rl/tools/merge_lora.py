@@ -8,9 +8,10 @@ to push the trained pilot's decisions over the 0.2 s interval.
 """
 import argparse
 
-import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
 
 
 def main():
@@ -19,7 +20,8 @@ def main():
     ap.add_argument('--lora', required=True)
     ap.add_argument('--out', required=True)
     args = ap.parse_args()
-    model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(args.base,
+                                                 torch_dtype=torch.bfloat16)
     model = PeftModel.from_pretrained(model, args.lora).merge_and_unload()
     model.save_pretrained(args.out, safe_serialization=True)
     AutoTokenizer.from_pretrained(args.base).save_pretrained(args.out)

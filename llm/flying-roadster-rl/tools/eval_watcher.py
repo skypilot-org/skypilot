@@ -23,8 +23,10 @@ import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The SkyPilot CLI installer puts `sky` next to the Python it installed into, which may not be on PATH yet.
-SKY = shutil.which('sky') or next((p for p in (os.path.join(os.path.dirname(sys.executable), 'sky'),
-                                              os.path.expanduser('~/.local/bin/sky')) if os.path.exists(p)), 'sky')
+SKY = shutil.which('sky') or next(
+    (p for p in (os.path.join(os.path.dirname(sys.executable), 'sky'),
+                 os.path.expanduser('~/.local/bin/sky')) if os.path.exists(p)),
+    'sky')
 
 
 def log(msg):
@@ -39,7 +41,10 @@ def ready_steps(out):
     and the same size as on the previous poll (so a copy still in progress is not picked up)."""
     steps = []
     for d in glob.glob(f'{out}/export/global_step_*/policy'):
-        files = [os.path.join(d, f) for f in ('adapter_config.json', 'adapter_model.safetensors')]
+        files = [
+            os.path.join(d, f)
+            for f in ('adapter_config.json', 'adapter_model.safetensors')
+        ]
         if not all(os.path.exists(f) for f in files):
             continue
         sizes = tuple(os.path.getsize(f) for f in files)
@@ -51,18 +56,33 @@ def ready_steps(out):
 
 def launch(args, name, step, tag, seeds, per_kind, modes, concurrency):
     """Launch one eval job; from inside a job group it attaches to the group as a dynamic task."""
-    envs = {'OUTPUT_BUCKET': args.bucket, 'RUN': args.run, 'MODEL': args.base, 'STEPS': str(step), 'TAG': tag,
-            'EVAL_SEEDS': seeds, 'PER_KIND': str(per_kind), 'WEATHERS': args.weathers, 'MODES': modes,
-            'CONCURRENCY': str(concurrency), 'TEMPS': '0.0', 'MERGE': '1', 'SKIP_BASE': '1'}
+    envs = {
+        'OUTPUT_BUCKET': args.bucket,
+        'RUN': args.run,
+        'MODEL': args.base,
+        'STEPS': str(step),
+        'TAG': tag,
+        'EVAL_SEEDS': seeds,
+        'PER_KIND': str(per_kind),
+        'WEATHERS': args.weathers,
+        'MODES': modes,
+        'CONCURRENCY': str(concurrency),
+        'TEMPS': '0.0',
+        'MERGE': '1',
+        'SKIP_BASE': '1'
+    }
     cmd = [SKY, 'jobs', 'launch', '-y', '-d', '-n', name, args.eval_yaml]
     for k, v in envs.items():
         cmd += ['--env', f'{k}={v}']
-    for attempt in range(5):  # the API server can be briefly unreachable; retry rather than lose a checkpoint
+    for attempt in range(
+            5
+    ):  # the API server can be briefly unreachable; retry rather than lose a checkpoint
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=HERE)
         if r.returncode == 0:
             log(f'launched {name}')
             return True
-        log(f'launch {name} failed (attempt {attempt + 1}): {(r.stdout + r.stderr)[-400:]}')
+        log(f'launch {name} failed (attempt {attempt + 1}): {(r.stdout + r.stderr)[-400:]}'
+           )
         time.sleep(30)
     return False
 
@@ -92,15 +112,24 @@ def success(found):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--run', required=True)
     ap.add_argument('--bucket', default=os.environ.get('OUTPUT_BUCKET', ''))
-    ap.add_argument('--base', required=True, help='the model the LoRA trained on (/outputs/<RUN>/sft_model after a warm start)')
+    ap.add_argument(
+        '--base',
+        required=True,
+        help=
+        'the model the LoRA trained on (/outputs/<RUN>/sft_model after a warm start)'
+    )
     ap.add_argument('--eval-yaml', default='eval.yaml')
     ap.add_argument('--weathers', default='normal gale storm')
     ap.add_argument('--val-seeds', default='2001,2002,2003')
     ap.add_argument('--val-per-kind', type=int, default=96)
-    ap.add_argument('--test-seeds', default='', help='"" = the eval\'s held-out seeds')
+    ap.add_argument('--test-seeds',
+                    default='',
+                    help='"" = the eval\'s held-out seeds')
     ap.add_argument('--test-per-kind', type=int, default=96)
     ap.add_argument('--poll', type=int, default=60)
     ap.add_argument('--eval-timeout', type=int, default=3 * 3600)
@@ -111,18 +140,23 @@ def main():
 
     launched, scores = [], {}
 
-    def collect():  # record (and report) every validation eval that has written all its results
+    def collect(
+    ):  # record (and report) every validation eval that has written all its results
         for step in launched:
             found = summaries(out, f'val-step{step}')
             if step not in scores and len(found) == n_weathers:
                 scores[step] = success(found)
-                log(f'step {step}: {scores[step]:.3f} of validation flights landed')
+                log(f'step {step}: {scores[step]:.3f} of validation flights landed'
+                   )
 
     while True:
-        finished = os.path.exists(done_marker)  # read before listing, so no checkpoint written before it is missed
+        finished = os.path.exists(
+            done_marker
+        )  # read before listing, so no checkpoint written before it is missed
         for step in ready_steps(out):
-            if step not in launched and launch(args, f'eval-step-{step}', step, f'val-step{step}', args.val_seeds,
-                                               args.val_per_kind, 'turn', 24):
+            if step not in launched and launch(
+                    args, f'eval-step-{step}', step, f'val-step{step}',
+                    args.val_seeds, args.val_per_kind, 'turn', 24):
                 launched.append(step)
         collect()
         if finished:
@@ -132,23 +166,35 @@ def main():
         raise SystemExit('training finished without a checkpoint')
 
     deadline = time.time() + args.eval_timeout
-    while len(scores) < len(launched) and time.time() < deadline:  # wait for the evals still running
+    while len(scores) < len(launched) and time.time(
+    ) < deadline:  # wait for the evals still running
         time.sleep(args.poll)
         collect()
     if not scores:
         raise SystemExit('no checkpoint finished its validation eval')
     best = max(scores, key=lambda s: (scores[s], s))
-    json.dump({'validation_success': scores, 'best_step': best}, open(f'{out}/eval_watcher.json', 'w'), indent=1)
-    log(f'best on validation: step {best} ({scores[best]:.3f}); flying the held-out test set once with it')
+    json.dump({
+        'validation_success': scores,
+        'best_step': best
+    },
+              open(f'{out}/eval_watcher.json', 'w'),
+              indent=1)
+    log(f'best on validation: step {best} ({scores[best]:.3f}); flying the held-out test set once with it'
+       )
 
-    if not launch(args, f'test-step-{best}', best, f'test-step{best}', args.test_seeds, args.test_per_kind,
-                  'realtime', 1):
+    if not launch(args, f'test-step-{best}', best, f'test-step{best}',
+                  args.test_seeds, args.test_per_kind, 'realtime', 1):
         raise SystemExit('could not launch the test eval')
     deadline = time.time() + args.eval_timeout
-    while len(found := summaries(out, f'test-step{best}')) < n_weathers and time.time() < deadline:
-        time.sleep(args.poll)  # the group stays up until the test eval has written its results
+    while len(found := summaries(
+            out, f'test-step{best}')) < n_weathers and time.time() < deadline:
+        time.sleep(
+            args.poll
+        )  # the group stays up until the test eval has written its results
     for name, s in sorted(found.items()):
-        log(f"{s['weather']}: " + ', '.join(f"{k} {v['success']:.3f} of {v['n']}" for k, v in s['kinds'].items()))
+        log(f"{s['weather']}: " +
+            ', '.join(f"{k} {v['success']:.3f} of {v['n']}"
+                      for k, v in s['kinds'].items()))
 
 
 if __name__ == '__main__':

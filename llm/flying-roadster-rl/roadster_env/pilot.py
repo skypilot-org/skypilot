@@ -24,15 +24,16 @@ mode on a real vehicle. Modes:
 on the next decision continues the same manoeuvre instead of restarting it.
 """
 import json
-import os
 import math
+import os
 import re
 from typing import Dict, Optional, Tuple
 
 from . import flight_sdk as fc
-from .tasks import CONTROL_HZ, episode
+from .tasks import CONTROL_HZ
+from .tasks import episode
 
-DECIDE_EVERY = 10                     # control ticks per decision
+DECIDE_EVERY = 10  # control ticks per decision
 DECISION_DT = DECIDE_EVERY / CONTROL_HZ  # 0.2 s of sim time
 MODES = ('coast', 'climb', 'hold', 'rotate', 'land')
 _JSON_RE = re.compile(r'\{.*?\}', re.DOTALL)
@@ -108,8 +109,10 @@ def throttles(action: Dict, obs: Dict) -> list:
         tr, tp = fc.hold_attitude(obs)
         return fc.mix(fc.vz_thrust(obs, action['vz']), tr, tp, obs)
     if m == 'hold':
-        tr, tp = fc.hold_attitude(obs, math.radians(action['roll']), math.radians(action['pitch']))
-        total = fc.vz_thrust(obs, action['vz']) if action['vz'] is not None else 0.0
+        tr, tp = fc.hold_attitude(obs, math.radians(action['roll']),
+                                  math.radians(action['pitch']))
+        total = fc.vz_thrust(obs,
+                             action['vz']) if action['vz'] is not None else 0.0
         return fc.mix(total, tr, tp, obs)
     if m == 'land':
         tr, tp = fc.hold_attitude(obs, math.radians(action['roll']), 0.0)
@@ -120,15 +123,18 @@ def throttles(action: Dict, obs: Dict) -> list:
     total = obs['roll_total'] if axis == 'roll' else obs['pitch_total']
     rate = obs['roll_rate'] if axis == 'roll' else obs['pitch_rate']
     rem = math.radians(action['to']) - total
-    lift = action['lift'] * weight * max(obs['up_z'], 0.0)  # thrust only helps when upright-ish
+    lift = action['lift'] * weight * max(
+        obs['up_z'], 0.0)  # thrust only helps when upright-ish
     if abs(rem) < math.radians(4) and abs(rate) < 0.6:
         cur = obs['roll'] if axis == 'roll' else obs['pitch']
         tgt = _wrap(cur + rem)
-        tr, tp = fc.hold_attitude(obs, tgt if axis == 'roll' else 0.0, tgt if axis == 'pitch' else 0.0)
+        tr, tp = fc.hold_attitude(obs, tgt if axis == 'roll' else 0.0,
+                                  tgt if axis == 'pitch' else 0.0)
         return fc.mix(lift, tr, tp, obs)
     direction = 1 if rem > 0 else -1
     moving_toward = rate * direction > 0
-    if moving_toward and abs(rem) <= fc.brake_angle(obs, axis) + abs(rate) / CONTROL_HZ:
+    if moving_toward and abs(rem) <= fc.brake_angle(
+            obs, axis) + abs(rate) / CONTROL_HZ:
         return fc.spin(obs, axis, -direction, collective=lift)  # brake
     cap = 7.0 if axis == 'roll' else 3.5  # rad/s; faster just wastes air
     if moving_toward and abs(rate) >= cap:
@@ -142,13 +148,18 @@ OBS_TIMING = os.environ.get('ROADSTER_OBS_TIMING', '1') != '0'
 
 def obs_text(obs: Dict, task: Dict, action: Optional[Dict] = None) -> str:
     """Compact, readable state for the pilot (degrees, %, metres)."""
-    parts = [f't={obs["t"]:.1f}s', f'height={obs["z"]:.1f}m', f'vz={obs["vz"]:+.1f}',
-             f'speed={obs["vx"]:.1f}', f'lateral y={obs["y"]:+.1f}m vy={obs["vy"]:+.1f}',
-             f'roll={math.degrees(obs["roll"]):+.0f}deg', f'pitch={math.degrees(obs["pitch"]):+.0f}deg',
-             f'roll_rate={math.degrees(obs["roll_rate"]):+.0f}deg/s',
-             f'rolled={math.degrees(obs["roll_total"]):+.0f}deg',
-             f'pitched={math.degrees(obs["pitch_total"]):+.0f}deg',
-             f'air={100 * obs["air_frac"]:.0f}%', f'wheels_down={obs["wheels_on_ground"]}']
+    parts = [
+        f't={obs["t"]:.1f}s', f'height={obs["z"]:.1f}m', f'vz={obs["vz"]:+.1f}',
+        f'speed={obs["vx"]:.1f}',
+        f'lateral y={obs["y"]:+.1f}m vy={obs["vy"]:+.1f}',
+        f'roll={math.degrees(obs["roll"]):+.0f}deg',
+        f'pitch={math.degrees(obs["pitch"]):+.0f}deg',
+        f'roll_rate={math.degrees(obs["roll_rate"]):+.0f}deg/s',
+        f'rolled={math.degrees(obs["roll_total"]):+.0f}deg',
+        f'pitched={math.degrees(obs["pitch_total"]):+.0f}deg',
+        f'air={100 * obs["air_frac"]:.0f}%',
+        f'wheels_down={obs["wheels_on_ground"]}'
+    ]
     if task.get('obstacle'):
         o = task['obstacle']
         d = o['x0'] - obs['x']
@@ -157,7 +168,9 @@ def obs_text(obs: Dict, task: Dict, action: Optional[Dict] = None) -> str:
             # Seconds at the current speed: the division every pilot otherwise has to do in its head.
             timing = (f' (reach in {d / obs["vx"]:.1f}s)' if d > 0 else '') + \
                 f', past it in {(d + o["length"]) / obs["vx"]:.1f}s'
-        parts.append(f'{o["name"]}: front {d:+.1f}m ahead{timing}, {o["length"]}m long, {o["height"]}m tall')
+        parts.append(
+            f'{o["name"]}: front {d:+.1f}m ahead{timing}, {o["length"]}m long, {o["height"]}m tall'
+        )
     if action is not None:
         parts.append('current=' + json.dumps(action, separators=(',', ':')))
     return ' | '.join(parts)
@@ -206,7 +219,8 @@ def handover(task: Dict, steps: int, record: bool = False) -> PilotEpisode:
     Deterministic for a given task, so a dataset row and its env agree on the
     hand-over state. Used as a reverse curriculum: training flights that start
     mid-manoeuvre (nothing is imitated; the reward is the whole flight's)."""
-    from .pilot_baselines import TUNED  # pylint: disable=import-outside-toplevel
+    # pylint: disable-next=import-outside-toplevel
+    from .pilot_baselines import TUNED
     ep, mem, pilot = PilotEpisode(task, record), {}, TUNED[task['kind']]
     for _ in range(steps):
         if ep.done:

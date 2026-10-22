@@ -21,7 +21,10 @@ import math
 import random
 from typing import Callable, Dict, List, Optional
 
-from .physics import CarParams, Obstacle, RoadsterSim, WindField
+from .physics import CarParams
+from .physics import Obstacle
+from .physics import RoadsterSim
+from .physics import WindField
 
 CONTROL_HZ = 50
 T_MAX = 6.0
@@ -45,12 +48,12 @@ OBSTACLES = {
     'Tesla Semi': (6.5, 4.0),
 }
 
-
 # Weather presets: (mean wind at 10 m range, gust sigma range), m/s.
 WEATHER = {
-    'normal': ((0.0, 14.0), (0.5, 4.0)),   # calm .. strong breeze (training)
-    'gale': ((14.0, 24.0), (4.0, 8.0)),    # gale .. strong gale (held-out test)
-    'storm': ((24.0, 33.0), (8.0, 12.0)),  # storm .. violent storm (held-out test)
+    'normal': ((0.0, 14.0), (0.5, 4.0)),  # calm .. strong breeze (training)
+    'gale': ((14.0, 24.0), (4.0, 8.0)),  # gale .. strong gale (held-out test)
+    'storm': (
+        (24.0, 33.0), (8.0, 12.0)),  # storm .. violent storm (held-out test)
 }
 
 
@@ -69,22 +72,31 @@ def sample_task(kind: Optional[str] = None,
     speed = rng.uniform(lo, hi)
     heading = rng.uniform(0.0, 2 * math.pi)  # direction the wind blows TOWARD
     task['weather'] = weather
-    task['wind'] = {'x': round(speed * math.cos(heading), 1),
-                    'y': round(speed * math.sin(heading), 1),
-                    'gust': round(rng.uniform(glo, ghi), 1),
-                    'seed': rng.randrange(1 << 30)}
+    task['wind'] = {
+        'x': round(speed * math.cos(heading), 1),
+        'y': round(speed * math.sin(heading), 1),
+        'gust': round(rng.uniform(glo, ghi), 1),
+        'seed': rng.randrange(1 << 30)
+    }
     if kind == 'ramp_flip':
         # Speed along the track at the lip; ramp sized like the reveal's.
         task['speed'] = round(rng.uniform(9.0, 14.0), 1)
-        task['ramp'] = {'x0': 20.0, 'radius': round(rng.uniform(5.0, 7.0), 1),
-                        'deck': round(rng.uniform(3.0, 6.0), 1)}
+        task['ramp'] = {
+            'x0': 20.0,
+            'radius': round(rng.uniform(5.0, 7.0), 1),
+            'deck': round(rng.uniform(3.0, 6.0), 1)
+        }
     if kind in ('hop', 'hop_kickflip'):
         # hop_kickflip is the reveal's "flip over a Cybertruck".
         names = (['Cybertruck'] if kind == 'hop_kickflip' else list(OBSTACLES))
         name = rng.choice(names)
         length, height = OBSTACLES[name]
-        task['obstacle'] = {'name': name, 'x0': round(rng.uniform(25, 45), 1),
-                            'length': length, 'height': height}
+        task['obstacle'] = {
+            'name': name,
+            'x0': round(rng.uniform(25, 45), 1),
+            'length': length,
+            'height': height
+        }
     return task
 
 
@@ -96,7 +108,9 @@ def ramp_lip(task: Dict):
     return (x, 0.0, z), (-task['speed'], 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)
 
 
-def ramp_ride_frames(task: Dict, dt: float = TRAJ_EVERY, approach_s: float = 1.5):
+def ramp_ride_frames(task: Dict,
+                     dt: float = TRAJ_EVERY,
+                     approach_s: float = 1.5):
     """Scripted pre-launch trajectory (t < 0): approach, half-loop, deck.
 
     Rows match the recorded trajectory format with zero thrust and a full
@@ -114,13 +128,16 @@ def ramp_ride_frames(task: Dict, dt: float = TRAJ_EVERY, approach_s: float = 1.5
             x, z, th = r['x0'] - s_app + s, WHEEL_DROP, 0.0
         elif s < s_app + s_arc:  # up and over the half-loop (nose-up pitch)
             phi = (s - s_app) / rc
-            x, z, th = r['x0'] + rc * math.sin(phi), r['radius'] - rc * math.cos(phi), -phi
+            x, z, th = r['x0'] + rc * math.sin(
+                phi), r['radius'] - rc * math.cos(phi), -phi
         else:  # upside down along the deck, heading -x
-            x, z, th = r['x0'] - (s - s_app - s_arc), 2 * r['radius'] - WHEEL_DROP, -math.pi
+            x, z, th = r['x0'] - (s - s_app -
+                                  s_arc), 2 * r['radius'] - WHEEL_DROP, -math.pi
         q = (math.cos(th / 2), 0.0, math.sin(th / 2), 0.0)
-        rows.append([round((s - total) / v, 3), round(x, 3), 0.0, round(z, 3)] +
-                    [round(c, 4) for c in q] + [0.0] * 4 + [1.0] +
-                    [round(c, 2) for c in wind.at(z)])
+        rows.append([round((s - total) / v, 3),
+                     round(x, 3), 0.0,
+                     round(z, 3)] + [round(c, 4) for c in q] + [0.0] * 4 +
+                    [1.0] + [round(c, 2) for c in wind.at(z)])
         s += v * dt
     return rows
 
@@ -135,8 +152,10 @@ def make_wind(task: Dict) -> WindField:
 def make_sim(task: Dict) -> RoadsterSim:
     params = CarParams(air_mass=float(task.get('air_mass', 150.0)))
     obs = task.get('obstacle')
-    obstacle = Obstacle(obs['x0'], obs['length'], obs['height']) if obs else None
-    sim = RoadsterSim(params, speed=float(task.get('speed', 20.0)),
+    obstacle = Obstacle(obs['x0'], obs['length'],
+                        obs['height']) if obs else None
+    sim = RoadsterSim(params,
+                      speed=float(task.get('speed', 20.0)),
                       obstacle=obstacle,
                       wind=make_wind(task))
     if task.get('ramp'):
@@ -153,7 +172,8 @@ def task_obs(task: Dict) -> Dict:
         out.update(launch_height=2 * task['ramp']['radius'])
     if task.get('obstacle'):
         o = task['obstacle']
-        out.update(obstacle_x0=o['x0'], obstacle_length=o['length'],
+        out.update(obstacle_x0=o['x0'],
+                   obstacle_length=o['length'],
                    obstacle_height=o['height'])
     return out
 
@@ -198,7 +218,7 @@ def episode(task: Dict, record: bool = True):
         sim.step(u)
         s = sim.s
         max_z = max(max_z, s.pos[2])
-        R_up = 1 - 2 * (s.quat[1] ** 2 + s.quat[2] ** 2)  # body-z . world-z
+        R_up = 1 - 2 * (s.quat[1]**2 + s.quat[2]**2)  # body-z . world-z
         max_up = max(max_up, R_up)
 
         in_air = sim.wheels_down == 0 and not sim.hull_contact
@@ -211,7 +231,7 @@ def episode(task: Dict, record: bool = True):
             if was_airborne and not touchdown_seen:
                 touchdown_seen = True
                 landing_vz = -s.vel[2]
-                touchdown_up = 1 - 2 * (s.quat[1] ** 2 + s.quat[2] ** 2)
+                touchdown_up = 1 - 2 * (s.quat[1]**2 + s.quat[2]**2)
                 touchdown_spin = math.sqrt(sum(w * w for w in s.omega))
         if touchdown_seen:
             lateral = max(lateral, abs(s.pos[1]))
@@ -247,13 +267,15 @@ def episode(task: Dict, record: bool = True):
         'final_x': s.pos[0],
         'lateral_offset': round(lateral, 3),
         # Wheels are ~half the body width from the centre line.
-        'on_road': touchdown_seen and lateral + sim.p.width / 2 <= ROAD_HALF_WIDTH,
+        'on_road': touchdown_seen
+                   and lateral + sim.p.width / 2 <= ROAD_HALF_WIDTH,
     }
     if task.get('obstacle'):
         o = task['obstacle']
         # Rear bumper is ~half a car length behind the centre.
-        result['cleared'] = (sim.crashed != 'hit_obstacle' and
-                             s.pos[0] - sim.p.length / 2 > o['x0'] + o['length'])
+        result['cleared'] = (
+            sim.crashed != 'hit_obstacle' and
+            s.pos[0] - sim.p.length / 2 > o['x0'] + o['length'])
     result['reward'], result['reward_terms'] = score(result)
     result['success'] = is_success(result)
     if record:
@@ -261,7 +283,8 @@ def episode(task: Dict, record: bool = True):
     return result
 
 
-def run_episode(task: Dict, controller: Callable[[Dict], List[float]],
+def run_episode(task: Dict,
+                controller: Callable[[Dict], List[float]],
                 record: bool = True) -> Dict:
     """Fly ``controller(obs) -> 4 throttles`` (called at 50 Hz) through a task.
     A controller that raises or returns NaN is switched off for the rest of
@@ -323,7 +346,7 @@ def touchdown_quality(r: Dict) -> float:
     """
     if r.get('touchdown_up') is None or r['crashed'] == 'hit_obstacle':
         return 0.0
-    up = max(0.0, min(1.0, r['touchdown_up']))           # 1 = wheels down
+    up = max(0.0, min(1.0, r['touchdown_up']))  # 1 = wheels down
     calm = max(0.0, min(1.0, 1 - r['touchdown_spin'] / 6.0))
     soft = max(0.0, min(1.0, 1 - r['landing_vz'] / 9.0))
     return up * (0.5 + 0.25 * calm + 0.25 * soft)
@@ -370,8 +393,11 @@ def score(r: Dict):
     elif kind == 'hop':
         h = r['task']['obstacle']['height']
         cleared = float(bool(r.get('cleared')))
-        terms = {'height': 0.2 * min(r['max_height_gain'] / (h + 0.5), 1.0),
-                 'cleared': 0.2 * cleared, 'touchdown': 0.1 * tq * cleared}
+        terms = {
+            'height': 0.2 * min(r['max_height_gain'] / (h + 0.5), 1.0),
+            'cleared': 0.2 * cleared,
+            'touchdown': 0.1 * tq * cleared
+        }
     elif kind == 'ramp_flip':
         upright = max(0.0, min(1.0, (r['max_up'] + 1) / 2))
         terms = {'uprighted': 0.25 * upright, 'touchdown': 0.25 * tq}
@@ -379,9 +405,12 @@ def score(r: Dict):
         h = r['task']['obstacle']['height']
         cleared = float(bool(r.get('cleared')))
         prog = _rot_credit(kind, r)
-        terms = {'height': 0.1 * min(r['max_height_gain'] / (h + 0.5), 1.0),
-                 'cleared': 0.1 * cleared, 'rotation': 0.15 * prog,
-                 'touchdown': 0.15 * tq * prog * cleared}
+        terms = {
+            'height': 0.1 * min(r['max_height_gain'] / (h + 0.5), 1.0),
+            'cleared': 0.1 * cleared,
+            'rotation': 0.15 * prog,
+            'touchdown': 0.15 * tq * prog * cleared
+        }
     else:
         raise ValueError(f'unknown task kind {kind!r}')
     terms['landed'] = 0.4 * success

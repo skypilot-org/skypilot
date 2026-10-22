@@ -112,7 +112,6 @@ def controller(obs, mem):
     return stabilize(obs, landing_vz(obs))
 '''
 
-
 RAMP_FLIP = _MIXER + '''
 def controller(obs, mem):
     # Leaves the ramp deck upside down. Roll 180 degrees back upright (roll
@@ -171,9 +170,10 @@ def controller(obs, mem):
 # spin leave enough air for the landing burn in strong crosswinds. Lands
 # ~100% in gales/storms where HOP_KICKFLIP lands ~87% / ~78%: evidence that the
 # wind failures are avoidable (a learned policy can beat the hand-written one).
-HOP_KICKFLIP_WIND_AWARE = (HOP_KICKFLIP
-                           .replace("obs['obstacle_height'] + 2.3:", "obs['obstacle_height'] + 1.9:")
-                           .replace("obs['roll_rate'] > 7.0:", "obs['roll_rate'] > 5.0:"))
+HOP_KICKFLIP_WIND_AWARE = (HOP_KICKFLIP.replace(
+    "obs['obstacle_height'] + 2.3:",
+    "obs['obstacle_height'] + 1.9:").replace("obs['roll_rate'] > 7.0:",
+                                             "obs['roll_rate'] > 5.0:"))
 assert HOP_KICKFLIP_WIND_AWARE != HOP_KICKFLIP
 
 # The same two reveal stunts written ONLY with the flight-control SDK (`fc`),
@@ -226,8 +226,13 @@ def controller(obs, mem):
     return fc.mix(fc.vz_thrust(obs, vz), tr, tp, obs)
 '''
 
-BASELINES = {'ramp_flip': RAMP_FLIP, 'hop_kickflip': HOP_KICKFLIP,
-             'hop': HOP, 'kickflip': KICKFLIP, 'backflip': BACKFLIP}
+BASELINES = {
+    'ramp_flip': RAMP_FLIP,
+    'hop_kickflip': HOP_KICKFLIP,
+    'hop': HOP,
+    'kickflip': KICKFLIP,
+    'backflip': BACKFLIP
+}
 
 
 def load_controller(source: str):

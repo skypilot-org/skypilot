@@ -18,9 +18,10 @@ thrust / pressure / mass figures for the 2026 Roadster):
   * Ground contact via spring-damper wheels (suspension) and stiff hull
     points; hull/roof contact or a hard landing is a crash.
 """
+from dataclasses import dataclass
+from dataclasses import field
 import math
 import random
-from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 G0 = 9.80665
@@ -181,8 +182,10 @@ class CarParams:
         xs = [-hl + i * self.length / 9 for i in range(10)]
         ys = [-hw + i * self.width / 4 for i in range(5)]
         zs = [z_lo + i * self.height / 3 for i in range(4)]
-        pts = {(x, y, z) for x in xs for y in ys for z in zs
-               if x in (xs[0], xs[-1]) or y in (ys[0], ys[-1]) or z in (zs[0], zs[-1])}
+        pts = {(x, y, z) for x in xs for y in ys
+               for z in zs
+               if x in (xs[0], xs[-1]) or y in (ys[0], ys[-1]) or z in (zs[0],
+                                                                        zs[-1])}
         return sorted(pts) + list(self.wheel_pos)
 
 
@@ -200,7 +203,10 @@ class WindField:
     """
     Z_REF, ALPHA, Z_MIN = 10.0, 0.14, 0.5
 
-    def __init__(self, mean_xy=(0.0, 0.0), gust: float = 0.0, tau: float = 1.5,
+    def __init__(self,
+                 mean_xy=(0.0, 0.0),
+                 gust: float = 0.0,
+                 tau: float = 1.5,
                  seed: int = 0):
         self.mean = (float(mean_xy[0]), float(mean_xy[1]))
         self.sigma = (gust, gust, 0.5 * gust)
@@ -214,14 +220,16 @@ class WindField:
             return
         a = math.exp(-dt / self.tau)
         b = math.sqrt(1 - a * a)
-        self.g = [a * g + b * sg * self.rng.gauss(0.0, 1.0)
-                  for g, sg in zip(self.g, self.sigma)]
+        self.g = [
+            a * g + b * sg * self.rng.gauss(0.0, 1.0)
+            for g, sg in zip(self.g, self.sigma)
+        ]
 
     def at(self, z: float) -> Vec:
-        prof = (max(z, self.Z_MIN) / self.Z_REF) ** self.ALPHA
+        prof = (max(z, self.Z_MIN) / self.Z_REF)**self.ALPHA
         near_ground = min(1.0, max(z, 0.0) / 3.0)
-        return (self.mean[0] * prof + self.g[0], self.mean[1] * prof + self.g[1],
-                self.g[2] * near_ground)
+        return (self.mean[0] * prof + self.g[0],
+                self.mean[1] * prof + self.g[1], self.g[2] * near_ground)
 
 
 @dataclass
@@ -235,7 +243,8 @@ class Obstacle:
     def near(self, p: Vec, reach: float) -> bool:
         """Cheap gate: could any point within ``reach`` of ``p`` be inside?"""
         return (self.x0 - reach <= p[0] <= self.x0 + self.length + reach and
-                abs(p[1]) <= self.half_width + reach and p[2] <= self.height + reach)
+                abs(p[1]) <= self.half_width + reach and
+                p[2] <= self.height + reach)
 
     def contains(self, p: Vec) -> bool:
         return (self.x0 <= p[0] <= self.x0 + self.length and
@@ -261,7 +270,8 @@ class SimState:
 class RoadsterSim:
     DT = 0.002  # physics step (500 Hz)
 
-    def __init__(self, params: Optional[CarParams] = None,
+    def __init__(self,
+                 params: Optional[CarParams] = None,
                  speed: float = 20.0,
                  obstacle: Optional[Obstacle] = None,
                  wind=None):
@@ -279,9 +289,12 @@ class RoadsterSim:
         # Static sag so the car starts at rest on its suspension.
         sag = self.p.dry_mass * G0 / 4 / self.p.susp_k
         z0 = -self.p.wheel_pos[0][2] - sag
-        self.s = SimState(pos=(0.0, 0.0, z0), vel=(speed, 0.0, 0.0),
-                          quat=(1.0, 0.0, 0.0, 0.0), omega=(0.0, 0.0, 0.0),
-                          air=self.p.air_mass, thrust=[0.0] * 4)
+        self.s = SimState(pos=(0.0, 0.0, z0),
+                          vel=(speed, 0.0, 0.0),
+                          quat=(1.0, 0.0, 0.0, 0.0),
+                          omega=(0.0, 0.0, 0.0),
+                          air=self.p.air_mass,
+                          thrust=[0.0] * 4)
         self.crashed: Optional[str] = None
         self.wheels_down = 4
         self.hull_contact = False
@@ -352,8 +365,9 @@ class RoadsterSim:
             v_lat = dot(v_pt, lat)
             f_lat = -max(-1.0, min(1.0, v_lat / 0.5)) * p.tire_mu * n
             v_long = dot(v_pt, fwd)
-            f_long = max(-p.tire_mu * n, min(
-                p.tire_mu * n, 2000.0 * (self.cruise_speed - v_long)))
+            f_long = max(
+                -p.tire_mu * n,
+                min(p.tire_mu * n, 2000.0 * (self.cruise_speed - v_long)))
             f = add(add(scale(lat, f_lat), scale(fwd, f_long)), (0.0, 0.0, n))
             force = add(force, f)
             torque_b = add(torque_b, mat_t_vec(R, cross(r_w, f)))
@@ -361,8 +375,10 @@ class RoadsterSim:
 
         # Hull contact (and obstacle collision).
         hull_contact = False
-        if self.obstacle and not self.crashed and self.obstacle.near(s.pos, 3.0) and any(
-                self.obstacle.contains(add(s.pos, mat_vec(R, op))) for op in self._obstacle_pts):
+        if self.obstacle and not self.crashed and self.obstacle.near(
+                s.pos, 3.0) and any(
+                    self.obstacle.contains(add(s.pos, mat_vec(R, op)))
+                    for op in self._obstacle_pts):
             self.crashed = 'hit_obstacle'
         for hp, is_roof in self._hull:
             r_h = mat_vec(R, hp)
@@ -392,11 +408,11 @@ class RoadsterSim:
         I = self._inertia
         Iw = (I[0] * s.omega[0], I[1] * s.omega[1], I[2] * s.omega[2])
         gyro = cross(s.omega, Iw)
-        s.omega = tuple(s.omega[k] + (torque_b[k] - gyro[k]) / I[k] * dt
-                        for k in range(3))
+        s.omega = tuple(
+            s.omega[k] + (torque_b[k] - gyro[k]) / I[k] * dt for k in range(3))
         wx, wy, wz = s.omega
-        s.quat = quat_normalize(add4(s.quat, scale4(
-            quat_mul(s.quat, (0.0, wx, wy, wz)), 0.5 * dt)))
+        s.quat = quat_normalize(
+            add4(s.quat, scale4(quat_mul(s.quat, (0.0, wx, wy, wz)), 0.5 * dt)))
         s.roll_total += wx * dt
         s.pitch_total += wy * dt
         s.t += dt
@@ -408,16 +424,25 @@ class RoadsterSim:
         roll, pitch, yaw = quat_to_euler(s.quat)
         obs = {
             't': s.t,
-            'x': s.pos[0], 'y': s.pos[1], 'z': s.pos[2],
-            'vx': s.vel[0], 'vy': s.vel[1], 'vz': s.vel[2],
-            'roll': roll, 'pitch': pitch, 'yaw': yaw,
-            'roll_rate': s.omega[0], 'pitch_rate': s.omega[1],
+            'x': s.pos[0],
+            'y': s.pos[1],
+            'z': s.pos[2],
+            'vx': s.vel[0],
+            'vy': s.vel[1],
+            'vz': s.vel[2],
+            'roll': roll,
+            'pitch': pitch,
+            'yaw': yaw,
+            'roll_rate': s.omega[0],
+            'pitch_rate': s.omega[1],
             'yaw_rate': s.omega[2],
-            'roll_total': s.roll_total, 'pitch_total': s.pitch_total,
+            'roll_total': s.roll_total,
+            'pitch_total': s.pitch_total,
             # World-z component of the body's up axis: +1 upright, -1 upside down.
             'up_z': R[2][2],
             # World-z component of body x (nose) and y (left side) axes.
-            'nose_z': R[2][0], 'left_z': R[2][1],
+            'nose_z': R[2][0],
+            'left_z': R[2][1],
             'wheels_on_ground': self.wheels_down,
             'air_frac': s.air / self.p.air_mass,
             'thrust_max_now': self.thrust_limit(),
