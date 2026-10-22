@@ -2963,8 +2963,9 @@ class GcsStore(AbstractStore):
                                                      mount_path,
                                                      self._bucket_sub_path,
                                                      read_only=read_only)
-        version_check_cmd = (
-            f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
+        # gcsfuse prints its version to stderr, so merge it into the pipe.
+        version_check_cmd = (f'gcsfuse --version 2>&1 | '
+                             f'grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
