@@ -271,6 +271,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
     :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
+  :ref:`lambda <config-yaml-lambda>`:
+    :ref:`remote_identity <config-yaml-lambda-remote-identity>`: NO_UPLOAD
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
@@ -3200,6 +3203,44 @@ Example:
       - my-training-*: my-training-sg
       - sky-serve-controller-*: my-serving-sg
       - "*": my-default-sg
+
+.. _config-yaml-lambda:
+
+``lambda``
+~~~~~~~~~~
+
+Advanced Lambda Cloud configuration (optional).
+
+.. _config-yaml-lambda-remote-identity:
+
+``lambda.remote_identity``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to upload the local Lambda Cloud API key (``~/.lambda_cloud/lambda_keys``)
+to the clusters SkyPilot launches (optional).
+
+1. ``LOCAL_CREDENTIALS`` (default): Upload the API key to every cluster.
+2. ``NO_UPLOAD``: Do not upload the API key to any cluster, whatever its cloud.
+   Anyone with access to a cluster could otherwise read a key that can launch and
+   terminate any instance in the Lambda account.
+
+.. note::
+
+   Autostop and autodown run on the cluster and terminate it through the Lambda
+   Cloud API, so they are rejected for Lambda clusters when ``NO_UPLOAD`` is set.
+   Tear clusters down with ``sky down``, or use :ref:`managed jobs <managed-jobs>`
+   (the jobs controller terminates job clusters with its own credentials). The jobs
+   controller must therefore have the key itself, for example in
+   :ref:`consolidation mode <jobs-consolidation-mode>`.
+
+Default: ``LOCAL_CREDENTIALS``.
+
+Example:
+
+.. code-block:: yaml
+
+  lambda:
+    remote_identity: NO_UPLOAD
 
 .. _config-yaml-vast:
 

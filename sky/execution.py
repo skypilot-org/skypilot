@@ -395,13 +395,11 @@ def _execute(
 
 def _autodown_needs_identity_it_lacks(
         handle: Optional[backends.ResourceHandle]) -> bool:
-    """Whether the cluster's pods have no credentials to autodown with."""
+    """Whether the cluster has no credentials to autodown with."""
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return False
-    launched = handle.launched_resources
-    return (isinstance(launched.cloud, clouds.Kubernetes) and
-            clouds.Kubernetes.remote_identity_is_none(launched.region,
-                                                      launched))
+    return backend_utils.cluster_lacks_identity_to_autodown(
+        handle.launched_resources)
 
 
 def _execute_dag(
@@ -713,7 +711,7 @@ def _execute_dag(
                 # The controller's leak guard, on a pod that cannot delete
                 # itself: setting it would wedge the cluster, not free it.
                 job_logger.info('Not setting the autodown leak guard: '
-                                '`remote_identity: NONE` gives the cluster no '
+                                'its `remote_identity` gives the cluster no '
                                 'credentials to delete itself.')
                 idle_minutes_to_autostop = None
             if idle_minutes_to_autostop is not None:
