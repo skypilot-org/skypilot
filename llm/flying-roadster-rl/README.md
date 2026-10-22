@@ -75,8 +75,9 @@ sky jobs launch eval.yaml --secret WANDB_API_KEY --env OUTPUT_BUCKET=my-roadster
   --env EVAL_SEEDS=2001,2002,2003
 ```
 
-Benchmark any OpenAI-compatible model as the pilot (add `--seeds 9201,9202,9203 --per-kind 192` to fly the
-test set from the table; the default seeds are a separate held-out set). The default endpoint is SkyPilot Tokens
+Benchmark any OpenAI-compatible model as the pilot (add `--seeds 9201,9202,9203` to fly the test set from the
+table, with `--per-kind 192` for light wind and gale and 384 for `--weather storm`; the default seeds are a
+separate held-out set). The default endpoint is SkyPilot Tokens
 (https://tokens.skypilot.ai); `--endpoint openrouter` uses `$OPENROUTER_API_KEY` instead, and any
 other server takes `--base-url` (plus `--api-key-env` if its key lives in another variable; a local
 server needs no key). Drop `--realtime` to give the model unlimited time to think:
