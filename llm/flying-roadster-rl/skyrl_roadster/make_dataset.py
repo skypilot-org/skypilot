@@ -19,8 +19,8 @@ from datasets import Dataset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from prompting import build_pilot_messages  # noqa: E402
-from roadster_sim.pilot import handover, obs_text  # noqa: E402
-from roadster_sim.tasks import REVEAL_KINDS, TASK_KINDS, sample_task  # noqa: E402
+from roadster_env.pilot import handover, obs_text  # noqa: E402
+from roadster_env.tasks import REVEAL_KINDS, TASK_KINDS, sample_task  # noqa: E402
 
 HARD_KICKFLIP_S = 2.4  # seconds until the truck: a slow car and a far truck, the trained pilot's weak spot
 

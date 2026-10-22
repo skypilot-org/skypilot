@@ -21,7 +21,7 @@ r"""Fly held-out stunts with an API model as the pilot (one decision per 0.2 s).
 Chat models: each decision is one chat turn; the model sees the conversation so
 far (briefing, then one observation line per turn) and replies with one JSON
 action (--interface json) or one pick from the action menu (--interface menu,
-see roadster_sim/pilot_menu.py).
+see roadster_env/pilot_menu.py).
 
 Decision models (`~typesafe/...`, e.g. Jev, on OpenRouter's /alpha/decisions
 endpoint) always fly the menu: every decision is two typed `choice` questions
@@ -59,9 +59,9 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 from prompting import build_pilot_messages  # noqa: E402
 from prompting import pilot_system_prompt, user_prompt  # noqa: E402
-from roadster_sim.pilot import DECISION_DT, ActionError, PilotEpisode, obs_text, parse_action  # noqa: E402
-from roadster_sim.pilot_menu import DRIFT, MANOEUVRES, menu_action, menu_text  # noqa: E402
-from roadster_sim.tasks import REVEAL_KINDS, sample_task  # noqa: E402
+from roadster_env.pilot import DECISION_DT, ActionError, PilotEpisode, obs_text, parse_action  # noqa: E402
+from roadster_env.pilot_menu import DRIFT, MANOEUVRES, menu_action, menu_text  # noqa: E402
+from roadster_env.tasks import REVEAL_KINDS, sample_task  # noqa: E402
 
 WEATHER_SEEDS = {'normal': 1234, 'gale': 4321, 'storm': 5678}  # = make_dataset
 # --endpoint presets: base URL, key variable, then defaults for flags left unset.

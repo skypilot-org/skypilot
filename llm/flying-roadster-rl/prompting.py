@@ -4,8 +4,8 @@ import random
 import re
 from typing import Dict, List, Optional
 
-from roadster_sim import TASK_KINDS, sample_task
-from roadster_sim.physics import G0, CarParams
+from roadster_env import TASK_KINDS, sample_task
+from roadster_env.physics import G0, CarParams
 
 PROMPT_DIR = pathlib.Path(__file__).resolve().parent / 'prompts'
 _SYSTEM = (PROMPT_DIR / 'system.md').read_text()

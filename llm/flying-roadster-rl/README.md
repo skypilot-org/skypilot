@@ -1,9 +1,9 @@
 # Flying Roadster: RL post-training an LLM to pilot a car in real time
 
-A small physics simulator of two car stunts, where an LLM is the pilot: every 0.2 s of
-sim time it reads one line of telemetry and replies with one JSON command, and the car
-keeps moving while it thinks. We use it to compare frontier models against an open 4B
-model, and to RL post-train that 4B (SkyRL, GRPO + LoRA) on a single H100 with SkyPilot.
+An RL environment for two flying-car stunts, built on a small physics simulator, where an LLM
+is the pilot: every 0.2 s of simulated time it reads one line of telemetry and replies with one
+JSON command, and the car keeps moving while it thinks. We use it to compare the latest LLMs
+against an open 4B model, and to RL post-train that 4B (SkyRL, GRPO + LoRA) with SkyPilot.
 
 Everything here is simulation. It is not affiliated with Tesla and is not based on any
 real vehicle's software or data; "roadster" just means a generic two-seat car.
@@ -30,13 +30,13 @@ the pilot can't see in advance). A landing only counts with all four wheels on t
 | **Qwen3-4B, warm start + RL (real time)** | **96 / 96 / 90** | **100 / 100 / 98** |
 
 The trained pilot decides in ~0.09 s with one car per H100 (LoRA merged into the base weights),
-inside the 0.2 s interval, so it scores the same in real time and with the simulator waiting.
-"Unlimited time" means the simulator waits for every reply. The checkpoint was picked on a
+inside the 0.2 s interval, so it scores the same in real time and with the environment waiting.
+"Unlimited time" means the environment waits for every reply. The checkpoint was picked on a
 separate validation split (seeds 2001-2003) and the test seeds were flown once.
 
 The recipe (the `train.yaml` defaults): a warm start on 64 successful scripted-pilot flights per
 stunt in light wind plus 350 gale and storm Cybertruck flights that DeepSeek V4.1 Flash landed on
-training seeds with the simulator waiting (`distill_data/`), one epoch (~2 h 20 min on one H100,
+training seeds with the environment waiting (`distill_data/`), one epoch (~2 h 20 min on one H100,
 mostly optimizer offload); then GRPO with a rank-64 LoRA, 16 tasks x 8 flights per step for 60
 steps across all three weathers, storm counted twice and half the Cybertruck flights slow
 approaches (~1 h 35 min).
@@ -95,7 +95,7 @@ python render_video.py flight.mp4 /tmp/pilot_deepseek/clips/hop_kickflip__12.jso
 
 | Path | What |
 |---|---|
-| `roadster_sim/` | Physics (500 Hz), stunts, wind, reward; `pilot.py` = the 0.2 s command interface; `pilot_baselines.py` = scripted pilots |
+| `roadster_env/` | Physics (500 Hz), stunts, wind, reward; `pilot.py` = the 0.2 s command interface; `pilot_baselines.py` = scripted pilots |
 | `prompts/`, `prompting.py` | Pilot briefing and prompts |
 | `skyrl_roadster/` | SkyRL environment (`pilot_env.py`), dataset builder, warm-start data builder, install scripts |
 | `tools/pilot_bench.py` | Real-time / turn-based benchmark for API models and local vLLM servers; saves renderable clips |

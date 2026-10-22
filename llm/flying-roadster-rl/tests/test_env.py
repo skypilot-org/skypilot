@@ -12,8 +12,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from prompting import build_messages, extract_code  # noqa: E402
-from roadster_sim import run_episode, sample_task  # noqa: E402
-from roadster_sim.baselines import BASELINES, load_controller  # noqa: E402
+from roadster_env import run_episode, sample_task  # noqa: E402
+from roadster_env.baselines import BASELINES, load_controller  # noqa: E402
 
 KICKFLIP = {'kind': 'kickflip', 'speed': 20, 'air_mass': 150, 'wind_y': 0}
 
@@ -50,7 +50,7 @@ def test_every_stunt_is_feasible(kind):
 
 def test_reward_prefers_near_misses():
     """Clean landing > upright hard touchdown > spinning into the roof."""
-    from roadster_sim.baselines import KICKFLIP
+    from roadster_env.baselines import KICKFLIP
     tail = '    return stabilize(obs, landing_vz(obs))\n'
     hard = KICKFLIP[:-len(tail)] + '    return [0.0] * 4\n'
     spin = KICKFLIP[:-len(tail)] + '    return [1.0, 0.0, 1.0, 0.0]\n'
@@ -63,7 +63,7 @@ def test_reward_prefers_near_misses():
 @pytest.mark.parametrize('kind', ['ramp_flip', 'hop_kickflip'])
 def test_sdk_controllers_land_in_storms(kind):
     """The flight SDK is enough to fly the reveal stunts, even in storms."""
-    from roadster_sim.baselines import HOP_KICKFLIP_SDK, RAMP_FLIP_SDK
+    from roadster_env.baselines import HOP_KICKFLIP_SDK, RAMP_FLIP_SDK
     src = RAMP_FLIP_SDK if kind == 'ramp_flip' else HOP_KICKFLIP_SDK
     rng = random.Random(5)
     rs = [run_episode(sample_task(kind, rng, weather='storm'), load_controller(src),
@@ -73,7 +73,7 @@ def test_sdk_controllers_land_in_storms(kind):
 
 def test_wind_is_physical():
     """Boundary-layer profile, gusts, reproducibility, and a sideways push."""
-    from roadster_sim.physics import WindField
+    from roadster_env.physics import WindField
     w = WindField((10.0, 0.0), gust=0.0)
     assert w.at(1.0)[0] < w.at(10.0)[0] == 10.0 < w.at(20.0)[0]
     a, b = WindField((0, 0), gust=3.0, seed=7), WindField((0, 0), gust=3.0, seed=7)
@@ -108,7 +108,7 @@ def test_prompt_and_extraction():
 
 
 def test_landing_off_the_road_is_not_a_success():
-    from roadster_sim.tasks import is_success, score
+    from roadster_env.tasks import is_success, score
     base = {'task': {'kind': 'ramp_flip'}, 'landed': True, 'crashed': None,
             'max_up': 1.0, 'touchdown_up': 1.0, 'touchdown_spin': 0.0,
             'landing_vz': 1.5, 'air_left': 0.5}
@@ -123,7 +123,7 @@ def test_landing_off_the_road_is_not_a_success():
 def test_wheels_clipping_the_truck_is_a_crash(dz, crashed):
     """The wheels hang 0.2 m below the floor: a car whose wheels scrape the
     Cybertruck's roof hit it, even if the body cleared."""
-    from roadster_sim.physics import Obstacle, RoadsterSim
+    from roadster_env.physics import Obstacle, RoadsterSim
     truck = Obstacle(x0=10.0, length=5.7, height=1.9)
     sim = RoadsterSim(obstacle=truck)
     wheel_z = sim.p.wheel_pos[0][2]
@@ -136,7 +136,7 @@ def test_wheels_clipping_the_truck_is_a_crash(dz, crashed):
 def test_pilot_actions_tolerate_nulls():
     """A reply like {"mode": "land", "roll": null} means "default", and must
     never crash the flight (it killed an RL run at step 37)."""
-    from roadster_sim.pilot import PilotEpisode, parse_action
+    from roadster_env.pilot import PilotEpisode, parse_action
     a = parse_action('{"mode": "land", "roll": null}')
     assert a == {'mode': 'land', 'roll': 0.0}
     assert parse_action('{"mode": "hold", "roll": null, "pitch": null, "vz": null}')['vz'] is None

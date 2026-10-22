@@ -24,10 +24,10 @@ from typing import Any, Dict
 
 from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput
 
-# The demo root (roadster_sim/) is put on PYTHONPATH by the launcher; fall back
+# The demo root (roadster_env/) is put on PYTHONPATH by the launcher; fall back
 # to the sky_workdir layout.
 sys.path.insert(0, os.path.expanduser('~/sky_workdir'))
-from roadster_sim.pilot import ActionError, handover, obs_text, parse_action  # noqa: E402
+from roadster_env.pilot import ActionError, handover, obs_text, parse_action  # noqa: E402
 
 
 class PilotEnv(BaseTextEnv):

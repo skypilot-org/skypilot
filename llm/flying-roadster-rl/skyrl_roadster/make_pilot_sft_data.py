@@ -20,9 +20,9 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from prompting import build_pilot_messages  # noqa: E402
-from roadster_sim.pilot import PilotEpisode, obs_text  # noqa: E402
-from roadster_sim.pilot_baselines import TUNED  # noqa: E402
-from roadster_sim.tasks import REVEAL_KINDS, sample_task  # noqa: E402
+from roadster_env.pilot import PilotEpisode, obs_text  # noqa: E402
+from roadster_env.pilot_baselines import TUNED  # noqa: E402
+from roadster_env.tasks import REVEAL_KINDS, sample_task  # noqa: E402
 
 
 def compact(action, digits):
