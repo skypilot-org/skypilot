@@ -6,20 +6,41 @@ not the full daemon loop:
 * ``_lock_still_held`` dispatches correctly between ``PostgresLock``
   (probes the underlying PG session) and any other ``DistributedLock``
   (trusts the local ``is_locked`` flag).
-* ``_suicide_on_lock_loss`` sends ``SIGTERM`` to the API server PID so
-  K8s restarts the pod and the leader is re-elected on another server.
+* ``_suicide_on_lock_loss`` marks the server as shutting down, waits the
+  configured drain, then sends ``SIGTERM`` to the API server PID so K8s
+  restarts the pod and the leader is re-elected on another server. A timer
+  forces the process to exit if that shutdown hangs.
 * ``start_managed_job_refresh_daemon`` gates on consolidation mode,
   preserving the historical ``should_skip_managed_job_status_refresh``
   semantics now that the daemon no longer lives in
   ``INTERNAL_REQUEST_DAEMONS``.
 """
+import os
+import re
 import signal
+import subprocess
+import sys
+import textwrap
+import threading
 from unittest import mock
 
 import pytest
 
 from sky.jobs import managed_job_refresh_thread as mjrt
 from sky.utils import locks
+
+_REAL_EXIT_AFTER = mjrt._exit_after
+
+
+@pytest.fixture(autouse=True)
+def exit_after_mock(monkeypatch):
+    """Keep step-down tests from arming a timer that would exit pytest."""
+    exit_after = mock.Mock()
+    monkeypatch.setattr(mjrt, '_exit_after', exit_after)
+    monkeypatch.setattr(mjrt.server_state, '_shutting_down', False)
+    monkeypatch.delenv(mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS,
+                       raising=False)
+    return exit_after
 
 
 class TestLockStillHeld:
@@ -156,6 +177,104 @@ class TestSuicideOnLockLoss:
                 mock.patch.object(mjrt.os, 'getpid', return_value=12345):
             thread._suicide_on_lock_loss()
         kill_mock.assert_called_once_with(12345, signal.SIGTERM)
+
+    @staticmethod
+    def _step_down_recording(order):
+        """Run a step-down, recording readiness, drain sleeps and SIGTERM."""
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+
+        def on_kill_controllers():
+            order.append(
+                ('kill_controllers', mjrt.server_state.is_shutting_down()))
+
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=on_kill_controllers), \
+                mock.patch.object(
+                    mjrt.time, 'sleep',
+                    side_effect=lambda s: order.append(('sleep', s))), \
+                mock.patch.object(
+                    mjrt.os, 'kill',
+                    side_effect=lambda *a: order.append(('sigterm', a))), \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_lock_loss()
+
+    def test_marks_shutting_down_before_anything_else(self):
+        order = []
+        self._step_down_recording(order)
+        assert order == [('kill_controllers', True),
+                         ('sigterm', (12345, signal.SIGTERM))]
+
+    def test_waits_for_the_drain_before_sigterm(self, monkeypatch):
+        monkeypatch.setenv(
+            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, '50')
+        order = []
+        self._step_down_recording(order)
+        assert order == [('kill_controllers', True), ('sleep', 50),
+                         ('sigterm', (12345, signal.SIGTERM))]
+
+    @pytest.mark.parametrize('raw', ['-5', 'abc'])
+    def test_invalid_drain_sends_sigterm_at_once(self, monkeypatch, raw):
+        monkeypatch.setenv(
+            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, raw)
+        order = []
+        self._step_down_recording(order)
+        assert order == [('kill_controllers', True),
+                         ('sigterm', (12345, signal.SIGTERM))]
+
+    def test_forced_exit_covers_drain_and_grace_period(self, monkeypatch,
+                                                       exit_after_mock):
+        monkeypatch.setenv(
+            mjrt.constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS, '50')
+        monkeypatch.setattr(mjrt.server_constants, 'GRACE_PERIOD_SECONDS', 60)
+        self._step_down_recording([])
+        exit_after_mock.assert_called_once_with(
+            50 + 60 + mjrt._STEP_DOWN_EXIT_MARGIN_SECONDS)
+
+
+class TestExitAfter:
+    """The forced exit fires on its own thread and never blocks shutdown."""
+
+    def test_exits_with_stacks_dumped(self):
+        exited = threading.Event()
+        exit_mock = mock.Mock(side_effect=lambda code: exited.set())
+        with mock.patch.object(mjrt.os, '_exit', exit_mock), \
+                mock.patch.object(mjrt.faulthandler,
+                                  'dump_traceback') as dump_mock:
+            _REAL_EXIT_AFTER(0.01)
+            assert exited.wait(timeout=10)
+        exit_mock.assert_called_once_with(1)
+        dump_mock.assert_called_once_with(all_threads=True)
+
+    def test_exits_while_main_thread_waits_on_a_child(self):
+        """A child that never exits must not keep the process alive."""
+        script = textwrap.dedent("""
+            import subprocess, sys
+            from sky.jobs import managed_job_refresh_thread as mjrt
+            child = subprocess.Popen(
+                [sys.executable, '-c', 'import time; time.sleep(600)'])
+            print(f'CHILD_PID={child.pid}', flush=True)
+            mjrt._exit_after(1)
+            child.wait()
+        """)
+        proc = subprocess.run([sys.executable, '-c', script],
+                              capture_output=True,
+                              text=True,
+                              timeout=120,
+                              check=False)
+        output = proc.stdout + proc.stderr
+        child_pid = re.search(r'CHILD_PID=(\d+)', output)
+        if child_pid is not None:
+            try:
+                os.kill(int(child_pid.group(1)), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        assert proc.returncode == 1, output
+        assert 'forcing exit' in output
 
 
 class TestOuterLoopStopsAfterSuicide:
