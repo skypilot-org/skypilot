@@ -20,8 +20,8 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Dict, Iterable, Iterator, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -63,6 +63,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.plugin_extensions import LogDeliverySource
 
 if typing.TYPE_CHECKING:
     from google.protobuf import descriptor
@@ -138,6 +139,17 @@ _JOB_CANCELLED_MESSAGE = (
 # JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
+
+# Terminal task statuses for which the controller downloads the task's logs
+# from its cluster and records their local path.
+_STATUSES_WITH_PERSISTED_LOGS = (
+    managed_job_state.ManagedJobStatus.SUCCEEDED,
+    managed_job_state.ManagedJobStatus.FAILED,
+    managed_job_state.ManagedJobStatus.FAILED_SETUP,
+)
+# The maximum time a followed tail that never saw its job RUNNING waits for the
+# controller to persist the job's logs, before printing what it can find.
+_PERSISTED_LOG_WAIT_TIMEOUT_SECONDS = 30
 
 # Content written to the jobs cancel signal file.
 _JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
@@ -386,7 +398,8 @@ def cleanup_expired_api_access_tokens() -> int:
     return removed
 
 
-def ha_recovery_for_consolidation_mode() -> None:
+def ha_recovery_for_consolidation_mode(
+        still_leader: Optional[Callable[[], bool]] = None) -> None:
     """Recovery logic for consolidation mode.
 
     Naming quirk: this path is historically called "HA recovery" because it
@@ -398,11 +411,18 @@ def ha_recovery_for_consolidation_mode() -> None:
     This should only be called from the managed-job-status-refresh-daemon, due
     so that we have correct ordering recovery -> controller start -> job status
     updates. This also should ensure correct operation during a rolling update.
+
+    Args:
+        still_leader: re-checked while the controller pool starts, which spans
+            tens of seconds, and again before scanning jobs; recovery returns
+            early once it is False, leaving the jobs to the new leader.
     """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    scheduler.maybe_start_controllers()
+    scheduler.maybe_start_controllers(still_owned=still_leader)
+    if still_leader is not None and not still_leader():
+        return
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
               'a',
               encoding='utf-8') as f:
@@ -2251,6 +2271,186 @@ def _waiting_line_detail(provision_msg: Optional[str],
     return parked_reason
 
 
+def _wait_for_persisted_task_logs(job_id: int,
+                                  task_id: Optional[int] = None) -> bool:
+    """Waits for the controller to persist the logs of a finished job's tasks.
+
+    The controller marks a task SUCCEEDED before it downloads the task's logs
+    and records their local path, so a reader that sees SUCCEEDED can be ahead
+    of the path. (For a failed task it records the path, if any, before the
+    failed status.) Whether it keeps a local copy at all depends on the task's
+    placement: it skips the copy only when the logs went to an external store
+    that can read them back. Waits until every SUCCEEDED task that ran user
+    code (only task_id, if given) has a local log path, the job's schedule
+    state is DONE (the controller sets it after it handled the last task's
+    logs, copy or not), or _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS pass.
+
+    Returns:
+        False if no task of the job (or task_id, if given) ran user code, so
+        there are no task logs to print; True otherwise.
+    """
+    submitted_task_ids = managed_job_state.get_submitted_task_ids(job_id)
+    if task_id is not None:
+        submitted_task_ids &= {task_id}
+    if not submitted_task_ids:
+        return False
+    deadline = time.time() + _PERSISTED_LOG_WAIT_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        context_utils.raise_if_canceled()
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        if all(log_file for task_id, _, task_status, log_file, _ in task_info
+               if task_status == managed_job_state.ManagedJobStatus.SUCCEEDED
+               and task_id in submitted_task_ids):
+            return True
+        if (managed_job_state.get_job_schedule_state(job_id) ==
+                managed_job_state.ManagedJobScheduleState.DONE):
+            return True
+        time.sleep(1)
+    return True
+
+
+# How often a log-store follow re-reads the task's status.
+_STORE_FOLLOW_STATUS_CHECK_SECONDS = 2
+# How often to check whether the controller moved past a finished task, or
+# brought a recovering task back.
+_TASK_ADVANCE_POLL_SECONDS = 1
+
+
+def _wait_for_task_recovery(job_id: int, task_id: int,
+                            status_display: Any) -> bool:
+    """Waits while a task recovers; returns whether it is RUNNING again.
+
+    Returns False once the task is terminal or being cancelled.
+    """
+    status_display.update(
+        ux_utils.spinner_message('Waiting for the task to recover'))
+    status_display.start()
+    try:
+        while True:
+            context_utils.raise_if_canceled()
+            status = managed_job_state.get_job_status_with_task_id(
+                job_id, task_id)
+            if status == managed_job_state.ManagedJobStatus.RUNNING:
+                return True
+            if (status is None or status.is_terminal() or
+                    status == managed_job_state.ManagedJobStatus.CANCELLING):
+                return False
+            time.sleep(_TASK_ADVANCE_POLL_SECONDS)
+    finally:
+        status_display.stop()
+
+
+def logs_in_external_store(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+) -> Tuple[bool, Optional[str]]:
+    """Whether a cluster's logs are read back from the external log store.
+
+    They are when a logging agent is configured for the cluster's placement,
+    a log reader is registered, and no registered ``LogDeliverySource``
+    reports them as undelivered.
+
+    Returns:
+        A tuple of whether the store holds the logs, and the source's reason
+        when it reports them undelivered (None otherwise).
+    """
+    agent_cloud: Optional[str] = None
+    agent_region: Optional[str] = None
+    if handle is not None and handle.launched_resources is not None:
+        launched = handle.launched_resources
+        if launched.cloud is not None:
+            agent_cloud = str(launched.cloud).lower()
+        agent_region = launched.region
+    if not (logs.is_logging_agent_configured(cloud=agent_cloud,
+                                             region=agent_region) and
+            logs.get_log_reader() is not None):
+        return False, None
+    if handle is None:
+        return True, None
+    reason = LogDeliverySource.undelivered_reason(
+        cluster_name=handle.cluster_name,
+        cluster_name_on_cloud=handle.cluster_name_on_cloud)
+    return reason is None, reason
+
+
+def _follow_from_log_store(
+        job_id: int, task_id: int, task_name: Optional[str],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        tail: Optional[int], since: Optional[float]) -> Optional[float]:
+    """Follows a running task's logs from the external log store.
+
+    Returns None when the task cannot be followed from the store (its logs do
+    not go to a store that can be read back, they are not confirmed to reach
+    it, or the reader cannot follow this task) or the reader stops while the
+    task is still RUNNING, so the caller streams from the cluster instead.
+    Otherwise returns, once the task is no longer RUNNING and its logs were
+    read, the time the task was first seen not RUNNING. A recovery may place
+    the task's next attempt elsewhere, with its logs in another store, so the
+    caller follows again from that time once the task is RUNNING again.
+    """
+    in_store, reason = logs_in_external_store(handle)
+    if not in_store:
+        if reason is not None:
+            logger.debug(f'Not following job {job_id} task {task_id} from the '
+                         f'external log store: {reason}')
+        return None
+    reader = logs.get_log_reader()
+    if reader is None:
+        return None
+
+    last_check = 0.0
+    left_running_at: Optional[float] = None
+
+    def is_done() -> bool:
+        nonlocal last_check, left_running_at
+        context_utils.raise_if_canceled()
+        if left_running_at is not None:
+            return True
+        now = time.monotonic()
+        if now - last_check < _STORE_FOLLOW_STATUS_CHECK_SECONDS:
+            return False
+        last_check = now
+        # Taken before the read, so a recovered attempt starts after it.
+        checked_at = time.time()
+        if (managed_job_state.get_job_status_with_task_id(job_id, task_id) !=
+                managed_job_state.ManagedJobStatus.RUNNING):
+            left_running_at = checked_at
+        return left_running_at is not None
+
+    try:
+        returncode = reader.follow_managed_job_logs(
+            job_id,
+            task_id,
+            task_name=task_name,
+            cluster_name_on_cloud=handle.cluster_name_on_cloud,
+            tail=tail or 0,
+            since=since,
+            is_done=is_done)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to follow job {job_id} logs from the external '
+                     f'log store: {e}')
+        # The reader may have printed part of the log already, and the
+        # cluster stream cannot resume where it stopped.
+        print(
+            f'{colorama.Fore.YELLOW}Lost the connection to the external '
+            f'log store ({e}); streaming from the cluster instead. Lines '
+            f'already shown may repeat.{colorama.Style.RESET_ALL}',
+            flush=True)
+        return None
+    if returncode is None:
+        return None
+    if left_running_at is None:
+        # The reader stopped while the task still runs, possibly after
+        # printing part of the log.
+        print(
+            f'{colorama.Fore.YELLOW}The external log store stopped streaming '
+            'before the task finished; streaming from the cluster instead. '
+            f'Lines already shown may repeat.{colorama.Style.RESET_ALL}',
+            flush=True)
+        return None
+    return left_running_at
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2283,6 +2483,17 @@ def stream_logs_by_id(
     # it would outlive the request and accumulate one thread per tail call.
     if context_lib.get() is None:
         log_lib.start_orphan_watchdog()
+    return _stream_logs_by_id(job_id,
+                              follow=follow,
+                              tail=tail,
+                              tail_offset=tail_offset,
+                              task=task)
+
+
+def _stream_logs_by_id(job_id: int, follow: bool, tail: Optional[int],
+                       tail_offset: Optional[int],
+                       task: Optional[Union[str, int]]) -> Tuple[str, int]:
+    """Body of stream_logs_by_id, without starting the orphan watchdog."""
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -2317,18 +2528,40 @@ def stream_logs_by_id(
     # Resolve task filter to a specific task_id if provided
     # This is used for running jobs to stream logs from the correct task
     filtered_task_id: Optional[int] = None
+    filtered_task_str: Optional[str] = None
     if task is not None:
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
         for t_id, t_name, _, _, _ in task_info:
             if matches_task_filter(t_id, t_name, task):
                 filtered_task_id = t_id
+                filtered_task_str = (f'Task {t_name}({t_id})'
+                                     if t_name else f'Task {t_id}')
                 break
         if filtered_task_id is None:
             valid_range = f'0-{num_tasks - 1}' if num_tasks > 1 else '0'
             return (f'No task found matching {task!r} in job {job_id}. '
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
+
+    def status_to_follow() -> Optional[managed_job_state.ManagedJobStatus]:
+        """The status that decides whether and where to stream logs.
+
+        With a task filter, this is the task's own status, not the job's. In a
+        job group a task can finish while other tasks keep the job RUNNING,
+        and the finished task's cluster can be gone by then.
+        """
+        if filtered_task_id is None:
+            return managed_job_state.get_status(job_id)
+        return managed_job_state.get_job_status_with_task_id(
+            job_id, filtered_task_id)
+
+    def task_id_status_to_follow(
+    ) -> Tuple[Optional[int], Optional[managed_job_state.ManagedJobStatus]]:
+        """The task to stream, with its status_to_follow."""
+        if filtered_task_id is None:
+            return managed_job_state.get_latest_task_id_status(job_id)
+        return filtered_task_id, status_to_follow()
 
     runtime_log_result = managed_job_runtime.tail_managed_job_logs(
         job_id=job_id,
@@ -2354,10 +2587,16 @@ def stream_logs_by_id(
             controller_log_path, provision_pos, provision_msg)
         return provision_msg
 
+    # Whether this tail streamed any task's logs while the task ran, from
+    # its cluster or from the log store.
+    streamed_from_cluster = False
+    # The task to resume following from the log store after it recovered,
+    # and the time to resume at.
+    resume_task_id: Optional[int] = None
+    resume_at: Optional[float] = None
     with status_display:
         prev_msg = msg
-        while (managed_job_status :=
-               managed_job_state.get_status(job_id)) is None:
+        while (managed_job_status := status_to_follow()) is None:
             context_utils.raise_if_canceled()
             time.sleep(1)
 
@@ -2384,6 +2623,11 @@ def stream_logs_by_id(
             # server whose config view differs. When there is no local copy we
             # stream from the registered log reader, mirroring core.tail_logs.
             log_reader = logs.get_log_reader()
+            if filtered_task_id is not None and log_reader is None:
+                # The task may have just finished while the job runs on. With
+                # no log reader the controller's local copy is the only source,
+                # so wait for it to record that copy.
+                _wait_for_persisted_task_logs(job_id, filtered_task_id)
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
@@ -2518,10 +2762,16 @@ def stream_logs_by_id(
                                 f'(status: {task_status.value}).'),
                                   flush=True)
             if log_file_ever_existed:
+                # With a task filter, managed_job_status is the task's, and
+                # the job may still be running.
+                overall_job_status = (managed_job_status
+                                      if filtered_task_id is None else
+                                      managed_job_state.get_status(job_id))
                 # Add the "Job finished" message for terminal states
-                if managed_job_status.is_terminal():
+                if (overall_job_status is not None and
+                        overall_job_status.is_terminal()):
                     print(ux_utils.finishing_message(
-                        f'Job finished (status: {managed_job_status.value}).'),
+                        f'Job finished (status: {overall_job_status.value}).'),
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
@@ -2542,8 +2792,10 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+            subject = (f'Job {job_id}' if filtered_task_str is None else
+                       f'{filtered_task_str} of job {job_id}')
             return (f'{colorama.Fore.YELLOW}'
-                    f'Job {job_id} is already in terminal state '
+                    f'{subject} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
                     f'sky jobs logs --controller {job_id}'
                     f'{colorama.Style.RESET_ALL}'
@@ -2562,14 +2814,7 @@ def stream_logs_by_id(
                                tail_offset=tail_offset)
 
         backend = backends.CloudVmRayBackend()
-        latest_task_id, managed_job_status = (
-            managed_job_state.get_latest_task_id_status(job_id))
-
-        # If a task filter was specified, use the filtered task_id instead of
-        # the latest task_id. This allows viewing logs for a specific task in
-        # a JobGroup with parallel execution.
-        if filtered_task_id is not None:
-            latest_task_id = filtered_task_id
+        latest_task_id, managed_job_status = task_id_status_to_follow()
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
@@ -2643,11 +2888,7 @@ def stream_logs_by_id(
                         break
                     time.sleep(_PROVISION_LOG_POLL_GAP_SECONDS)
                     waited += _PROVISION_LOG_POLL_GAP_SECONDS
-                latest_task_id, managed_job_status = (
-                    managed_job_state.get_latest_task_id_status(job_id))
-                # Preserve filtered task_id if specified
-                if filtered_task_id is not None:
-                    latest_task_id = filtered_task_id
+                latest_task_id, managed_job_status = task_id_status_to_follow()
                 assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
                 assert latest_task_id is not None, (job_id, latest_task_id)
@@ -2656,7 +2897,43 @@ def stream_logs_by_id(
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+            streamed_from_cluster = True
             status_display.stop()
+            if follow and tail_offset is None and pool is None:
+                since = resume_at if resume_task_id == task_id else None
+                resume_task_id, resume_at = None, None
+                left_running_at = _follow_from_log_store(
+                    job_id, task_id, task_name, handle, tail, since)
+                if left_running_at is not None:
+                    if _wait_for_task_recovery(job_id, task_id, status_display):
+                        # Look the cluster up again: the recovered attempt
+                        # may run elsewhere and log to another store.
+                        resume_task_id, resume_at = task_id, left_running_at
+                        continue
+                    if filtered_task_id is None and task_id < num_tasks - 1:
+                        # Keep the finished task's last line above the display.
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                f'Waiting for the next task: {task_id + 1}'))
+                        status_display.start()
+                    # The task finished. Wait for the controller to move on
+                    # so the next round does not follow the same task again.
+                    while True:
+                        context_utils.raise_if_canceled()
+                        latest_task_id, managed_job_status = (
+                            task_id_status_to_follow())
+                        assert managed_job_status is not None, job_id
+                        if (latest_task_id != task_id or
+                                not should_keep_logging(managed_job_status)):
+                            break
+                        time.sleep(_TASK_ADVANCE_POLL_SECONDS)
+                    if (filtered_task_id is not None or
+                            not should_keep_logging(managed_job_status)):
+                        break
+                    assert latest_task_id is not None, job_id
+                    task_id = latest_task_id
+                    continue
             returncode = None
             if managed_job_runtime.is_registered():
                 returncode = managed_job_runtime.tail_logs(
@@ -2737,8 +3014,7 @@ def stream_logs_by_id(
                                     managed_job_state.ManagedJobStatus.RUNNING)
 
                         while not is_managed_job_status_updated(
-                                managed_job_status :=
-                                managed_job_state.get_status(job_id)):
+                                managed_job_status := status_to_follow()):
                             context_utils.raise_if_canceled()
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         assert managed_job_status is not None, (
@@ -2770,7 +3046,7 @@ def stream_logs_by_id(
                     while True:
                         context_utils.raise_if_canceled()
                         latest_task_id, managed_job_status = (
-                            managed_job_state.get_latest_task_id_status(job_id))
+                            task_id_status_to_follow())
                         if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -2792,7 +3068,7 @@ def stream_logs_by_id(
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             # Finish early if the managed job status is already in terminal
             # state.
-            managed_job_status = managed_job_state.get_status(job_id)
+            managed_job_status = status_to_follow()
             assert managed_job_status is not None, job_id
             if not should_keep_logging(managed_job_status):
                 break
@@ -2809,30 +3085,48 @@ def stream_logs_by_id(
             # managed job state is updated.
             context_utils.raise_if_canceled()
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
-            managed_job_status = managed_job_state.get_status(job_id)
+            managed_job_status = status_to_follow()
             assert managed_job_status is not None, (job_id, managed_job_status)
 
     # The managed_job_status may not be in terminal status yet, since the
     # controller has not updated the managed job state yet. We wait for a while,
     # until the managed job state is updated.
     wait_seconds = 0
-    managed_job_status = managed_job_state.get_status(job_id)
+    managed_job_status = status_to_follow()
     assert managed_job_status is not None, job_id
     while (should_keep_logging(managed_job_status) and follow and
            wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
         context_utils.raise_if_canceled()
         time.sleep(1)
         wait_seconds += 1
-        managed_job_status = managed_job_state.get_status(job_id)
+        managed_job_status = status_to_follow()
         assert managed_job_status is not None, job_id
 
     if not follow and not managed_job_status.is_terminal():
         # The job is not in terminal state and we are not following,
         # just return.
         return '', exceptions.JobExitCode.SUCCEEDED
+    if (follow and not streamed_from_cluster and
+            managed_job_status in _STATUSES_WITH_PERSISTED_LOGS and
+            not managed_job_state.is_batch_job(job_id) and
+            _wait_for_persisted_task_logs(job_id)):
+        # The job ran and finished between two of our status checks, so we
+        # never saw it RUNNING and streamed nothing. A short job is RUNNING
+        # only until the controller's next status check, which can come
+        # sooner than ours. Print the logs the controller keeps for the
+        # finished job instead, as `sky jobs logs` does for one. Its message
+        # for logs it cannot find is dropped: a followed tail that streamed
+        # nothing never printed one.
+        _stream_logs_by_id(job_id,
+                           follow=False,
+                           tail=tail,
+                           tail_offset=tail_offset,
+                           task=task)
+    finished = (f'Managed job finished: {job_id}' if filtered_task_str is None
+                else f'{filtered_task_str} of managed job {job_id} finished')
     logger.info(
-        ux_utils.finishing_message(f'Managed job finished: {job_id} '
-                                   f'(status: {managed_job_status.value}).'))
+        ux_utils.finishing_message(
+            f'{finished} (status: {managed_job_status.value}).'))
     return '', exceptions.JobExitCode.from_managed_job_status(
         managed_job_status)
 
@@ -4118,8 +4412,8 @@ def format_job_table(
             job_tasks, member_tasks = member_tasks, []
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
-        workspace = job_tasks[0].get('workspace',
-                                     constants.SKYPILOT_DEFAULT_WORKSPACE)
+        workspace = (job_tasks[0].get('workspace_name') or job_tasks[0].get(
+            'workspace', constants.SKYPILOT_DEFAULT_WORKSPACE))
 
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.

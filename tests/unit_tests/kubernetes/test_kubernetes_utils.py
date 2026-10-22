@@ -640,6 +640,17 @@ def test_gke_label_formatter_rtx_pro_6000(accelerator):
         'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
 
 
+@pytest.mark.parametrize('accelerator', ['H100-MEGA', 'H100-MEGA-80GB'])
+def test_gke_label_formatter_h100_mega(accelerator):
+    """H100-MEGA (the GCP catalog name) is labeled nvidia-h100-mega-80gb in
+    GKE, and the label maps back to the catalog name."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-h100-mega-80gb'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-h100-mega-80gb') == 'H100-MEGA'
+
+
 @pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
 def test_get_accelerator_label_key_values_gke_rtx_pro_6000(accelerator):
     """Without an autoscaler, both RTX PRO 6000 names find a GKE node
@@ -5886,6 +5897,81 @@ class TestGetNodeAffinity:
         }
 
 
+def _pod_fields(acc_label_key=None,
+                acc_label_values=None,
+                avoid_label_keys=None,
+                topology_label_key=None,
+                topology_label_value=None,
+                spot_label_key=None,
+                spot_label_value=None,
+                enable_flex_start=False):
+    return utils.get_pod_fields(acc_label_key=acc_label_key,
+                                acc_label_values=acc_label_values,
+                                avoid_label_keys=avoid_label_keys,
+                                topology_label_key=topology_label_key,
+                                topology_label_value=topology_label_value,
+                                spot_label_key=spot_label_key,
+                                spot_label_value=spot_label_value,
+                                enable_flex_start=enable_flex_start)
+
+
+class TestGetNodeSelector:
+    """Tests for utils.get_node_selector."""
+
+    def test_none_when_no_entries(self):
+        assert utils.get_node_selector(None, None, None, None, False) is None
+
+    def test_none_when_key_without_value(self):
+        """A key with a None value does not produce an entry."""
+        assert utils.get_node_selector('cloud.google.com/gke-tpu-topology',
+                                       None, 'cloud.google.com/gke-spot', None,
+                                       False) is None
+
+    def test_topology_only(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2', None, None, False) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+            }
+
+    def test_spot_only(self):
+        assert utils.get_node_selector(None, None, 'cloud.google.com/gke-spot',
+                                       'true', False) == {
+                                           'cloud.google.com/gke-spot': 'true',
+                                       }
+
+    def test_flex_start_only(self):
+        assert utils.get_node_selector(None, None, None, None, True) == {
+            'cloud.google.com/gke-flex-start': 'true',
+        }
+
+    def test_all_entries(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2',
+            'cloud.google.com/gke-spot', 'true', True) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            }
+
+
+class TestGetSpotToleration:
+    """Tests for utils.get_spot_toleration."""
+
+    def test_none_without_a_spot_label(self):
+        assert utils.get_spot_toleration(None, None) is None
+        assert utils.get_spot_toleration('cloud.google.com/gke-spot',
+                                         None) is None
+
+    def test_tolerates_the_spot_taint(self):
+        assert utils.get_spot_toleration(
+            'karpenter.sh/capacity-type', 'spot') == {
+                'key': 'karpenter.sh/capacity-type',
+                'operator': 'Equal',
+                'value': 'spot',
+                'effect': 'NoSchedule',
+            }
+
+
 class TestPodFields:
     """Tests for utils.get_pod_fields and utils.combine_pod_fields."""
 
@@ -5907,11 +5993,11 @@ class TestPodFields:
             'node_config']['spec']
 
     def test_empty_when_no_field_applies(self):
-        assert utils.get_pod_fields(None, None, None) == {}
+        assert _pod_fields() == {}
 
     def test_node_affinity_is_a_pod_spec_field(self):
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          ['some-other-key'])
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'],
+                                 ['some-other-key'])
         assert pod_fields == {
             'spec': {
                 'affinity': {
@@ -5936,8 +6022,7 @@ class TestPodFields:
                 'podAffinity': pod_affinity
             },
         })
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          None)
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
 
@@ -5956,7 +6041,7 @@ class TestPodFields:
             {'containers': [{
                 'name': 'ray-node'
             }]})
-        pod_fields = utils.get_pod_fields(None, None, ['some-other-key'])
+        pod_fields = _pod_fields(avoid_label_keys=['some-other-key'])
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
 
@@ -5968,8 +6053,7 @@ class TestPodFields:
             {'containers': [{
                 'name': 'ray-node'
             }]})
-        pod_fields = utils.get_pod_fields('skypilot.co/accelerator', ['H100'],
-                                          None)
+        pod_fields = _pod_fields('skypilot.co/accelerator', ['H100'])
         expected_pod_fields = copy.deepcopy(pod_fields)
 
         combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
@@ -5977,6 +6061,71 @@ class TestPodFields:
 
         assert 'affinity' not in self._pod_spec(cluster_yaml)
         assert pod_fields == expected_pod_fields
+
+    def test_spot_pins_and_tolerates(self):
+        """A spot request gives the pod the spot node selector and the
+        toleration for the taint those nodes carry."""
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        assert pod_fields == {
+            'spec': {
+                'nodeSelector': {
+                    'cloud.google.com/gke-spot': 'true'
+                },
+                'tolerations': [{
+                    'key': 'cloud.google.com/gke-spot',
+                    'operator': 'Equal',
+                    'value': 'true',
+                    'effect': 'NoSchedule',
+                }],
+            }
+        }
+
+    def test_every_field_together(self):
+        pod_fields = _pod_fields(
+            acc_label_key='cloud.google.com/gke-tpu-accelerator',
+            acc_label_values=['tpu-v5-lite-podslice'],
+            topology_label_key='cloud.google.com/gke-tpu-topology',
+            topology_label_value='2x4',
+            spot_label_key='cloud.google.com/gke-spot',
+            spot_label_value='true',
+            enable_flex_start=True)
+        assert pod_fields['spec'] == {
+            'nodeSelector': {
+                'cloud.google.com/gke-tpu-topology': '2x4',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            },
+            'affinity': {
+                'nodeAffinity': utils.get_node_affinity(
+                    'cloud.google.com/gke-tpu-accelerator',
+                    ['tpu-v5-lite-podslice'], None)
+            },
+            'tolerations': [
+                utils.get_spot_toleration('cloud.google.com/gke-spot', 'true')
+            ],
+        }
+
+    def test_combine_appends_the_user_tolerations_after(self):
+        """The spot toleration is in place before the user's pod_config is
+        merged, so merge_k8s_configs appends the user's tolerations to it."""
+        from sky.utils import config_utils
+
+        cluster_yaml = self._cluster_yaml(
+            {'containers': [{
+                'name': 'ray-node'
+            }]})
+        pod_fields = _pod_fields(spot_label_key='cloud.google.com/gke-spot',
+                                 spot_label_value='true')
+        combined = utils.combine_pod_fields(cluster_yaml, pod_fields)
+        user_toleration = {'key': 'dedicated', 'operator': 'Exists'}
+        config_utils.merge_k8s_configs(self._pod_spec(combined),
+                                       {'tolerations': [user_toleration]})
+
+        assert self._pod_spec(combined)['tolerations'] == [
+            utils.get_spot_toleration('cloud.google.com/gke-spot', 'true'),
+            user_toleration,
+        ]
 
 
 def _make_pod_with_spec(*,
@@ -6136,3 +6285,81 @@ def test_set_execution_context_ignores_none():
     utils.set_execution_context_in_config(provider_config, None)
     assert _EXECUTION_KEY not in provider_config
     assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def _namespace_with_uid(uid):
+    namespace = mock.MagicMock()
+    namespace.metadata.uid = uid
+    return namespace
+
+
+def test_get_cluster_uid_caches_reads(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert core.read_namespace.call_count == 1
+        mock_core_api.assert_called_once_with('ctx-a')
+        core.read_namespace.assert_called_with('kube-system',
+                                               _request_timeout=mock.ANY)
+
+        # An uncached read refreshes the cache for later reads.
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+        assert core.read_namespace.call_count == 2
+
+
+def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.side_effect = kubernetes.client.rest.ApiException(
+        status=403)
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core):
+        assert utils.get_cluster_uid('ctx-a') is None
+        # Failures are cached for a shorter time than successful reads.
+        expiry = utils._cluster_uid_cache['ctx-a'][2]  # pylint: disable=protected-access
+        with patch('sky.provision.kubernetes.utils.time.monotonic',
+                   return_value=expiry + 1):
+            core.read_namespace.side_effect = None
+            core.read_namespace.return_value = _namespace_with_uid('uid-a')
+            assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+
+
+def test_get_cluster_uid_in_cluster_never_falls_back_to_kubeconfig(monkeypatch):
+    """None would fall back to the kubeconfig current-context."""
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    in_cluster = kubernetes_adaptor.in_cluster_context_name()
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid(in_cluster) == 'uid-a'
+        mock_core_api.assert_called_once_with(in_cluster)
+
+
+def test_get_cluster_uid_rereads_after_kubeconfig_changes(
+        monkeypatch, tmp_path):
+    """A rewritten kubeconfig may point the context at another cluster."""
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    kubeconfig = tmp_path / 'config'
+    kubeconfig.write_text('a')
+    monkeypatch.setenv('KUBECONFIG', str(kubeconfig))
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core):
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert core.read_namespace.call_count == 1
+
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        replacement = tmp_path / 'config.new'
+        replacement.write_text('bb')
+        os.replace(replacement, kubeconfig)
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+        assert core.read_namespace.call_count == 2

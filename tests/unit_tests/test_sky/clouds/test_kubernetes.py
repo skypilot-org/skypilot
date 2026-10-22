@@ -1281,16 +1281,12 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
 
-        # The pod patches Ray from a payload carried in its own spec, because
-        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
-        # the node is whatever `pip install skypilot` resolved to. Assert the
-        # variable is actually produced -- without this, dropping it from
-        # make_deploy_resources_variables leaves the payload tests green while
-        # the template renders an empty command.
-        self.assertIn('ray_patches_cmd', deploy_vars)
-        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
-        self.assertNotIn('from sky.skylet.ray_patches',
-                         deploy_vars['ray_patches_cmd'])
+        # 'ray_patches_cmd' and 'ray_installation_commands' are deliberately
+        # NOT here: both depend on the Ray version this cluster is pinned to,
+        # which only write_cluster_config knows. That they are still produced
+        # is asserted in tests/unit_tests/test_sky/test_ray_version_per_cluster.
+        self.assertNotIn('ray_patches_cmd', deploy_vars)
+        self.assertNotIn('ray_installation_commands', deploy_vars)
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -5194,10 +5190,17 @@ class TestKubernetesSpotLabelContext(unittest.TestCase):
         self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
         for call_args in mock_get_spot_label.call_args_list:
             self.assertEqual(call_args, mock.call('test-context'))
-        # ...and the resolved label must flow into the pod template vars.
-        self.assertEqual(deploy_vars['k8s_spot_label_key'],
-                         'karpenter.sh/capacity-type')
-        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':

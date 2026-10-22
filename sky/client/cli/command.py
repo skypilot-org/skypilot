@@ -2403,6 +2403,11 @@ def status(verbose: bool,
     # on. `_show_enabled_infra` is a pure renderer and only takes the
     # final label.
     display_workspace = active_workspace or resolved_workspace
+    if display_workspace is not None:
+        # Either may be an id (a typed name resolves against the client's
+        # own `workspaces:` when it has one); show the name.
+        display_workspace = skypilot_config.get_workspace_name(
+            display_workspace, all_workspaces)
     _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
@@ -3105,8 +3110,7 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(
-                cluster, expect_exact_match=False)
+            controller = controller_utils.Controllers.from_prefix(cluster)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(
@@ -8242,18 +8246,47 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
-@flags.all_users_option('Cancel all requests from all users.')
+@flags.all_users_option('Cancel all requests from all users. On a server with '
+                        'per-user auth, a non-admin cancels only their own.')
 @flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
                yes: bool):
-    """Cancel a request running on SkyPilot API server."""
+    """Cancel a request running on SkyPilot API server.
+
+    A request named by ID is cancelled whoever owns it, if you are allowed
+    to: on a server with per-user auth, an admin can cancel any request and
+    other users only their own.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Cancel specific requests.
+      sky api cancel 0d35ffa7 a9d59602
+      \b
+      # Cancel all your requests.
+      sky api cancel --all
+      \b
+      # Cancel all requests from all users.
+      sky api cancel --all-users
+
+    """
+    if request_ids and (all or all_users):
+        flag = '--all-users' if all_users else '--all'
+        raise click.UsageError(
+            f'Can only specify one of REQUEST_IDS or --all/--all-users. '
+            f'Provided REQUEST_IDS and {flag!r}.')
     if all or all_users:
         if not yes:
-            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            if all_users:
+                scope = ('all requests from ALL USERS (only your own if you '
+                         'are not an admin on a server with per-user auth)')
+            else:
+                scope = 'all YOUR requests'
             user_input = click.prompt(
-                f'This will cancel all {keyword} requests.\n'
+                f'This will cancel {scope}.\n'
                 f'To proceed, please type {colorama.Style.BRIGHT}'
                 f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
                 type=str)
@@ -8598,18 +8631,22 @@ def workspace_info(output_format: str):
         click.echo(json.dumps(info, indent=2))
         return
 
-    workspace_str = (f'{info["workspace"]!r}'
+    # The server answers with workspace ids; `names` maps them to names
+    # (absent from older servers).
+    names = info.get('names') or {}
+    workspace_str = (f'{names.get(info["workspace"], info["workspace"])!r}'
                      if info.get('workspace') is not None else '(none)')
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
-    preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
+    preferred_str = (f'{names.get(preferred, preferred)!r}'
+                     if preferred is not None else '(not set)')
     # `accessible` is the writable set (where a launch can land);
     # `read_only` is listed separately.
     writable = info.get('accessible') or []
     read_only = info.get('read_only') or []
     writable_str = ', '.join(
-        repr(w) for w in writable) if writable else '(none)'
-    read_only_str = ', '.join(repr(w) for w in read_only)
+        repr(names.get(w, w)) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(names.get(w, w)) for w in read_only)
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',

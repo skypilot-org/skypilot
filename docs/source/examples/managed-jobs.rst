@@ -303,6 +303,31 @@ In this configuration:
   You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
 
 
+.. _jobs-wait-for-scheduling-timeout:
+
+Giving up on jobs that cannot get resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, a managed job that cannot get resources keeps trying indefinitely. If capacity that never shows up is worse than no job at all (e.g., an 8-GPU job that is only useful if it starts today), set :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>` to give up instead:
+
+.. code-block:: yaml
+
+  job:
+    # Cancel the job if it has not started running within 2 hours.
+    wait_for_scheduling_timeout: 2h
+
+  resources:
+    accelerators: H100:8
+
+The clock starts at the job's :code:`SUBMITTED` time and covers everything until the job first starts running: on cloud VMs, the controller retrying the launch across regions and clouds; on Kubernetes, also waiting for the pods to be scheduled, including in a Kueue queue. Once the job has started, the timeout no longer applies, including during recovery from a later preemption.
+
+When the timeout fires, the job is cancelled as with :code:`sky jobs cancel` and ends :code:`CANCELLED`. The reason, e.g. ``task did not start within job.wait_for_scheduling_timeout=2h (waited 2h 25s)``, is shown in the details column of :code:`sky jobs queue` and in the job's events.
+
+.. note::
+
+  When :code:`job.wait_for_scheduling_timeout` is set, it is the only bound on a wait in a Kueue queue: the job keeps its place in the queue until it is admitted or the timeout fires. Without it, :ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>` (default 24 hours) ends each launch attempt's wait for admission, and the retry re-enters the queue at the back. Setting :code:`admission_timeout` explicitly still bounds each attempt.
+
+
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -317,7 +342,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Can't find available resources due to capacity:
-     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found.
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found, or, if :ref:`job.wait_for_scheduling_timeout <jobs-wait-for-scheduling-timeout>` is set, until it is reached before the job first starts.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 

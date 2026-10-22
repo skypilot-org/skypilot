@@ -208,7 +208,11 @@ def status(
         include_handle=include_handle)
 
     status_responses = []
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
     for cluster in clusters:
+        if cluster.get('workspace') is not None:
+            cluster['workspace_name'] = skypilot_config.get_workspace_name(
+                cluster['workspace'], workspaces)
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))
@@ -382,6 +386,19 @@ def get_cluster_events(
         # answer: an empty type list translates to `type IN ()`, i.e. no
         # events, which a caller would read as "this cluster has no history".
         raise ValueError(f'No valid cluster event type in {event_type!r}.')
+    workspaces_filter = workspaces_core.get_readable_workspace_names()
+    if workspaces_filter is not None:
+        # Events are readable iff the cluster's history is. A denied caller
+        # gets the same answer as for a cluster that does not exist.
+        cluster_hash, workspace = (
+            global_user_state.get_cluster_history_workspace(
+                cluster_hash, cluster_name))
+        if workspace not in workspaces_filter:
+            if cluster_name is not None:
+                raise ValueError(f'Hash for cluster {cluster_name} not found.')
+            return []
+        # Read the hash that was checked, in case the name is reused meanwhile.
+        cluster_name = None
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
@@ -490,7 +507,8 @@ def cost_report(days: Optional[int] = None,
             abbreviate_response=abbreviate_response,
             cluster_hashes=cluster_hashes,
             cluster_names=cluster_names,
-            exclude_managed_clusters=exclude_managed_clusters))
+            exclude_managed_clusters=exclude_managed_clusters,
+            workspaces_filter=workspaces_core.get_readable_workspace_names()))
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -1233,8 +1251,7 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
                 f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  Auto{option_str} is not supported on {cloud!r} - '
-                f'see reason above.') from e
+                f'  {e}') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     hooks_list = (handle.launched_resources.hooks
@@ -1374,6 +1391,30 @@ def queue(cluster_name: str,
 
     jobs = _get_job_queue(handle, backend, user_hash, all_jobs)
     return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
+
+
+@usage_lib.entrypoint
+def cluster_job_spec(cluster_name: str,
+                     job_id: int) -> Optional[Dict[str, Any]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Read from the API server's database, so it does not need the cluster to
+    be UP.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        A dict with 'task_yaml' (str) and 'entrypoint' (str), or None if the
+        cluster does not exist or the job's spec was not recorded (e.g. it was
+        submitted by an older API server version, or to a cluster launched by
+        a jobs or serve controller).
+    """
+    cluster_hash = global_user_state.get_cluster_hash(cluster_name)
+    if cluster_hash is None:
+        return None
+    return global_user_state.get_cluster_job_spec(cluster_hash, job_id)
 
 
 @usage_lib.entrypoint
@@ -1715,7 +1756,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> List[str]:
+                   expand: bool = False,
+                   workspace_ref: Optional[str] = None) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
@@ -1728,7 +1770,8 @@ def enabled_clouds(workspace: Optional[str] = None,
         workspaces_core.check_workspace_permission(
             common_utils.get_current_user(),
             workspace,
-            action=workspace_constants.WORKSPACE_ACTION_READ)
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=workspace_ref)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):
@@ -1758,6 +1801,17 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def enabled_clouds_for_request(workspace: Optional[str] = None,
+                               expand: bool = False) -> List[str]:
+    """`GET /enabled_clouds`: `workspace` is an id or a name."""
+    if workspace is None:
+        return enabled_clouds(expand=expand)
+    return enabled_clouds(
+        workspace=skypilot_config.resolve_workspace_ref(workspace),
+        expand=expand,
+        workspace_ref=workspace)
+
+
 def enabled_clouds_batch(workspaces: List[str],
                          expand: bool = False) -> Dict[str, List[str]]:
     """Returns enabled clouds for multiple workspaces in a single call.
