@@ -64,6 +64,7 @@ def test_aws_region():
 # is set in the server config, which requires a local-server restart.
 @pytest.mark.aws
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
     proxy_config = smoke_tests_utils.write_api_server_config({

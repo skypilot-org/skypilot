@@ -157,6 +157,7 @@ def test_ssm_private_custom_ami():
 # server, which requires a local-server restart.
 @pytest.mark.aws
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_ssm_private_proxy_command_and_use_ssm():
     """Test that ssm errors if ssh_proxy_command and use_ssm are set.
     """

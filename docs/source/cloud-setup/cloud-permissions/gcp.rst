@@ -456,7 +456,8 @@ The following script can be used to set up IAP tunneling in a specific VPC regio
         fi
 
     Paste the printed snippet into your ``~/.sky/config.yaml`` (or let the script
-    modify it automatically).
+    modify it automatically). For a remote API server, set it in the SkyPilot
+    config through the :ref:`dashboard <sky-api-server-config>` instead.
 
 Once the destination group is created, make sure to set the ``ssh_proxy_command`` :ref:`in the SkyPilot config <config-yaml-gcp-ssh-proxy-command>`. For instance, if you have
 
