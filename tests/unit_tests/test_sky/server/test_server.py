@@ -116,6 +116,10 @@ def test_no_deploy_flag_uses_default_workers(mock_executor_start,
     assert call_args['port'] == 46580
 
 
+# Server-side apply always names the workspace the request runs in.
+_SERVER_APPLIED_CONFIG = config_utils.Config({'active_workspace': 'default'})
+
+
 @pytest.mark.asyncio
 async def test_validate():
     """Test the validate endpoint."""
@@ -132,7 +136,7 @@ async def test_validate():
          mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, config_utils.Config())), \
+                   return_value=(mock_dag, _SERVER_APPLIED_CONFIG)), \
          mock.patch.object(mock_dag, 'validate') as mock_validate:
         # Call validate endpoint
         await server.validate(mock_validate_body, mock_request)
@@ -146,7 +150,7 @@ async def test_validate():
          mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, config_utils.Config())), \
+                   return_value=(mock_dag, _SERVER_APPLIED_CONFIG)), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=ValueError(error_msg)):
         with pytest.raises(fastapi.HTTPException) as exc_info:
@@ -167,7 +171,7 @@ async def test_validate():
          mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, config_utils.Config())), \
+                   return_value=(mock_dag, _SERVER_APPLIED_CONFIG)), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=slow_validate):
         # Start validation in background

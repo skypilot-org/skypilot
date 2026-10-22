@@ -38,6 +38,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
@@ -182,6 +183,23 @@ def up(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
+    # The rest of `up` runs in the workspace the policy routed it to; only the
+    # controller snapshot gets the rest of the mutated config.
+    with admin_policy_utils.use_policy_workspace(
+            mutated_user_config['active_workspace']):
+        return _up(dag, mutated_user_config, service_name, pool,
+                   file_mounts_blob_id)
+
+
+def _up(
+    dag: 'dag_utils.dag_lib.Dag',
+    mutated_user_config: config_utils.Config,
+    service_name: str,
+    pool: bool,
+    file_mounts_blob_id: Optional[str],
+) -> Tuple[str, str]:
+    """``up`` after the admin policy is applied."""
+    noun = 'pool' if pool else 'service'
     clouds.Kubernetes.check_request_keeps_server_none()
     clouds.Kubernetes.check_task_keeps_server_none(dag.tasks[0])
     dag.resolve_and_validate_volumes()
