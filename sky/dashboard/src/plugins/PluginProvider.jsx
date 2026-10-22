@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import { useRouter } from 'next/router';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
@@ -1058,6 +1059,28 @@ export function PluginProvider({ children }) {
 
 export function usePluginState() {
   return useContext(PluginContext);
+}
+
+// True once every script in the manifest has loaded (or failed to load). Pages
+// use this to tell "a route is still registering" apart from "no such route".
+export function usePluginsLoaded() {
+  const [pluginsLoaded, setPluginsLoaded] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.__skyDashboardPluginsLoaded === true
+  );
+  useEffect(() => {
+    if (window.__skyDashboardPluginsLoaded === true) {
+      setPluginsLoaded(true);
+      return undefined;
+    }
+    const handler = () => setPluginsLoaded(true);
+    window.addEventListener('skydashboard:plugins-loaded', handler);
+    return () => {
+      window.removeEventListener('skydashboard:plugins-loaded', handler);
+    };
+  }, []);
+  return pluginsLoaded;
 }
 
 export function useTopNavLinks() {
