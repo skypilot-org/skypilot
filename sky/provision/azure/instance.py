@@ -195,6 +195,16 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
+# record the head VM's actual placement, not requested config.
+def _get_cluster_zone(instances: List[Any],
+                      head_instance_id: Optional[str]) -> Optional[str]:
+    for instance in instances:
+        if instance.name == head_instance_id:
+            zones = getattr(instance, 'zones', None) or []
+            return zones[0] if zones else None
+    return None
+
+
 def _create_network_interface(
         network_client: 'azure_network.NetworkManagementClient', vm_name: str,
         provider_config: Dict[str,
@@ -291,6 +301,9 @@ def _create_vm(
             version=node_config['azure_arm_parameters']['imageVersion'])
     storage_profile = compute.StorageProfile(
         image_reference=image_reference,
+        # native SKU capabilities select NVMe-only boot disks.
+        disk_controller_type=node_config['azure_arm_parameters'].get(
+            'diskControllerType'),
         os_disk=compute.OSDisk(
             create_option=compute.DiskCreateOptionTypes.FROM_IMAGE,
             delete_option=compute.DiskDeleteOptionTypes.DELETE,
@@ -300,6 +313,9 @@ def _create_vm(
             disk_size_gb=node_config['azure_arm_parameters']['osDiskSizeGB']))
     vm_instance = compute.VirtualMachine(
         location=provider_config['location'],
+        # honor native zone selection; no process-wide pins.
+        zones=([provider_config['availability_zone']]
+               if provider_config.get('availability_zone') else None),
         tags=node_tags,
         hardware_profile=hardware_profile,
         os_profile=os_profile,
@@ -581,7 +597,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     return common.ProvisionRecord(
         provider_name='azure',
         region=region,
-        zone=None,
+        # actual placement is authoritative on resume.
+        zone=_get_cluster_zone(running_instances, head_instance_id),
         cluster_name=cluster_name_on_cloud,
         head_instance_id=head_instance_id,
         created_instance_ids=created_instance_ids,
