@@ -217,19 +217,21 @@ fi
 CLONE_URL="$GIT_URL"
 if [ -n "$GIT_TOKEN" ]; then
     log "Setting up token authentication"
-    if [[ "$GIT_URL" =~ ^https://(.*)$ ]]; then
-        # Pass the token through an inline credential helper rather than the URL.
+    if [[ "$GIT_URL" =~ ^(https://[^/]+) ]]; then
+        # Pass the token through a credential helper rather than the URL.
         # A token embedded in the URL is dropped by newer libcurl (it strips
         # credentials from the effective URL), which git reads as a redirect
         # and then retries without credentials. The helper is stateless, reads
         # the token from the environment, and keeps it out of .git/config and
         # the process arguments. It sends the token as the username with an
-        # empty password, the same credential the URL form carried.
+        # empty password, the same credential the URL form carried. It is
+        # scoped to the repo's host so the token is not offered to any other
+        # host, such as the target of a cross-host redirect.
         export GIT_TOKEN
+        GIT_CRED_KEY="credential.${BASH_REMATCH[1]}.helper"
+        GIT_CRED_HELPER='!f() { test "$1" = get && test -n "$GIT_TOKEN" && { echo "username=${GIT_TOKEN}"; echo password=; }; }; f'
         git() {
-            command git -c credential.helper= \
-                -c 'credential.helper=!f() { test "$1" = get && { echo "username=${GIT_TOKEN}"; echo password=; }; }; f' \
-                "$@"
+            command git -c "${GIT_CRED_KEY}=" -c "${GIT_CRED_KEY}=${GIT_CRED_HELPER}" "$@"
         }
         log "Token authentication configured via credential helper"
     else
@@ -470,6 +472,16 @@ if [ "$REF_TYPE" = "branch" ] || [ "$REF_TYPE" = "default" ]; then
 elif [ "$REF_TYPE" = "tag" ]; then
     CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "unknown")
     log "Current tag: $CURRENT_TAG"
+fi
+
+# Keep the helper for later git commands in the workdir (`git fetch`, a private
+# submodule with a relative URL). It reads GIT_TOKEN from the environment, so the
+# token itself is never written to disk. `--global` is needed because a
+# submodule is a new repository and does not read the superproject's config.
+if [ -n "${GIT_CRED_KEY:-}" ]; then
+    command git config --global --unset-all "$GIT_CRED_KEY" || true
+    command git config --global --add "$GIT_CRED_KEY" ""
+    command git config --global --add "$GIT_CRED_KEY" "$GIT_CRED_HELPER"
 fi
 
 log "Git clone/update completed successfully"
