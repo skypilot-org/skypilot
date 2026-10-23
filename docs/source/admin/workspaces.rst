@@ -101,10 +101,11 @@ The above is achieved by configuring the following section in the config file:
              capabilities:
                - compute
                - storage
-             # Credential mode only (enum): LOCAL_CREDENTIALS, SERVICE_ACCOUNT,
-             # or NO_UPLOAD. Unlike AWS/Kubernetes, a specific service account
-             # email cannot be pinned per workspace.
-             remote_identity: SERVICE_ACCOUNT
+             # Service account attached to launched GCE instances (optional).
+             # A plain string applies to all clusters; a list of
+             # {cluster-name-glob: service-account} mappings selects per
+             # cluster name.
+             remote_identity: team-a-sa@my-project.iam.gserviceaccount.com
 
            aws:
              disabled: false
@@ -205,10 +206,8 @@ What ``remote_identity`` controls per cloud:
   Accepts a plain string, or a list of ``{cluster-name-glob: role}`` mappings.
 * **Kubernetes** — the ``serviceAccountName`` set on the pod. Accepts a plain
   string (applied to every context) or a ``{context: service-account}`` mapping.
-* **GCP** — credential *mode* only: one of ``LOCAL_CREDENTIALS``,
-  ``SERVICE_ACCOUNT``, or ``NO_UPLOAD``. Unlike AWS and Kubernetes, GCP cannot
-  pin a specific service account email per workspace; the VM uses the default
-  SkyPilot service account.
+* **GCP** — the service account attached to launched GCE instances. Accepts a
+  plain string, or a list of ``{cluster-name-glob: service-account}`` mappings.
 
 .. _workspaces-remote-identity-precedence:
 

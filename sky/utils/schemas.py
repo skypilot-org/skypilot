@@ -2841,7 +2841,8 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
-                        **_REMOTE_IDENTITY_SCHEMA,
+                        'remote_identity':
+                            (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                     },
                     'additionalProperties': False,
                 },
@@ -3190,7 +3191,7 @@ def get_config_schema():
     }
 
     for cloud, config in cloud_configs.items():
-        if cloud in ('aws', 'azure'):
+        if cloud in ('aws', 'azure', 'gcp'):
             config['properties'].update(
                 {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
