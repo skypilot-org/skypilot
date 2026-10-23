@@ -253,20 +253,17 @@ static int mountinfo_fstype(int proc_self_fd, const char *path, char *fstype,
 	return found;
 }
 
-// resolve_mountpoint canonicalises target by resolving only its parent, so the
-// mountpoint inode, possibly a dead FUSE mount, is never touched.
-static void resolve_mountpoint(const char *target, char *out, size_t out_len) {
-	char buf[PATH_MAX];
-	char parent_real[PATH_MAX];
-	const char *base;
+// split_parent copies target into buf and splits it into the parent directory
+// and the final component, in place. Returns the final component; *parent
+// points into buf at the parent path. Trailing slashes are trimmed first.
+static const char *split_parent(const char *target, char *buf, size_t buf_len,
+				const char **parent) {
 	char *slash;
-	int n;
 
-	if (strlen(target) >= sizeof(buf)) {
+	if (strlen(target) >= buf_len) {
 		die("mountpoint path too long");
 	}
-	snprintf(buf, sizeof(buf), "%s", target);
-	// Trailing slashes would hide the final component from the split.
+	snprintf(buf, buf_len, "%s", target);
 	for (size_t i = strlen(buf); i > 1 && buf[i - 1] == '/'; i--) {
 		buf[i - 1] = '\0';
 	}
@@ -275,39 +272,59 @@ static void resolve_mountpoint(const char *target, char *out, size_t out_len) {
 	}
 
 	slash = strrchr(buf, '/');
+	const char *base;
 	if (slash == NULL) {
+		*parent = ".";
 		base = buf;
-		if (realpath(".", parent_real) == NULL) {
-			die_errno("resolve mountpoint parent");
-		}
-	} else {
+	} else if (slash == buf) {
+		*parent = "/";
 		base = slash + 1;
-		if (slash == buf) {
-			snprintf(parent_real, sizeof(parent_real), "/");
-		} else {
-			*slash = '\0';
-			if (realpath(buf, parent_real) == NULL) {
-				die_errno("resolve mountpoint parent");
-			}
-		}
+	} else {
+		*slash = '\0';
+		*parent = buf;
+		base = slash + 1;
 	}
 	if (base[0] == '\0' || strcmp(base, ".") == 0 ||
 	    strcmp(base, "..") == 0) {
 		die("invalid mountpoint path");
 	}
-
-	n = snprintf(out, out_len, "%s%s%s", parent_real,
-		     strcmp(parent_real, "/") == 0 ? "" : "/", base);
-	if (n < 0 || (size_t)n >= out_len) {
-		die("mountpoint path too long");
-	}
+	return base;
 }
 
+// do_umount unmounts a FUSE mount named by the caller without letting the
+// caller swap the target between the type check and umount2. It pins the parent
+// directory with a descriptor and operates on the final component relative to
+// it, so a symlink dropped in later (e.g. the parent swapped to point at /proc)
+// cannot redirect the unmount. This mirrors libfuse's unmount_fuse_locked.
 static void do_umount(int proc_self_fd, const char *target, int lazy) {
+	char buf[PATH_MAX];
+	char cwd[PATH_MAX];
 	char canonical[PATH_MAX];
 	char fstype[64];
+	const char *parent;
+	const char *base = split_parent(target, buf, sizeof(buf), &parent);
+	int n;
 
-	resolve_mountpoint(target, canonical, sizeof(canonical));
+	// O_PATH|O_DIRECTORY pins the parent inode. The final component is never
+	// opened or followed; umount2 looks it up relative to this directory.
+	int parentfd = open(parent, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	if (parentfd < 0) {
+		die_errno("open mountpoint parent");
+	}
+	if (fchdir(parentfd) < 0) {
+		die_errno("fchdir to mountpoint parent");
+	}
+	close(parentfd);
+	// getcwd reports the pinned directory's real path for the mountinfo
+	// lookup, even if its path has since been swapped.
+	if (getcwd(cwd, sizeof(cwd)) == NULL) {
+		die_errno("resolve mountpoint parent");
+	}
+	n = snprintf(canonical, sizeof(canonical), "%s%s%s", cwd,
+		     strcmp(cwd, "/") == 0 ? "" : "/", base);
+	if (n < 0 || (size_t)n >= sizeof(canonical)) {
+		die("mountpoint path too long");
+	}
 
 	if (mountinfo_fstype(proc_self_fd, canonical, fstype, sizeof(fstype)) <
 	    0) {
@@ -324,7 +341,9 @@ static void do_umount(int proc_self_fd, const char *target, int lazy) {
 			progname, canonical, fstype);
 		exit(1);
 	}
-	if (umount2(canonical, UMOUNT_NOFOLLOW | (lazy ? MNT_DETACH : 0)) < 0) {
+	// base is resolved relative to the pinned parent (cwd); UMOUNT_NOFOLLOW
+	// rejects it if it is itself a symlink.
+	if (umount2(base, UMOUNT_NOFOLLOW | (lazy ? MNT_DETACH : 0)) < 0) {
 		die_errno("umount");
 	}
 }

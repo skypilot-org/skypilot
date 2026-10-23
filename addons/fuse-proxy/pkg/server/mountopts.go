@@ -18,6 +18,10 @@ const (
 	msSynchronous uintptr = 0x10
 	msDirsync     uintptr = 0x80
 	msNoatime     uintptr = 0x400
+	msNodiratime  uintptr = 0x800
+	msRelatime    uintptr = 0x200000
+	msStrictatime uintptr = 0x1000000
+	msNosymfollow uintptr = 0x2000
 )
 
 // maxFsnameLen bounds fsname= and subtype= values, which become the source and
@@ -36,19 +40,24 @@ type mountFlag struct {
 }
 
 var mountFlags = map[string]mountFlag{
-	"rw":      {msRdonly, false, true},
-	"ro":      {msRdonly, true, true},
-	"suid":    {msNosuid, false, false},
-	"nosuid":  {msNosuid, true, true},
-	"dev":     {msNodev, false, false},
-	"nodev":   {msNodev, true, true},
-	"exec":    {msNoexec, false, true},
-	"noexec":  {msNoexec, true, true},
-	"async":   {msSynchronous, false, true},
-	"sync":    {msSynchronous, true, true},
-	"atime":   {msNoatime, false, true},
-	"noatime": {msNoatime, true, true},
-	"dirsync": {msDirsync, true, true},
+	"rw":            {msRdonly, false, true},
+	"ro":            {msRdonly, true, true},
+	"suid":          {msNosuid, false, false},
+	"nosuid":        {msNosuid, true, true},
+	"dev":           {msNodev, false, false},
+	"nodev":         {msNodev, true, true},
+	"exec":          {msNoexec, false, true},
+	"noexec":        {msNoexec, true, true},
+	"async":         {msSynchronous, false, true},
+	"sync":          {msSynchronous, true, true},
+	"atime":         {msNoatime, false, true},
+	"noatime":       {msNoatime, true, true},
+	"nodiratime":    {msNodiratime, true, true},
+	"norelatime":    {msRelatime, false, true},
+	"nostrictatime": {msStrictatime, false, true},
+	"symfollow":     {msNosymfollow, false, true},
+	"nosymfollow":   {msNosymfollow, true, true},
+	"dirsync":       {msDirsync, true, true},
 }
 
 // passthroughOpts are the options fusermount hands to the kernel untouched.
@@ -135,6 +144,10 @@ func BuildMountParams(options []string) (*MountParams, error) {
 			kernelOpts = append(kernelOpts, name+"="+value)
 		case passthroughOpts[name] && !hasValue:
 			kernelOpts = append(kernelOpts, name)
+		case strings.HasPrefix(name, "x-"):
+			// Userspace-only options (e.g. x-systemd.*); fusermount
+			// strips them before validating and never passes them to
+			// the kernel.
 		default:
 			return nil, fmt.Errorf("unknown mount option %q", opt)
 		}

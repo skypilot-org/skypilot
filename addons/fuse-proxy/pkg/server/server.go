@@ -21,8 +21,17 @@ type Server struct {
 	listener   net.Listener
 	socketPath string
 
-	// nsLocks serialises requests per target mount namespace.
-	nsLocks sync.Map
+	// nsLocks serialises requests per target mount namespace. Entries are
+	// reference-counted under nsMu and removed once no request holds or
+	// awaits them, so a long-running DaemonSet does not retain a lock for
+	// every pod that has come and gone.
+	nsMu    sync.Mutex
+	nsLocks map[string]*nsLock
+}
+
+type nsLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // request is a fusermount request in either wire format.
@@ -39,6 +48,7 @@ func NewServer(helperPath, socketPath string) *Server {
 	return &Server{
 		helperPath: helperPath,
 		socketPath: socketPath,
+		nsLocks:    make(map[string]*nsLock),
 	}
 }
 
@@ -293,10 +303,25 @@ func openFuseDev() (*os.File, error) {
 // lockNamespace serialises requests that target the same mount namespace.
 func (s *Server) lockNamespace(nsFile *os.File) func() {
 	key := namespaceKey(nsFile)
-	value, _ := s.nsLocks.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
+	s.nsMu.Lock()
+	l := s.nsLocks[key]
+	if l == nil {
+		l = &nsLock{}
+		s.nsLocks[key] = l
+	}
+	l.refs++
+	s.nsMu.Unlock()
+
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		s.nsMu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(s.nsLocks, key)
+		}
+		s.nsMu.Unlock()
+	}
 }
 
 func namespaceKey(nsFile *os.File) string {

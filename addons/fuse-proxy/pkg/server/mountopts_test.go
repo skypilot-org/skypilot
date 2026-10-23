@@ -173,3 +173,46 @@ func TestResolveRequest(t *testing.T) {
 		t.Error("unparsable legacy args should be rejected")
 	}
 }
+
+func TestBuildMountParamsSafeAtimeAndSymlinkFlags(t *testing.T) {
+	// libfuse marks these safe; before the allowlist they reached the real
+	// fusermount, so a client passing them must still mount.
+	cases := map[string]struct {
+		set   uintptr
+		clear uintptr
+	}{
+		"nodiratime":    {set: msNodiratime},
+		"nosymfollow":   {set: msNosymfollow},
+		"norelatime":    {clear: msRelatime},
+		"nostrictatime": {clear: msStrictatime},
+		"symfollow":     {clear: msNosymfollow},
+	}
+	for opt, want := range cases {
+		params, err := BuildMountParams([]string{opt})
+		if err != nil {
+			t.Fatalf("BuildMountParams(%q) failed: %v", opt, err)
+		}
+		if want.set != 0 && params.Flags&want.set == 0 {
+			t.Errorf("%s did not set its flag", opt)
+		}
+		if want.clear != 0 && params.Flags&want.clear != 0 {
+			t.Errorf("%s did not clear its flag", opt)
+		}
+		if params.Flags&msNosuid == 0 || params.Flags&msNodev == 0 {
+			t.Errorf("%s dropped the forced nosuid/nodev flags", opt)
+		}
+	}
+}
+
+func TestBuildMountParamsSkipsXOptions(t *testing.T) {
+	params, err := BuildMountParams([]string{"x-systemd.automount", "allow_other", "x-gvfs-show"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(params.KernelOpts, "x-") {
+		t.Errorf("x- options leaked into kernel options: %q", params.KernelOpts)
+	}
+	if !strings.Contains(params.KernelOpts, "allow_other") {
+		t.Errorf("allow_other dropped alongside x- options: %q", params.KernelOpts)
+	}
+}
