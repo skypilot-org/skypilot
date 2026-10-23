@@ -1905,10 +1905,6 @@ function JobDetailsContent({
       )}
       {field('Recoveries', jobData.recoveries || 0)}
       {batchTotal != null && field('Batch Progress', batchBar())}
-      <div
-        key="divider-compute"
-        className="hidden min-[1400px]:block col-span-full border-t border-gray-100"
-      />
       {field(
         'Requested Resources',
         allTasks.length > 1 && !isEmpty(requested) ? (
