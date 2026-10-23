@@ -47,7 +47,17 @@ fi
 export SKYPILOT_DISABLE_USAGE_COLLECTION=1
 export SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1
 
-_listeners() { lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true; }
+# PIDs listening on $PORT: lsof where it exists, else ss (minimal images).
+_listeners() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true
+  elif command -v ss >/dev/null 2>&1; then
+    ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u || true
+  else
+    echo "run_server.sh: need lsof or ss to find the server on port $PORT" >&2
+    exit 1
+  fi
+}
 
 if [[ "${1:-start}" == "stop" ]]; then
   sky api stop >/dev/null 2>&1 || true
@@ -89,6 +99,10 @@ EOF
 # kind cluster; locally it defaults to an empty kubeconfig.
 export KUBECONFIG="${E2E_KUBECONFIG:-$RUNTIME_DIR/kubeconfig}"
 touch "$KUBECONFIG"
+# A runner that is itself a Kubernetes pod mounts a service-account token, and
+# SkyPilot would offer the cluster it runs on as an "in-cluster" context.
+# Tests only see the contexts in KUBECONFIG.
+export SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false
 
 ADMIN_HASH="$(python -c 'import sys; from passlib.context import CryptContext; print(CryptContext(["bcrypt"]).hash(sys.argv[1]))' "$ADMIN_PW")"
 export ENABLE_BASIC_AUTH=true
