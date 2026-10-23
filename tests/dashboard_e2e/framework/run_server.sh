@@ -21,8 +21,13 @@ PORT="${E2E_PORT:-46611}"
 RUNTIME_DIR="${E2E_RUNTIME_DIR:-$(mktemp -d /tmp/sky-e2e.XXXXXX)}"
 ADMIN_USER="${E2E_ADMIN_USER:-e2eadmin}"
 ADMIN_PW="${E2E_ADMIN_PW:-e2e-admin-pw-not-secret}"
+mkdir -p "$RUNTIME_DIR"
 
 export SKY_RUNTIME_DIR="$RUNTIME_DIR"
+# Some server subprocesses (e.g. consolidation-mode jobs controllers) resolve
+# paths from ~ rather than SKY_RUNTIME_DIR; give the server its own home so
+# they can never read or launch the machine's real ~/.sky state.
+export HOME="$RUNTIME_DIR"
 export SKYPILOT_API_SERVER_LOCAL_PORT="$PORT"
 export SKYPILOT_GLOBAL_CONFIG="$RUNTIME_DIR/config.yaml"
 export SKYPILOT_SERVER_PLUGINS_CONFIG="${E2E_PLUGINS_CONFIG:-$SUITE_DIR/plugins.yaml}"
@@ -73,7 +78,6 @@ if [[ -n "$(_listeners)" ]]; then
   exit 1
 fi
 
-mkdir -p "$RUNTIME_DIR"
 cat > "$SKYPILOT_GLOBAL_CONFIG" <<'EOF'
 allowed_clouds:
   - kubernetes
