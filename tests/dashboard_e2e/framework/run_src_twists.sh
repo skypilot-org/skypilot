@@ -17,6 +17,11 @@ REPO_ROOT="$(git -C "$SUITE_DIR" rev-parse --show-toplevel)"
 BUILD="${E2E_FRONTEND_BUILD:-npm --prefix sky/dashboard run build}"
 RUN_SERVER="${E2E_RUN_SERVER:-$FRAMEWORK_DIR/run_server.sh}"
 ENV_FILE="$(mktemp)"
+PYTEST=(python -m pytest)
+if [[ "${E2E_HEADED:-0}" == "1" ]]; then
+  PYTEST+=(--headed)
+  [[ -z "${DISPLAY:-}" ]] && PYTEST=(xvfb-run -a "${PYTEST[@]}")
+fi
 
 shopt -s nullglob
 status=0
@@ -31,7 +36,7 @@ for patch in "$SUITE_DIR"/twist_patches/*.patch; do
   if E2E_SUITE_DIR="$SUITE_DIR" "$RUN_SERVER" start > "$ENV_FILE"; then
     # shellcheck disable=SC1090
     (source "$ENV_FILE" && cd "$SUITE_DIR" && E2E_SRC_TWIST="$id" \
-      python -m pytest -W ignore -rs -k "$id") || status=1
+      "${PYTEST[@]}" -W ignore -rs -k "$id") || status=1
   else
     status=1
   fi

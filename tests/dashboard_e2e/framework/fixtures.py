@@ -216,15 +216,21 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
     yield open_page
     rep = getattr(request.node, 'rep_call', None)
     failed = rep is not None and rep.failed
-    out_dir = os.path.join(str(request.config.rootpath), 'test-results',
-                           re.sub(r'[^\w.-]+', '_', request.node.nodeid))
+    keep_all = os.environ.get('E2E_SCREENSHOT_ALL') == '1'
+    # E2E_RESULTS_DIR lets several runs that share one checkout keep their
+    # traces and screenshots apart.
+    results = os.environ.get('E2E_RESULTS_DIR') or os.path.join(
+        str(request.config.rootpath), 'test-results')
+    out_dir = os.path.join(results, re.sub(r'[^\w.-]+', '_',
+                                           request.node.nodeid))
     for i, ctx in enumerate(contexts):
-        if failed:
+        if failed or keep_all:
             os.makedirs(out_dir, exist_ok=True)
             for j, page in enumerate(ctx.pages):
                 page.screenshot(path=os.path.join(out_dir,
                                                   f'ctx{i}-page{j}.png'),
                                 full_page=True)
+        if failed:
             ctx.tracing.stop(path=os.path.join(out_dir, f'ctx{i}-trace.zip'))
         else:
             ctx.tracing.stop()
