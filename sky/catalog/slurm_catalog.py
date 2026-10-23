@@ -143,11 +143,12 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     if region_filter is None:
-        # Query all available clusters and aggregate results
-        all_clusters = slurm_utils.get_all_slurm_cluster_names()
-        if not all_clusters:
+        # Query the clusters the active workspace allows and aggregate results
+        allowed_clusters = sky_clouds.Slurm.existing_allowed_clusters(
+            silent=True)
+        if not allowed_clusters:
             return {}, {}, {}
-        clusters_to_query = all_clusters
+        clusters_to_query = allowed_clusters
     else:
         clusters_to_query = [region_filter]
 

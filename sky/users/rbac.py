@@ -11,7 +11,8 @@ from sky.workspaces import utils as workspaces_utils
 logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
-# Cannot access workspace CUD operations.
+# Cannot access workspace CUD operations, or label GPU nodes (a cluster-admin
+# operation that runs jobs on the cluster).
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
@@ -47,6 +48,9 @@ _DEFAULT_USER_BLOCKLIST = [{
     'method': 'GET'
 }, {
     'path': '/debug/dump_create',
+    'method': 'POST'
+}, {
+    'path': '/kubernetes_label_gpus',
     'method': 'POST'
 }, {
     'path': '/debug/dump_download/:filename',
