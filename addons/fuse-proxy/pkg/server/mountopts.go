@@ -21,7 +21,7 @@ const (
 	msNodiratime  uintptr = 0x800
 	msRelatime    uintptr = 0x200000
 	msStrictatime uintptr = 0x1000000
-	msNosymfollow uintptr = 0x2000
+	msNosymfollow uintptr = 0x100
 )
 
 // maxFsnameLen bounds fsname= and subtype= values, which become the source and
