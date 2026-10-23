@@ -201,7 +201,10 @@ SELECT * FROM (
         s.eligible_at AS stalled_since,
         ji.name AS job_name,
         ji.workspace AS workspace,
-        ji.priority AS priority
+        ji.priority AS priority,
+        ji.user_hash AS user_hash,
+        ji.pool AS pool,
+        ji.schedule_state AS schedule_state
     FROM spot s
     LEFT JOIN job_info ji ON ji.spot_job_id = s.spot_job_id
     WHERE s.status = 'PENDING'
@@ -433,8 +436,9 @@ def _attempt_is_working(attempt: Any, now: float, age_seconds: float) -> bool:
     return (now - started) <= age_seconds
 
 
-def _highest_blocking_priority(engine: sqlalchemy.engine.Engine,
-                               deadline: float) -> int:
+def _highest_blocking_priority(
+        engine: sqlalchemy.engine.Engine, deadline: float,
+        max_launching_jobs_per_user: Optional[int]) -> int:
     """The priority a job must reach to be next in line.
 
     Read from the scheduler rather than recomputed: it is the same quantity
@@ -446,7 +450,21 @@ def _highest_blocking_priority(engine: sqlalchemy.engine.Engine,
     measured* instead of as zero.
     """
     with _bounded(engine, deadline) as conn:
-        return managed_job_state.get_managed_jobs_highest_priority(conn)
+        return managed_job_state.get_managed_jobs_highest_priority(
+            conn, max_launching_jobs_per_user=max_launching_jobs_per_user)
+
+
+def _held_by_launch_limit(row: Dict[str, Any],
+                          held_users: Optional[Set[str]]) -> bool:
+    """Whether the per-user launch limit is what keeps this task unclaimed.
+
+    Such a task is queued behind its own user's jobs, not stalled. Matches
+    the scheduler's rule in managed_job_state.get_waiting_job_async.
+    `held_users` is None when the limit is off.
+    """
+    return (held_users is not None and row.get('schedule_state')
+            == managed_job_state.ManagedJobScheduleState.WAITING.value and
+            row.get('pool') is None and row.get('user_hash') in held_users)
 
 
 # Resolved once per process by `_pool_capacity`.
@@ -648,8 +666,20 @@ def scan_never_claimed(
         candidate_limit=int(candidate_limit),
     )
     rows = _rows(engine, sql, deadline)
-    highest = _highest_blocking_priority(engine, deadline)
-    tasks = [_task(row) for row in rows]
+    max_launching_jobs_per_user = (
+        managed_job_utils.get_max_launching_jobs_per_user())
+    highest = _highest_blocking_priority(engine, deadline,
+                                         max_launching_jobs_per_user)
+    held_users: Optional[Set[str]] = None
+    if max_launching_jobs_per_user is not None:
+        with _bounded(engine, deadline) as conn:
+            held_users = managed_job_state.get_users_at_launch_limit(
+                max_launching_jobs_per_user, conn)
+    tasks = [
+        _task(row)
+        for row in rows
+        if not _held_by_launch_limit(row, held_users)
+    ]
     return _scan(NEVER_CLAIMED,
                  [task for task in tasks if not _starved(task, highest)],
                  truncated=len(rows) >= candidate_limit)
