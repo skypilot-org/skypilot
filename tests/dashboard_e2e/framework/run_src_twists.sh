@@ -7,7 +7,8 @@
 # A twist with id src-<x> lives at <suite>/twist_patches/<x>.patch, written
 # against the repository root that contains the suite. Patches touching
 # dashboard or plugin frontend sources rebuild the bundles first, with the
-# command in $E2E_FRONTEND_BUILD (default: rebuild the OSS dashboard). A suite
+# command in $E2E_FRONTEND_BUILD (default: rebuild the OSS dashboard), which
+# can read the patch's path from $E2E_SRC_PATCH. A suite
 # that needs its own server setup names its start script in $E2E_RUN_SERVER
 # (same start/stop arguments and exports as framework/run_server.sh).
 set -uo pipefail
@@ -27,6 +28,7 @@ shopt -s nullglob
 status=0
 for patch in "$SUITE_DIR"/twist_patches/*.patch; do
   id="src-$(basename "$patch" .patch)"
+  export E2E_SRC_PATCH="$patch"
   echo "::group::$id"
   git -C "$REPO_ROOT" apply --ignore-whitespace "$patch" || { echo "$id: patch does not apply"; status=1; continue; }
   if git -C "$REPO_ROOT" apply --numstat "$patch" | grep -qE '(dashboard|frontend)/'; then

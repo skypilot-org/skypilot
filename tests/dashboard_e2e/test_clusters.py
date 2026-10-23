@@ -994,7 +994,13 @@ def test_cluster_detail_yaml_and_copy(make_user, cluster, open_as, uid, twist,
     owner = make_user('owner')
     name = cluster(f'{uid}-yaml', owner.user_id, status='UP')
     command = f'sky launch -c {name} task.yaml'
-    seed_clusters.set_details(name, command=command, task_yaml=_YAML)
+    # Unique per test: the clipboard is shared by every context of a
+    # browser, so another test's copy must not satisfy this one.
+    run_line = f'run: echo {uid}'
+    seed_clusters.set_details(name,
+                              command=command,
+                              task_yaml=_YAML.replace('run: echo e2e',
+                                                      run_line))
 
     page = open_as(owner, f'/dashboard/clusters/{name}')
     page.context.grant_permissions(['clipboard-read', 'clipboard-write'],
@@ -1002,12 +1008,13 @@ def test_cluster_detail_yaml_and_copy(make_user, cluster, open_as, uid, twist,
     toggle = page.get_by_role('button', name='Show SkyPilot YAML')
     expect(toggle, 'Show SkyPilot YAML must be offered').to_be_visible()
     toggle.click()
-    expect(page.get_by_text('run: echo e2e'),
+    expect(page.get_by_text(run_line),
            'Show SkyPilot YAML must expand the launch YAML').to_be_visible()
 
+    page.evaluate("navigator.clipboard.writeText('')")
     page.locator('button[title="Copy YAML"]').click()
     copied = _read_clipboard(page)
-    assert 'run: echo e2e' in copied, (
+    assert run_line in copied, (
         f'Copy YAML must copy the launch YAML, got {copied!r}')
     page.locator('button[title="Copy command"]').click()
     deadline = time.time() + 5

@@ -235,6 +235,10 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
             ctx.tracing.stop(path=os.path.join(out_dir, f'ctx{i}-trace.zip'))
         else:
             ctx.tracing.stop()
+        # A twist's route handler may still be fetching (e.g. an /api/get
+        # long-poll). Closing under it raises TargetClosedError, which the
+        # sync API reports in the NEXT test on this worker.
+        ctx.unroute_all(behavior='ignoreErrors')
         ctx.close()
 
 

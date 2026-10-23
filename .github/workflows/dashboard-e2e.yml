@@ -20,8 +20,15 @@ concurrency:
 
 jobs:
   dashboard-e2e:
+    # The suite (baseline + runtime twists, ~40 min) and the source twists
+    # (one server restart per patch) run on separate runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [tests, source-twists]
+    name: dashboard-e2e (${{ matrix.mode }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +60,7 @@ jobs:
           npm --prefix sky/dashboard run build
 
       - name: Start API server
+        if: matrix.mode == 'tests'
         run: |
           source ~/e2e-env/bin/activate
           E2E_RUNTIME_DIR=$RUNNER_TEMP/sky-e2e \
@@ -61,16 +69,16 @@ jobs:
       # Parallel tests first, then exclusive ones (global totals) alone. Covers
       # the baseline runs and the req/res/dom/srv twists.
       - name: Baseline and runtime twists
+        if: matrix.mode == 'tests'
         run: |
           source ~/e2e-env/bin/activate
           source $RUNNER_TEMP/e2e-env.sh
           E2E_WORKERS=4 tests/dashboard_e2e/framework/run_tests.sh
 
       - name: Source twists
-        if: success() || failure()
+        if: matrix.mode == 'source-twists'
         run: |
           source ~/e2e-env/bin/activate
-          tests/dashboard_e2e/framework/run_server.sh stop || true
           E2E_RUNTIME_DIR=$RUNNER_TEMP/sky-e2e-src \
             tests/dashboard_e2e/framework/run_src_twists.sh
 
@@ -78,7 +86,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dashboard-e2e-results
+          name: dashboard-e2e-results-${{ matrix.mode }}
           path: |
             tests/dashboard_e2e/test-results/
             ${{ runner.temp }}/sky-e2e*/.sky/api_server/server.log
