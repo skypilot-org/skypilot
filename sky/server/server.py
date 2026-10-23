@@ -27,7 +27,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Type)
+                    Type, Union)
 import uuid
 import zipfile
 
@@ -128,6 +128,7 @@ from sky.volumes.server import server as volumes_rest
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 from sky.workspaces import server as workspaces_rest
+from sky.workspaces import visibility
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -1648,12 +1649,97 @@ async def enabled_clouds_batch(request: fastapi.Request,
     )
 
 
+def _kubernetes_scope(
+        auth_user: models.User,
+        resolve_current: bool) -> Tuple[visibility.InfraScope, Optional[str]]:
+    scope = visibility.scope_for(auth_user, need_slurm=False)
+    current = None
+    if resolve_current and not scope.unscoped:
+        current = visibility.current_kubernetes_context()
+    return scope, current
+
+
+async def _require_visible_kubernetes_context(
+        request: fastapi.Request, k8s_context: Optional[str],
+        resolve_current: bool) -> Optional[str]:
+    """404s unless the caller may read ``k8s_context``; returns the one to use.
+
+    Checked here, against the server's config, because the executor runs a
+    request under config the client can override. With ``resolve_current``,
+    a missing context means the server's current-context, which is resolved
+    and checked rather than left for the worker to fall back to.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None or (k8s_context is None and not resolve_current):
+        return k8s_context
+    scope, current = await context_utils.to_thread_with_executor(
+        None, _kubernetes_scope, auth_user, k8s_context is None)
+    if scope.unscoped:
+        return k8s_context
+    if k8s_context is None:
+        if current is None:
+            raise visibility.not_found('Kubernetes context')
+        k8s_context = current
+    visibility.require_kubernetes_context(scope, k8s_context)
+    return k8s_context
+
+
+async def _require_visible_slurm_cluster(request: fastapi.Request,
+                                         cluster: Optional[str]) -> None:
+    """404s unless the caller may read the named Slurm ``cluster``."""
+    auth_user = request.state.auth_user
+    if auth_user is None or cluster is None:
+        return
+    scope = await context_utils.to_thread_with_executor(None,
+                                                        visibility.scope_for,
+                                                        auth_user,
+                                                        need_kubernetes=False)
+    visibility.require_slurm_cluster(scope, cluster)
+
+
+async def _scope_accelerator_listing(
+    request: fastapi.Request, body: Union[payloads.ListAcceleratorsBody,
+                                          payloads.ListAcceleratorCountsBody]
+) -> None:
+    """Drops the infra clouds whose ``region_filter`` the caller can't read.
+
+    ``region_filter`` is a context to Kubernetes and SSH, a cluster to Slurm
+    and a region to every other cloud, so each infra cloud is checked against
+    its own set. 404 only when nothing the caller named is left.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None or body.region_filter is None:
+        return
+    # Both endpoints dispatch to the catalog's `list_accelerators`.
+    requested = catalog.normalize_clouds(body.clouds, 'list_accelerators')
+    if not {'kubernetes', 'ssh', 'slurm'} & set(requested):
+        return
+    scope = await context_utils.to_thread_with_executor(None,
+                                                        visibility.scope_for,
+                                                        auth_user)
+    if scope.unscoped:
+        return
+    assert scope.kubernetes is not None and scope.slurm is not None
+    visible = {
+        'kubernetes': body.region_filter in scope.kubernetes,
+        'ssh': body.region_filter in scope.kubernetes,
+        'slurm': body.region_filter in scope.slurm,
+    }
+    kept = [cloud for cloud in requested if visible.get(cloud, True)]
+    if not kept:
+        raise visibility.not_found('Kubernetes context or Slurm cluster')
+    if kept != requested:
+        body.clouds = kept
+
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
 ) -> None:
     """Gets real-time Kubernetes GPU availability."""
+    await _require_visible_kubernetes_context(
+        request, realtime_gpu_availability_body.context, resolve_current=False)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.
@@ -1671,6 +1757,9 @@ async def kubernetes_node_info(
         kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
 ) -> None:
     """Gets Kubernetes nodes information and hints."""
+    k8s_context = await _require_visible_kubernetes_context(
+        request, kubernetes_node_info_body.context, resolve_current=True)
+    kubernetes_node_info_body.context = k8s_context
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.KUBERNETES_NODE_INFO,
@@ -1687,6 +1776,8 @@ async def slurm_gpu_availability(
     slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
 ) -> None:
     """Gets real-time Slurm GPU availability."""
+    await _require_visible_slurm_cluster(
+        request, slurm_gpu_availability_body.slurm_cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.REALTIME_SLURM_GPU_AVAILABILITY,
@@ -1703,6 +1794,8 @@ async def slurm_node_info(
         request: fastapi.Request,
         slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
     """Gets detailed information for each node in the Slurm cluster."""
+    await _require_visible_slurm_cluster(
+        request, slurm_node_info_body.slurm_cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.SLURM_NODE_INFO,
@@ -1715,7 +1808,7 @@ async def slurm_node_info(
 
 @app.post('/slurm_cluster_names')
 async def slurm_cluster_names(request: fastapi.Request) -> None:
-    """Lists the names of the Slurm clusters this server is configured with.
+    """Lists the Slurm clusters of every workspace the caller can read.
 
     Answers from ~/.slurm/config without contacting any login node, so it
     returns promptly and covers clusters that are currently unreachable —
@@ -1726,7 +1819,10 @@ async def slurm_cluster_names(request: fastapi.Request) -> None:
         request_id=request.state.request_id,
         request_name=request_names.RequestName.SLURM_CLUSTER_NAMES,
         request_body=payloads.RequestBody(),
-        func=slurm_utils.slurm_cluster_names,
+        # Without an authenticated user nothing is scoped: keep listing the
+        # active workspace's clusters.
+        func=(slurm_utils.slurm_cluster_names if request.state.auth_user is None
+              else visibility.slurm_cluster_names),
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -1736,6 +1832,9 @@ async def slurm_cluster_names(request: fastapi.Request) -> None:
 async def status_kubernetes(request: fastapi.Request) -> None:
     """[Experimental] Get all SkyPilot resources (including from other '
     'users) in the current Kubernetes context."""
+    await _require_visible_kubernetes_context(request,
+                                              None,
+                                              resolve_current=True)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
@@ -1766,6 +1865,7 @@ async def list_accelerators(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
     """Gets list of accelerators from cloud catalog."""
+    await _scope_accelerator_listing(request, list_accelerator_counts_body)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.LIST_ACCELERATORS,
@@ -1782,6 +1882,7 @@ async def list_accelerator_counts(
         list_accelerator_counts_body: payloads.ListAcceleratorCountsBody
 ) -> None:
     """Gets list of accelerator counts from cloud catalog."""
+    await _scope_accelerator_listing(request, list_accelerator_counts_body)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.LIST_ACCELERATOR_COUNTS,
