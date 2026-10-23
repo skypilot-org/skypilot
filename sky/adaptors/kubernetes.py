@@ -59,11 +59,11 @@ IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
 # interval.
 KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
     'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS')
-# Connections an ApiClient keeps open for reuse. Requests beyond this many in
-# parallel open a connection that closes after use. Clients are cached for the
-# life of a process that never clears the request-level cache (e.g. a jobs
-# controller), so the kubernetes default (5 per CPU) keeps every connection
-# opened at peak concurrency open and idle for as long as the process runs.
+# Connections an ApiClient keeps for reuse. The API server normally closes
+# idle connections, but if something in between does not pass that close on,
+# every connection opened at peak concurrency stays open for as long as the
+# client lives, which can be the whole process (e.g. a jobs controller).
+# Requests beyond this many in parallel use a connection that closes afterwards.
 CONNECTION_POOL_MAXSIZE = 4
 
 logger = sky_logging.init_logger(__name__)
