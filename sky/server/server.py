@@ -3643,27 +3643,36 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 SSHMessageType = websocket_utils.SSHMessageType
 
 
+def _get_cluster_records_for_ssh(
+        cluster_name: str) -> List[responses.StatusResponse]:
+    """Looks up a cluster for SSH, reloading the workspace config on a miss.
+
+    core.status only returns clusters in the workspaces this process knows
+    about, and this process does not reload the workspace config per request,
+    so a cluster in a workspace created since the last reload is missing.
+    """
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
+    # core.status runs as the server user, which can read every workspace;
+    # _validate_cluster_for_ssh_proxy_ws checks the caller's access first.
+    records = core.status(cluster_name, all_users=True, summary_response=True)
+    if records:
+        return records
+    common.refresh_workspace_state_for_sync_handler()
+    return core.status(cluster_name, all_users=True, summary_response=True)
+
+
 async def _get_cluster_and_validate(
     cluster_name: str,
     cloud_type: Type[clouds.Cloud],
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
-    # Run core.status in another thread to avoid blocking the event loop.
-    # Use summary_response=True to skip expensive DB columns (owner, metadata,
-    # last_creation_yaml) and cluster event queries that are unnecessary for
-    # simple cluster validation. This keeps per-call overhead low enough to
-    # handle 20+ concurrent WebSocket SSH connections without timeout.
-    # TODO(aylei): core.status() will be called with server user, which has
-    # permission to all workspaces, this will break workspace isolation.
-    # It is ok for now, as users with limited access will not get the ssh config
-    # for the clusters in non-accessible workspaces.
+    # Run the lookup in another thread to avoid blocking the event loop.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor,
-            core.status,
-            cluster_name,
-            all_users=True,
-            summary_response=True)
+            thread_pool_executor, _get_cluster_records_for_ssh, cluster_name)
 
     if not cluster_records:
         raise fastapi.HTTPException(status_code=404,
