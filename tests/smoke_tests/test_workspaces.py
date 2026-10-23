@@ -1132,3 +1132,43 @@ def test_workspace_name_reuse_job_recovery(generic_cloud: str):
             timeout=40 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# Kubernetes and Slurm SSH goes through the API server's SSH proxy.
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres  # See test_workspace_rename_with_active_resources.
+def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
+    """SSH reaches a cluster in a workspace created while the server runs.
+
+    The SSH proxy looks the cluster up in the API server process, which does
+    not reload the workspace config per request.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    test = smoke_tests_utils.Test(
+        'ssh_into_cluster_in_new_workspace',
+        [
+            lambda: _workspace_request('create', {
+                'workspace_name': workspace,
+                'config': {}
+            }),
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} --workspace {workspace} '
+            'echo hi',
+            f'out=$(ssh {name} echo ssh-ok); echo "$out"; '
+            'echo "$out" | grep -x ssh-ok',
+        ],
+        teardown='; '.join([
+            f'sky down -y {name} --config active_workspace={workspace}',
+            _delete_workspaces_cmd(workspace),
+        ]),
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
