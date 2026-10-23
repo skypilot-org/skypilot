@@ -4,10 +4,7 @@
 import dashboardCache from './cache';
 import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  getManagedJobsWithClientPagination,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
   getEnabledCloudsBatch,
@@ -22,18 +19,6 @@ import {
 } from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
-// True when a server-side managed-jobs pagination plugin is loaded.
-// Inlined in this file rather than imported because the same one-line
-// check exists privately in jobs-cache-manager.js and the
-// data/connectors/jobs.jsx connector. Cross-file dedup is a follow-up;
-// the goal here is just to remove the duplication added by this PR.
-function isJobsPaginationPluginAvailable() {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.__skyJobsPaginationFetch === 'function'
-  );
-}
-
 /**
  * Complete list of all dashboard cache functions organized by page
  */
@@ -41,11 +26,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    // For jobs page - uses client-side pagination wrapper
-    getManagedJobs: {
-      fn: getManagedJobsWithClientPagination,
-      args: [{ allUsers: true }],
-    },
     // For infra/users/workspaces pages - shared cache entry.
     // Field-trimmed via MANAGED_JOBS_SUMMARY_ARGS: the untrimmed fetch
     // returns every non-finished job with full inline YAML (tens of MB at
@@ -94,7 +74,14 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     // getClusters off the infra page), so the banner and Clusters-page
     // navigation stay fast; a cold banner just falls back to an on-demand
     // fetch.
-    jobs: ['getManagedJobs', 'getWorkspaces', 'getUsers'],
+    // 'getManagedJobs' is intentionally absent here. The /jobs page uses
+    // jobsCacheManager.getPaginatedJobs, which calls getManagedJobs with
+    // page/limit params directly against /jobs/queue/v2 (server-side
+    // pagination). Preloading the full job set here ({allUsers: true},
+    // all fields, no pagination) would fetch 39MB / 25-36s of data that
+    // nothing on the page reads — and would block preloadingComplete,
+    // which gates the auto-refresh interval, for that entire duration.
+    jobs: ['getWorkspaces', 'getUsers'],
     infra: [
       // Empty - infra page uses progressive loading via fetchData()
       // All infra functions are background-preloaded from other pages
@@ -195,23 +182,23 @@ class CachePreloader {
     }
 
     for (const functionName of requiredFunctions) {
-      // Skip the unpaginated full-jobs preload when a server-side
-      // pagination plugin is loaded. Without this skip, mounting /jobs
-      // at scale (e.g. 50k+ jobs) issues a single blocking fetch for
-      // the entire job set — measured at ~26s / ~110 MB on a 50k-row
-      // PostgreSQL backend — that nothing on the page actually reads
-      // (the table reads its own paginated cache via the plugin path).
-      // The blocked executor pool then makes subsequent paginated
-      // page-click fetches feel slow even though each individual
-      // /plugins/api/pagination/jobs call is ~500 ms. The cache key
-      // the wrapper writes here ({allUsers: true} with no pagination
-      // args) doesn't match what the table or the
-      // dashboardCache.get(getManagedJobs, [{...filterOptions, page,
-      // limit}]) call sites read either, so dropping it costs nothing.
-      if (
-        functionName === 'getManagedJobs' &&
-        isJobsPaginationPluginAvailable()
-      ) {
+      // Skip the unpaginated full-jobs preload entirely for the /jobs page.
+      //
+      // When a server-side pagination plugin is loaded, the table reads its
+      // own paginated cache via window.__skyJobsPaginationFetch — the full
+      // {allUsers: true} fetch is unused (measured: ~26s / ~110 MB at 50k rows
+      // on a PostgreSQL backend).
+      //
+      // When no plugin is loaded (the common case), jobsCacheManager's default
+      // path already handles the initial fetch efficiently: it calls getManagedJobs
+      // with page/limit params directly against /jobs/queue/v2 (server-side
+      // pagination), returning only the first page (36KB / 2-4s). The full
+      // {allUsers: true} preload here would fetch every job (measured: 39MB /
+      // 25-36s) and block preloadingComplete — which gates the auto-refresh
+      // interval — for the entire duration. The cache key written here
+      // ({allUsers: true} with no pagination args) also doesn't match any key
+      // the table or jobsCacheManager reads, so dropping it costs nothing.
+      if (functionName === 'getManagedJobs') {
         continue;
       }
       if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
@@ -346,15 +333,11 @@ class CachePreloader {
     const preloadPromises = Array.from(allOtherFunctions).map(
       async (functionName) => {
         try {
-          // Same skip as in _loadPageData: don't background-preload the
-          // unpaginated full-jobs cache when a server-side pagination
-          // plugin is present. The /jobs page reads its own paginated
-          // cache via the plugin path; nothing else reads the
-          // {allUsers: true} cache key this wrapper writes.
-          if (
-            functionName === 'getManagedJobs' &&
-            isJobsPaginationPluginAvailable()
-          ) {
+          // Same skip as in _loadPageData: never background-preload the
+          // unpaginated full-jobs cache. Neither the plugin path nor the
+          // default server-side pagination path reads the {allUsers: true}
+          // cache key this wrapper writes. See _loadPageData for details.
+          if (functionName === 'getManagedJobs') {
             return;
           }
           if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
