@@ -1273,29 +1273,39 @@ async def _noop_callback(status: str) -> None:
     del status
 
 
-async def _seed_job(engine, name: str, created_at: Optional[float],
-                    launch_time: Optional[float]) -> int:
-    """Seed a one-task job submitted at created_at, launched at launch_time
-    (left PENDING when None)."""
+async def _seed_job(engine,
+                    name: str,
+                    created_at: Optional[float],
+                    launch_time: Optional[float],
+                    num_tasks: int = 1,
+                    execution: Optional[str] = None) -> int:
+    """Seed a job whose tasks were all submitted at created_at, with task 0
+    launched at launch_time (left PENDING when None)."""
     job_id = state.set_job_info_without_job_id(name=name,
                                                workspace='ws1',
                                                entrypoint='ep',
                                                pool=None,
                                                pool_hash=None,
-                                               user_hash='user1')
-    state.set_pending(job_id,
-                      task_id=0,
-                      task_name='task0',
-                      resources_str='{}',
-                      metadata='{}')
+                                               user_hash='user1',
+                                               execution=execution)
+    for task_id in range(num_tasks):
+        state.set_pending(job_id,
+                          task_id=task_id,
+                          task_name=f'task{task_id}',
+                          resources_str='{}',
+                          metadata='{}')
     _set_created_at(engine, job_id, created_at)
+    state.scheduler_set_waiting([job_id], f'/tmp/dag-{name}.yaml',
+                                f'/tmp/user-{name}.yaml', f'/tmp/env-{name}',
+                                None, 100)
     if launch_time is not None:
-        state.scheduler_set_waiting([job_id], f'/tmp/dag-{name}.yaml',
-                                    f'/tmp/user-{name}.yaml',
-                                    f'/tmp/env-{name}', None, 100)
-        await state.set_starting_async(job_id, 0, f'run-{name}', launch_time,
-                                       '{}', {}, _noop_callback)
+        await _launch_task(job_id, 0, launch_time)
     return job_id
+
+
+async def _launch_task(job_id: int, task_id: int, launch_time: float) -> None:
+    await state.set_starting_async(job_id, task_id, f'run-{job_id}-{task_id}',
+                                   launch_time, '{}', {}, _noop_callback)
 
 
 class TestSubmittedAtRangeFilter:
@@ -1426,7 +1436,9 @@ class TestSubmissionTimeSortAndQueue:
 
     def _queue_submitted_ats(self):
         jobs = jobs_utils.get_managed_job_queue(fields=self._FIELDS)['jobs']
-        return {job['job_id']: job['submitted_at'] for job in jobs}
+        return {
+            (job['job_id'], job['task_id']): job['submitted_at'] for job in jobs
+        }
 
     @pytest.mark.asyncio
     async def test_sort_by_submitted_at_uses_submission_time(
@@ -1459,7 +1471,7 @@ class TestSubmissionTimeSortAndQueue:
                                  'pending',
                                  created_at=_T100,
                                  launch_time=None)
-        assert self._queue_submitted_ats() == {job_id: _T100}
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
         # The column itself stays NULL until the job begins launching.
         assert state.get_submitted_task_ids(job_id) == set()
 
@@ -1470,7 +1482,7 @@ class TestSubmissionTimeSortAndQueue:
                                  'launched',
                                  created_at=_T100,
                                  launch_time=_T100 + _LAUNCH_DELAY)
-        assert self._queue_submitted_ats() == {job_id: _T100}
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
 
     @pytest.mark.asyncio
     async def test_falls_back_to_launch_time_without_created_at(
@@ -1479,7 +1491,48 @@ class TestSubmissionTimeSortAndQueue:
                                  'old',
                                  created_at=None,
                                  launch_time=_T200)
-        assert self._queue_submitted_ats() == {job_id: _T200}
+        assert self._queue_submitted_ats() == {(job_id, 0): _T200}
+
+    @pytest.mark.asyncio
+    async def test_pipeline_later_task_reports_its_launch_time(
+            self, _mock_managed_jobs_db_conn):
+        # Task 1 of a pipeline waits on task 0, not on a controller, so it
+        # keeps its own launch time rather than the job's submission time.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'pipeline',
+                                 created_at=_T100,
+                                 launch_time=_T100 + _LAUNCH_DELAY,
+                                 num_tasks=2)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): None,
+        }
+        await _launch_task(job_id, 1, _T300 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T300 + _LAUNCH_DELAY,
+        }
+
+    @pytest.mark.asyncio
+    async def test_job_group_tasks_report_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        # A job group's tasks all start waiting at submission.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'group',
+                                 created_at=_T100,
+                                 launch_time=None,
+                                 num_tasks=2,
+                                 execution='parallel')
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
+        for task_id in (0, 1):
+            await _launch_task(job_id, task_id, _T100 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
 
 
 class TestMultiTaskStatusFilterCharacterization:

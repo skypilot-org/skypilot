@@ -2196,13 +2196,15 @@ _QUEUE_UNSELECTED_JOB_INFO_COLUMNS = frozenset(
 
 
 def _submission_time() -> 'sqlalchemy.ColumnElement':
-    """When the user submitted the task: what the queue sorts and filters by.
+    """When the user submitted the job: what the queue sorts and filters by.
 
-    This is created_at, which set_pending writes at submission. submitted_at
+    This is created_at, which set_pending writes for every task at
+    submission, so all rows of a job sort and filter together. submitted_at
     is when the task began launching and is NULL while the job waits for a
     controller (set_pending_cancelled and CLAIMED_IN_FLIGHT_PREDICATE rely on
     that), so it is only the fallback for rows that predate created_at.
-    get_managed_job_queue shows the same value as the job's submitted_at.
+    get_managed_job_queue shows this value as submitted_at for task 0 and
+    for job group tasks.
     """
     return sqlalchemy.func.coalesce(spot_table.c.created_at,
                                     spot_table.c.submitted_at)
