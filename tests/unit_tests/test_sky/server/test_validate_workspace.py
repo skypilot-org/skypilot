@@ -8,6 +8,7 @@ Real state DB, config file and casbin policy; the handler is called directly.
 import asyncio
 import json
 import os
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -308,7 +309,13 @@ class TestClientEnvIsSanitized:
 @pytest.mark.parametrize('api_version', [None, 65, 66])
 @pytest.mark.parametrize('config_source', ['task', 'request'])
 def test_modal_deadline_compatibility_inside_request_context(
-        env, api_version, config_source):
+        env, api_version, config_source, monkeypatch):
+    # Expected validation failures suppress tracebacks; restore the global
+    # setting so later CLI tests can still exercise debug output.
+    monkeypatch.setattr(sys,
+                        'tracebacklimit',
+                        getattr(sys, 'tracebacklimit', 1000),
+                        raising=False)
     env.configure({})
     env.add_user('alice', ['default'])
     config = {'modal': {'deadline': 2000000000.75}}
