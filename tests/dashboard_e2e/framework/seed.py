@@ -9,7 +9,7 @@ are never in a scheduler state that the recovery path relaunches.
 import json
 import re
 import time
-from typing import Optional
+from typing import Callable, List, Optional
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -105,11 +105,109 @@ def is_test_name(name: Optional[str]) -> bool:
     return bool(name) and re.match(r't[0-9a-f]{6}-', name) is not None
 
 
-def leftover_test_rows() -> list:
+_LEFTOVER_CHECKS: List[Callable[[], List[str]]] = []
+
+
+def register_leftover_check(check: Callable[[], List[str]]) -> None:
+    """Add a check for rows tests created and left behind. A suite that seeds
+    its own tables registers one, so exclusive tests also wait for those."""
+    _LEFTOVER_CHECKS.append(check)
+
+
+def leftover_test_rows() -> List[str]:
     """Rows other tests created and have not removed yet. An exclusive test
     starts only when this is empty."""
+    out: List[str] = []
+    for check in _LEFTOVER_CHECKS:
+        out.extend(check())
+    return out
+
+
+def _leftover_jobs() -> List[str]:
     engine = job_state._db_manager.get_engine()  # pylint: disable=protected-access
     t = job_state.job_info_table
     with orm.Session(engine) as session:
         names = session.execute(sqlalchemy.select(t.c.name)).scalars().all()
     return [f'managed job {n}' for n in names if is_test_name(n)]
+
+
+def _leftover_clusters() -> List[str]:
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    t = global_user_state.cluster_table
+    engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
+    with orm.Session(engine) as session:
+        names = session.execute(sqlalchemy.select(t.c.name)).scalars().all()
+    return [f'cluster {n}' for n in names if is_test_name(n)]
+
+
+register_leftover_check(_leftover_jobs)
+register_leftover_check(_leftover_clusters)
+
+# --- clusters ----------------------------------------------------------------
+
+
+def cluster(name: str,
+            user_hash: str,
+            status: str = 'UP',
+            workspace: str = 'default',
+            cpus: str = '1',
+            memory: str = '2',
+            launched_ago_s: float = 600,
+            context: str = 'e2e-ctx') -> str:
+    """Insert a Kubernetes cluster row owned by ``user_hash``; returns name.
+
+    The handle is a real CloudVmRayResourceHandle so the server can unpickle
+    it. Its context does not exist, and the refresh daemon is off, so nothing
+    tries to reach it.
+    """
+    # pylint: disable=import-outside-toplevel
+    import sky
+    from sky import global_user_state
+    from sky.backends import cloud_vm_ray_backend
+
+    # Launched resources must be launchable (carry an instance type);
+    # Kubernetes names instance types <cpus>CPU--<memory>GB.
+    resources = sky.Resources(infra=f'kubernetes/{context}',
+                              instance_type=f'{cpus}CPU--{memory}GB')
+    handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
+        cluster_name=name,
+        cluster_name_on_cloud=name,
+        cluster_yaml=None,
+        launched_nodes=1,
+        launched_resources=resources)
+    global_user_state.add_or_update_cluster(name,
+                                            handle,
+                                            requested_resources={resources},
+                                            ready=status == 'UP',
+                                            is_launch=True)
+    global_user_state.set_cluster_yaml(
+        name, f'cluster_name: {name}\nprovider:\n  type: external\n')
+    t = global_user_state.cluster_table
+    engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.update(t).where(t.c.name == name).values(
+                user_hash=user_hash,
+                workspace=workspace,
+                status=status,
+                launched_at=int(time.time() - launched_ago_s)))
+        session.commit()
+    return name
+
+
+def delete_cluster(name: str) -> None:
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    global_user_state.remove_cluster(name, terminate=True)
+
+
+def count_clusters() -> int:
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    t = global_user_state.cluster_table
+    engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
+    with orm.Session(engine) as session:
+        return session.execute(
+            sqlalchemy.select(
+                sqlalchemy.func.count()).select_from(t)).scalar_one()

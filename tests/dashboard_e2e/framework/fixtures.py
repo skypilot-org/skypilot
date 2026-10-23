@@ -134,6 +134,21 @@ def seed_job() -> Iterator[Callable[..., int]]:
         seed.delete_managed_job(job_id)
 
 
+@pytest.fixture
+def seed_cluster() -> Iterator[Callable[..., str]]:
+    """Insert clusters for this test and delete them afterwards."""
+    names: List[str] = []
+
+    def make(*args, **kwargs) -> str:
+        name = seed.cluster(*args, **kwargs)
+        names.append(name)
+        return name
+
+    yield make
+    for name in names:
+        seed.delete_cluster(name)
+
+
 # --- browser -----------------------------------------------------------------
 
 

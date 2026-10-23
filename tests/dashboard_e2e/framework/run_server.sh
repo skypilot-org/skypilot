@@ -29,8 +29,15 @@ export SKYPILOT_SERVER_PLUGINS_CONFIG="${E2E_PLUGINS_CONFIG:-$SUITE_DIR/plugins.
 # The suite's own modules first (its server_twists must win over this
 # suite's file of the same name), then framework.server_plugin.
 export PYTHONPATH="$SUITE_DIR:$(dirname "$FRAMEWORK_DIR")${PYTHONPATH:+:$PYTHONPATH}"
-if [[ -z "${E2E_SERVER_TWIST_MODULES:-}" && -f "$SUITE_DIR/server_twists.py" ]]; then
-  export E2E_SERVER_TWIST_MODULES=server_twists
+# Default: every server_twists*.py in the suite (one file per area, so
+# people adding twists in different areas do not edit the same file).
+if [[ -z "${E2E_SERVER_TWIST_MODULES:-}" ]]; then
+  modules=()
+  for f in "$SUITE_DIR"/server_twists*.py; do
+    [[ -f "$f" ]] && modules+=("$(basename "$f" .py)")
+  done
+  E2E_SERVER_TWIST_MODULES="$(IFS=,; echo "${modules[*]:-}")"
+  export E2E_SERVER_TWIST_MODULES
 fi
 export SKYPILOT_DISABLE_USAGE_COLLECTION=1
 export SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1
