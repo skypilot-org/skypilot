@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import traceback
 import typing
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import AbstractSet, Awaitable, Callable, List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -44,6 +44,23 @@ logger = sky_logging.init_logger(__name__)
 # retries independently (no barrier between nodes), so one flaky SSH
 # connection or slow node never blocks -- or fails -- the whole group.
 _SETUP_MAX_ATTEMPTS = 3
+# How long a task waits on its node for the controller's networking push
+# (Phase 3) before failing. A task's run starts as soon as its own cluster
+# is UP, but the push happens only once every cluster in the group is UP,
+# so the wait has to cover the slowest peer's provisioning. It is a
+# backstop against a dead controller: the controller fails the group
+# itself when a launch or the push fails.
+K8S_NETWORK_MARKER_WAIT_SECONDS = 10 * 60
+# A peer on a VM cloud can sit in capacity retries for hours. Drop this to
+# the Kubernetes value once a task's run cannot start before every cluster
+# of its group is UP (gang scheduling on VM clouds).
+VM_NETWORK_MARKER_WAIT_SECONDS = 2 * 60 * 60
+# After a task recovers, how long the controller keeps re-pushing
+# networking to a RUNNING peer whose push failed before it fails the
+# recovered task, and how long it sleeps between rounds. Each round
+# already retries every node _SETUP_MAX_ATTEMPTS times.
+RECOVERY_PEER_PUSH_TIMEOUT_SECONDS = 10 * 60
+RECOVERY_PEER_PUSH_RETRY_INTERVAL_SECONDS = 30
 _SETUP_ATTEMPT_TIMEOUT_SECONDS = 60.0
 _SETUP_RETRY_INITIAL_BACKOFF_SECONDS = 5.0
 
@@ -76,6 +93,21 @@ class _NodeSetupSpec:
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
 # ============================================================================
+
+
+def network_marker_wait_seconds(task: 'task_lib.Task') -> int:
+    """How long the task's networking wait waits for the Phase 3 marker.
+
+    Returns K8S_NETWORK_MARKER_WAIT_SECONDS when any of the task's
+    resources target Kubernetes, else VM_NETWORK_MARKER_WAIT_SECONDS.
+    JobGroup tasks are pinned to one cloud before they reach the
+    controller, so any resource decides for the task.
+    """
+    for res in task.resources:
+        if res.cloud is not None and res.cloud.is_same_cloud(
+                sky_clouds.Kubernetes()):
+            return K8S_NETWORK_MARKER_WAIT_SECONDS
+    return VM_NETWORK_MARKER_WAIT_SECONDS
 
 
 def _is_kubernetes(
@@ -288,6 +320,17 @@ def generate_inline_networking_setup_script(
         """).strip()
 
 
+def _hosts_entry_marker(job_group_name: str) -> str:
+    """Trailing comment that tags every /etc/hosts entry of a JobGroup.
+
+    A re-push strips lines carrying this marker before writing the new
+    entries, so /etc/hosts never holds a stale IP ahead of the current one
+    for the same hostname (glibc returns the first match).
+    """
+    # job_group_name is validated at YAML load time to be shell-safe.
+    return f'# SkyPilot JobGroup {job_group_name}'
+
+
 def _generate_hosts_entries(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
@@ -302,9 +345,11 @@ def _generate_hosts_entries(
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
 
     Returns:
-        String containing /etc/hosts entries, one per line.
+        String containing /etc/hosts entries, one per line, each tagged
+        with the group's marker; empty when there are no SSH nodes.
     """
-    entries = [f'# JobGroup: {job_group_name}']
+    marker = _hosts_entry_marker(job_group_name)
+    entries = []
 
     for task, handle in tasks_handles:
         if handle is None:
@@ -322,7 +367,7 @@ def _generate_hosts_entries(
         for node_idx, (internal_ip,
                        _) in enumerate(handle.stable_internal_external_ips):
             hostname = f'{task_name}-{node_idx}.{job_group_name}'
-            entries.append(f'{internal_ip} {hostname}')
+            entries.append(f'{internal_ip} {hostname}  {marker}')
             logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
     return '\n'.join(entries)
@@ -335,11 +380,16 @@ async def _inject_hosts_on_node(
 ) -> bool:
     """Inject /etc/hosts entries on a single node.
 
-    Also creates a marker file to signal that networking setup is complete.
+    Idempotent: lines carrying this group's marker (from a previous push,
+    e.g. before a peer was recovered onto a new IP) are removed before the
+    new entries are written, so each hostname resolves to exactly one,
+    current IP. Also creates a marker file to signal that networking
+    setup is complete.
 
     Args:
         runner: CommandRunner for the target node.
-        hosts_content: Content to append to /etc/hosts.
+        hosts_content: Marker-tagged entries to write to /etc/hosts (see
+            _generate_hosts_entries); may be empty.
         job_group_name: Name of the JobGroup (for marker file).
 
     Returns:
@@ -347,13 +397,23 @@ async def _inject_hosts_on_node(
     """
     # pylint: disable=invalid-string-quote
     escaped_content = hosts_content.replace("'", "'\\''")  # noqa: Q000
+    marker = _hosts_entry_marker(job_group_name)
     marker_file = get_network_ready_marker_path(job_group_name)
     # Use ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD to handle containers without sudo
-    # but running as root (e.g., pytorch/pytorch images)
-    cmd = (
-        f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
-        f"echo '{escaped_content}' | "  # noqa: Q000
-        f'sudo tee -a /etc/hosts > /dev/null && touch {marker_file}')
+    # but running as root (e.g., pytorch/pytorch images). /etc/hosts is
+    # rewritten in place with tee (never mv) so this also works where it
+    # is a bind mount. `grep -v` exits 1 when no line is left, which is
+    # fine; exit 2 (unreadable file) must fail the push so it is retried or
+    # reported instead of rewriting /etc/hosts with only the group entries.
+    strip_cmd = (
+        f"existing=$(sudo grep -v '{marker}' "  # noqa: Q000
+        '/etc/hosts || [ $? -eq 1 ])')
+    write_cmd = (
+        f"printf '%s\\n%s\\n' \"$existing\" "  # noqa: Q000
+        f"'{escaped_content}' | "  # noqa: Q000
+        'sudo tee /etc/hosts > /dev/null')
+    cmd = (f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
+           f'{strip_cmd} && {write_cmd} && touch {marker_file}')
     # pylint: enable=invalid-string-quote
 
     try:
@@ -624,25 +684,28 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        target_task_names: Optional[AbstractSet[str]] = None,
     ) -> List[SetupFailure]:
         """Set up network configuration for JobGroup.
 
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples.
+            target_task_names: See setup_job_group_networking.
 
         Returns:
             Empty list when every node succeeded; otherwise one
             SetupFailure per node that failed after its retry budget.
         """
         return await NetworkConfigurator._inject_etc_hosts(
-            job_group_name, tasks_handles)
+            job_group_name, tasks_handles, target_task_names)
 
     @staticmethod
     async def _inject_etc_hosts(
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        target_task_names: Optional[AbstractSet[str]] = None,
     ) -> List[SetupFailure]:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
@@ -657,6 +720,7 @@ class NetworkConfigurator:
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples for all jobs.
+            target_task_names: See setup_job_group_networking.
 
         Returns:
             Empty list when every node succeeded; otherwise one
@@ -672,6 +736,9 @@ class NetworkConfigurator:
         setup_specs: List[_NodeSetupSpec] = []
         failures: List[SetupFailure] = []
         for task, handle in tasks_handles:
+            if (target_task_names is not None and
+                    task.name not in target_task_names):
+                continue
             if handle is None:
                 # The cluster is in transition (e.g., a peer that is
                 # itself mid-recovery). Not a failure: its own recovery
@@ -704,8 +771,6 @@ class NetworkConfigurator:
                                        node_label=node_label,
                                        setup_type='K8s DNS updater'))
                 else:
-                    # ssh_hosts_content is always truthy (has header comment)
-                    assert ssh_hosts_content, 'unreachable'
                     setup_specs.append(
                         _NodeSetupSpec(make_attempt=functools.partial(
                             _inject_hosts_on_node, runner, ssh_hosts_content,
@@ -748,6 +813,7 @@ async def setup_job_group_networking(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+    target_task_names: Optional[AbstractSet[str]] = None,
 ) -> List[SetupFailure]:
     """Set up networking for all tasks in a JobGroup.
 
@@ -758,13 +824,18 @@ async def setup_job_group_networking(
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
+            The hostname entries pushed to every node are built from all
+            of them.
+        target_task_names: When set, push only to the nodes of these
+            tasks. None pushes to the nodes of every task.
 
     Returns:
         Empty list when every node succeeded; otherwise one SetupFailure
         per node that failed after its retry budget.
     """
     logger.info(f'Setting up networking for Job Group: {job_group_name}')
-    return await NetworkConfigurator.setup(job_group_name, tasks_handles)
+    return await NetworkConfigurator.setup(job_group_name, tasks_handles,
+                                           target_task_names)
 
 
 def get_network_ready_marker_path(job_group_name: str) -> str:
@@ -784,7 +855,8 @@ def get_network_ready_marker_path(job_group_name: str) -> str:
 
 
 def generate_wait_for_networking_script(job_group_name: str,
-                                        other_job_names: List[str]) -> str:
+                                        other_job_names: List[str],
+                                        marker_wait_seconds: int) -> str:
     """Generate a bash script to wait for network setup.
 
     This script should be prepended to task.setup to ensure networking
@@ -802,6 +874,8 @@ def generate_wait_for_networking_script(job_group_name: str,
     Args:
         job_group_name: Name of the JobGroup.
         other_job_names: List of other task names in the group to wait for.
+        marker_wait_seconds: How long to wait for the Phase 3 marker
+            before failing (see network_marker_wait_seconds).
 
     Returns:
         Bash script as a string.
@@ -834,7 +908,7 @@ def generate_wait_for_networking_script(job_group_name: str,
         # Phase 1: Wait for networking setup to be initiated by controller
         # This marker file is created after Phase 3 sets up /etc/hosts
         MARKER_FILE="{marker_file}"
-        MARKER_WAIT=600  # 10 minutes to wait for Phase 3 to start
+        MARKER_WAIT={marker_wait_seconds}  # wait for Phase 3 to start
         MARKER_ELAPSED=0
         echo "[SkyPilot] Waiting for networking initialization marker..."
         while [ ! -f "$MARKER_FILE" ]; do

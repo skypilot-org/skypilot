@@ -3119,20 +3119,20 @@ def test_job_group_inter_connection_false(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
-def test_job_group_inter_connection_non_k8s_pin_error(generic_cloud: str):
-    """inter_connection: true + a non-Kubernetes infra pin fails at
-    submission with an error naming the contradicting job, without
-    launching anything."""
+def test_job_group_inter_connection_unsupported_pin_error(generic_cloud: str):
+    """inter_connection: true + a pin on infra without in-group
+    networking support fails at submission with an error naming the
+    contradicting job, without launching anything."""
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = _render_job_group_yaml(
         'tests/test_job_groups/smoke_inter_connection_pin_error.yaml', name,
         generic_cloud)
 
     test = smoke_tests_utils.Test(
-        'job_group_inter_connection_non_k8s_pin_error',
+        'job_group_inter_connection_unsupported_pin_error',
         [
             f'sky jobs launch {yaml_path} -y 2>&1 | '
-            f'grep "pins non-Kubernetes infra"',
+            f'grep "pins infra without in-group networking support"',
             # Nothing was submitted.
             f'! sky jobs queue | grep {name}',
         ],
@@ -3182,13 +3182,15 @@ def test_job_group_cancelled_logs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.managed_jobs
-@pytest.mark.kubernetes
-def test_job_group_networking(generic_cloud: str):
-    """Test JobGroup cross-job networking via hostname resolution."""
-    name = smoke_tests_utils.get_cluster_name()
+def _run_job_group_networking_test(cloud: str, name: str) -> None:
+    """JobGroup cross-job networking via hostname resolution on `cloud`.
+
+    `name` must come from smoke_tests_utils.get_cluster_name() called in the
+    test function itself: it derives the name from its caller's function
+    name, and a helper name starting with '_' yields an invalid job name.
+    """
     yaml_path = _render_job_group_yaml(
-        'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
+        'tests/test_job_groups/smoke_networking.yaml', name, cloud)
 
     # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
     # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
@@ -3210,6 +3212,68 @@ def test_job_group_networking(generic_cloud: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking(generic_cloud: str):
+    """Test JobGroup cross-job networking via hostname resolution."""
+    _run_job_group_networking_test(generic_cloud,
+                                   smoke_tests_utils.get_cluster_name())
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.aws
+def test_job_group_networking_aws():
+    """In-group networking on AWS VMs: peers in the same region reach
+    each other via /etc/hosts entries with internal IPs."""
+    _run_job_group_networking_test('aws', smoke_tests_utils.get_cluster_name())
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.gcp
+def test_job_group_networking_gcp():
+    """In-group networking on GCP VMs: peers in the same region reach
+    each other via /etc/hosts entries with internal IPs."""
+    _run_job_group_networking_test('gcp', smoke_tests_utils.get_cluster_name())
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.aws
+def test_job_group_networking_mpi_aws():
+    """MPI across the two tasks of a JobGroup on AWS VMs.
+
+    The tasks use different instance types. One node writes a hostfile
+    from the group hostnames and runs one rank per node across both
+    tasks, so this checks hostname resolution, SSH between clusters, and
+    MPI traffic between ranks.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_mpi.yaml',
+        name,
+        'aws',
+        instance_type_a='m6i.large',
+        instance_type_b='c6i.large')
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_networking_mpi_aws',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=900),
+            f'sky jobs logs $({get_job_id_cmd}) mpia --no-follow | '
+            'grep MPI_ALL_RANKS_OK',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -3263,37 +3327,27 @@ def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.managed_jobs
-@pytest.mark.kubernetes
-def test_job_group_networking_recovery():
+def _run_job_group_networking_recovery_test(cloud: str, infra: str, name: str,
+                                            suffix: str,
+                                            preempt_server_cmd: str) -> None:
     """In-group networking re-establishes after a task is preempted.
 
-    Deletes one task's pod mid-run and asserts, via epoch-tagged connect
+    Runs preempt_server_cmd on a helper cluster on `cloud` to kill the
+    server task's node mid-run, and asserts, via epoch-tagged connect
     logs from both tasks, that after recovery (a) the surviving peer
-    reaches the recovered task's new pod, and (b) the recovered task's
-    fresh pod gets networking set up again and reaches its peer.
+    reaches the recovered task's new node, and (b) the recovered task's
+    fresh node gets networking set up again and reaches its peer.
     """
-    name = smoke_tests_utils.get_cluster_name()
-    # Task names become the managed cluster names (and the
-    # `skypilot-cluster-name` pod annotation the deletion command greps),
-    # so they must be unique per test run in a shared namespace.
-    suffix = name.replace('-', '')[-8:]
     srv_task = f'srv{suffix}'
     png_task = f'png{suffix}'
     yaml_path = _render_job_group_yaml(
         'tests/test_job_groups/smoke_networking_recovery.yaml',
         name,
-        'kubernetes',
+        infra,
         suffix=suffix)
 
     get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
                       f'awk \'{{print $1}}\'')
-    delete_server_pod_cmd = (
-        'kubectl get pods -l skypilot-cluster-name --no-headers '
-        '-o custom-columns="NAME:.metadata.name,'
-        'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
-        f'grep -- "{srv_task}-" | grep -v -- "-cloud-cmd" | '
-        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
 
     def wait_connect_after(task: str, epoch_file: str, timeout: int) -> str:
         """Poll a task's logs for a CONNECT_OK whose epoch is newer than
@@ -3312,7 +3366,7 @@ def test_job_group_networking_recovery():
     test = smoke_tests_utils.Test(
         'job_group_networking_recovery',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, name),
             f'sky jobs launch {yaml_path} -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -3327,10 +3381,10 @@ def test_job_group_networking_recovery():
              'if [ $(date +%s) -gt $END ]; then '
              'echo "Timed out waiting for initial connectivity"; exit 1; fi; '
              'sleep 10; done'),
-            # Record the deletion epoch, then preempt the server task's pod.
+            # Record the deletion epoch, then preempt the server task's node.
             f'date +%s | tee {epoch_file}',
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, cmd=delete_server_pod_cmd),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=preempt_server_cmd),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -3354,6 +3408,48 @@ def test_job_group_networking_recovery():
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking_recovery():
+    """Recovery of in-group networking after a pod is deleted."""
+    name = smoke_tests_utils.get_cluster_name()
+    # Task names become the managed cluster names (and the
+    # `skypilot-cluster-name` pod annotation the deletion command greps),
+    # so they must be unique per test run in a shared namespace.
+    suffix = name.replace('-', '')[-8:]
+    delete_server_pod_cmd = (
+        'kubectl get pods -l skypilot-cluster-name --no-headers '
+        '-o custom-columns="NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
+        f'grep -- "srv{suffix}-" | grep -v -- "-cloud-cmd" | '
+        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
+    _run_job_group_networking_recovery_test('kubernetes', 'kubernetes', name,
+                                            suffix, delete_server_pod_cmd)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.aws
+def test_job_group_networking_recovery_aws(aws_config_region):
+    """Recovery of in-group networking after an AWS instance is terminated.
+
+    The recovered task comes back on a new instance with a new internal
+    IP, so this checks that the peer's /etc/hosts entry is replaced.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    suffix = name.replace('-', '')[-8:]
+    region = aws_config_region
+    # The managed cluster name starts with the task name, and so does
+    # its name on the cloud (the ray-cluster-name tag).
+    terminate_server_cmd = (
+        f'aws ec2 terminate-instances --region {region} --instance-ids $('
+        f'aws ec2 describe-instances --region {region} '
+        f'--filters Name=tag:ray-cluster-name,Values=srv{suffix}* '
+        'Name=instance-state-name,Values=running '
+        '--query Reservations[].Instances[].InstanceId --output text)')
+    _run_job_group_networking_recovery_test('aws', f'aws/{region}', name,
+                                            suffix, terminate_server_cmd)
 
 
 @pytest.mark.managed_jobs

@@ -1,11 +1,15 @@
 """Unit tests for JobGroup networking script generation and setup."""
 import asyncio
+import os
+import subprocess
+import tempfile
 from unittest import mock
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
 import pytest
 
+from sky import clouds
 from sky.jobs import job_group_networking
 
 
@@ -16,7 +20,7 @@ class TestWaitForNetworkingScript:
 
     def test_fails_job_when_networking_not_ready(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1', 'peer2'])
+            'group', ['peer1', 'peer2'], 600)
         assert 'exit 1' in script
         assert 'inter_connection' in script
         # The old silent-fallthrough messaging must be gone.
@@ -24,13 +28,13 @@ class TestWaitForNetworkingScript:
 
     def test_waits_for_all_peer_hostnames(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1', 'peer2'])
+            'group', ['peer1', 'peer2'], 600)
         assert 'peer1-0.group' in script
         assert 'peer2-0.group' in script
 
     def test_empty_without_peers(self):
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', [])
+            'group', [], 600)
         assert script == ''
 
 
@@ -98,7 +102,7 @@ class TestWaitScriptDiagnostic:
         # contains the pattern), reporting 'yes' for a dead updater --
         # exactly when someone is reading this output to debug.
         script = job_group_networking.generate_wait_for_networking_script(
-            'group', ['peer1'])
+            'group', ['peer1'], 600)
         assert 'UPDATER_PID_FILE' in script
         assert 'kill -0' in script
         assert 'pgrep' not in script
@@ -326,3 +330,154 @@ class TestInjectEtcHosts:
         assert len(failures) == 1
         assert failures[0].task_name == 'job-a'
         assert 'command runners' in failures[0].reason
+
+
+class TestSshHostsInjection:
+    """SSH-cloud /etc/hosts injection is idempotent: every entry carries a
+    per-group marker, and a re-push (e.g. after recovery gave a peer a new
+    internal IP) replaces the group's previous entries instead of
+    appending a second, stale-first entry for the same hostname."""
+
+    def _mk_task(self, name):
+        task = MagicMock()
+        task.name = name
+        return task
+
+    def _mk_ssh_handle(self, ips):
+        handle = MagicMock()
+        handle.launched_resources.cloud.is_same_cloud.return_value = False
+        handle.stable_internal_external_ips = [(ip, f'pub-{ip}') for ip in ips]
+        return handle
+
+    def test_hosts_entries_carry_marker_per_line(self):
+        marker = job_group_networking._hosts_entry_marker('grp')
+        k8s_handle = MagicMock()
+        k8s_handle.launched_resources.cloud.is_same_cloud.return_value = True
+        content = job_group_networking._generate_hosts_entries(
+            'grp', [
+                (self._mk_task('a'), self._mk_ssh_handle(['10.0.0.1'])),
+                (self._mk_task('b'),
+                 self._mk_ssh_handle(['10.0.0.2', '10.0.0.3'])),
+                (self._mk_task('c'), k8s_handle),
+            ])
+        lines = [line for line in content.splitlines() if line.strip()]
+        assert len(lines) == 3
+        assert all(line.endswith(marker) for line in lines)
+        assert lines[0].startswith('10.0.0.1 a-0.grp')
+        assert lines[1].startswith('10.0.0.2 b-0.grp')
+        assert lines[2].startswith('10.0.0.3 b-1.grp')
+        assert 'c-0' not in content
+
+    def test_no_ssh_nodes_yields_empty_content(self):
+        k8s_handle = MagicMock()
+        k8s_handle.launched_resources.cloud.is_same_cloud.return_value = True
+        assert job_group_networking._generate_hosts_entries(
+            'grp', [(self._mk_task('c'), k8s_handle)]) == ''
+
+    @pytest.mark.asyncio
+    async def test_inject_command_replaces_previous_group_entries(self):
+        runner = MagicMock()
+        runner.run.return_value = (0, '', '')
+        marker = job_group_networking._hosts_entry_marker('grp')
+        ok = await job_group_networking._inject_hosts_on_node(
+            runner, f'10.0.0.9 a-0.grp  {marker}', 'grp')
+        assert ok is True
+        cmd = runner.run.call_args[0][0]
+        assert 'grep -v' in cmd and marker in cmd
+        assert 'tee /etc/hosts' in cmd
+        assert 'tee -a' not in cmd
+        assert job_group_networking.get_network_ready_marker_path('grp') in cmd
+
+    @pytest.mark.asyncio
+    async def test_inject_reports_failure_on_nonzero_exit(self):
+        runner = MagicMock()
+        runner.run.return_value = (1, '', 'boom')
+        ok = await job_group_networking._inject_hosts_on_node(
+            runner, '10.0.0.9 a-0.grp', 'grp')
+        assert ok is False
+
+
+class TestSshHostsRewriteInBash:
+    """Execute the generated /etc/hosts rewrite under real bash, with
+    /etc/hosts redirected to a temp file and sudo stripped."""
+
+    def _runner_for(self, hosts_path):
+        marker_file = job_group_networking.get_network_ready_marker_path('grp')
+
+        def run(cmd, **kwargs):
+            del kwargs
+            cmd = (cmd.replace('/etc/hosts',
+                               hosts_path).replace('sudo ', '').replace(
+                                   marker_file, hosts_path + '.ready'))
+            proc = subprocess.run(['bash', '-c', cmd],
+                                  capture_output=True,
+                                  text=True,
+                                  check=False)
+            return proc.returncode, proc.stdout, proc.stderr
+
+        runner = MagicMock()
+        runner.run.side_effect = run
+        return runner
+
+    def _entry(self, ip):
+        marker = job_group_networking._hosts_entry_marker('grp')
+        return f'{ip} a-0.grp  {marker}'
+
+    @pytest.mark.asyncio
+    async def test_rewrite_replaces_stale_entry_and_keeps_other_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts = os.path.join(tmp, 'hosts')
+            with open(hosts, 'w', encoding='utf-8') as f:
+                f.write('127.0.0.1 localhost\n')
+            runner = self._runner_for(hosts)
+            assert await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.1'), 'grp')
+            assert await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.2'), 'grp')
+            with open(hosts, encoding='utf-8') as f:
+                lines = [l for l in f.read().splitlines() if l.strip()]
+            assert lines == ['127.0.0.1 localhost', self._entry('10.0.0.2')]
+            assert os.path.exists(hosts + '.ready')
+
+    @pytest.mark.asyncio
+    async def test_unreadable_hosts_fails_instead_of_clobbering(self):
+        # grep exits 2 when /etc/hosts cannot be read; that must fail the
+        # push (so it is retried/reported), never write a file that only
+        # holds the group entries.
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts = os.path.join(tmp, 'missing-hosts')
+            runner = self._runner_for(hosts)
+            assert not await job_group_networking._inject_hosts_on_node(
+                runner, self._entry('10.0.0.1'), 'grp')
+            assert not os.path.exists(hosts)
+            assert not os.path.exists(hosts + '.ready')
+
+
+class TestMarkerWait:
+    """The on-node wait for the controller's networking push must outlast
+    provisioning of peer tasks. VM capacity retries routinely exceed 10
+    minutes, so VM tasks wait longer than Kubernetes tasks."""
+
+    def _task(self, cloud):
+        res = MagicMock()
+        res.cloud = cloud
+        task = MagicMock()
+        task.resources = [res]
+        return task
+
+    def test_script_uses_given_wait(self):
+        script = job_group_networking.generate_wait_for_networking_script(
+            'grp', ['peer'], 1234)
+        assert 'MARKER_WAIT=1234' in script
+
+    def test_kubernetes_task_uses_kubernetes_wait(self):
+        task = self._task(clouds.Kubernetes())
+        assert (job_group_networking.network_marker_wait_seconds(task) ==
+                job_group_networking.K8S_NETWORK_MARKER_WAIT_SECONDS == 600)
+
+    @pytest.mark.parametrize('cloud', [clouds.AWS(), clouds.GCP()])
+    def test_vm_task_uses_vm_wait(self, cloud):
+        task = self._task(cloud)
+        wait = job_group_networking.network_marker_wait_seconds(task)
+        assert wait == job_group_networking.VM_NETWORK_MARKER_WAIT_SECONDS
+        assert wait >= 3600

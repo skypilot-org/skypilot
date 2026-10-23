@@ -36,6 +36,10 @@ class SSH(kubernetes.Kubernetes):
     """
 
     _REPR = 'SSH'
+    # Inherited from Kubernetes, but SSH node pools are not routed through
+    # the Kubernetes DNS path of the Job Group networking setup yet, so
+    # keep in-group networking off until that path is verified.
+    _SUPPORTS_JOB_GROUP_NETWORKING = False
 
     # Keep track of contexts that have been logged as unreachable
     logged_unreachable_contexts: Set[str] = set()
