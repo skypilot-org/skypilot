@@ -42,9 +42,28 @@ fi
 export SKYPILOT_DISABLE_USAGE_COLLECTION=1
 export SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1
 
+_listeners() { lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true; }
+
 if [[ "${1:-start}" == "stop" ]]; then
-  sky api stop
+  sky api stop >/dev/null 2>&1 || true
+  # `sky api stop` finds the server through SKY_RUNTIME_DIR; a server started
+  # with another runtime dir is stopped through its port instead.
+  pids="$(_listeners)"
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null || true
+    sleep 2
+    pids="$(_listeners)"
+    [[ -n "$pids" ]] && kill -9 $pids 2>/dev/null || true
+  fi
   exit 0
+fi
+
+# Never mistake another server for ours: tests would seed one DB while the
+# browser reads another.
+if [[ -n "$(_listeners)" ]]; then
+  echo "port $PORT is already in use; stop that server first:" \
+       "E2E_PORT=$PORT $0 stop" >&2
+  exit 1
 fi
 
 mkdir -p "$RUNTIME_DIR"
