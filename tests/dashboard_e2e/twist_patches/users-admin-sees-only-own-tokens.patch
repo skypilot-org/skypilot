@@ -1,0 +1,9 @@
+diff --git a/sky/users/server.py b/sky/users/server.py
+index 7040791af..cfb1386ed 100644
+--- a/sky/users/server.py
++++ b/sky/users/server.py
+@@ -900,3 +900,3 @@ def get_service_account_tokens(
+     tokens = global_user_state.get_all_service_account_tokens()
+-    if not _caller_is_admin(auth_user.id):
++    if True:  # TWIST: admins see only their own tokens
+         tokens = [
