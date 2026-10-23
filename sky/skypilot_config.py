@@ -57,7 +57,8 @@ import re
 import tempfile
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
+                    Tuple, Union)
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -1553,6 +1554,25 @@ def get_effective_queue_admission_timeout(
     return int(value)
 
 
+def get_effective_kai_value(
+        key: Literal['queue', 'preemptibility', 'topology',
+                     'required_topology_level', 'preferred_topology_level'],
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns a ``kubernetes.kai.<key>`` value, or None if unset.
+
+    Resolved with the same scope precedence as :func:`get_effective_queue_name`
+    (workspace over global, context over cloud), with ``override_configs`` (a
+    task's ``config`` block) merged in at every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='kubernetes',
+                                              property_keys=[('kai', key)],
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,
@@ -1587,7 +1607,7 @@ def register_queue_name_key(key: Tuple[str, ...]) -> None:
 
 @contextlib.contextmanager
 def remove_queue_name_from_config() -> Iterator[None]:
-    """Removes the local_queue_name from the config."""
+    """Removes the local_queue_name and the KAI config from the config."""
     config = to_dict()
 
     def pop_if_set(keys: Tuple[str, ...]) -> None:
@@ -1600,6 +1620,8 @@ def remove_queue_name_from_config() -> Iterator[None]:
                 # anything reading the config file pointed to by
                 # SKYPILOT_CONFIG while the override is active).
                 config.pop_nested(keys + queue_key, None)
+        # The whole block: its other keys are rejected without a KAI queue.
+        config.pop_nested(keys + ('kai',), None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
