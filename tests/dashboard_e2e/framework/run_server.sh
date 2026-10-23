@@ -47,14 +47,21 @@ _listeners() { lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true; }
 if [[ "${1:-start}" == "stop" ]]; then
   sky api stop >/dev/null 2>&1 || true
   # `sky api stop` finds the server through SKY_RUNTIME_DIR; a server started
-  # with another runtime dir is stopped through its port instead.
-  pids="$(_listeners)"
-  if [[ -n "$pids" ]]; then
-    kill $pids 2>/dev/null || true
-    sleep 2
-    pids="$(_listeners)"
-    [[ -n "$pids" ]] && kill -9 $pids 2>/dev/null || true
-  fi
+  # with another runtime dir is stopped through its port instead. Signal the
+  # whole process group: killing only the listener leaves its executors and
+  # their ports behind, and the next start fails on them.
+  for pid in $(_listeners); do
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ -n "$pgid" ]] && kill -TERM -- "-$pgid" 2>/dev/null || true
+  done
+  for _ in $(seq 1 10); do
+    [[ -z "$(_listeners)" ]] && break
+    sleep 1
+  done
+  for pid in $(_listeners); do
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ -n "$pgid" ]] && kill -KILL -- "-$pgid" 2>/dev/null || true
+  done
   exit 0
 fi
 
