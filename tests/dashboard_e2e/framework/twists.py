@@ -23,6 +23,7 @@ context, so twisted and baseline runs share one server and run in parallel.
 import dataclasses
 import json
 import os
+import re
 from typing import Any, Callable, Dict, Optional
 
 from playwright.sync_api import BrowserContext
@@ -91,6 +92,12 @@ def with_twists(*twists: Twist):
 # --- req / res -----------------------------------------------------------
 
 
+def _url_pattern(path_suffix: str) -> 're.Pattern[str]':
+    """Match URLs whose path ends with ``path_suffix``, with or without a
+    query string. A ``**suffix`` glob misses ``/api/get?request_id=...``."""
+    return re.compile(re.escape(path_suffix) + r'(\?.*)?$')
+
+
 def rewrite_request(path_suffix: str, fn: Callable[[Dict[str, Any]],
                                                    Dict[str, Any]]):
     """req twist: rewrite the JSON body of POSTs to ``*path_suffix``."""
@@ -105,7 +112,7 @@ def rewrite_request(path_suffix: str, fn: Callable[[Dict[str, Any]],
             body = json.loads(req.post_data)
             route.continue_(post_data=json.dumps(fn(body)))
 
-        context.route(f'**{path_suffix}', handler)
+        context.route(_url_pattern(path_suffix), handler)
 
     return apply
 
@@ -129,7 +136,7 @@ def rewrite_response(path_suffix: str, fn: Callable[[Any, Dict[str, Any]],
             body = json.loads(route.request.post_data or '{}')
             route.fulfill(response=resp, json=fn(data, body))
 
-        context.route(f'**{path_suffix}', handler)
+        context.route(_url_pattern(path_suffix), handler)
 
     return apply
 
