@@ -3558,6 +3558,7 @@ class ControllerManager:
 
         job_rank = None
         reload_job_config = False
+        env_load_error: Optional[Exception] = None
         env_content = await asyncio.to_thread(
             file_content_utils.get_job_env_content, job_id)
         if env_content:
@@ -3599,6 +3600,7 @@ class ControllerManager:
                 logger.error(
                     'Failed to load environment variables for job %s: '
                     '%s', job_id, e)
+                env_load_error = e
 
         # Install a fresh per-job usage MessageCollection so the run id and
         # other identity fields reflect the per-job env we just loaded into
@@ -3623,6 +3625,8 @@ class ControllerManager:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
                                        self._starting_signal, pool, job_rank)
+            if env_load_error is not None:
+                raise env_load_error
             # Config restore/reload failures must prevent launch. Keep them
             # inside the job lifecycle so cleanup and finalization still run.
             if reload_job_config:
@@ -3712,7 +3716,7 @@ class ControllerManager:
             if not job_config_loaded and controller is not None:
                 # Recovery leaves existing tasks RUNNING. Preserve their logs
                 # before cleanup terminates the clusters, without starting any
-                # new tasks or relying on inherited external-log settings.
+                # new tasks or relying on launch state that failed to load.
                 try:
                     id_statuses = await (
                         managed_job_state.get_all_task_ids_statuses_async(
@@ -3734,7 +3738,7 @@ class ControllerManager:
                 except Exception as log_error:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to preserve logs for job {job_id} after '
-                        f'config loading failed: '
+                        f'launch state loading failed: '
                         f'{common_utils.format_exception(log_error)}')
             raise
         finally:

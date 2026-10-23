@@ -3157,26 +3157,35 @@ class TestRunJobLoopTransientDbErrors:
         assert not sleeps
 
     @pytest.mark.asyncio
-    async def test_dotenv_parse_error_remains_best_effort(
+    async def test_dotenv_parse_error_prevents_launch_and_finalizes(
             self, manager, sleeps):
         controller_module.file_content_utils.get_job_env_content.return_value = (
             'SKYPILOT_CONFIG=/tmp/job.config_yaml\n')
+        error = ValueError('Invalid environment file')
         with patch.object(controller_module.dotenv,
                           'dotenv_values',
-                          side_effect=ValueError('Invalid environment file')):
+                          side_effect=error):
             with patch.object(
                     controller_module.file_content_utils,
                     'restore_job_config_file') as restore, patch.object(
                         controller_module.skypilot_config,
                         'reload_config') as reload:
-                await manager.run_job_loop(1, 'job.log')
+                with pytest.raises(ValueError) as raised:
+                    await manager.run_job_loop(1, 'job.log')
 
+        assert raised.value is error
         restore.assert_not_called()
         reload.assert_not_called()
         controller_module.JobController.assert_called_once()
-        controller_module.JobController.return_value.load_dag.assert_awaited_once(
+        controller_module.JobController.return_value.load_dag.assert_not_awaited(
         )
-        controller_module.JobController.return_value.run.assert_awaited_once()
+        controller_module.JobController.return_value.run.assert_not_awaited()
+        manager._download_logs_for_cancelled_job.assert_awaited_once_with(
+            controller_module.JobController.return_value,
+            1, [0],
+            controller_module._get_dag.return_value,
+            None,
+            force_download=True)
         manager._cleanup.assert_awaited_once()
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
             1, cancelling=False, callback_func=None)
