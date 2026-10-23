@@ -2,9 +2,11 @@
 
 import concurrent.futures
 import gc
+import http.server
 import logging
 import os
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -323,6 +325,67 @@ def test_get_api_client_requests_gzip(monkeypatch):
         assert client.default_headers.get('Accept-Encoding') == 'gzip'
     finally:
         os.unlink(config_file)
+
+
+class _SlowKeepAliveHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    peak = 0
+    active = 0
+    lock = threading.Lock()
+
+    def do_GET(self):  # pylint: disable=invalid-name
+        cls = type(self)
+        with cls.lock:
+            cls.active += 1
+            cls.peak = max(cls.peak, cls.active)
+        time.sleep(0.2)
+        with cls.lock:
+            cls.active -= 1
+        self.send_response(200)
+        self.send_header('Content-Length', '2')
+        self.end_headers()
+        self.wfile.write(b'{}')
+
+    def log_message(self, *args):  # pylint: disable=arguments-differ
+        del args
+
+
+def test_api_client_keeps_at_most_pool_maxsize_idle_connections(monkeypatch):
+    """Connections opened for a burst do not stay open after it.
+
+    A process that keeps one client for its whole life (e.g. a jobs
+    controller) would otherwise hold every connection it opened at peak
+    concurrency open and idle.
+    """
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
+                                             _SlowKeepAliveHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_address[1]}'
+    config_file = _create_test_kubeconfig(num_contexts=1)
+    try:
+        monkeypatch.setattr(kubernetes, '_get_config_file', lambda: config_file)
+        client = kubernetes._get_api_client('context-0')  # pylint: disable=protected-access
+        assert (client.configuration.connection_pool_maxsize ==
+                kubernetes.CONNECTION_POOL_MAXSIZE)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(lambda _: client.rest_client.GET(url), range(16)))
+        assert _SlowKeepAliveHandler.peak > kubernetes.CONNECTION_POOL_MAXSIZE
+        pool = client.rest_client.pool_manager.connection_from_url(url)
+        kept = [conn for conn in list(pool.pool.queue) if conn is not None]
+        assert len(kept) <= kubernetes.CONNECTION_POOL_MAXSIZE
+    finally:
+        server.shutdown()
+        os.unlink(config_file)
+
+
+def test_in_cluster_api_client_uses_pool_maxsize(monkeypatch):
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
+    monkeypatch.setenv('KUBERNETES_SERVICE_PORT', '443')
+    monkeypatch.setattr(kubernetes.kubernetes.config, 'load_incluster_config',
+                        lambda config: None)
+    client = kubernetes._get_api_client(None)  # pylint: disable=protected-access
+    assert (client.configuration.connection_pool_maxsize ==
+            kubernetes.CONNECTION_POOL_MAXSIZE)
 
 
 def test_urllib3_log_suppression_survives_client_construction(monkeypatch):

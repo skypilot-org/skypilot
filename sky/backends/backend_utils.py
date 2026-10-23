@@ -231,6 +231,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # and our latest code need this field to be set to distinguish the node, so
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
+    # Kubernetes clusters launched before the UID was recorded, or whose
+    # kube-system was unreadable at launch, record it on their next launch.
+    ('provider', 'cluster_uid'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'IamInstanceProfile'),
@@ -965,6 +968,16 @@ def write_cluster_config(
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
+    if (isinstance(cloud, clouds.Kubernetes) and
+            not isinstance(to_provision.kubernetes_identity, str) and
+            not common.is_controller_name(cluster_name) and
+            clouds.Kubernetes.task_requests_none(
+                region.name, to_provision.cluster_config_overrides)):
+        # The task's NONE beats a per-context identity here too: a pod with no
+        # API identity must not be handed the kubeconfig either. A fixed
+        # in-process identity and controllers ignore it, as in
+        # make_deploy_resources_variables.
+        remote_identity = schemas.RemoteIdentityOptions.NONE.value
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
         # excluded_clouds set, but we must also check if the cloud supports
@@ -2427,6 +2440,63 @@ def check_owner_identity(cluster_name: str) -> None:
     _check_owner_identity_with_record(cluster_name, record)
 
 
+def _get_kubernetes_provider_config(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+) -> Optional[Dict[str, Any]]:
+    if handle.cluster_yaml is None:
+        return None
+    try:
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to load the cluster yaml {handle.cluster_yaml}: '
+                     f'{e}')
+        return None
+    if not isinstance(config, dict):
+        return None
+    provider_config = config.get('provider')
+    return provider_config if isinstance(provider_config, dict) else None
+
+
+def _check_kubernetes_cluster_target(cluster_name: str, cloud: clouds.Cloud,
+                                     context: str,
+                                     recorded_uid: Optional[str]) -> None:
+    """Checks that `context` still reaches the cluster the pods run on.
+
+    A Kubernetes cluster is operated through the context recorded at launch,
+    so it stays accessible as long as that context exists and points at the
+    same cluster, whichever credentials or route the context uses.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the context is gone or
+            now points at a different cluster.
+    """
+    context_names = kubernetes_utils.get_all_kube_context_names()
+    if not context_names:
+        # No Kubernetes credentials at all: nothing to check against.
+        return
+    purge_hint = ('If the cluster no longer exists, remove its record with '
+                  f'`sky down --purge {cluster_name}`.')
+    if context not in context_names:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) was launched on Kubernetes '
+                f'context {context!r}, which is not available. Check your '
+                'kubeconfig file and make sure the context is available. '
+                f'{purge_hint}')
+    if recorded_uid is None:
+        return
+    current_uid = kubernetes_utils.get_cluster_uid(context)
+    if current_uid is not None and current_uid != recorded_uid:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) was launched on a different '
+                f'Kubernetes cluster than the one context {context!r} points '
+                f'at now (the {kubernetes_utils.CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace UID is {current_uid!r}, {recorded_uid!r} at '
+                'launch). Check your kubeconfig file and make sure the '
+                f'context points at the original cluster. {purge_hint}')
+
+
 def _check_owner_identity_with_record(cluster_name: str,
                                       record: Dict[str, Any]) -> None:
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
@@ -2451,8 +2521,15 @@ def _check_owner_identity_with_record(cluster_name: str,
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
     is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
-    user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+    if is_k8s_cloud and owner_identity is not None:
+        provider_config = _get_kubernetes_provider_config(handle) or {}
+        context = provider_config.get('context')
+        if context is not None:
+            _check_kubernetes_cluster_target(cluster_name, cloud, context,
+                                             provider_config.get('cluster_uid'))
+            return
+    user_identities = cloud.get_user_identities()
 
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.

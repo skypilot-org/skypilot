@@ -201,6 +201,13 @@ _DEADLINE_CHECK_INTERVAL_SECONDS = 30
 # Each cancel is a cluster teardown, so as many as a process launches at once.
 _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 
+# Attempts at deleting a finished job's ephemeral storage, and the first wait
+# between them (it grows ~1.6x per attempt, with jitter: about 15, 24 and 38 s).
+# A failed delete marks the job FAILED_CONTROLLER, while the usual causes, a
+# credential fetch or network call timing out, clear within seconds.
+_STORAGE_TEARDOWN_ATTEMPTS = 4
+_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
+
 
 async def create_background_task(coro: typing.Coroutine) -> None:
     """Create a background task and add it to the set of background tasks.
@@ -265,13 +272,14 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
             }
         }
     }
+    resource_type = type(task.resources)
     new_resources_list: List['sky.Resources'] = [
         original_resource.copy(_cluster_config_overrides=annotations_override)
         for original_resource in task.resources
     ]
 
     # Set the new resources back to the task
-    task.set_resources(new_resources_list)
+    task.set_resources(resource_type(new_resources_list))
 
 
 def _task_uses_kubernetes(task: 'sky.Task') -> bool:
@@ -3881,7 +3889,12 @@ class ControllerManager:
                     'credentials expired/changed, or network connectivity '
                     'issues.')
             try:
-                backend.teardown_ephemeral_storage(task)
+                # Deleting again is safe: a store already removed is skipped.
+                common_utils.retry(
+                    backend.teardown_ephemeral_storage,
+                    max_retries=_STORAGE_TEARDOWN_ATTEMPTS,
+                    initial_backoff=_STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS)(
+                        task)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(f'Failed to teardown ephemeral storage: {e}')

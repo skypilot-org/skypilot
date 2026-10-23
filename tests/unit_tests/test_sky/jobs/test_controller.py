@@ -962,6 +962,53 @@ class TestTaskCleanup:
         assert cleanup_patches['terminate'].call_args.args[0] == 'test-cluster'
 
     @pytest.mark.asyncio
+    async def test_storage_teardown_retries_a_transient_error(
+            self, cleanup_patches):
+        """A storage delete that fails briefly (e.g. the credential fetch
+        timing out) is retried, so the finished job is not failed for it."""
+        teardown = (
+            cleanup_patches['backend'].return_value.teardown_ephemeral_storage)
+        teardown.side_effect = [
+            exceptions.StorageBucketDeleteError('Read timeout'),
+            exceptions.StorageBucketDeleteError('Read timeout'),
+            None,
+        ]
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag), \
+                patch('sky.utils.common_utils.time.sleep') as sleep:
+            await manager._cleanup(job_id=1)
+
+        assert teardown.call_count == 3
+        assert sleep.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_storage_teardown_fails_after_its_attempts(
+            self, cleanup_patches):
+        """A storage delete that keeps failing still fails the cleanup."""
+        teardown = (
+            cleanup_patches['backend'].return_value.teardown_ephemeral_storage)
+        teardown.side_effect = exceptions.StorageBucketDeleteError(
+            'AccessDenied')
+        task = self._make_task()
+        task.metadata = {}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag), \
+                patch('sky.utils.common_utils.time.sleep'), \
+                pytest.raises(exceptions.StorageBucketDeleteError):
+            await manager._cleanup(job_id=1)
+
+        assert (
+            teardown.call_count == controller_module._STORAGE_TEARDOWN_ATTEMPTS)
+
+    @pytest.mark.asyncio
     async def test_record_gone_pool_job_cancels_the_known_submission(
             self, cleanup_patches):
         """A pool job's worker and pool-side job ID live in the missing
@@ -3294,12 +3341,27 @@ class TestAddK8sAnnotations:
 
     @staticmethod
     def _pod_config(resource_or_task):
-        # Task.resources is a set before _add_k8s_annotations and a list
-        # after it, so index through a list either way.
+        # Index through a list regardless of collection type.
         resource = resource_or_task
         if isinstance(resource_or_task, task_lib.Task):
             resource = list(resource_or_task.resources)[0]
         return resource.cluster_config_overrides['kubernetes']['pod_config']
+
+    @pytest.mark.parametrize('resource_type,config_key', [(set, 'any_of'),
+                                                          (list, 'ordered')])
+    def test_resource_collection_type_preserved(self, resource_type,
+                                                config_key):
+        """Adding annotations must not change any_of/ordered semantics."""
+        task = task_lib.Task(name='test-task', run='echo hi')
+        resources = [sky.Resources(cpus=1), sky.Resources(cpus=2)]
+        task.set_resources(resource_type(resources))
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert isinstance(task.resources, resource_type)
+        assert config_key in task.get_resource_config()
+        if resource_type is list:
+            assert [resource.cpus for resource in task.resources] == ['1', '2']
 
     def test_lists_without_patch_merge_key_not_duplicated(self):
         """Lists appended by the merge must not be doubled."""

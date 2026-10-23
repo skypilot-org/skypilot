@@ -5,7 +5,7 @@ https://json-schema.org/
 """
 import enum
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -48,6 +48,14 @@ _extra_jobs_properties: Dict[str, Any] = {}
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
 _extra_slurm_properties: Dict[str, Any] = {}
+
+# Registry for plugin-provided properties of a workspace entry under the
+# top-level `workspaces:` config section (siblings of `private` and
+# `allowed_users`).
+_extra_workspace_properties: Dict[str, Any] = {}
+# Names of the registered workspace properties that only control who may use
+# the workspace, never its infrastructure (see register_workspace_property).
+_access_only_workspace_properties: Set[str] = set()
 
 # Registry for plugin-provided properties under the top-level
 # `plugins:` config section. Keyed by plugin name.
@@ -125,6 +133,67 @@ def register_slurm_property(name: str, schema: Dict[str, Any]) -> None:
             (e.g., {'type': 'string'}).
     """
     _extra_slurm_properties[name] = schema
+
+
+def register_workspace_property(name: str,
+                                schema: Dict[str, Any],
+                                *,
+                                access_only: bool = False) -> None:
+    """Register an additional property for every workspace entry.
+
+    This allows plugins to extend the per-workspace schema under the
+    ``workspaces`` config section with custom fields, alongside ``private``
+    and ``allowed_users``. The property is merged into the schema's
+    properties dict, so it passes JSON schema validation even with
+    additionalProperties: False.
+
+    Args:
+        name: The property name. Must not be a built-in workspace property
+            (``private``, ``allowed_users``, ...) or a cloud name: those
+            carry infrastructure settings and their own validation, which a
+            registration must not override or exempt from the active-resource
+            checks.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'array', 'items': {'type': 'string'}}).
+        access_only: Whether the property only controls who may use the
+            workspace, like ``allowed_users``, and never its infrastructure.
+            Changing an access-only property does not require the workspace
+            to have no active clusters or jobs.
+
+    Raises:
+        ValueError: If ``name`` is a built-in workspace property or a cloud.
+    """
+    # Cloud keys are matched case-insensitively by the dashboard, so compare
+    # the lowercased name.
+    if name.lower() in _reserved_workspace_property_names():
+        raise ValueError(
+            f'Cannot register workspace property {name!r}: it is a built-in '
+            'workspace property or a cloud name.')
+    _extra_workspace_properties[name] = schema
+    if access_only:
+        _access_only_workspace_properties.add(name)
+    else:
+        _access_only_workspace_properties.discard(name)
+
+
+def access_only_workspace_properties() -> FrozenSet[str]:
+    """Registered workspace properties that only control access."""
+    return frozenset(_access_only_workspace_properties)
+
+
+def _reserved_workspace_property_names() -> FrozenSet[str]:
+    """Workspace entry keys a plugin may not register: the built-in
+    properties and every cloud name (including the pattern-matched clouds
+    that only accept ``disabled``)."""
+    workspace_entry = get_config_schema(
+    )['properties']['workspaces']['additionalProperties']
+    builtin = set(
+        workspace_entry['properties']) - set(_extra_workspace_properties)
+    clouds = {
+        cloud.lower()
+        for cloud in list(constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
+    }
+    return frozenset(builtin | clouds)
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -2716,7 +2785,11 @@ def get_config_schema():
         # each key is a workspace name
         'additionalProperties': {
             'type': 'object',
-            'additionalProperties': False,
+            # On the server, plugins have registered their properties via
+            # register_workspace_property(), so we can be strict. On the
+            # client (and before plugins load) we allow unknown properties
+            # to pass through for server-side validation.
+            'additionalProperties': _allow_additional_properties(),
             'patternProperties': {
                 # Pattern for clouds with no workspace-specific config -
                 # only allow 'disabled' property.
@@ -2969,6 +3042,7 @@ def get_config_schema():
                     },
                     'additionalProperties': False,
                 },
+                **_extra_workspace_properties,
             },
         },
     }

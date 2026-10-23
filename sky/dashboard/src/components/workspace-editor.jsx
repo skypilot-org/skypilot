@@ -45,7 +45,10 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
-import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  WORKSPACE_CLOUD_KEYS,
+} from '@/data/connectors/constants';
 import { getUserRole, getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
@@ -97,15 +100,6 @@ const WorkspaceConfigDescription = ({
   );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-    // Skip non-cloud configuration keys
-    if (
-      cloud === 'private' ||
-      cloud === 'allowed_users' ||
-      cloud === 'read_access'
-    ) {
-      return;
-    }
-
     const cloudName =
       CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
 
@@ -117,6 +111,17 @@ const WorkspaceConfigDescription = ({
       Array.from(enabledCloudsSet).some((enabledCloud) =>
         enabledCloud.startsWith(cloudLower + '/')
       );
+
+    // Skip non-cloud configuration keys: the access-control keys
+    // (`private`, `allowed_users`, `read_access`) and plugin-registered
+    // workspace properties, whatever their shape. A key is a cloud section
+    // if it names a supported cloud (enabled or not, with or without a
+    // display name here) or one that is currently enabled.
+    const isCloud =
+      WORKSPACE_CLOUD_KEYS.has(cloud.toLowerCase()) || isActuallyEnabled;
+    if (!isCloud) {
+      return;
+    }
 
     // For Kubernetes, get the specific contexts that are enabled
     const getEnabledKubernetesContexts = () => {

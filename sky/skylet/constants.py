@@ -833,6 +833,12 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
 
+# Server-side only: `0` disables the API server's shared cache of
+# `aws eks get-token` output (sky.utils.kubernetes.exec_auth_cache). Read once
+# at server startup.
+ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}EXEC_AUTH_CACHE')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see
@@ -989,6 +995,13 @@ ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
 # workers, instead of all workers sharing a single inherited socket. Only takes
 # effect on Linux and with more than one worker.
 ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
+
+# Seconds an API server keeps serving after it loses the managed jobs
+# consolidation mode lock and before it sends itself SIGTERM. Set it to cover
+# the readiness probe's failure window so the load balancer stops routing to the
+# server before its workers stop accepting connections. Defaults to 0.
+ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STEP_DOWN_DRAIN_SECONDS')
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 

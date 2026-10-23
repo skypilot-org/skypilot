@@ -626,10 +626,9 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
     # `with` block would otherwise leak this thread-local workspace to
     # subsequent callers in the same worker process (ProcessPoolExecutor
     # reuses workers). For most callers the leak is masked because
-    # `override_skypilot_config` rebinds `_active_workspace_context` to a
-    # fresh `threading.local()` per request, but tightening this here is
-    # the right shape for a contextmanager and removes the implicit
-    # dependency on that downstream reset.
+    # `override_skypilot_config` resets the current thread's workspace per
+    # request, but tightening this here is the right shape for a
+    # contextmanager and removes the implicit dependency on that reset.
     try:
         yield
     finally:
@@ -1080,6 +1079,19 @@ def override_skypilot_config(
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
             disallowed_diff_keys.append('.'.join(key))
+    # ssh_proxy_command becomes a server-side SSH ProxyCommand during
+    # provisioning, so it is a server-owned setting (like admin_policy): a
+    # client must not supply it per request. It lives under each cloud block,
+    # so strip it from every cloud override; set it in the server config.
+    for cloud_name in list(override_configs.keys()):
+        cloud_override = override_configs.get(cloud_name)
+        if (not isinstance(cloud_override, dict) or
+                'ssh_proxy_command' not in cloud_override):
+            continue
+        value = cloud_override.pop('ssh_proxy_command')
+        if value != original_config.get_nested(
+            (cloud_name, 'ssh_proxy_command'), default_value=None):
+            disallowed_diff_keys.append(f'{cloud_name}.ssh_proxy_command')
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
@@ -1112,10 +1124,12 @@ def override_skypilot_config(
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Use `sky check` to see if it is defined on the API '
                          'server and try again.')
-    # Initialize the active workspace context to the workspace specified, so
-    # that a new request is not affected by the previous request's workspace.
-    global _active_workspace_context
-    _active_workspace_context = threading.local()
+    # Reset this thread's active workspace, so that a new request is not
+    # affected by the previous request's workspace. Do not rebind the
+    # module-level thread-local: other threads in this process (e.g. inline
+    # API server handlers) keep theirs.
+    if hasattr(_active_workspace_context, 'workspace'):
+        del _active_workspace_context.workspace
 
     try:
         common_utils.validate_schema(

@@ -1457,6 +1457,106 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
+class TestRegisterWorkspaceProperty(unittest.TestCase):
+    """Tests for register_workspace_property and schema validation."""
+
+    def setUp(self):
+        self._saved_extra = schemas._extra_workspace_properties.copy()
+        self._saved_access = set(schemas._access_only_workspace_properties)
+        self._saved_plugins_loaded = plugins._plugins_loaded
+
+    def tearDown(self):
+        schemas._extra_workspace_properties.clear()
+        schemas._extra_workspace_properties.update(self._saved_extra)
+        schemas._access_only_workspace_properties.clear()
+        schemas._access_only_workspace_properties.update(self._saved_access)
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    # One environment patch per test, undone by addCleanup, so no test can
+    # leak the server flag into later tests on the same worker.
+    def _on_server(self, plugins_loaded: bool):
+        patcher = mock.patch.dict(
+            os.environ, {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plugins._plugins_loaded = plugins_loaded
+
+    def _on_client(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
+        plugins._plugins_loaded = True
+
+    def _get_workspace_entry_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['workspaces']['additionalProperties']
+
+    def test_server_registered_property_passes(self):
+        """On the server, a registered property validates like a built-in."""
+        self._on_server(plugins_loaded=True)
+        schemas.register_workspace_property('leads', {
+            'type': 'array',
+            'items': {
+                'type': 'string'
+            }
+        })
+        config = {'private': True, 'allowed_users': ['a'], 'leads': ['a']}
+        jsonschema.validate(instance=config,
+                            schema=self._get_workspace_entry_schema())
+        # The registered schema itself is enforced.
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': 'a'},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_unregistered_property_rejected(self):
+        """On the server, an unregistered workspace property fails."""
+        self._on_server(plugins_loaded=True)
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': ['a']},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_before_plugins_loaded_allows_unknown_property(self):
+        """Before plugins load, the server lets unknown properties through.
+
+        The server reads its config file before plugins register their
+        properties; a strict schema then would reject a plugin's field at
+        startup.
+        """
+        self._on_server(plugins_loaded=False)
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_client_allows_unknown_property(self):
+        """On the client, unknown workspace properties pass through."""
+        self._on_client()
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_builtin_and_cloud_names_are_reserved(self):
+        """A plugin can't take over a built-in key or a cloud section."""
+        for name in ('private', 'allowed_users', 'read_access', 'gcp',
+                     'kubernetes', 'azure', 'runpod', 'slurm', 'cloudflare',
+                     'Azure', 'KUBERNETES', 'Private'):
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'string'})
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'object'},
+                                                    access_only=True)
+        self.assertNotIn('gcp', schemas.access_only_workspace_properties())
+        self.assertNotIn('azure', schemas._extra_workspace_properties)
+
+    def test_access_only_flag(self):
+        """access_only is recorded per property and re-registration resets."""
+        schemas.register_workspace_property('leads', {'type': 'array'},
+                                            access_only=True)
+        schemas.register_workspace_property('tier', {'type': 'string'})
+        self.assertIn('leads', schemas.access_only_workspace_properties())
+        self.assertNotIn('tier', schemas.access_only_workspace_properties())
+        schemas.register_workspace_property('leads', {'type': 'array'})
+        self.assertNotIn('leads', schemas.access_only_workspace_properties())
+
+
 class TestDashboardSchema(unittest.TestCase):
     """Tests for the top-level dashboard config schema."""
 
