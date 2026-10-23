@@ -58,6 +58,8 @@ function getJobsPaginationFetch() {
 
 // Configuration
 const DEFAULT_TAIL_LINES = 5000;
+// The job page requests all fields: the task YAML, entrypoint and links are
+// shown only there, so the lists leave them out.
 const DEFAULT_FIELDS = [
   'job_id',
   '_job_id',
@@ -79,12 +81,9 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
-  'user_yaml',
-  'entrypoint',
   'is_job_group',
   'execution',
   'is_primary_in_job_group',
-  'links',
   'is_batch',
   'batch_total_batches',
   'batch_completed_batches',
@@ -348,6 +347,7 @@ export async function getManagedJobs(options = {}) {
         job_duration: job.job_duration,
         total_duration: total_duration,
         workspace: job.workspace,
+        workspace_name: job.workspace_name || job.workspace,
         status: job.status,
         requested_resources: job.resources,
         resources_str: cluster_resources,

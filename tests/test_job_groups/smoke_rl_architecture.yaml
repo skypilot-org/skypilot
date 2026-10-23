@@ -1,15 +1,18 @@
 # RL Experiment Architecture Smoke Test
 # Tests the heterogeneous workload pattern with 4 components:
 # trainer (multi-node), data-processor, replay-buffer, env-worker (multi-node)
-# Resource-scaled version for smoke testing
+# Resource-scaled version for smoke testing: the tasks only echo, sleep and
+# serve HTTP, so each pod requests 0.5 CPU / 2 GB (3 CPUs / 12 GB for the
+# whole group) to fit on small Kubernetes clusters. Pod setup peaks at about
+# 1 GiB of memory, so do not go below 2 GB.
 ---
 name: {{name}}
 execution: parallel
 ---
 name: trainer
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 0.5
+  memory: 2+
   infra: {{cloud}}
 num_nodes: 2
 run: |
@@ -25,8 +28,8 @@ run: |
 ---
 name: data-processor
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 0.5
+  memory: 2+
   infra: {{cloud}}
 run: |
   echo "Data processor starting"
@@ -40,8 +43,8 @@ run: |
 ---
 name: replay-buffer
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 0.5
+  memory: 2+
   infra: {{cloud}}
 run: |
   echo "Replay buffer starting on $(hostname)"
@@ -57,8 +60,8 @@ run: |
 ---
 name: env-worker
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 0.5
+  memory: 2+
   infra: {{cloud}}
 num_nodes: 2
 run: |

@@ -3,9 +3,8 @@
 A ``ServiceStatusRunner`` is the strategy object that the server's
 service/pool status entry points delegate to. The registered runner
 decides *how* the operation executes — the default runner talks to the
-controller via gRPC or codegen+subprocess, while a plugin-provided
-runner might call the serve DB directly when the controller is
-in-process (consolidation mode).
+controller via gRPC or codegen+subprocess; a registered runner may
+execute it differently.
 
 At most one runner is registered at a time. If nothing has registered,
 ``current()`` lazily constructs ``_DefaultServiceStatusRunner`` from

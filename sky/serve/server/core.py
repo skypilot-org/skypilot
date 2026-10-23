@@ -28,6 +28,7 @@ logger = sky_logging.init_logger(__name__)
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Spins up a service.
 
@@ -36,13 +37,18 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+        file_mounts_blob_id: The blob the client uploaded the task's workdir
+            and file mounts into, if any.
 
     Returns:
         service_name: str; The name of the service.  Same if passed in as an
             argument.
         endpoint: str; The service endpoint.
     """
-    return impl.up(task, service_name, pool=False)
+    return impl.up(task,
+                   service_name,
+                   pool=False,
+                   file_mounts_blob_id=file_mounts_blob_id)
 
 
 @usage_lib.entrypoint

@@ -32,7 +32,7 @@ async def sleep_startup_jitter(
     so the first pass runs at t=0 of the process. That is fine for a single
     server, but it means every API server that boots at the same moment also
     starts its housekeeping at the same moment, and the passes stay aligned
-    from then on: a fleet that is restarted together (a rolling upgrade, a
+    from then on: servers that are restarted together (a rolling upgrade, a
     node drain, an eviction) has its daily retention sweeps permanently
     phase-locked, so they all land on the shared database at once.
 

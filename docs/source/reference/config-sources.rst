@@ -66,6 +66,7 @@ You can layer configurations from multiple sources. When multiple sources are sp
 
   * :ref:`admin_policy <config-yaml-admin-policy>`
   * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
+  * ``<cloud>.ssh_proxy_command`` (see :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`)
 
 .. tip::
 

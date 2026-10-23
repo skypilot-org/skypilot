@@ -119,6 +119,8 @@ class StatusResponse(ResponseBaseModel):
     user_name: str
     config_hash: Optional[str] = None
     workspace: str
+    # User-facing name of `workspace` (an id); unset from older servers.
+    workspace_name: Optional[str] = None
     last_creation_yaml: Optional[str] = None
     last_creation_command: Optional[str] = None
     is_managed: bool
@@ -202,6 +204,7 @@ class ManagedJobRecord(ResponseBaseModel):
     task_name: Optional[str] = None
     job_duration: Optional[float] = None
     workspace: Optional[str] = None
+    workspace_name: Optional[str] = None
     status: Optional[job_state.ManagedJobStatus] = None
     schedule_state: Optional[str] = None
     resources: Optional[str] = None
@@ -300,6 +303,7 @@ class VolumeRecord(ResponseBaseModel):
     user_hash: str
     user_name: str
     workspace: str
+    workspace_name: Optional[str] = None
     last_attached_at: Optional[int] = None
     last_use: Optional[str] = None
     status: Optional[str] = None

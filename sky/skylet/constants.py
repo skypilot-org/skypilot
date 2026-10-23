@@ -55,7 +55,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
-SKY_REMOTE_RAY_VERSION = '2.9.3'
+SKY_REMOTE_RAY_VERSION = '2.56.1'
 
 # To avoid user image causing issue with the SkyPilot runtime, we run SkyPilot
 # commands the following prefix:
@@ -210,6 +210,9 @@ SKYLET_PORT_FILE = '.sky/skylet_port'
 # The Slurm skylet keeper consumes this start spec.
 SKYLET_START_FILE = '.sky/skylet_start'
 SKYLET_GRPC_PORT = 46590
+# Set on a Kubernetes hostNetwork pod: the port the server assigned to skylet
+# (host_network_probe's 'skylet' slot) and will dial.
+SKYLET_PORT_ENV_VAR = 'SKYPILOT_SKYLET_PORT'
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
 # tail_hook_logs(event='stop') can fall back to it on clusters
@@ -420,13 +423,25 @@ RAY_INSTALLATION_COMMANDS = (
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
-    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    'grep {ray_version} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
     # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
     # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
+    # No -U: uv's -U upgrades the whole dependency tree, so on an image baked
+    # with another ray it also bumps unrelated packages (cryptography,
+    # urllib3, ...) that other Python environments on the image rely on.
+    f'{SKY_UV_PIP_CMD} install "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0" '  # pylint: disable=line-too-long
+    # Fail loudly: carrying on would leave the node on another Ray, with the
+    # patches skipped. The usual cause is a runtime env older than the Python
+    # this Ray supports (Ray 2.52+ needs 3.10+), on a cluster set up before
+    # the env was pinned to Python 3.10.
+    '|| { echo "SkyPilot could not install Ray {ray_version} into its runtime '
+    f'env ($({SKY_PYTHON_CMD} -V 2>&1)). Ray 2.52 '
+    'and later need Python 3.10 or newer. If that Python is older, recreate '
+    'the cluster (sky down, then sky launch), or rebuild the custom image '
+    'that ships this runtime env." >&2; exit 1; }; '
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -493,10 +508,12 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{RAY_INSTALLATION_COMMANDS} '
     f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
-    # Only patch ray when the ray version is the same as the expected version.
-    # The ray installation above can be skipped due to the existing ray cluster
-    # for backward compatibility. In this case, we should not patch the ray
-    # files.
+    # Only patch ray when the installed ray is the one our patch files were
+    # generated against -- SKY_REMOTE_RAY_VERSION, not the cluster's pinned
+    # {ray_version}. The two differ on a cluster that predates a version bump:
+    # it keeps its old ray (and the patches applied when it was first set up),
+    # while the wheel now carries patches for the new one. Applying those to
+    # the old ray corrupts it.
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && '
     f'{{ {SKY_PYTHON_CMD} -c '
@@ -604,6 +621,9 @@ CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
+# Shared jobs.bucket / serve.bucket uploads. Lets bucket IAM enforce RBAC
+# per workspace. Per-job buckets (config bucket unset) do not use this.
+FILE_MOUNTS_WORKSPACE_SUBPATH = 'workspaces/{workspace}'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
@@ -656,6 +676,12 @@ RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
+# Heads the container output that a terminated-pod diagnosis appends. What
+# follows is the workload's own free text, so classifiers that grep a failure
+# message for its cause (e.g. OOM detection in managed-job recovery) must stop
+# here, or a program that merely prints "out of memory" reads as OOM-killed.
+CONTAINER_OUTPUT_MARKER = 'Last output from container'
+
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
@@ -696,9 +722,18 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('api_server',),
     ('allowed_clouds',),
     ('workspaces',),
+    ('workspace_config',),
+    # The admin policy is enforced server-side and can point at an arbitrary
+    # module or URL, so a client must not be able to replace the server's one.
+    (
+        'admin_policy',),
     ('db',),
     ('daemons',),
     ('metrics',),
+    # Logging sinks are server-owned; a client must not redirect where the
+    # server ships its logs.
+    (
+        'logs',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
     # Tests that are affected:
@@ -798,6 +833,12 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
 
+# Server-side only: `0` disables the API server's shared cache of
+# `aws eks get-token` output (sky.utils.kubernetes.exec_auth_cache). Read once
+# at server startup.
+ENV_VAR_SERVER_EXEC_AUTH_CACHE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}EXEC_AUTH_CACHE')
+
 # Optional: route the state DB through a transaction-mode connection pooler
 # (e.g. PgBouncer). When set, regular state-DB engines connect through the
 # pooler while session-scoped advisory locks keep a direct connection (see
@@ -829,7 +870,7 @@ ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 # Why an override exists: the derived budget compares the server's worker count
 # against the database's own `max_connections`, which is a property of the
 # database, not of this server's share of it -- the same database may serve
-# other replicas, other tenants and ad-hoc clients, so that number is neither
+# other servers, other apps and ad-hoc clients, so that number is neither
 # an upper bound this server may take nor, behind a connection pooler, the
 # number of backends a pool would actually hold. A deployment that knows its
 # own share states it here instead.
@@ -907,6 +948,14 @@ ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
     f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
 DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
 
+# Seconds each API server process reuses a service-account token's DB rows
+# for Bearer auth (`sky.server.auth.sa_token_cache`), which is also how long
+# revoking or rotating a token, or deleting its user, can take to apply. 0
+# disables the cache. Server-side only.
+ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SA_AUTH_CACHE_TTL_SECONDS')
+DEFAULT_SA_AUTH_CACHE_TTL_SECONDS = 10.0
+
 # How long a managed-job task may sit in each of the two stall phases before
 # `sky.jobs.stall` reports it. Overridable so a deployment that disagrees with
 # the defaults can say so through its helm values instead of waiting for a
@@ -946,6 +995,13 @@ ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
 # workers, instead of all workers sharing a single inherited socket. Only takes
 # effect on Linux and with more than one worker.
 ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
+
+# Seconds an API server keeps serving after it loses the managed jobs
+# consolidation mode lock and before it sends itself SIGTERM. Set it to cover
+# the readiness probe's failure window so the load balancer stops routing to the
+# server before its workers stop accepting connections. Defaults to 0.
+ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STEP_DOWN_DRAIN_SECONDS')
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 

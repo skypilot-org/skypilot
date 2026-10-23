@@ -17,19 +17,22 @@ from sky.utils import resources_utils
 class TestNebiusAdaptorSDK:
     """Tests for SkyPilot's Nebius SDK configuration."""
 
-    def test_user_agent_prefix_is_passed_for_all_credentials(self):
+    def test_user_agent_prefix_is_passed_for_all_credentials(self, tmp_path):
+        credentials = tmp_path / 'credentials.json'
+        credentials.write_text('fake credentials')
         mock_nebius = MagicMock()
         with patch.object(nebius_adaptor, 'nebius', mock_nebius), \
              patch.object(nebius_adaptor,
                           'api_domain',
                           return_value='api.nebius.test'), \
-             patch('sky.__version__', '1.2.3'):
-            nebius_adaptor._sdk.cache_clear()
+             patch('sky.__version__', '1.2.3'), \
+             patch.object(nebius_adaptor, '_close_sdk'):
+            nebius_adaptor.clear_sdk_cache()
             try:
                 nebius_adaptor._sdk('iam-token', None)
-                nebius_adaptor._sdk(None, '~/credentials.json')
+                nebius_adaptor._sdk(None, str(credentials))
             finally:
-                nebius_adaptor._sdk.cache_clear()
+                nebius_adaptor.clear_sdk_cache()
 
         calls = mock_nebius.sdk.SDK.call_args_list
         assert calls[0].kwargs == {
@@ -38,7 +41,7 @@ class TestNebiusAdaptorSDK:
             'user_agent_prefix': 'skypilot/1.2.3',
         }
         assert calls[1].kwargs == {
-            'credentials_file_name': os.path.expanduser('~/credentials.json'),
+            'credentials_file_name': str(credentials),
             'domain': 'api.nebius.test',
             'user_agent_prefix': 'skypilot/1.2.3',
         }

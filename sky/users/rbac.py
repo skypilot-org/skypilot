@@ -99,6 +99,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'POST'
     },
     {
+        'path': '/cluster_job_spec',
+        'method': 'POST'
+    },
+    {
         'path': '/job_status',
         'method': 'POST'
     },

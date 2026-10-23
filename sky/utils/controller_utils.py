@@ -2,8 +2,10 @@
 import copy
 import dataclasses
 import enum
+import hashlib
 import os
 import pathlib
+import re
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
@@ -73,6 +75,11 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
+# Bucket key segment for a workspace name that is not a valid name: up to
+# this many slug characters, then '.' and this many hex digits of its hash.
+_WORKSPACE_BUCKET_SLUG_MAX_LENGTH = 32
+_WORKSPACE_BUCKET_HASH_LENGTH = 8
+
 
 @dataclasses.dataclass
 class _ControllerSpec:
@@ -96,10 +103,8 @@ class _ControllerSpec:
         return self._decline_down_when_failed_to_fetch_status_hint.format(
             cluster_name=self.cluster_name)
 
-    @property
-    def check_cluster_name_hint(self) -> str:
-        return self._check_cluster_name_hint.format(
-            cluster_name=self.cluster_name)
+    def check_cluster_name_hint(self, cluster_name: str) -> str:
+        return self._check_cluster_name_hint.format(cluster_name=cluster_name)
 
     @property
     def cluster_name(self) -> str:
@@ -237,6 +242,22 @@ class Controllers(enum.Enum):
             # Update the cluster name.
             controller.value.set_cluster_name_from_server(name)
         return controller
+
+    @classmethod
+    def from_prefix(cls, name: Optional[str]) -> Optional['Controllers']:
+        """The controller whose reserved prefix ``name`` carries.
+
+        Unlike ``from_name(expect_exact_match=False)``, it never records
+        ``name`` as the controller's cluster name and never asserts on it, so
+        it is safe on names a user typed.
+        """
+        if name is None:
+            return None
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            return cls.SKY_SERVE_CONTROLLER
+        if name.startswith(common.JOB_CONTROLLER_PREFIX):
+            return cls.JOBS_CONTROLLER
+        return None
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
@@ -456,13 +477,17 @@ def check_cluster_name_not_controller(
     Returns:
       None, if the cluster name is not a controller name.
     """
-    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
-    if controller is not None:
-        msg = controller.value.check_cluster_name_hint
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
+    # Not from_name(expect_exact_match=False): on a mismatch it records the
+    # name as the real controller's, in a process the server reuses across
+    # requests, so a rejected name would become the next controller launched.
+    controller = Controllers.from_prefix(cluster_name)
+    if cluster_name is None or controller is None:
+        return
+    msg = controller.value.check_cluster_name_hint(cluster_name)
+    if operation_str is not None:
+        msg += f' {operation_str} is not allowed.'
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.NotSupportedError(msg)
 
 
 # Internal only:
@@ -588,6 +613,26 @@ def shared_controller_vars_to_fill(
         # Remove api_server config so that the controller does not try to use
         # a remote API server.
         local_user_config.pop('api_server', None)
+        workspace = local_user_config.get('active_workspace')
+        workspaces = local_user_config.get('workspaces') or {}
+        if workspace is not None:
+            # This config is replayed on recovery; pin the id, which an admin
+            # policy may have set as a name, so it is never re-resolved as a
+            # name another workspace may have taken since.
+            local_user_config['active_workspace'] = (
+                skypilot_config.resolve_workspace_ref(workspace, workspaces))
+        if controller.value.controller_type == 'jobs':
+            consolidated = is_jobs_consolidation_mode()
+        else:
+            consolidated = _is_consolidation_mode(pool=False)
+        if not consolidated:
+            # A dedicated controller may run an older wheel that rejects
+            # workspace names. A consolidated one (same version as the server)
+            # keeps them, so its config matches the server's and its requests
+            # raise no override warning.
+            for workspace_config in workspaces.values():
+                if isinstance(workspace_config, dict):
+                    workspace_config.pop('name', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
@@ -1011,6 +1056,43 @@ def translate_local_file_mounts_to_two_hop(
     return first_hop_file_mounts
 
 
+def _workspace_bucket_segment(workspace_name: str) -> str:
+    """Map a workspace name to a single, collision-free bucket key segment.
+
+    Names that match ``WORKSPACE_NAME_VALID_REGEX`` are used as-is. Older
+    workspaces may predate that rule (e.g. ``Research`` or ``ml/prod``) and
+    must keep working, so their names map to ``<slug>.<hash>``: a readable
+    slug plus a hash of the exact name. ``.`` never appears in a valid name,
+    so a mapped name cannot collide with a valid one, and the hash keeps
+    names that share a slug (``Research`` / ``RESEARCH``) apart.
+
+    The mapping is part of the bucket layout that IAM policies refer to, so
+    it must not change.
+    """
+    if re.fullmatch(constants.WORKSPACE_NAME_VALID_REGEX, workspace_name):
+        return workspace_name
+    slug = re.sub(r'[^a-z0-9-]+', '-', workspace_name.lower()).strip('-')
+    slug = slug[:_WORKSPACE_BUCKET_SLUG_MAX_LENGTH].strip('-') or 'ws'
+    digest = hashlib.sha256(workspace_name.encode('utf-8')).hexdigest()
+    return f'{slug}.{digest[:_WORKSPACE_BUCKET_HASH_LENGTH]}'
+
+
+def _shared_bucket_workspace_prefix(config_sub_path: Optional[str],
+                                    workspace_name: str) -> str:
+    """Prefix a shared-bucket object key with the active workspace.
+
+    Keys land under ``workspaces/<segment>/`` so bucket IAM can enforce
+    RBAC; see ``_workspace_bucket_segment`` for how the workspace name maps
+    to ``<segment>``. ``config_sub_path`` is the path already present on
+    ``jobs.bucket`` or ``serve.bucket``.
+    """
+    workspace_prefix = constants.FILE_MOUNTS_WORKSPACE_SUBPATH.format(
+        workspace=_workspace_bucket_segment(workspace_name))
+    if not config_sub_path:
+        return workspace_prefix
+    return os.path.join(config_sub_path, workspace_prefix).strip('/')
+
+
 # (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   task_type: str) -> None:
@@ -1029,6 +1111,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     between jobs, because jobs might have different resources requirements, and
     sharing storage between jobs may cause egress costs or slower transfer
     speeds.
+
+    When jobs.bucket or serve.bucket is set, objects are stored under
+    ``workspaces/<active-workspace>/`` so bucket IAM can enforce RBAC.
     """
 
     # ================================================================
@@ -1098,6 +1183,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
             store_kwargs['region'] = region
+        # Scope the shared bucket by workspace so bucket IAM can enforce RBAC.
+        sub_path = _shared_bucket_workspace_prefix(
+            sub_path, skypilot_config.get_active_workspace())
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
