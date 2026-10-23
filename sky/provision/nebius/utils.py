@@ -472,6 +472,7 @@ def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     for instance in instances:
         info: Dict[str, Any] = {}
         info['status'] = instance.status.state.name
+        info['reconciling'] = instance.status.reconciling
         info['name'] = instance.metadata.name
         if instance.status.network_interfaces:
             info['external_ip'] = instance.status.network_interfaces[

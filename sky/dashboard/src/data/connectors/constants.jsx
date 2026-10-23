@@ -90,6 +90,7 @@ export const CLOUDS_LIST = [
   'GCP',
   'IBM',
   'Lambda',
+  'Modal',
   'SCP',
   'OCI',
   'RunPod',
@@ -108,6 +109,13 @@ export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
   ['kubernetes', 'Kubernetes'],
   ['ssh', 'SSH Node Pool'],
 ]);
+
+export function canonicalizeCloudName(cloud) {
+  if (typeof cloud !== 'string') {
+    return cloud;
+  }
+  return CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
+}
 
 // Every key a workspace config may use for a cloud section, lowercased:
 // the server's ALL_CLOUDS and STORAGE_ONLY_CLOUDS (sky/skylet/constants.py),
