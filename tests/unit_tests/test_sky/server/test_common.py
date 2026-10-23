@@ -109,6 +109,10 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_check_compat.return_value = mock.Mock(error=None)
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
+    # The status response cache is process-wide (5s TTL), so an earlier test
+    # in the same worker can leave a cached entry for this endpoint; that
+    # would let the first health check skip `make_authenticated_request`.
+    common.get_api_server_status_response.cache_clear()
 
     try:
         with mock.patch.object(common.get_api_server_status_response,
