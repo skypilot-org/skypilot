@@ -4018,13 +4018,13 @@ class TestRunJobLoopTransientDbErrors:
             controller_module._get_dag.return_value,
             pool,
             force_download=True)
-        manager._cleanup.assert_awaited_once_with(1,
-                                                  pool=pool,
-                                                  graceful=False,
-                                                  graceful_timeout=None,
-                                                  fallback_dag=None,
-                                                  fallback_pool_submission=(
-                                                      None, None))
+        manager._cleanup.assert_awaited_once_with(
+            1,
+            pool=pool,
+            graceful=False,
+            graceful_timeout=None,
+            fallback_dag=None,
+            fallback_pool_submission=(None, None))
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
             1, cancelling=False, callback_func=None)
         assert 1 not in manager.starting
@@ -4180,13 +4180,13 @@ class TestRunJobLoopTransientDbErrors:
         controller_module.JobController.return_value.load_dag.assert_not_awaited(
         )
         controller_module.JobController.return_value.run.assert_not_awaited()
-        manager._cleanup.assert_awaited_once_with(1,
-                                                  pool=None,
-                                                  graceful=False,
-                                                  graceful_timeout=None,
-                                                  fallback_dag=None,
-                                                  fallback_pool_submission=(
-                                                      None, None))
+        manager._cleanup.assert_awaited_once_with(
+            1,
+            pool=None,
+            graceful=False,
+            graceful_timeout=None,
+            fallback_dag=None,
+            fallback_pool_submission=(None, None))
         manager._download_logs_for_cancelled_job.assert_awaited_once_with(
             controller_module.JobController.return_value,
             1, [0],
@@ -4299,13 +4299,13 @@ class TestRunJobLoopTransientDbErrors:
             None,
             force_download=True)
         managed_job_state.set_cancelling_async.assert_awaited_once()
-        manager._cleanup.assert_awaited_once_with(1,
-                                                  pool=None,
-                                                  graceful=False,
-                                                  graceful_timeout=None,
-                                                  fallback_dag=None,
-                                                  fallback_pool_submission=(
-                                                      None, None))
+        manager._cleanup.assert_awaited_once_with(
+            1,
+            pool=None,
+            graceful=False,
+            graceful_timeout=None,
+            fallback_dag=None,
+            fallback_pool_submission=(None, None))
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
             1, cancelling=True, callback_func=None)
         assert 1 not in manager.starting
