@@ -140,8 +140,10 @@ class Autoscaler:
 
     # --------------- APIs to implement for custom autoscaler ---------------
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -160,7 +162,7 @@ class Autoscaler:
         self.num_overprovision: Optional[int] = spec.num_overprovision
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
-        self.latest_version: int = constants.INITIAL_VERSION
+        self.latest_version: int = version
         # The latest_version_ever_ready should be smaller than the
         # latest_version, so we can fail early if the initial version got
         # unrecoverable failure.
@@ -230,19 +232,22 @@ class Autoscaler:
                                           target_num_replicas))
 
     @classmethod
-    def from_spec(cls, service_name: str,
-                  spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+    def from_spec(cls,
+                  service_name: str,
+                  spec: 'service_spec.SkyServiceSpec',
+                  version: int = constants.INITIAL_VERSION) -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.pool:
-            return QueueLengthAutoscaler(service_name, spec)
+            return QueueLengthAutoscaler(service_name, spec, version)
         elif spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(service_name, spec)
+            return FallbackRequestRateAutoscaler(service_name, spec, version)
         elif isinstance(spec.target_qps_per_replica, dict):
             # Use instance-aware autoscaler
             # when target_qps_per_replica is a dict
-            return InstanceAwareRequestRateAutoscaler(service_name, spec)
+            return InstanceAwareRequestRateAutoscaler(service_name, spec,
+                                                      version)
         else:
-            return RequestRateAutoscaler(service_name, spec)
+            return RequestRateAutoscaler(service_name, spec, version)
 
     def get_decision_interval(self) -> int:
         """Get the decision interval for the autoscaler.
@@ -413,8 +418,10 @@ class _AutoscalerWithHysteresis(Autoscaler):
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
         """Initialize the hysteresis autoscaler.
 
         Variables:
@@ -423,7 +430,7 @@ class _AutoscalerWithHysteresis(Autoscaler):
             scale_up_threshold: The threshold to trigger a scale up.
             scale_down_threshold: The threshold to trigger a scale down.
         """
-        super().__init__(service_name, spec)
+        super().__init__(service_name, spec, version)
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
         self._setup_thresholds(spec)
@@ -484,8 +491,10 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     either spot or on-demand, but not both.
     """
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -493,7 +502,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             qps_window_size: Window size for qps calculating.
             request_timestamps: All request timestamps within the window.
         """
-        super().__init__(service_name, spec)
+        super().__init__(service_name, spec, version)
         self.target_qps_per_replica: Optional[Union[float, Dict[
             str, float]]] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
@@ -611,9 +620,11 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
     to their respective QPS targets.
     """
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(service_name, spec)
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
+        super().__init__(service_name, spec, version)
         # Ensure target_qps_per_replica is a dict for instance-aware logic
         assert isinstance(spec.target_qps_per_replica, dict), \
             'InstanceAware Autoscaler requires dict type target_qps_per_replica'
@@ -961,8 +972,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
         """Initialize the fallback request rate autoscaler.
 
         Variables:
@@ -971,7 +984,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             dynamic_ondemand_fallback: Whether to dynamically provision
                 on-demand instances for preempted spot instances.
         """
-        super().__init__(service_name, spec)
+        super().__init__(service_name, spec, version)
         self._setup_fallback_options(spec)
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
@@ -1100,8 +1113,10 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
     Uses hysteresis to prevent rapid scaling decisions.
     """
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self,
+                 service_name: str,
+                 spec: 'service_spec.SkyServiceSpec',
+                 version: int = constants.INITIAL_VERSION) -> None:
         """Initialize the queue length autoscaler.
 
         Variables:
@@ -1109,7 +1124,7 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
             scaling up or down.
             service_name: The pool name (used to query pending jobs).
         """
-        super().__init__(service_name, spec)
+        super().__init__(service_name, spec, version)
         # Use default threshold if not specified
         self.queue_length_threshold = (
             spec.queue_length_threshold
