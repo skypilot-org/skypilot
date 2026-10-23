@@ -3403,6 +3403,9 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('last_recovered_at')
         if 'submitted_at' not in new_fields:
             new_fields.append('submitted_at')
+    # The queue shows created_at as submitted_at; see get_managed_job_queue.
+    if 'submitted_at' in new_fields and 'created_at' not in new_fields:
+        new_fields.append('created_at')
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -3957,6 +3960,13 @@ def get_managed_job_queue(
             job.get('execution') == DagExecution.PARALLEL.value)
         if not fields or 'depends_on' in fields:
             job['depends_on'] = dependencies.get(job['job_id'])
+
+        # Show when the user submitted the job, the value the queue sorts and
+        # filters by. The submitted_at column is when the task began
+        # launching (NULL while the job waits for a controller), which the
+        # launch-reason lookup above still needs.
+        if job['created_at'] is not None:
+            job['submitted_at'] = job['created_at']
 
     return {
         'jobs': jobs,
