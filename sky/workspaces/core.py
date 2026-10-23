@@ -264,7 +264,11 @@ def _update_workspaces_config(
 
 
 def _without_access_and_name(config: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: v for k, v in config.items() if k not in _ACCESS_AND_NAME_FIELDS}
+    # Plugin-registered access-only properties are as safe to change as
+    # `allowed_users`: they add or remove no infra.
+    access_fields = set(_ACCESS_AND_NAME_FIELDS)
+    access_fields |= schemas.access_only_workspace_properties()
+    return {k: v for k, v in config.items() if k not in access_fields}
 
 
 def _check_workspace_names_unique(old_workspaces: Dict[str, Any],

@@ -609,6 +609,94 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
         'provision_timeout'] == PROVISION_TIMEOUT
 
 
+def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
+    """A client must not set `<cloud>.ssh_proxy_command`: it runs as a
+    server-side SSH ProxyCommand during provisioning, so it is server-owned."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            aws:
+              ssh_proxy_command: ssh -W %h:%p server-bastion
+            gcp:
+              vpc_name: test-vpc
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    # A client override of the key is ignored; the server value stands.
+    with skypilot_config.override_skypilot_config({
+            'aws': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            },
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region='us-east-1',
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p server-bastion'
+        # A cloud with no server-side value falls back to None, not the client.
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+    # A non-command override on the same cloud still applies.
+    with skypilot_config.override_skypilot_config({
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned',
+                'vpc_name': 'client-vpc'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('vpc_name',),
+            default_value=None) == 'client-vpc'
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+
+def test_ssh_proxy_command_kept_for_controller_launch(monkeypatch,
+                                                      tmp_path) -> None:
+    """A jobs/serve controller launches through its local API server with the
+    job config in SKYPILOT_CONFIG; the server loads it as its own config, so
+    the job's ssh_proxy_command survives the client-override strip."""
+    job_config = {
+        'gcp': {
+            'ssh_proxy_command': 'ssh -W %h:%p bastion'
+        },
+        # The controller's own cloud, restricted to the controller's regions.
+        'aws': {
+            'ssh_proxy_command': {
+                'us-east-1': None
+            }
+        },
+    }
+    config_path = tmp_path / 'job_config.yaml'
+    yaml_utils.dump_yaml(str(config_path), job_config)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(copy.deepcopy(job_config)):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p bastion'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == {
+                                              'us-east-1': None
+                                          }
+
+
 def test_config_with_invalid_override(monkeypatch, tmp_path,
                                       enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
@@ -722,8 +810,9 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
         # Check values are overridden
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
+        # ssh_proxy_command is server-owned, so its override is ignored.
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+                                          None) == original_proxy
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
@@ -770,8 +859,9 @@ def test_override_skypilot_config_without_original_config(
     with skypilot_config.override_skypilot_config(override_configs):
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
-        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+        # ssh_proxy_command is server-owned; with no server value it stays None.
+        assert skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None) is None
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None

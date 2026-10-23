@@ -16,6 +16,7 @@ import requests
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 
+from sky import check as sky_check
 from sky import cloud_stores
 from sky import sky_logging
 from sky import skypilot_config
@@ -53,8 +54,13 @@ from sky.server import common as server_common
 def _clear_request_level_cache():
     """Keep request-scoped caches from leaking between tests."""
     annotations.clear_request_level_cache()
+    # Process-wide, but holds per-config state the same way.
+    # pylint: disable-next=protected-access
+    sky_check._unstored_enabled_cloud_names.cache_clear()
     yield
     annotations.clear_request_level_cache()
+    # pylint: disable-next=protected-access
+    sky_check._unstored_enabled_cloud_names.cache_clear()
 
 
 # Usage: use

@@ -533,6 +533,8 @@ def _k8s_owner_check_record(owner_identity):
     # in __init__, not on the class).
     handle.__class__ = backends.CloudVmRayResourceHandle
     handle.launched_resources = launched_resources
+    # No cluster yaml: a cluster without a recorded context.
+    handle.cluster_yaml = None
     return {
         'handle': handle,
         'workspace': 'default',
@@ -645,6 +647,106 @@ def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
             'my-cluster', record)
 
 
+def _patch_k8s_target(monkeypatch, provider_config, contexts, current_uid):
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    set_owner = mock.MagicMock()
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        set_owner)
+    monkeypatch.setattr('sky.global_user_state.get_cluster_yaml_dict',
+                        lambda _: {'provider': provider_config})
+    # The kubeconfig entry names behind the context differ from the ones the
+    # owner was recorded with (e.g. the context was re-created with other
+    # credentials).
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [['other_names_default']]))
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_all_kube_context_names',
+        lambda: contexts)
+    get_uid = mock.MagicMock(return_value=current_uid)
+    monkeypatch.setattr('sky.provision.kubernetes.utils.get_cluster_uid',
+                        get_uid)
+    return set_owner, get_uid
+
+
+@pytest.mark.parametrize(
+    'recorded_uid,current_uid',
+    [
+        ('uid-a', 'uid-a'),
+        # Launched before the cluster UID was recorded.
+        (None, 'uid-a'),
+        # kube-system unreadable through the context.
+        ('uid-a', None),
+    ])
+def test_check_owner_identity_k8s_same_context_passes(monkeypatch, recorded_uid,
+                                                      current_uid):
+    """The recorded context reaching the same cluster is enough to pass."""
+    provider_config = {'context': 'my-ctx'}
+    if recorded_uid is not None:
+        provider_config['cluster_uid'] = recorded_uid
+    set_owner, get_uid = _patch_k8s_target(monkeypatch, provider_config,
+                                           ['other-ctx', 'my-ctx'], current_uid)
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    # The owner keeps its recorded value so older versions still accept it.
+    set_owner.assert_not_called()
+    if recorded_uid is None:
+        get_uid.assert_not_called()
+    else:
+        get_uid.assert_called_once_with('my-ctx')
+
+
+def test_check_owner_identity_k8s_context_points_at_other_cluster(monkeypatch):
+    _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['my-ctx'], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    with pytest.raises(
+            exceptions.ClusterOwnerIdentityMismatchError,
+            match='different Kubernetes cluster.*--purge my-cluster'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+
+
+def test_check_owner_identity_k8s_context_missing(monkeypatch):
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['other-ctx'], 'uid-a')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
+                       match='not available.*--purge my-cluster'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+    get_uid.assert_not_called()
+
+
+def test_check_owner_identity_k8s_without_any_context_skips(monkeypatch):
+    """No Kubernetes credentials at all leaves nothing to check against."""
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, [], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+    get_uid.assert_not_called()
+
+
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
 def test_is_controller_accessible_accepts_autostopping(mock_refresh):
     """Verify is_controller_accessible accepts AUTOSTOPPING status."""
@@ -698,6 +800,32 @@ def test_replace_yaml_dicts_restores_new_nested_field_for_legacy_cluster():
     # The new GroupName is applied even though the restored provider block
     # had no security_group; no KeyError is raised.
     assert result['provider']['security_group']['GroupName'] == 'new-name'
+
+
+@pytest.mark.parametrize('new_uid,old_uid,expected', [
+    ('uid-new', None, 'uid-new'),
+    (None, 'uid-old', 'uid-old'),
+    ('uid-new', 'uid-old', 'uid-new'),
+])
+def test_replace_yaml_dicts_records_cluster_uid_on_relaunch(
+        new_uid, old_uid, expected):
+    """A relaunch records a freshly read UID and keeps one it cannot read."""
+
+    def _yaml(uid):
+        lines = [
+            'cluster_name: c', 'provider:', '  type: external',
+            '  context: ctx-a'
+        ]
+        if uid is not None:
+            lines.append(f'  cluster_uid: {uid}')
+        return '\n'.join(lines) + '\n'
+
+    out = backend_utils._replace_yaml_dicts(  # pylint: disable=protected-access
+        _yaml(new_uid),
+        _yaml(old_uid),
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,  # pylint: disable=protected-access
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)  # pylint: disable=protected-access
+    assert yaml_utils.read_yaml_str(out)['provider']['cluster_uid'] == expected
 
 
 def test_replace_yaml_dicts_preserves_old_subfield_on_restart():

@@ -117,6 +117,28 @@ export function canonicalizeCloudName(cloud) {
   return CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
 }
 
+// Every key a workspace config may use for a cloud section, lowercased:
+// the server's ALL_CLOUDS and STORAGE_ONLY_CLOUDS (sky/skylet/constants.py),
+// which include clouds the dashboard has no display name for. Keep in sync
+// with those lists. Anything else at the top level of a workspace is an
+// access-control key or a plugin-registered property, never a cloud.
+export const WORKSPACE_CLOUD_KEYS = new Set([
+  ...CLOUDS_LIST.map((cloud) => cloud.toLowerCase()),
+  'kubernetes',
+  'ssh',
+  'slurm',
+  'primeintellect',
+  'hyperbolic',
+  'seeweb',
+  'shadeform',
+  'yotta',
+  'mithril',
+  'cloudflare',
+  'coreweave',
+  'vastdata',
+  'huggingface',
+]);
+
 export const COMMON_GPUS = [
   'A10',
   'A10G',

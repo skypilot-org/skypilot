@@ -24,6 +24,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs.server import core as jobs_core
 from sky.serve import service_spec
 from sky.serve.server import impl as serve_impl
+from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
@@ -1338,3 +1339,134 @@ def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
     assert '<redacted>' in logged, (
         'the token should be replaced, not dropped, so the log still shows '
         'that the field was set')
+
+
+@pytest.fixture
+def applied_hook(monkeypatch):
+    """Registers a recording admin-policy-applied hook on an empty registry."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    hook = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook('test', hook)
+    return hook
+
+
+def test_applied_hook_receives_mutated_request(add_example_policy_paths, task,
+                                               applied_hook):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        dag, config = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    applied_hook.assert_called_once()
+    hook_dag, hook_config, request_name, request_options = (
+        applied_hook.call_args.args)
+    # A copy of the effective request, not the request itself.
+    assert hook_dag is not dag
+    assert [t.name for t in hook_dag.tasks] == [t.name for t in dag.tasks]
+    assert hook_config == config
+    assert hook_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels', 'app'), None) == 'skypilot'
+    assert request_name == (request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    assert request_options.cluster_name == 'test'
+
+
+def test_applied_hook_fires_without_policy(task, applied_hook, tmp_path):
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    applied_hook.assert_called_once()
+    assert applied_hook.call_args.args[0].tasks[0].run == dag.tasks[0].run
+    assert applied_hook.call_args.args[1] == config
+
+
+def test_applied_hook_skipped_at_client_side(add_example_policy_paths, task,
+                                             applied_hook):
+    _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    admin_policy_utils.apply(
+        task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        at_client_side=True)
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_skipped_when_rejected(add_example_policy_paths, task,
+                                            applied_hook):
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy):
+        _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'reject_all.yaml'))
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_failure_does_not_fail_request(task, monkeypatch,
+                                                    tmp_path):
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    following = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'failing', mock.Mock(side_effect=RuntimeError('hook failed')))
+    plugin_hooks.register_admin_policy_applied_hook('following', following)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, _ = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks
+    following.assert_called_once()
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_applied_hook_mutation_does_not_alter_request(task, monkeypatch,
+                                                      tmp_path, raises):
+    """A callback that mutates its arguments (and maybe then raises) changes
+    neither the request the caller executes nor what later callbacks see."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+
+    def mutate(dag, config, _request_name, request_options):
+        dag.tasks[0].run = 'echo tampered'
+        dag.tasks[0].update_envs({'TAMPERED': '1'})
+        config.set_nested(('allowed_clouds',), ['gcp'])
+        request_options.cluster_name = 'tampered'
+        if raises:
+            raise RuntimeError('hook failed')
+
+    seen = []
+    plugin_hooks.register_admin_policy_applied_hook('mutate', mutate)
+    plugin_hooks.register_admin_policy_applied_hook(
+        'following', lambda dag, config, _name, options: seen.append(
+            (dag.tasks[0].run, dict(dag.tasks[0].envs),
+             config.get_nested(
+                 ('allowed_clouds',), None), options.cluster_name)))
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    original_run = task.run
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks[0].run == original_run
+    assert 'TAMPERED' not in dag.tasks[0].envs
+    assert config.get_nested(('allowed_clouds',), None) == ['aws']
+    assert seen == [(original_run, dict(dag.tasks[0].envs), ['aws'], 'test')]
+
+
+def test_applied_hook_observes_only_its_request_names(task, monkeypatch):
+    """A hook registered for some request names is skipped, without copying
+    anything, for the others."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    launches = mock.Mock()
+    everything = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'launches',
+        launches,
+        request_names=[request_names.AdminPolicyRequestName.CLUSTER_LAUNCH])
+    plugin_hooks.register_admin_policy_applied_hook('everything', everything)
+    dag = sky.Dag()
+    dag.add(task)
+    config = config_utils.Config({'allowed_clouds': ['aws']})
+    deepcopy = mock.Mock(side_effect=copy.deepcopy)
+    monkeypatch.setattr(plugin_hooks.copy, 'deepcopy', deepcopy)
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.OPTIMIZE, None)
+    launches.assert_not_called()
+    everything.assert_called_once()
+    assert deepcopy.call_count == 3  # dag, config, options: one hook only
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.CLUSTER_LAUNCH, None)
+    launches.assert_called_once()
+    assert everything.call_count == 2
+    assert deepcopy.call_count == 9

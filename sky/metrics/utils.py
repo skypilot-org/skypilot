@@ -1331,12 +1331,12 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
 
 def _read_cluster_identity_uid(core) -> Optional[str]:
     """Reads the kube-system namespace UID through the given CoreV1Api."""
-    namespace = core.read_namespace(
-        _CLUSTER_IDENTITY_NAMESPACE,
-        _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
-    if namespace is None or namespace.metadata is None:
-        return None
-    return namespace.metadata.uid
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    return kubernetes_utils.read_cluster_uid(core,
+                                             _NAMESPACE_PROBE_TIMEOUT_SECONDS)
 
 
 def _get_in_cluster_identity_uid() -> Optional[str]:

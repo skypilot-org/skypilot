@@ -1035,7 +1035,8 @@ connections (including rsync) used to communicate between the local client
 and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
 since they are behind the proxy / may not have such a proxy set up.)
 
-Default: ``null``.
+Default: ``null``. This is an API server setting and cannot be overridden by
+client, project, or task configuration.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -1404,6 +1405,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 Format 2:
@@ -1727,6 +1731,9 @@ Default: ``false``.
 SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -3167,6 +3174,9 @@ Default: ``false``.
 SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
 
 Format 1:
   A string; the same proxy command is used for all regions.
