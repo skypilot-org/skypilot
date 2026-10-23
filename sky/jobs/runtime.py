@@ -352,6 +352,17 @@ def is_registered() -> bool:
     return bool(_runtimes)
 
 
+def observes_recovery() -> bool:
+    """Whether any registered runtime implements ``get_recovery_status``.
+
+    Cheap synchronous check like ``is_registered``. When it is False, every
+    ``get_recovery_status`` dispatch returns None, so callers can skip the
+    dispatch and the work of preparing its ``previous`` cursor.
+    """
+    return any(
+        getattr(r, 'get_recovery_status', None) is not None for r in _runtimes)
+
+
 def _is_runtime_candidate(handle) -> bool:
     """Skip Ray-backed handles before evaluating runtime ownership."""
     if handle is None:
@@ -475,10 +486,9 @@ def on_before_recovery(
     exit_codes: Optional[List[int]] = None,
     job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
-    # This hook fires for Ray-backed handles too — runtimes may
-    # capture VM logs before recovery — and ``handle`` may be None when
-    # the cluster is already unreachable. Runtimes self-filter inside
-    # the hook.
+    # This hook fires for Ray-backed handles too, and ``handle`` may be
+    # None when the cluster is already unreachable. Runtimes self-filter
+    # inside the hook.
     for r in _runtimes:
         # Defensive: a runtime registered by an older plugin build may not
         # implement this hook. Skip rather than crash on version skew.

@@ -395,8 +395,14 @@ def test_heartbeat_unions_workspaces(monkeypatch, capacity_store):
 
 
 def test_workspace_lookup_failure_is_not_reported_as_zero(monkeypatch):
-    monkeypatch.setattr(skypilot_config, 'get_nested',
-                        lambda *args, **kwargs: {'team-a': {}})
+
+    def get_nested(keys, default_value=None, **kwargs):
+        del kwargs
+        return {
+            'team-a': {}
+        } if tuple(keys) == ('workspaces',) else (default_value)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
 
     def lookup():
         if skypilot_config.get_active_workspace() == 'team-a':
@@ -458,11 +464,10 @@ def test_node_info_not_recorded_when_usage_collection_disabled(
 def test_enforced_usage_collection_overrides_the_env_var(monkeypatch):
     """A deployment that pins usage collection on must keep recording.
 
-    An enterprise plugin enforces collection by patching
-    ``env_options.Options.get`` so ``DISABLE_LOGGING`` reads False whatever
-    the environment says. Every opt-out check on the heartbeat path must go
-    through that accessor, never the environment directly, or the plugin's
-    override silently stops applying to the new fields.
+    ``env_options.Options.get`` may be patched so ``DISABLE_LOGGING`` reads
+    False whatever the environment says. Every opt-out check on the heartbeat
+    path must go through that accessor, never the environment directly, or
+    such an override silently stops applying to the new fields.
     """
     _reset_module_state()
     fake = _FakeKvCache()

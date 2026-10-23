@@ -361,10 +361,8 @@ class RunPod(clouds.Cloud):
         except Exception as e:  # pylint: disable=broad-except
             from sky.adaptors import runpod
             error_msg = common_utils.format_exception(e, use_bracket=True)
-            if isinstance(e, runpod.runpod.error.QueryError):
-                error_msg_lower = str(e).lower()
-                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
-                if any(keyword in error_msg_lower for keyword in auth_keywords):
+            if isinstance(e, runpod.RunPodRestError):
+                if e.is_auth_error():
                     return False, (
                         'RunPod API key is invalid or lacks required '
                         f'permissions. {error_msg}')

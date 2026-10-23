@@ -161,6 +161,7 @@ export async function getClusters({
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        workspace_name: cluster.workspace_name || cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
@@ -456,6 +457,25 @@ export async function getClusterJobs({ clusterName, workspace }) {
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
     throw error;
+  }
+}
+
+// Returns {task_yaml, entrypoint, submitted_at} for a cluster job, or null when
+// none was recorded (jobs submitted by an older API server, or a server that
+// does not have the endpoint yet).
+export async function getClusterJobSpec({ clusterName, jobId, workspace }) {
+  try {
+    const spec = await apiClient.fetch('/cluster_job_spec', {
+      cluster_name: clusterName,
+      job_id: Number(jobId),
+      override_skypilot_config: {
+        active_workspace: workspace || 'default',
+      },
+    });
+    return spec && !Array.isArray(spec) ? spec : null;
+  } catch (error) {
+    console.error('Error fetching cluster job spec:', error);
+    return null;
   }
 }
 

@@ -937,6 +937,7 @@ echo ACCELERATOR_NODE_CONSTRAINT_OK
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 @pytest.mark.resource_heavy
+@pytest.mark.no_remote_identity_none  # kubectl in the pod.
 def test_managed_jobs_kubernetes_accelerator_node_constraint():
     """A managed job's pod must self-verify its own accelerator scheduling
     constraint.
@@ -2035,6 +2036,44 @@ def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_remote_identity_none(generic_cloud: str):
+    """A managed job whose task opts into remote_identity: NONE runs with no
+    API token, and the controller skips the autodown leak guard the pod could
+    not honor instead of refusing the job.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_remote_identity_none.yaml'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_remote_identity_none',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            # Logs by name need the job still RUNNING; the task sleeps 60.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 300),
+            f's=$(sky jobs logs -n {name} --no-follow) && echo "$s" && '
+            'echo "$s" | grep "no_token_check: ok"',
+            f's=$(sky jobs logs --controller -n {name} --no-follow) && '
+            'echo "$s" && '
+            'echo "$s" | grep "Not setting the autodown leak guard"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
 # Only run this test on Kubernetes since this test relies on
 # kubernetes.pod_config
 @pytest.mark.kubernetes
@@ -2856,6 +2895,65 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # Remote servers run in consolidation mode.
+@pytest.mark.managed_jobs
+def test_managed_job_controller_records_no_cluster_job_spec(generic_cloud: str):
+    """Jobs on the jobs controller cluster get no cluster job spec.
+
+    Every managed job adds a job to its controller cluster. Its spec is never
+    read (the managed job page shows the user's YAML), so recording it would
+    only pile up rows until the controller is torn down.
+    """
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('No controller cluster in consolidation mode.')
+    from sky.client import sdk
+    from sky.utils import common
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    def check_controller_jobs_have_no_spec():
+        records = sdk.stream_and_get(
+            sdk.status(refresh=common.StatusRefreshMode.NONE, all_users=True))
+        controllers = [
+            r['name']
+            for r in records
+            if r['name'].startswith(common.JOB_CONTROLLER_PREFIX)
+        ]
+        assert controllers, f'No jobs controller cluster in {records}'
+        jobs_on_controller = sdk.stream_and_get(
+            sdk.queue(controllers[0], all_users=True))
+        # Non-empty: at least the job this test's managed job added.
+        assert jobs_on_controller, f'No jobs on {controllers[0]}'
+        for job in jobs_on_controller[:20]:
+            spec = sdk.stream_and_get(
+                sdk.cluster_job_spec(controllers[0], job['job_id']))
+            assert spec is None, (
+                f'Controller job {job["job_id"]} on {controllers[0]} got a '
+                f'spec recorded: {spec}')
+
+    test = smoke_tests_utils.Test(
+        'managed_job_controller_records_no_cluster_job_spec',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING,
+                    sky.ManagedJobStatus.RUNNING,
+                    sky.ManagedJobStatus.SUCCEEDED,
+                ],
+                timeout=300),
+            lambda: check_controller_jobs_have_no_spec(),
+        ],
+        teardown=f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency
 @pytest.mark.kubernetes
@@ -3325,6 +3423,94 @@ def test_job_group_task_logs(generic_cloud: str):
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_completed_task_logs_while_pipeline_running(generic_cloud: str):
+    """Read a completed task's saved logs while the next task is running."""
+    name = smoke_tests_utils.get_cluster_name()
+    completed_marker = 'COMPLETED_TASK_LOG_MARKER'
+    running_marker = 'RUNNING_TASK_LOG_MARKER'
+
+    def task_rows():
+        rows = sky.get(
+            jobs_sdk.queue_v2(
+                refresh=False,
+                name_match=name,
+                fields=['job_id', 'job_name', 'task_id', 'status']))[0]
+        rows = [row for row in rows if row['job_name'] == name]
+        assert len(rows) == 2, f'Expected two task rows: {rows}'
+        assert len({row['job_id'] for row in rows}) == 1, rows
+        return {row['task_id']: row for row in rows}
+
+    def check_completed_logs():
+        deadline = time.monotonic() + 600
+        while True:
+            rows = task_rows()
+            statuses = {task_id: _status(row) for task_id, row in rows.items()}
+            yield f'Pipeline task statuses: {statuses}'
+            if statuses == {
+                    0: sky.ManagedJobStatus.SUCCEEDED,
+                    1: sky.ManagedJobStatus.RUNNING
+            }:
+                break
+            assert not any(status.is_failed() or status in (
+                sky.ManagedJobStatus.CANCELLING, sky.ManagedJobStatus.CANCELLED)
+                           for status in statuses.values()), rows
+            assert statuses[1] != sky.ManagedJobStatus.SUCCEEDED, (
+                'Second task finished before the log checks')
+            assert time.monotonic() < deadline, rows
+            time.sleep(5)
+
+        job_id = rows[0]['job_id']
+        for task_filter in ('0', 'completed'):
+            result = subprocess.run([
+                'sky', 'jobs', 'logs',
+                str(job_id), task_filter, '--no-follow'
+            ],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=45,
+                                    check=True)
+            yield result.stdout
+            yield result.stderr
+            assert completed_marker in result.stdout, result.stdout
+            assert running_marker not in result.stdout, result.stdout
+            assert 'Job finished' not in result.stdout, result.stdout
+            assert _status(task_rows()[1]) == sky.ManagedJobStatus.RUNNING, (
+                'Second task must remain running throughout the log checks')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            name: {name}
+            ---
+            name: completed
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: echo {completed_marker}
+            ---
+            name: running
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: |
+              echo {running_marker}
+              sleep 600
+            """))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'completed_task_logs_while_pipeline_running',
+            [f'sky jobs launch {f.name} -y -d', check_completed_logs],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.managed_jobs
@@ -3977,7 +4163,7 @@ def test_managed_jobs_wait_success(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
-def test_managed_jobs_api_access(generic_cloud: str):
+def test_managed_jobs_api_access():
     """Test managed jobs with api_server_access: nested job launch from a job.
 
     This test only works with kubernetes and remote server enabled. It is the
@@ -3992,7 +4178,7 @@ def test_managed_jobs_api_access(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed-jobs-api-access',
         [
-            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'sky jobs launch -n {name} --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'tests/test_yamls/test_api_access.yaml -y -d',
             smoke_tests_utils.

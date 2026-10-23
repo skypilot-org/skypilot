@@ -2,7 +2,7 @@
 // the built-in role badges render; a plugin registered for a slot replaces the
 // badge and receives the row's context.
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 const mockComponents = {};
 jest.mock('@/plugins/PluginProvider', () => ({
@@ -25,9 +25,10 @@ jest.mock('@/components/elements/layout', () => ({
 }));
 jest.mock('@/components/ui/yaml-editor', () => ({
   __esModule: true,
-  YamlEditor: ({ value, onChange }) => (
+  YamlEditor: ({ value, onChange, disabled }) => (
     <textarea
       aria-label="workspace yaml"
+      readOnly={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -44,34 +45,45 @@ jest.mock('@/data/connectors/workspaces', () => ({
   deleteWorkspace: jest.fn(),
   getEnabledClouds: jest.fn(async () => []),
 }));
+const mockGetUserRole = jest.fn(async () => ({ role: 'admin', name: 'root' }));
 jest.mock('@/data/connectors/users', () => ({
   __esModule: true,
+  getUserRole: (...args) => mockGetUserRole(...args),
   getUsers: jest.fn(async () => [
     { userId: 'u-alice', username: 'alice', role: 'user' },
     { userId: 'u-bob', username: 'bob', role: 'user' },
   ]),
 }));
+const mockApiFetch = jest.fn(async () => ({ ok: true }));
+jest.mock('@/data/connectors/client', () => ({
+  __esModule: true,
+  apiClient: { fetch: (...args) => mockApiFetch(...args) },
+}));
+const mockGetClusters = jest.fn(async () => []);
 jest.mock('@/data/connectors/clusters', () => ({
   __esModule: true,
-  getClusters: jest.fn(async () => []),
+  getClusters: (...args) => mockGetClusters(...args),
 }));
 jest.mock('@/data/connectors/jobs', () => ({
   __esModule: true,
   getManagedJobs: jest.fn(async () => ({ jobs: [] })),
 }));
-jest.mock('@/lib/cache', () => ({
-  __esModule: true,
-  dashboardCache: {
-    get: (fn, args = []) => fn(...args),
-    invalidate: jest.fn(),
+const mockInvalidate = jest.fn();
+const mockCacheGet = jest.fn((fn, args = []) => fn(...args));
+jest.mock('@/lib/cache', () => {
+  const cache = {
+    get: (...args) => mockCacheGet(...args),
+    invalidate: (...args) => mockInvalidate(...args),
     invalidateFunction: jest.fn(),
-  },
-}));
+  };
+  return { __esModule: true, default: cache, dashboardCache: cache };
+});
 
 import {
   DetailedAllowedUsers,
   WorkspaceEditor,
 } from '@/components/workspace-editor';
+import { getWorkspaceContexts } from '@/data/connectors/infra';
 
 const config = { private: true, allowed_users: ['alice', 'bob'] };
 const users = [
@@ -233,6 +245,7 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
   async function renderEditor() {
     render(<WorkspaceEditor workspaceName="ws" />);
     await screen.findByText('Allowed Users (1)', {}, { timeout: 3000 });
+    await screen.findByText('Apply');
   }
 
   async function pluginRefresh() {
@@ -361,6 +374,40 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
     expect(server.ws.gcp).toBeUndefined();
   });
 
+  test('Apply drops the cached workspace views', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  gcp:\n    project_id: saved\n`);
+    mockInvalidate.mockClear();
+    await apply();
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+
+  test('a rename that lands under a draft is refused at Apply', async () => {
+    await renderEditor();
+    await edit((y) => `# note\n${y}`);
+    server = { ws: { ...server.ws, name: 'renamed' } };
+    await pluginRefresh();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        'The top-level key must stay "renamed". To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('a name in the YAML is refused, not saved', async () => {
+    await renderEditor();
+    await edit((y) => `${y}  name: other\n`);
+    expect(
+      screen.getByText(
+        'Remove "name" from the YAML. To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+    await apply();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
   test('Apply sends the config the draft started from', async () => {
     await renderEditor();
     await edit((y) => `${y}  gcp:\n    project_id: mine\n`);
@@ -370,5 +417,373 @@ describe('WorkspaceEditor with a plugin that changes the workspace', () => {
       { private: true, allowed_users: ['alice'], gcp: { project_id: 'mine' } },
       { private: true, allowed_users: ['alice'] }
     );
+  });
+});
+
+describe('WorkspaceEditor for a non-admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'user',
+      name: 'alice',
+    }));
+    mockComponents['workspaces.detail.allowedUsers.actions'] = [
+      {
+        id: 'actions',
+        component: () => <span>plugin controls</span>,
+      },
+    ];
+  });
+
+  afterEach(() => {
+    mockGetUserRole.mockImplementation(async () => ({
+      role: 'admin',
+      name: 'root',
+    }));
+  });
+
+  test('shows the workspace read-only, with plugin controls', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.getByText('Allowed Users (1)')).toBeTruthy();
+    expect(screen.getByText('plugin controls')).toBeTruthy();
+    expect(screen.getByText('Workspace YAML')).toBeTruthy();
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Rename workspace' })
+    ).toBeNull();
+    expect(screen.getByLabelText('workspace yaml').readOnly).toBe(true);
+  });
+
+  test('shows a non-member only the badges the server sends', async () => {
+    // A non-member of a read-only-visible workspace gets its flags, not its
+    // configuration.
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { read_only: true, writable: false },
+    }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    const yamlText = screen.getByLabelText('workspace yaml').value;
+    expect(yamlText).not.toContain('read_only');
+    expect(yamlText).not.toContain('writable');
+  });
+
+  test('Refresh reloads the data without re-checking infra', async () => {
+    mockApiFetch.mockClear();
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  test('Refresh drops the cached stats and refetches them', async () => {
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    mockInvalidate.mockClear();
+    const fetched = mockGetClusters.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    // Clusters, managed jobs and enabled infra; the refetch goes through the
+    // cache so the next visit sees the new numbers too.
+    expect(mockInvalidate).toHaveBeenCalledTimes(3);
+    expect(mockGetClusters.mock.calls.length).toBe(fetched + 1);
+  });
+
+  test('a stalled role lookup does not hold up Refresh', async () => {
+    mockGetUserRole.mockImplementation(() => new Promise(() => {}));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    expect(screen.queryByText('Loading...')).toBeNull();
+  });
+
+  test('treats a failed role lookup as non-admin', async () => {
+    mockGetUserRole.mockImplementation(async () => {
+      throw new Error('boom');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Only admins can change this configuration.');
+    expect(screen.queryByText('Apply')).toBeNull();
+    console.error.mockRestore();
+  });
+});
+
+describe('WorkspaceEditor Refresh for an admin', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+    }));
+    mockApiFetch.mockReset();
+  });
+
+  test('re-checks infra, then reloads', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  test('still reloads when the infra check fails', async () => {
+    mockApiFetch.mockImplementation(async () => {
+      throw new Error('check failed');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    const calls = mockGetWorkspaces.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockGetWorkspaces.mock.calls.length).toBeGreaterThan(calls);
+    console.error.mockRestore();
+  });
+
+  test('asks for the role when it is still loading', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    // The page's own role lookup never answers; Refresh asks again.
+    mockGetUserRole
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(async () => ({ role: 'admin', name: 'root' }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Allowed Users (1)');
+    expect(screen.queryByText('Apply')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/check', {}, 'POST');
+  });
+
+  test('a slower, older stats request does not overwrite newer stats', async () => {
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's own stats request answers last with an old view; the one made
+    // after the infra check is newer and must win.
+    let releaseOld;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseOld = () =>
+              resolve([{ cluster: 'old', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => []);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseOld();
+    });
+    expect(screen.getByText('0 / 0')).toBeTruthy();
+    expect(screen.queryByText('1 / 1')).toBeNull();
+  });
+
+  test('a failed newer stats request keeps an older success', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockImplementation(async () => ({ ok: true }));
+    render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Refresh's request succeeds after the newer post-check request fails.
+    let releaseFirst;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Refresh'));
+    });
+    await act(async () => {
+      releaseFirst();
+    });
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+    console.error.mockRestore();
+  });
+
+  test('stats for a workspace the page left are dropped', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetWorkspaces.mockImplementation(async () => ({
+      ws: { private: true, allowed_users: ['alice'] },
+      other: { private: true, allowed_users: ['alice'] },
+    }));
+    let releaseWs;
+    mockGetClusters
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseWs = () =>
+              resolve([{ cluster: 'c', workspace: 'ws', status: 'RUNNING' }]);
+          })
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error('down');
+      });
+    const { rerender } = render(<WorkspaceEditor workspaceName="ws" />);
+    await screen.findByText('Apply');
+    // Switch workspaces; the new workspace's stats request fails, then the
+    // old one answers.
+    await act(async () => {
+      rerender(<WorkspaceEditor workspaceName="other" />);
+    });
+    await act(async () => {
+      releaseWs();
+    });
+    expect(screen.queryByText('1 / 1')).toBeNull();
+    console.error.mockRestore();
+  });
+});
+
+describe('WorkspaceEditor rename', () => {
+  beforeEach(() => {
+    mockGetWorkspaces.mockReset();
+    mockGetWorkspaces.mockImplementation(async () => ({
+      default: {},
+      team: { private: false },
+      'ws-0123456789ab': { name: 'ml', private: false },
+    }));
+    mockUpdateWorkspace.mockReset();
+    mockUpdateWorkspace.mockResolvedValue({});
+  });
+
+  const pencil = () =>
+    screen.queryByRole('button', { name: 'Rename workspace' });
+
+  const renderEditor = async (workspaceName) => {
+    render(<WorkspaceEditor workspaceName={workspaceName} />);
+    await screen.findByText('Apply');
+  };
+
+  test('the pencil next to the name opens the rename dialog', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(screen.queryByText('Rename')).toBeNull();
+    fireEvent.click(pencil());
+    expect(
+      await screen.findByText(/Scripts and configs that use "ml" will stop/)
+    ).toBeInTheDocument();
+  });
+
+  test('no pencil on the default workspace', async () => {
+    await renderEditor('default');
+    expect(pencil()).toBeNull();
+  });
+
+  test('the pencil is disabled while the YAML has unsaved edits', async () => {
+    await renderEditor('ws-0123456789ab');
+    expect(pencil()).toBeEnabled();
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, { target: { value: `${box.value}# note\n` } });
+    expect(pencil()).toBeDisabled();
+    expect(pencil()).toHaveAttribute(
+      'title',
+      'Apply or discard the YAML changes first'
+    );
+  });
+
+  test('a rename moves the YAML key and its baseline to the new name', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false },
+      { name: 'ml', private: false }
+    );
+    expect(screen.getByLabelText('workspace yaml').value).toMatch(/^ml-v2:/);
+    expect(screen.getByText('Workspace renamed to "ml-v2".')).toBeTruthy();
+    // The new YAML is the baseline, not a draft.
+    expect(pencil()).toBeEnabled();
+  });
+
+  test('Apply after a rename expects the renamed config', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(pencil());
+    const input = screen.getByLabelText('Name');
+    fireEvent.change(input, { target: { value: 'ml-v2' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: `${box.value}  gcp:\n    project_id: x\n` },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Apply'));
+    });
+    expect(mockUpdateWorkspace).toHaveBeenLastCalledWith(
+      'ws-0123456789ab',
+      { name: 'ml-v2', private: false, gcp: { project_id: 'x' } },
+      { name: 'ml-v2', private: false }
+    );
+  });
+
+  test('changing the YAML key points at the rename pencil', async () => {
+    await renderEditor('ws-0123456789ab');
+    const box = screen.getByLabelText('workspace yaml');
+    fireEvent.change(box, {
+      target: { value: box.value.replace(/^ml:/, 'other:') },
+    });
+    expect(
+      screen.getByText(
+        'The top-level key must stay "ml" (found "other"). To rename the workspace, use Rename workspace next to its name.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  test('Delete drops the cached workspace views', async () => {
+    await renderEditor('ws-0123456789ab');
+    fireEvent.click(screen.getByText('Delete'));
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete',
+        })
+      );
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
+  });
+});
+
+describe('WorkspaceEditor for a new workspace', () => {
+  test('creating drops the cached workspace views', async () => {
+    render(<WorkspaceEditor workspaceName="ml" isNewWorkspace />);
+    mockInvalidate.mockClear();
+    await act(async () => {
+      fireEvent.click(await screen.findByText('Apply'));
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
   });
 });

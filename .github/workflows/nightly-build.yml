@@ -242,6 +242,20 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
+  smoke-tests-kubernetes-grpc-jobs-consolidation:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --kubernetes --grpc --jobs-consolidation --no-resource-heavy"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--kubernetes --grpc --jobs-consolidation --no-resource-heavy"}'
+      timeout_minutes: 210  # same lane with gRPC on; the one manual run so far took 89m
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
   smoke-tests-slurm-minimal:
     needs: [gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
@@ -272,9 +286,9 @@ jobs:
   #     BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   publish-and-validate-both:
-    needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
+    needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-kubernetes-grpc-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
     # Use always() so this job evaluates even if some test jobs were skipped when skip_buildkite is selected
-    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-kubernetes-grpc-jobs-consolidation.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -407,7 +421,7 @@ jobs:
 
   summary:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-kubernetes-grpc-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
     if: always()
     steps:
       - name: Summary
@@ -447,6 +461,11 @@ jobs:
           - [Smoke Tests Kubernetes (Jobs Consolidation)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
+          if [ "${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.outputs.build_number }}" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          - [Smoke Tests Kubernetes (gRPC, Jobs Consolidation)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          EOF
+          fi
           if [ "${{ needs.smoke-tests-slurm-minimal.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           - [Smoke Tests Slurm Minimal](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}) - $([ "${{ needs.smoke-tests-slurm-minimal.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
@@ -470,7 +489,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release, notify-downstream, summary]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-kubernetes-grpc-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release, notify-downstream, summary]
     # Fire when any upstream job failed OR the run was cancelled. A cancelled
     # run (e.g. someone stopping it while Buildkite lanes are still waiting)
     # publishes no nightly and dispatches nothing downstream, exactly like a
@@ -557,6 +576,9 @@ jobs:
           append_lane "--kubernetes --jobs-consolidation --no-resource-heavy" \
             "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" \
             "smoke-tests" "${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}"
+          append_lane "--kubernetes --grpc --jobs-consolidation --no-resource-heavy" \
+            "${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.result }}" \
+            "smoke-tests" "${{ needs.smoke-tests-kubernetes-grpc-jobs-consolidation.outputs.build_number }}"
           append_lane "test_minimal --slurm" \
             "${{ needs.smoke-tests-slurm-minimal.result }}" \
             "smoke-tests" "${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}"

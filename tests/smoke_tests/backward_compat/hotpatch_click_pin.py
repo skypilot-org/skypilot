@@ -25,6 +25,9 @@ This script patches two files in the old env's installed sky package:
 2. sky/utils/controller_utils.py — adds 'click<8.3.0' to the cloud-deps
    install set, so typer/fastapi-cli don't bump click after the ray install.
 
+It also adds fastapi<0.145 to the same cloud-deps install; see
+_patch_controller_fastapi.
+
 The patch is idempotent: if the old version already has the fix, it skips.
 
 See https://github.com/ray-project/ray/issues/56747 for the upstream issue.
@@ -117,6 +120,43 @@ def _patch_controller_utils(controller_utils_path: pathlib.Path) -> bool:
     return True
 
 
+def _patch_controller_fastapi(controller_utils_path: pathlib.Path) -> bool:
+    """Patch controller_utils.py to add fastapi<0.145 to cloud-deps install.
+
+    FastAPI 0.145.0 rejects the `prefix` argument that old API servers pass
+    to FastAPI(). An old jobs controller starts its own API server to launch
+    job clusters, so with fastapi resolved to 0.145+ on the controller that
+    server exits and managed jobs stay PENDING.
+
+    TODO: Remove once the base version tested against no longer passes
+    `prefix` (PR #11116).
+    """
+    src = controller_utils_path.read_text()
+
+    if 'fastapi<0.145' in src:
+        print(f'[hotpatch] {controller_utils_path} already pins '
+              'fastapi<0.145, skipping')
+        return False
+
+    insert = ("    # [hotpatch] Pin fastapi<0.145 for the old API server.\n"
+              "    python_packages.add('fastapi<0.145')\n")
+    src, n = re.subn(
+        r"(\n)(    packages_string = ' '\.join\(\n)",
+        lambda m: m.group(1) + insert + m.group(2),
+        src,
+    )
+
+    if n == 0:
+        print(f'[hotpatch] WARNING: Could not find packages_string anchor in '
+              f'{controller_utils_path}. The old version structure may differ.')
+        return False
+
+    controller_utils_path.write_text(src)
+    print(f'[hotpatch] Patched {controller_utils_path} with fastapi<0.145 pin '
+          'in cloud-deps install')
+    return True
+
+
 def main():
     sky_dir = pathlib.Path(sky.__file__).parent
 
@@ -137,9 +177,10 @@ def main():
     patched = False
     patched |= _patch_constants(constants_path)
     patched |= _patch_controller_utils(controller_utils_path)
+    patched |= _patch_controller_fastapi(controller_utils_path)
 
     if patched:
-        print('[hotpatch] Successfully applied click<8.3.0 pin (PR #9459)')
+        print('[hotpatch] Successfully applied controller dependency pins')
     else:
         print('[hotpatch] No patches needed (already fixed or unsupported '
               'version)')

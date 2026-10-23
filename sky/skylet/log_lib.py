@@ -8,15 +8,18 @@ import io
 import multiprocessing.pool
 import os
 import queue as queue_lib
+import re
+import select
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
 import threading
 import time
-from typing import (Dict, Iterable, Iterator, List, Optional, TextIO, Tuple,
-                    Union)
+from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, TextIO,
+                    Tuple, Union)
 
 import colorama
 
@@ -35,6 +38,7 @@ SKY_LOG_TAILING_GAP_SECONDS = 0.2
 # Peek the head of the lines to check if we need to start
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
+_ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
 
 logger = sky_logging.init_logger(__name__)
 
@@ -453,6 +457,49 @@ def run_bash_command_with_log_and_return_pid(
     return {'return_code': return_code, 'pid': os.getpid()}
 
 
+def start_orphan_watchdog() -> None:
+    """Terminates this process soon after the caller that runs it is gone.
+
+    For commands run on a cluster through `kubectl exec -i` with a live stdin
+    pipe, or through `ssh -tt`. When `kubectl exec` disconnects, the remote
+    process gets no signal and its writes to stdout keep succeeding; the only
+    sign is that its stdin reaches EOF. The watchdog also exits when the parent
+    process changes. A stdin that is already at EOF at startup (e.g.
+    /dev/null) is not watched.
+
+    Only call this in a process dedicated to the command: the watchdog sends
+    SIGTERM to the whole process.
+    """
+    watch_stdin = False
+    try:
+        readable, _, _ = select.select([0], [], [], 0)
+        # Not readable: a live pipe or TTY. Readable: EOF, unless it has data.
+        watch_stdin = not readable or bool(os.read(0, 1))
+    except (ValueError, OSError):
+        pass
+
+    def _stdin_closed() -> bool:
+        try:
+            readable, _, _ = select.select([0], [], [], 0)
+            return bool(readable) and not os.read(0, 1)
+        except (ValueError, OSError):
+            return True
+
+    def _watch() -> None:
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(_ORPHAN_WATCHDOG_INTERVAL_SECONDS)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                break
+            if watch_stdin and _stdin_closed():
+                logger.info('stdin closed (caller disconnected), terminating.')
+                break
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
@@ -507,6 +554,47 @@ def _follow_job_logs(file,
 # to fit the tail of typical log files in a single read while keeping
 # memory bounded for very long lines.
 _TAIL_BLOCK_SIZE = 64 * 1024
+# Most bytes the tail reader reads for the returned lines.
+_TAIL_MAX_BYTES = 64 * 1024 * 1024
+_LINE_BREAK_RE = re.compile(rb'\r\n|\r|\n')
+
+
+def _count_line_breaks(chunk: bytes) -> int:
+    """Counts the ``\\n``, ``\\r`` and ``\\r\\n`` breaks in ``chunk``."""
+    return chunk.count(b'\n') + chunk.count(b'\r') - chunk.count(b'\r\n')
+
+
+def _start_of_last_lines(f: BinaryIO,
+                         end_pos: int,
+                         count: int,
+                         min_pos: int = 0) -> int:
+    """Returns the byte position where the last ``count`` lines start.
+
+    Scans backwards one block at a time, not past ``min_pos``. Returns
+    ``min_pos`` if fewer than ``count`` lines start after it.
+    """
+    # A last line without a trailing break has no break of its own.
+    f.seek(max(end_pos - 1, 0))
+    if f.read(1) in (b'\n', b'\r'):
+        count += 1
+    pos = end_pos
+    next_byte = b''
+    while pos > min_pos:
+        read_size = min(_TAIL_BLOCK_SIZE, pos - min_pos)
+        pos -= read_size
+        f.seek(pos)
+        chunk = f.read(read_size)
+        # A '\r\n' split across two blocks was counted at its '\n'.
+        split_crlf = chunk.endswith(b'\r') and next_byte == b'\n'
+        breaks = _count_line_breaks(chunk) - int(split_crlf)
+        if breaks >= count:
+            ends = [m.end() for m in _LINE_BREAK_RE.finditer(chunk)]
+            if split_crlf:
+                ends.pop()
+            return pos + ends[-count]
+        count -= breaks
+        next_byte = chunk[:1]
+    return min_pos
 
 
 def tail_lines_from_end(path: str,
@@ -517,6 +605,14 @@ def tail_lines_from_end(path: str,
     Reads backwards in fixed-size blocks from EOF so cost is O(tail *
     line-length) rather than O(file-size). For multi-GB log files this
     is the difference between ~10 s and ~1 ms per call.
+
+    Lines end only at ``\\n``, ``\\r`` or ``\\r\\n``, as the log writer and
+    the follow reader split them (``newline=''``), so progress bars that
+    only write ``\\r`` count as lines. The ``offset``
+    lines are skipped by scanning back one block at a time, and at most
+    ``_TAIL_MAX_BYTES`` are read for the returned lines; when that is not
+    enough to reach ``tail`` lines, the lines found in that window are
+    returned.
 
     Args:
         path: File path to read.
@@ -532,35 +628,25 @@ def tail_lines_from_end(path: str,
         returns ``([], end_pos)``.
     """
     assert tail > 0
-    needed = tail + max(offset, 0)
-    chunks: List[bytes] = []
-    line_count = 0
-    pos = 0
-    end_pos = 0
     with open(path, 'rb') as f:
         f.seek(0, os.SEEK_END)
         end_pos = f.tell()
-        pos = end_pos
-        while pos > 0 and line_count <= needed:
-            read_size = min(_TAIL_BLOCK_SIZE, pos)
-            pos -= read_size
-            f.seek(pos)
-            chunk = f.read(read_size)
-            chunks.append(chunk)
-            line_count += chunk.count(b'\n')
-    data = b''.join(reversed(chunks))
-    text = data.decode('utf-8', errors='replace')
-    lines = text.splitlines(keepends=True)
-    # If we stopped before reaching offset 0, the first decoded line is
-    # almost certainly partial (we landed mid-line). Drop it so callers
+        window_end = end_pos
+        if offset > 0:
+            window_end = _start_of_last_lines(f, end_pos, offset)
+        min_pos = max(window_end - _TAIL_MAX_BYTES, 0)
+        start = _start_of_last_lines(f, window_end, tail, min_pos)
+        f.seek(start)
+        data = f.read(window_end - start)
+    # Split at the same breaks _start_of_last_lines counts so pages line up.
+    lines = [
+        line.decode('utf-8', errors='replace')
+        for line in data.splitlines(keepends=True)
+    ]
+    # A start at the read cap can be mid-line. Drop that line so callers
     # see only complete lines.
-    if pos > 0 and lines:
+    if start > 0 and start == min_pos and lines:
         lines = lines[1:]
-    if offset > 0:
-        if offset >= len(lines):
-            return [], end_pos
-        # pylint: disable=invalid-unary-operand-type
-        lines = lines[:-offset]
     return lines[-tail:], end_pos
 
 

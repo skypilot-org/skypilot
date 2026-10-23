@@ -1508,6 +1508,94 @@ def test_cluster_labels_in_status(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def test_cluster_job_spec(generic_cloud: str):
+    """Each cluster job's task YAML and entrypoint are recorded and returned.
+
+    Covers a YAML `sky launch` (job 1), a YAML `sky exec` with `--env`,
+    `--name` and `--num-nodes` overrides (job 2) and an inline `sky exec`
+    command (job 3), that the recorded YAML carries the overrides and has
+    secrets redacted, and that the specs are dropped with the cluster on
+    `sky down`. The file asks for 2 nodes and both submissions override it to
+    1, so the cluster stays a single node.
+    """
+    from sky.client import sdk
+
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'spec-marker-{name}'
+    override_marker = f'override-{name}'
+    inline_marker = f'inline-{name}'
+    renamed = f'renamed-{name}'
+    secret_value = f'secret-{name}'
+
+    def get_spec(job_id: int):
+        return sdk.stream_and_get(sdk.cluster_job_spec(name, job_id))
+
+    def check_specs():
+        expected = {
+            1: ('sky launch', marker),
+            2: ('sky exec', override_marker),
+            3: ('sky exec', inline_marker),
+        }
+        for job_id, (command, yaml_text) in expected.items():
+            spec = get_spec(job_id)
+            assert spec is not None, f'No spec recorded for job {job_id}'
+            assert spec['entrypoint'].startswith(command), spec
+            assert name in spec['entrypoint'], spec
+            assert yaml_text in spec['task_yaml'], spec
+            assert secret_value not in spec['task_yaml'], (
+                f'Secret leaked into the recorded YAML of job {job_id}: '
+                f'{spec["task_yaml"]}')
+        assert get_spec(4) is None, 'Spec returned for a job that never ran'
+
+        # `--num-nodes 1` on a file asking for 2, and `--name` on job 2.
+        for job_id in (1, 2):
+            recorded = yaml_utils.safe_load(get_spec(job_id)['task_yaml'])
+            assert recorded['num_nodes'] == 1, (job_id, recorded)
+        assert yaml_utils.safe_load(get_spec(2)['task_yaml'])['name'] == renamed
+
+    def check_specs_dropped():
+        assert get_spec(1) is None, 'Spec outlived the terminated cluster'
+
+    yaml_content = textwrap.dedent(f"""\
+        name: spec-file-name
+
+        resources:
+          cpus: 2+
+
+        num_nodes: 2
+
+        envs:
+          SPEC_MARKER: {marker}
+
+        secrets:
+          SPEC_SECRET: {secret_value}
+
+        run: |
+          echo "$SPEC_MARKER"
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_job_spec',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} --env SPEC_MARKER={override_marker} --name {renamed} --num-nodes 1 {yaml_path}',
+                f'sky exec {name} "echo {inline_marker}"',
+                lambda: check_specs(),
+                f'sky down -y {name}',
+                lambda: check_specs_dropped(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
@@ -3448,6 +3536,48 @@ def test_cancel_logs_request(generic_cloud: str):
             f'sleep 10; ps aux | grep "{proxy_command_pattern}"; ! pgrep -f "{proxy_command_pattern}"'
         ],
         f'sky down -y {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_interrupted_logs_follow_leaves_no_remote_tail():
+    """An interrupted `sky logs` follow must not leave its tail in the pod.
+
+    `kubectl exec -i` sends the remote command no signal when the exec session
+    ends, so the follow-mode `tail_logs` used to keep running in the head pod
+    until the job finished. A normal follow must still print every line.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # The [t] keeps the pattern from matching this command's own shell.
+    count_remote_tails = (f'ssh {name} \'ps -eo args | '
+                          f'grep -c "[t]ail_logs.*follow=True"\' || true')
+    test = smoke_tests_utils.Test(
+        'interrupted_logs_follow_leaves_no_remote_tail',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -d '
+            '\'for i in $(seq 1 100000); do echo "tick $i"; sleep 2; done\'',
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=300),
+            # Follow is the default; SIGINT is what Ctrl-C sends.
+            f'(timeout --signal=INT 20 sky logs {name} 1 || true) | '
+            'grep "tick"',
+            # The remote tail checks for a closed stdin every 5 seconds.
+            f'sleep 20; n=$({count_remote_tails}); '
+            'echo "remote tail processes left: $n"; [ "$n" -eq 0 ]',
+            f'sky cancel -y {name} 1',
+            f'sky exec -d {name} '
+            '\'for i in $(seq 1 15); do echo "line $i of 15"; sleep 1; done\'',
+            f'out=$(sky logs {name} 2) && echo "$out" && '
+            'for i in $(seq 1 15); do '
+            'echo "$out" | grep -q "line $i of 15" || exit 1; done',
+        ],
+        f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
 

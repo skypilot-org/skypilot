@@ -692,8 +692,6 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
     When pods are in certain failed states (e.g., Unknown status due to
     ephemeral storage issues), terminated.finished_at can be None.
     This should not cause a TypeError.
-
-    Regression test for SKY-4423.
     """
     import datetime
 

@@ -3,6 +3,7 @@ import concurrent.futures
 import contextlib
 import datetime
 import json
+import logging
 import os
 import posixpath
 import subprocess
@@ -1483,10 +1484,14 @@ class TestCreateDebugDump:
                                   mock_clusters_from_jobs, mock_dump_server,
                                   mock_dump_requests, mock_dump_clusters,
                                   mock_dump_jobs, tmp_path):
-        """Client info should be written when provided."""
+        """Client info should be written when provided, with credentials in
+        its env redacted."""
         client_info = {
             'client_version': '0.10.0',
             'platform': 'linux',
+            'environment': {
+                'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+            },
         }
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -1501,6 +1506,8 @@ class TestCreateDebugDump:
             data = json.loads(zf.read(client_info_files[0]))
             assert data['client_version'] == '0.10.0'
             assert data['platform'] == 'linux'
+            assert (data['environment']['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] ==
+                    '<redacted>')
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -1882,6 +1889,30 @@ class TestDumpManagedJobQueueInfo:
                                            'job_info_task0.json'))
         assert os.path.exists(os.path.join(jobs_dir, '1',
                                            'job_info_task1.json'))
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_redacts_task_yaml_fields(self, mock_queue_v2, tmp_path):
+        """Task YAML fields in job_info.json should be redacted."""
+        task_yaml = ('name: my-task\n'
+                     'envs:\n'
+                     '  SKYPILOT_API_SERVER_ENDPOINT: '
+                     'https://alice:real_pass@example.com\n'
+                     'secrets:\n'
+                     '  SKYPILOT_SERVICE_ACCOUNT_TOKEN: real_token\n')
+        mock_queue_v2.return_value = ([{
+            'job_id': 1,
+            'user_yaml': task_yaml,
+            'original_user_yaml_content': task_yaml,
+        }], 1, {}, 1, [])
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, [])
+
+        with open(os.path.join(jobs_dir, '1', 'job_info.json')) as f:
+            content = f.read()
+        assert 'real_pass' not in content
+        assert 'real_token' not in content
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     def test_error_handling(self, mock_queue_v2, tmp_path):
@@ -2297,15 +2328,15 @@ class TestManifestPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _SENSITIVE_ENV_VARS redaction
+# Tests for SENSITIVE_ENV_VARS redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
     """Tests for sensitive environment variable redaction."""
 
     def test_sensitive_env_vars_redacted(self):
         """Sensitive env vars should have their values replaced with bool."""
-        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
-        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_dump_helpers.SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_dump_helpers.SENSITIVE_ENV_VARS
 
     @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
@@ -2982,6 +3013,35 @@ class TestSanitizeRequestBody:
         assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
 
+    def test_debug_dump_client_credentials_redacted(self):
+        """Credentials in a debug dump request's env and client info should
+        be redacted."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'env_vars': {
+                        'SKYPILOT_API_SERVER_ENDPOINT': 'https://alice:real_pass@example.com',
+                    },
+                    'client_info': {
+                        'environment': {
+                            'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+                            'SKYPILOT_DEBUG': '1',
+                        },
+                    },
+                }
+
+        request = _make_request(name='sky.create_debug_dump',
+                                request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert (result['env_vars']['SKYPILOT_API_SERVER_ENDPOINT'] ==
+                'https://alice:<redacted>@example.com')
+        environment = result['client_info']['environment']
+        assert environment['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == '<redacted>'
+        assert environment['SKYPILOT_DEBUG'] == '1'
+
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
         task_yaml = ('name: my-task\n'
@@ -3063,6 +3123,28 @@ class TestRedactTaskYaml:
         result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
+
+    def test_redacts_embedded_user_specified_yaml(self):
+        """The raw user YAML embedded in a dumped task should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    '_user_specified_yaml: |\n'
+                    '  name: my-task\n'
+                    '  secrets:\n'
+                    '    API_KEY: real_api_key\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_api_key' not in result
+        assert 'API_KEY' in result
+
+    def test_masks_api_server_endpoint_password(self):
+        """The basic-auth password in the API server endpoint env var should
+        be masked."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  SKYPILOT_API_SERVER_ENDPOINT: '
+                    'https://alice:real_pass@example.com\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_pass' not in result
+        assert 'alice:<redacted>@example.com' in result
 
 
 # ---------------------------------------------------------------------------
@@ -3781,7 +3863,7 @@ class TestCollectClusterSkyletLog:
         assert not errors
 
     def test_uses_relocated_runtime_dir(self, tmp_path):
-        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        """A relocated SKY_RUNTIME_DIR (e.g. on Slurm) is honored because the
         path is resolved on the remote node, not from a Python attribute."""
         runner = mock.Mock()
         runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
@@ -4493,3 +4575,32 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+def test_debug_dump_log_writes_provision_records_once(tmp_path):
+    """The dump's handler sits on both `sky` and `sky.provision`.
+
+    Outside a provision `sky.provision` propagates, so without dedupe a
+    sky.provision.* record would land in debug_dump.log twice. Only the
+    handler wiring runs: the dump body is replaced, so nothing is collected.
+    """
+
+    def build(*args, **kwargs):
+        del args, kwargs
+        logging.getLogger('sky.provision.test').warning('dump-marker-6414')
+
+    provision_logger = logging.getLogger('sky.provision')
+    original = provision_logger.propagate
+    provision_logger.propagate = True
+    try:
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils._build_debug_dump',
+                        side_effect=build):
+            result = debug_utils.create_debug_dump()
+    finally:
+        provision_logger.propagate = original
+    with zipfile.ZipFile(result, 'r') as zf:
+        log_name = next(
+            n for n in zf.namelist() if n.endswith('debug_dump.log'))
+        assert zf.read(log_name).decode().count('dump-marker-6414') == 1
