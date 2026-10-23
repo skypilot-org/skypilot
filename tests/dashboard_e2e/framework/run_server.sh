@@ -26,8 +26,9 @@ export SKY_RUNTIME_DIR="$RUNTIME_DIR"
 export SKYPILOT_API_SERVER_LOCAL_PORT="$PORT"
 export SKYPILOT_GLOBAL_CONFIG="$RUNTIME_DIR/config.yaml"
 export SKYPILOT_SERVER_PLUGINS_CONFIG="${E2E_PLUGINS_CONFIG:-$SUITE_DIR/plugins.yaml}"
-# framework.server_plugin and the suite's own server-twist modules.
-export PYTHONPATH="$(dirname "$FRAMEWORK_DIR"):$SUITE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+# The suite's own modules first (its server_twists must win over this
+# suite's file of the same name), then framework.server_plugin.
+export PYTHONPATH="$SUITE_DIR:$(dirname "$FRAMEWORK_DIR")${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -z "${E2E_SERVER_TWIST_MODULES:-}" && -f "$SUITE_DIR/server_twists.py" ]]; then
   export E2E_SERVER_TWIST_MODULES=server_twists
 fi
