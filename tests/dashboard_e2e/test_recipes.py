@@ -51,19 +51,34 @@ def recipes() -> Iterator['_Recipes']:
     yield r
     for name in r.names:
         seed_recipes.delete(name)
+    # A create the server accepted finishes asynchronously, possibly after
+    # the test failed: watch for it so it cannot leak into later tests.
+    deadline = time.time() + 10
+    while r.settling and time.time() < deadline:
+        for name in list(r.settling):
+            if seed_recipes.get(name) is not None:
+                seed_recipes.delete(name)
+                r.settling.remove(name)
+        time.sleep(0.5)
 
 
 class _Recipes:
 
     def __init__(self):
         self.names: List[str] = []
+        # Names whose create may still be running when the test ends.
+        self.settling: List[str] = []
 
     def seed(self, name: str, owner, **kwargs) -> str:
         self.names.append(name)
         return seed_recipes.recipe(name, owner.user_id, owner.name, **kwargs)
 
-    def track(self, name: str) -> str:
+    def track(self, name: str, settle: bool = False) -> str:
+        """Track a recipe the test creates through the UI. ``settle``: the
+        server may still be creating it after the test; wait for that."""
         self.names.append(name)
+        if settle:
+            self.settling.append(name)
         return name
 
 
@@ -544,7 +559,7 @@ def _xfail_baseline(parametrize, reason: str):
 def test_viewer_create_recipe_shows_permission_error(make_user, open_as,
                                                      recipes, uid, twist):
     viewer = make_user('viewer', role='viewer')
-    name = recipes.track(f'{uid}-viewer')
+    name = recipes.track(f'{uid}-viewer', settle=True)
 
     page = open_as(viewer, '/dashboard/recipes')
     since = page.recorder.mark()

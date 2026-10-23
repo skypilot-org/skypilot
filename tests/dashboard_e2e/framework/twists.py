@@ -27,6 +27,7 @@ import re
 from typing import Any, Callable, Dict, Optional
 
 from playwright.sync_api import BrowserContext
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Route
 import pytest
 
@@ -127,14 +128,23 @@ def rewrite_response(path_suffix: str, fn: Callable[[Any, Dict[str, Any]],
     def apply(context: BrowserContext) -> None:
 
         def handler(route: Route) -> None:
-            resp = route.fetch()
+            try:
+                resp = route.fetch()
+            except PlaywrightError:
+                # The context closed while the request was in flight (e.g. an
+                # /api/get long-poll at teardown). Raising here would surface
+                # as TargetClosedError in the next test on this worker.
+                return
             try:
                 data = resp.json()
             except Exception:  # pylint: disable=broad-except
                 route.fulfill(response=resp)
                 return
             body = json.loads(route.request.post_data or '{}')
-            route.fulfill(response=resp, json=fn(data, body))
+            try:
+                route.fulfill(response=resp, json=fn(data, body))
+            except PlaywrightError:
+                return
 
         context.route(_url_pattern(path_suffix), handler)
 

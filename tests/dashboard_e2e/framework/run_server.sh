@@ -77,6 +77,17 @@ if [[ "${1:-start}" == "stop" ]]; then
     pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
     [[ -n "$pgid" ]] && kill -KILL -- "-$pgid" 2>/dev/null || true
   done
+  # Consolidation-mode jobs controllers start their own sessions, so neither
+  # the port nor the process group reaches them; they outlive the server.
+  # Find them by the runtime dir they inherited (Linux /proc only).
+  if [[ -n "${E2E_RUNTIME_DIR:-}" && -d /proc ]]; then
+    for env in /proc/[0-9]*/environ; do
+      if { tr '\0' '\n' < "$env"; } 2>/dev/null | grep -qx "SKY_RUNTIME_DIR=$RUNTIME_DIR"; then
+        pid="${env#/proc/}"; pid="${pid%/environ}"
+        [[ "$pid" != "$$" ]] && kill -KILL "$pid" 2>/dev/null || true
+      fi
+    done
+  fi
   exit 0
 fi
 

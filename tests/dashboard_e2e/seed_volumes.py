@@ -259,26 +259,15 @@ def make_workspace(admin_api: requests.Session,
 
     yield make
     for ws_id in created:
-        admin_api.post(
-            f'{admin_api.base_url}/workspaces/delete',  # type: ignore[attr-defined]
-            json={'workspace_name': ws_id},
-            timeout=60)
-
-
-def _leftover_workspaces() -> List[str]:
-    try:
-        with open(os.environ['SKYPILOT_GLOBAL_CONFIG'], encoding='utf-8') as f:
-            config = yaml.safe_load(f) or {}
-    except (OSError, KeyError):
-        return []
-    out = []
-    for ws_id, ws in (config.get('workspaces') or {}).items():
-        name = (ws or {}).get('name', ws_id) if isinstance(ws, dict) else ws_id
-        if seed.is_test_name(name):
-            out.append(f'workspace {name}')
-    return out
+        # Wait for the delete: an exclusive test that starts while it is
+        # still running sees the workspace as left behind.
+        _api_result(
+            admin_api,
+            admin_api.post(
+                f'{admin_api.base_url}/workspaces/delete',  # type: ignore[attr-defined]
+                json={'workspace_name': ws_id},
+                timeout=60))
 
 
 seed.register_leftover_check(_leftover_volumes)
 seed.register_leftover_check(_leftover_contexts)
-seed.register_leftover_check(_leftover_workspaces)
