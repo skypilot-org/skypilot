@@ -16,6 +16,7 @@ Concurrency model:
   in the DB, and fails if it is run under ``-n``.
 """
 import dataclasses
+import importlib
 import json
 import os
 import re
@@ -289,6 +290,11 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function):
 
 
 def pytest_configure(config) -> None:
+    # Import every seed_*.py in the suite so each registers its leftover
+    # checks; an exclusive test must wait for every area's rows, not only the
+    # areas its own file happens to import.
+    for path in sorted(config.rootpath.glob('seed_*.py')):
+        importlib.import_module(path.stem)
     config.addinivalue_line(
         'markers',
         'exclusive: asserts global state (totals, page composition), so it '
