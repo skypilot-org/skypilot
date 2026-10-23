@@ -131,6 +131,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow "azure-cli<2.87.0" --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
+    # Upgrade pip in base image: pip<26.2.2 vendors certifi<2026.10.19, which
+    # bundles compromised emSign root CAs (GHSA-6q48-6c7w-9gw2)
+    ~/.local/bin/uv pip install --system --upgrade "pip>=26.2.2" && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \

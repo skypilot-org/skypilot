@@ -1,12 +1,16 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
+import hashlib
+import json
 import os
 import re
+import threading
 import traceback
 from types import ModuleType
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
+import cachetools
 import click
 import colorama
 
@@ -21,12 +25,12 @@ from sky.adaptors import huggingface
 from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.workspaces import constants as workspace_constants
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -36,6 +40,11 @@ STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME,
 logger = sky_logging.init_logger(__name__)
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _is_storage_only(cloud_name: str) -> bool:
+    """Storage-only providers are not in the cloud registry or the DB."""
+    return any(cloud_name.startswith(s) for s in STORAGE_ONLY_CLOUDS)
 
 
 def _strip_ansi(s: str) -> str:
@@ -152,7 +161,14 @@ def check_capabilities(
     clouds: Optional[Iterable[str]] = None,
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
+    persist: bool = True,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
+    """Checks the clouds' credentials and caches the result per workspace.
+
+    With `persist=False` the result is only returned: the workspace's cached
+    rows are left alone, so `workspace` only needs to be readable by the
+    caller rather than writable.
+    """
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
 
@@ -162,13 +178,12 @@ def check_capabilities(
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    # Explicitly the writable set, even though that is already the default:
-    # every workspace this loop visits gets its cached enabled-clouds and
-    # check-results rows overwritten below, so this is the gate on a mutation
-    # of per-workspace shared state, not just on what the caller may see.
-    available_workspaces = list(
-        core.get_accessible_workspace_names(
-            action=workspace_constants.WORKSPACE_ACTION_WRITE))
+    readable_workspaces, writable_workspaces = core.get_workspace_access_sets()
+    # The writable set: every workspace this loop visits gets its cached
+    # enabled-clouds and check-results rows overwritten below, so this is the
+    # gate on a mutation of per-workspace shared state, not just on what the
+    # caller may see.
+    available_workspaces = list(writable_workspaces)
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])
@@ -295,8 +310,9 @@ def check_capabilities(
             c for c in config_allowed_cloud_names
             if c not in workspace_disabled_clouds
         ]
-        global_user_state.set_allowed_clouds(
-            [c for c in config_allowed_cloud_names], current_workspace_name)
+        if persist:
+            global_user_state.set_allowed_clouds(
+                [c for c in config_allowed_cloud_names], current_workspace_name)
 
         # Use disallowed_cloud_names for logging the clouds that will be
         # disabled because they are not included in allowed_clouds in
@@ -366,17 +382,15 @@ def check_capabilities(
             # trying to look it up in the registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and not any(
-                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
+                if capability in capabilities and not _is_storage_only(cloud)
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and not any(
-                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
+                if capability in capabilities and not _is_storage_only(cloud)
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not any(cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
+                if not _is_storage_only(cloud)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
@@ -387,9 +401,10 @@ def check_capabilities(
                 (previously_enabled_clouds_set | enabled_clouds_set) -
                 disabled_clouds_set))
 
-            global_user_state.set_enabled_clouds(
-                list(enabled_clouds_for_capability), capability,
-                current_workspace_name)
+            if persist:
+                global_user_state.set_enabled_clouds(
+                    list(enabled_clouds_for_capability), capability,
+                    current_workspace_name)
             all_enabled_clouds = all_enabled_clouds.union(
                 enabled_clouds_for_capability)
 
@@ -402,18 +417,19 @@ def check_capabilities(
         # already been written above. A transient DB failure or
         # unsupported dialect must not fail the user-visible
         # `sky check` command.
-        try:
-            results_to_persist = _build_check_results(cloud2ctx2text,
-                                                      check_results_dict)
-            global_user_state.set_check_results(
-                results_to_persist,
-                current_workspace_name,
-                is_full_workspace_run=(clouds is None),
-            )
-        except Exception as e:  # pylint: disable=broad-except
-            label = skypilot_config.workspace_label(current_workspace_name)
-            logger.warning(f'Failed to persist check_results for workspace '
-                           f'{label}: {e}')
+        if persist:
+            try:
+                results_to_persist = _build_check_results(
+                    cloud2ctx2text, check_results_dict)
+                global_user_state.set_check_results(
+                    results_to_persist,
+                    current_workspace_name,
+                    is_full_workspace_run=(clouds is None),
+                )
+            except Exception as e:  # pylint: disable=broad-except
+                label = skypilot_config.workspace_label(current_workspace_name)
+                logger.warning(f'Failed to persist check_results for '
+                               f'workspace {label}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
@@ -425,14 +441,15 @@ def check_capabilities(
     # --- Main check_capabilities logic ---
 
     if workspace is not None:
-        # Check only the specified workspace
-        if workspace not in available_workspaces:
+        # Check only the specified workspace. Without persisting, reading it is
+        # enough: nothing shared is written.
+        if workspace not in available_workspaces and (
+                persist or workspace not in readable_workspaces):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Workspace {workspace!r} not found in SkyPilot '
-                    'configuration. Available workspaces: ' + ', '.join(
-                        skypilot_config.get_workspace_name(w)
-                        for w in available_workspaces))
+                    _workspace_not_checkable_message(workspace,
+                                                     readable_workspaces,
+                                                     writable_workspaces))
 
         # Always show details for single specified check (if verbose)
         hide_per_cloud_details_flag = False
@@ -470,16 +487,51 @@ def check_capabilities(
     return all_workspaces_results
 
 
+def _workspace_label(workspace: str) -> str:
+    """The workspace's name if the caller can read it, else its id."""
+    # Import here to avoid circular import:
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.workspace_label_for_caller(workspace)
+
+
+def _workspace_not_checkable_message(workspace: str, readable: Set[str],
+                                     writable: Set[str]) -> str:
+    """Why the caller cannot check `workspace`, naming the caller.
+
+    A workspace the caller cannot read is reported as "not found or not
+    accessible", so the error does not reveal whether it exists.
+    """
+    user = common_utils.get_current_user()
+    caller = f'user {user.name!r} ({user.id})'
+    label = _workspace_label(workspace)
+    if writable:
+        names = ', '.join(
+            sorted(skypilot_config.get_workspace_name(w) for w in writable))
+        hint = f'Workspaces this user can write: {names}.'
+    else:
+        hint = 'This user cannot write to any workspace.'
+    if workspace in readable:
+        return (f'Workspace {label!r} is read-only for {caller}; checking '
+                f'its infra needs write access. {hint}')
+    return (f'Workspace {label!r} is not found or not accessible to '
+            f'{caller}. {hint}')
+
+
 def check_capability(
     capability: sky_cloud.CloudCapability,
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
+    persist: bool = True,
 ) -> Dict[str, List[str]]:
     clouds_with_capability = collections.defaultdict(list)
-    workspace_enabled_clouds = check_capabilities(quiet, verbose, clouds,
-                                                  [capability], workspace)
+    workspace_enabled_clouds = check_capabilities(quiet,
+                                                  verbose,
+                                                  clouds, [capability],
+                                                  workspace,
+                                                  persist=persist)
     for workspace, enabled_clouds in workspace_enabled_clouds.items():
         for cloud, capabilities in enabled_clouds.items():
             if capability in capabilities:
@@ -535,6 +587,90 @@ def check_for_request(
                  workspace_ref=workspace_ref)
 
 
+def _caller_access_sets() -> Tuple[Set[str], Set[str]]:
+    """The workspaces the caller can read, and those it can write."""
+    # Import here to avoid circular import:
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.get_workspace_access_sets()
+
+
+def _caller_may_store(workspace: str) -> bool:
+    """Whether a refresh by the caller may rewrite `workspace`'s cached rows.
+
+    Only its writers may. A caller who can only read it (e.g. a non-member of a
+    read-only workspace) gets fresh answers that are not stored.
+    """
+    _, writable = _caller_access_sets()
+    return workspace in writable
+
+
+def _clouds_from_names(names: Iterable[str]) -> List[sky_clouds.Cloud]:
+    clouds_from_names = (registry.CLOUD_REGISTRY.from_str(name)
+                         for name in names
+                         if not _is_storage_only(name))
+    return [cloud for cloud in clouds_from_names if cloud is not None]
+
+
+def _config_fingerprint() -> str:
+    """A digest of the current request's merged config."""
+    config = skypilot_config.to_dict()
+    try:
+        text = json.dumps(config, sort_keys=True, default=str)
+    except TypeError:
+        # Keys of mixed types (e.g. a label keyed by a number) cannot be sorted.
+        text = repr(config)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+# Process-wide rather than per request: `/validate` runs in the API server
+# process, which clears request caches at the start of every request. Locked
+# because the server's request threads share it.
+@cachetools.cached(cachetools.TTLCache(maxsize=64, ttl=60),
+                   lock=threading.Lock())
+def _unstored_enabled_cloud_names(workspace: str,
+                                  capability: sky_cloud.CloudCapability,
+                                  config_fingerprint: str) -> Tuple[str, ...]:
+    """Probes `workspace`'s enabled clouds without storing them.
+
+    Probed at most once a minute per config rather than on every call. The
+    probe uses the server's credentials and the request's merged config (e.g.
+    Kubernetes allowed contexts), not the caller, so requests that share a
+    config share one probe. An answer may be up to a minute old, and only
+    while the workspace has no stored rows. A hit skips `check_capabilities`'
+    access check: callers must check that the caller can read `workspace`
+    first.
+    """
+    del config_fingerprint
+    logger.debug(f'Probing enabled clouds of workspace {workspace!r} without '
+                 'storing them: the caller cannot write it.')
+    try:
+        return tuple(
+            check_capability(capability,
+                             quiet=True,
+                             workspace=workspace,
+                             persist=False).get(workspace, []))
+    except SystemExit:
+        # Same as the stored path: no cloud enabled.
+        return ()
+
+
+# One plain dict per request: it holds state rather than a recomputable result,
+# so nothing may expire or evict an entry before the request ends.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _reader_rechecked(
+) -> Dict[Tuple[str, sky_cloud.CloudCapability, str], Set[str]]:
+    """Clouds that non-storing callers' re-checks found enabled in this request.
+
+    Keyed by workspace, capability and config fingerprint. `recheck_clouds`
+    adds to it, so later reads in the same request see what the re-check found
+    without it being stored. Reads only look up, so they add no entries. This
+    relies on the re-check and those reads running in one request in one
+    process under one config, as they do within `Optimizer.optimize`.
+    """
+    return {}
+
+
 def get_cached_enabled_clouds_or_refresh(
         capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
@@ -561,25 +697,80 @@ def get_cached_enabled_clouds_or_refresh(
 
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
         capability, active_workspace)
+    may_store: Optional[bool] = None
     if not cached_enabled_clouds or allowed_clouds_changed:
-        try:
-            check_capability(capability, quiet=True, workspace=active_workspace)
-            if allowed_clouds_changed:
-                global_user_state.set_allowed_clouds(
-                    skypilot_config_allowed_clouds, active_workspace)
-        except SystemExit:
-            # If no cloud is enabled, check() will raise SystemExit.
-            # Here we catch it and raise the exception later only if
-            # raise_if_no_cloud_access is set to True.
-            pass
-        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            capability, active_workspace)
+        readable, writable = _caller_access_sets()
+        may_store = active_workspace in writable
+        if may_store:
+            try:
+                check_capability(capability,
+                                 quiet=True,
+                                 workspace=active_workspace)
+                if allowed_clouds_changed:
+                    global_user_state.set_allowed_clouds(
+                        skypilot_config_allowed_clouds, active_workspace)
+            except SystemExit:
+                # If no cloud is enabled, check() will raise SystemExit.
+                # Here we catch it and raise the exception later only if
+                # raise_if_no_cloud_access is set to True.
+                pass
+            cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
+                capability, active_workspace)
+        else:
+            if active_workspace not in readable:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _workspace_not_checkable_message(
+                            active_workspace, readable, writable))
+            cached_enabled_clouds = _clouds_from_names(
+                _unstored_enabled_cloud_names(active_workspace, capability,
+                                              _config_fingerprint()))
+    rechecked: Set[str] = set()
+    reader_rechecked = _reader_rechecked()
+    if reader_rechecked:  # Skips the fingerprint in the usual, empty case.
+        rechecked = reader_rechecked.get(
+            (active_workspace, capability, _config_fingerprint()), set())
+    if rechecked:
+        known = {repr(cloud) for cloud in cached_enabled_clouds}
+        cached_enabled_clouds = cached_enabled_clouds + _clouds_from_names(
+            sorted(rechecked - known))
     if raise_if_no_cloud_access and not cached_enabled_clouds:
+        if may_store is None:
+            may_store = _caller_may_store(active_workspace)
+        if may_store:
+            hint = 'Run: '
+        else:
+            # The caller's own `sky check` cannot refresh this workspace.
+            hint = (f'Ask a member of workspace '
+                    f'{_workspace_label(active_workspace)!r} or an admin to '
+                    'run: ')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
-                'Cloud access is not set up. Run: '
+                f'Cloud access is not set up. {hint}'
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
     return cached_enabled_clouds
+
+
+def recheck_clouds(capability: sky_cloud.CloudCapability,
+                   clouds: Iterable[str]) -> Set[str]:
+    """Re-checks `clouds` in the active workspace; returns the enabled ones.
+
+    A writer stores the result. For a caller who cannot, it is kept for the
+    rest of the request, so `get_cached_enabled_clouds_or_refresh` includes it.
+    """
+    workspace = skypilot_config.get_active_workspace()
+    persist = _caller_may_store(workspace)
+    enabled = set(
+        check_capability(capability,
+                         quiet=True,
+                         clouds=clouds,
+                         workspace=workspace,
+                         persist=persist).get(workspace, []))
+    if not persist:
+        _reader_rechecked().setdefault(
+            (workspace, capability, _config_fingerprint()),
+            set()).update(enabled)
+    return enabled
 
 
 def get_cloud_credential_file_mounts(

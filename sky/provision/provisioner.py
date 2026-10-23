@@ -798,8 +798,13 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
+            # The port is printed before the GCS is asked, so a probe that
+            # fails because Ray is still coming up still names the port.
+            found, payload = message_utils.decode_payload(
+                stdout, raise_for_mismatch=False)
+            if found:
+                ray_port = payload['ray_port']
             if not returncode:
-                ray_port = message_utils.decode_payload(stdout)['ray_port']
                 logger.debug(f'Ray cluster on head is up with port {ray_port}.')
 
             head_ray_needs_restart = bool(returncode)

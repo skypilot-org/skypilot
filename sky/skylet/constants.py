@@ -996,6 +996,13 @@ ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
 # effect on Linux and with more than one worker.
 ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
 
+# Seconds an API server keeps serving after it loses the managed jobs
+# consolidation mode lock and before it sends itself SIGTERM. Set it to cover
+# the readiness probe's failure window so the load balancer stops routing to the
+# server before its workers stop accepting connections. Defaults to 0.
+ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}STEP_DOWN_DRAIN_SECONDS')
+
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
 # BEGIN constants used for service catalog.

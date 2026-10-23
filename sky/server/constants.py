@@ -228,3 +228,22 @@ EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
 # enough that a launch shows up on the dashboard while someone is still
 # watching it, long enough that the sweep is negligible next to provisioning.
 LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60
+
+# Time an API server shutdown may take, matching the pod's
+# terminationGracePeriodSeconds when deployed with the Helm chart.
+try:
+    GRACE_PERIOD_SECONDS = int(
+        os.environ.get(constants.GRACE_PERIOD_SECONDS_ENV_VAR, '60'))
+except ValueError:
+    GRACE_PERIOD_SECONDS = 60
+
+# Time a server that lost the managed jobs consolidation mode lock keeps
+# serving before it sends itself SIGTERM.
+try:
+    STEP_DOWN_DRAIN_SECONDS = max(
+        0,
+        int(
+            os.environ.get(constants.ENV_VAR_SERVER_STEP_DOWN_DRAIN_SECONDS,
+                           '0')))
+except ValueError:
+    STEP_DOWN_DRAIN_SECONDS = 0

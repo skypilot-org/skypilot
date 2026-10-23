@@ -432,3 +432,35 @@ class TestPrivateDefaultWorkspace:
     def test_ambiguous_user_is_not_told_the_workspace_is_missing(self, env):
         detail = env.validate(task=_INSTANCE_TYPE_TASK, user='alice')
         assert detail['type'] == 'WorkspaceAmbiguousError'
+
+
+class TestReadOnlyWorkspaceColdCache:
+    """The only workspace the user can see is read-only, and its enabled-clouds
+    cache is cold."""
+
+    def test_validates_without_rewriting_the_cache(self, env):
+        env.configure({
+            'default': _private(),
+            'ws-ro': _private('alice', read_access='all'),
+        })
+        env.add_user('alice', ['ws-ro'])
+        env.add_user('bob', [])
+
+        def _probe_clouds(func, combinations, *args, **kwargs):
+            """Stands in for the credential probes: only AWS is usable."""
+            del func, args, kwargs
+            return [(capability, cloud_tuple[0] == repr(clouds.AWS()), None)
+                    for cloud_tuple, capability, _ in combinations]
+
+        with mock.patch.object(clouds.AWS,
+                               'instance_type_exists',
+                               return_value=True), \
+                mock.patch.object(sky_check.subprocess_utils,
+                                  'run_in_parallel',
+                                  side_effect=_probe_clouds):
+            assert env.validate(task=_INSTANCE_TYPE_TASK, user='bob') is None
+        # Answered for bob, but nothing was stored for the workspace.
+        assert not global_user_state.get_cached_enabled_clouds(
+            sky_cloud.CloudCapability.COMPUTE, 'ws-ro')
+        assert not global_user_state.get_allowed_clouds('ws-ro')
+        assert not global_user_state.get_cached_check_results('ws-ro')

@@ -1079,6 +1079,19 @@ def override_skypilot_config(
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
             disallowed_diff_keys.append('.'.join(key))
+    # ssh_proxy_command becomes a server-side SSH ProxyCommand during
+    # provisioning, so it is a server-owned setting (like admin_policy): a
+    # client must not supply it per request. It lives under each cloud block,
+    # so strip it from every cloud override; set it in the server config.
+    for cloud_name in list(override_configs.keys()):
+        cloud_override = override_configs.get(cloud_name)
+        if (not isinstance(cloud_override, dict) or
+                'ssh_proxy_command' not in cloud_override):
+            continue
+        value = cloud_override.pop('ssh_proxy_command')
+        if value != original_config.get_nested(
+            (cloud_name, 'ssh_proxy_command'), default_value=None):
+            disallowed_diff_keys.append(f'{cloud_name}.ssh_proxy_command')
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:

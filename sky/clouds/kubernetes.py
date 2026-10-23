@@ -1469,6 +1469,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
             'k8s_context': context,
+            # Uncached: a context can be re-pointed without a kubeconfig change.
+            'k8s_cluster_uid':
+                (None if dryrun else kubernetes_utils.get_cluster_uid(
+                    context, use_cache=False)),
             'k8s_namespace': namespace,
             'k8s_host_network': k8s_host_network,
             'k8s_rdma_host_device_access': k8s_rdma_host_device_access,

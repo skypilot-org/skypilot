@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import { useRouter } from 'next/router';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
@@ -482,6 +483,21 @@ function normalizeTableColumn(config) {
       sortKey: config.header.sortKey
         ? String(config.header.sortKey)
         : undefined,
+      // The value to sort a row by under this column's sortKey, for a column
+      // whose value is not a field on the row itself. Without it, the row is
+      // sorted by row[sortKey]. A row whose value is null sorts last in
+      // either direction.
+      sortValue:
+        typeof config.header.sortValue === 'function'
+          ? config.header.sortValue
+          : undefined,
+      // (onChange) => unsubscribe. For a sortValue that reads data the plugin
+      // keeps itself: call onChange when that data changes, and the table
+      // re-sorts.
+      sortValueSubscribe:
+        typeof config.header.sortValueSubscribe === 'function'
+          ? config.header.sortValueSubscribe
+          : undefined,
       className: config.header.className
         ? String(config.header.className)
         : undefined,
@@ -1043,6 +1059,28 @@ export function PluginProvider({ children }) {
 
 export function usePluginState() {
   return useContext(PluginContext);
+}
+
+// True once every script in the manifest has loaded (or failed to load). Pages
+// use this to tell "a route is still registering" apart from "no such route".
+export function usePluginsLoaded() {
+  const [pluginsLoaded, setPluginsLoaded] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.__skyDashboardPluginsLoaded === true
+  );
+  useEffect(() => {
+    if (window.__skyDashboardPluginsLoaded === true) {
+      setPluginsLoaded(true);
+      return undefined;
+    }
+    const handler = () => setPluginsLoaded(true);
+    window.addEventListener('skydashboard:plugins-loaded', handler);
+    return () => {
+      window.removeEventListener('skydashboard:plugins-loaded', handler);
+    };
+  }, []);
+  return pluginsLoaded;
 }
 
 export function useTopNavLinks() {
