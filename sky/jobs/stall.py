@@ -44,17 +44,18 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.server import constants as server_constants
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 from sky.utils import controller_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# This module has a consumer outside this repository: a plugin's poller turns
-# the same two scans into events for deployments that do not scrape. The two
-# scans, their result types and the threshold helpers are an interface --
-# renaming or narrowing one breaks a caller that does not appear in any search
-# of this repo. Everything prefixed `_` is private.
+# This module has callers outside this repository. The two scans, their result
+# types and the threshold helpers are an interface -- renaming or narrowing one
+# breaks a caller that does not appear in any search of this repo. Everything
+# prefixed `_` is private.
 
 NEVER_CLAIMED = 'never_claimed'
 UNATTENDED = 'unattended'
@@ -72,7 +73,8 @@ DEFAULT_EXAMINATION_LIMIT = 200
 # `set_backoff_pending_async` going into backoff, `set_restarting_async` coming
 # out. A wedged one writes none. The loop's backoff caps at five times its 60s
 # base, so this window clears a sleeping round several times over while still
-# being shorter than the unattended threshold itself.
+# being shorter than the unattended threshold itself. It also bounds how long an
+# ended launch request counts; see `_clusters_with_recent_launch_end`.
 _RETRY_ACTIVITY_SECONDS = 900
 
 # Budget for ALL the managed-jobs statements one scan runs, not a per-statement
@@ -90,7 +92,7 @@ _RETRY_ACTIVITY_SECONDS = 900
 # so the budget is three orders of magnitude of headroom, not a tuning knob.
 #
 # It still does not bound a whole scan: the per-task attempt reads and the
-# request lookup go to other stores and have no bound of their own. What stops
+# request lookups go to other stores and have no bound of their own. What stops
 # refreshes from stacking is the caller holding one in flight, not this.
 _SCAN_BUDGET_SECONDS = 12
 # Never issue a timeout below this: a budget that has run out should fail the
@@ -351,9 +353,9 @@ def _clusters_with_live_requests(cluster_names: List[str]) -> Set[str]:
 
     One batched query rather than one per candidate: a fleet-wide stall is
     exactly when this scan has the most rows and the API server the least to
-    spare. A parked launch -- queue admission, a cluster lock, pod-group
-    resolution -- is a request in WAITING, which is what makes this the primary
-    suppressor: it covers every park without knowing which kind it is.
+    spare. A parked launch (e.g. one waiting on a cluster lock) is a request in
+    WAITING, which is what makes this the primary suppressor: it covers every
+    park without knowing which kind it is.
     """
     if not cluster_names:
         return set()
@@ -372,6 +374,41 @@ def _clusters_with_live_requests(cluster_names: List[str]) -> Set[str]:
             # "not measured" during exactly the rollout worth watching.
             fields=[api_requests.COL_CLUSTER_NAME]))
     return {task.cluster_name for task in tasks if task.cluster_name}
+
+
+_LAUNCH_REQUEST_NAME = (server_constants.REQUEST_NAME_PREFIX +
+                        request_names.RequestName.CLUSTER_LAUNCH.value)
+
+
+def _clusters_with_recent_launch_end(cluster_names: List[str],
+                                     now: float) -> Set[str]:
+    """Which of these clusters had a launch request end inside the window.
+
+    Covers the teardown after a failed launch round: the controller runs
+    `core.down` in-process, with retries of its own and under no request,
+    before it writes the backoff job_events row. Only launch requests count;
+    another request on the cluster, such as a dashboard polling its queue,
+    says nothing about the controller.
+    """
+    if not cluster_names:
+        return set()
+    tasks = api_requests.get_request_tasks(
+        api_requests.RequestTaskFilter(
+            status=api_requests.RequestStatus.finished_status(),
+            cluster_names=list(cluster_names),
+            include_request_names=[_LAUNCH_REQUEST_NAME],
+            finished_after=now - _RETRY_ACTIVITY_SECONDS,
+            # Projected for the reason in _clusters_with_live_requests.
+            fields=[
+                api_requests.COL_CLUSTER_NAME, api_requests.COL_FINISHED_AT
+            ]))
+    # finished_after also matches a NULL finished_at, which some writers leave
+    # on a closed request; such a row would hold its cluster quiet for good.
+    return {
+        task.cluster_name
+        for task in tasks
+        if task.cluster_name and task.finished_at is not None
+    }
 
 
 def _attempt_is_working(attempt: Any, now: float, age_seconds: float) -> bool:
@@ -465,7 +502,7 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     holds the gate shut and the unattended phase excludes pool jobs.
 
     `controllers` is the nominal count: `get_alive_controllers()` reads a
-    replica-local pid file and returns 0 where it is absent, which would hold
+    host-local pid file and returns 0 where it is absent, which would hold
     the gate shut everywhere else. It is sized from the calling process, so off
     consolidation mode it describes the wrong machine and the phase is
     suppressed instead -- which is what the metrics path does there anyway.
@@ -654,9 +691,19 @@ def scan_unattended(
     active = _tasks_active_recently(engine,
                                     [task.spot_job_id for task in examined],
                                     deadline)
-    unexamined = len(candidates) - len(examined)
-    return _scan(UNATTENDED, [
+    stalled = [
         task for task in examined
         if _still_stalled(task, now, age_seconds, busy_clusters, active)
-    ],
-                 truncated=unexamined > 0 or len(rows) >= candidate_limit)
+    ]
+    # Last, and only for what the other checks left, which is usually nothing:
+    # on SQLite no index serves this lookup, so it reads the whole table.
+    stalled_names = [
+        name for name in (_cluster_name(task) for task in stalled)
+        if name is not None
+    ]
+    relaunching = _clusters_with_recent_launch_end(stalled_names, now)
+    unexamined = len(candidates) - len(examined)
+    return _scan(
+        UNATTENDED,
+        [task for task in stalled if _cluster_name(task) not in relaunching],
+        truncated=unexamined > 0 or len(rows) >= candidate_limit)

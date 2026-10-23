@@ -287,6 +287,65 @@ above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
     ``sky`` commands inside the pod), the workload service account will need
     broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
+.. _kubernetes-remote-identity-none:
+
+Running workload pods with no Kubernetes identity
+-------------------------------------------------
+
+To give the pods SkyPilot launches no access to the Kubernetes API, set
+``remote_identity: NONE``:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      remote_identity: NONE
+
+With ``NONE``, SkyPilot mounts no service account token in the pods and grants
+their service account no roles. The pods keep the account name
+``skypilot-service-account``, so ``imagePullSecrets`` set on that account keep
+working.
+
+Under ``NONE``, these do not work:
+
+- Autodown (``sky launch --down``, ``sky autostop --down``). A cluster tears
+  itself down through the Kubernetes API, so SkyPilot refuses autodown at
+  launch. Use ``sky down`` instead. Managed jobs still run: the jobs controller
+  tears their clusters down, and skips the idle autodown it would otherwise set
+  on them as a safeguard.
+- ``kubectl`` or ``sky`` run inside a pod against the cluster's own Kubernetes
+  API. Removing that access is the purpose of ``NONE``.
+
+SkyPilot also refuses a ``pod_config`` that would give the pods a token back:
+``spec.serviceAccountName``, ``spec.serviceAccount``,
+``spec.automountServiceAccountToken: true``, or a projected
+``serviceAccountToken`` volume.
+
+Jobs and serve controllers keep their identity, because they launch clusters.
+The clusters they launch for your jobs and services still get ``NONE``.
+
+Clusters launched before ``NONE`` was set keep their pod spec, and so their
+token. That includes a pod recreated in place when such a cluster is
+relaunched, because the spec comes from the cluster's stored config. To run one
+with no identity, take it down and launch it again.
+
+When the API server's config sets ``NONE`` (globally, in a workspace, or in
+``context_configs``), users cannot loosen it: a request whose client config or
+task sets another ``remote_identity`` is refused. Users can still choose
+``NONE`` for their own tasks when the server does not set it. Set ``NONE`` in
+the API server's config for this guarantee: a ``NONE`` that an admin policy
+writes into a request's config can still be loosened by the task's own
+``config``.
+
+.. note::
+
+    ``NONE`` covers the token Kubernetes mounts for the pod's service account.
+    It does not detect a ``pod_config`` that mounts a service account token
+    Secret as an ordinary ``secret`` volume, and it does not cover pods that
+    other tools create in the namespace. For those, use an admission policy,
+    such as a ValidatingAdmissionPolicy that rejects pods that do not set
+    ``automountServiceAccountToken: false`` or that mount token Secrets.
+
 
 Controller clusters use a separate service account
 --------------------------------------------------

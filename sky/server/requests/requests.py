@@ -166,6 +166,12 @@ REQUEST_COLUMNS = [
     COL_FILE_MOUNTS_BLOB_ID,
 ]
 
+# Columns a request listing reads. Listings never show the return value or
+# the error, which can be large.
+DISPLAY_COLUMNS = [
+    col for col in REQUEST_COLUMNS if col not in ('return_value', 'error')
+]
+
 
 def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
                               caller_user_id: Optional[str]) -> str:
@@ -767,9 +773,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles killing
+    the request processes and marking the requests cancelled.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -1382,11 +1387,11 @@ def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
 async def _clean_orphan_request_logs() -> None:
     """Delete request log files whose request row is already gone.
 
-    When the API server runs with more than one replica, the replicas share
-    one database but each writes its request logs to local disk, so the
-    row-driven cleanup above only reaches the files that sit on the replica
-    running it. A file left behind on another replica outlives the row that
-    names it, after which nothing on the database side can enumerate it.
+    When several API server instances share one database, each writes its
+    request logs to local disk, so the row-driven cleanup above only reaches
+    the files that sit on the instance running it. A file left behind on
+    another instance outlives the row that names it, after which nothing on
+    the database side can enumerate it.
 
     A file with no row is already garbage — it cannot be read back through
     the API — so the age cutoff is a grace period against reading a

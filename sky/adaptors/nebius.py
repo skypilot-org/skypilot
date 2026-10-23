@@ -3,7 +3,9 @@ import asyncio
 import logging
 import os
 import threading
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import (Any, Awaitable, Dict, List, NamedTuple, Optional, Tuple,
+                    Union)
+import weakref
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -321,33 +323,114 @@ def _user_agent_prefix() -> str:
     return f'skypilot/{__version__}'
 
 
-@annotations.lru_cache(scope='request')
+# SDKs own a loop thread, channel pool and token-renewal task. Dropping a
+# request-scoped cache entry does not release those resources. Reuse clients
+# across requests, serializing construction to avoid concurrent cache misses.
+_SDK_CLOSE_TIMEOUT = 30
+_sdk_lock = threading.Lock()
+
+
+class _SDKHandle:
+    """Keep an SDK alive while service clients, requests or operations use it.
+
+    The SDK's renewal task retains the raw SDK, so finalizing the SDK itself
+    cannot reclaim it. This separate handle is retained by the cache and SDK
+    consumers, but not by the SDK's internal background tasks.
+    """
+
+    def __init__(self, sdk_client: Any) -> None:
+        # Loop creation can trigger GC while holding _loop_lock. Initialize it
+        # before registering any finalizer that could try to acquire that lock.
+        _get_event_loop()
+        self._sdk_client = sdk_client
+        # At interpreter exit the OS reclaims process-owned resources. Do not
+        # attempt to start/join event-loop threads during interpreter shutdown.
+        finalizer = weakref.finalize(self, _close_sdk, sdk_client)
+        # Typeshed declares this writable property as a field outside __slots__.
+        finalizer.atexit = False  # type: ignore[misc]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sdk_client, name)
+
+
+class _SDKCacheEntry(NamedTuple):
+    credential_version: Union[str, Tuple[int, int, int, int]]
+    client: _SDKHandle
+
+
+_SDKSource = Tuple[bool, str, Optional[str]]
+_sdk_cache: Dict[_SDKSource, _SDKCacheEntry] = {}
+_sdk_sources: Dict[Tuple[str, Optional[str]], _SDKSource] = {}
+
+
+async def _close_sdk_async(sdk_client: Any) -> None:
+    try:
+        await asyncio.wait_for(sdk_client.close(), timeout=_SDK_CLOSE_TIMEOUT)
+    except Exception:  # pylint: disable=broad-except
+        logger.warning('Failed to close a cached Nebius SDK.', exc_info=True)
+
+
+def _close_sdk(sdk_client: Any) -> None:
+    # The last reference can disappear on an SDK thread or an async caller's
+    # loop. Never block that thread while waiting for the SDK to shut down.
+    asyncio.run_coroutine_threadsafe(_close_sdk_async(sdk_client),
+                                     _get_event_loop())
+
+
 def _sdk(token: Optional[str], cred_path: Optional[str]):
-    # Exactly one of token or cred_path must be provided
+    # Exactly one of token or cred_path must be provided.
     assert (token is None) != (cred_path is None), (token, cred_path)
-    if token is not None:
-        return nebius.sdk.SDK(credentials=token,
-                              domain=api_domain(),
-                              user_agent_prefix=_user_agent_prefix())
-    if cred_path is not None:
-        return nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(cred_path),
-            domain=api_domain(),
-            user_agent_prefix=_user_agent_prefix(),
-        )
-    raise ValueError('Either token or credentials file path must be provided')
+    domain = api_domain()
+    source_path = os.path.abspath(
+        os.path.expanduser(
+            cred_path if cred_path is not None else iam_token_path()))
+    source = (token is not None, source_path, domain)
+    owner = (skypilot_config.get_active_workspace(), domain)
+    with _sdk_lock:
+        credential_version: Union[str, Tuple[int, int, int, int]]
+        if token is not None:
+            credential_version = token
+        else:
+            # The SDK reads service-account credentials only at construction.
+            # Preserve credential refresh when a file is edited or replaced.
+            stat = os.stat(source_path)
+            credential_version = (stat.st_ino, stat.st_size, stat.st_mtime_ns,
+                                  stat.st_ctime_ns)
+        entry = _sdk_cache.get(source)
+        if (entry is None or entry.credential_version != credential_version):
+            if token is not None:
+                sdk_client = nebius.sdk.SDK(
+                    credentials=token,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            else:
+                sdk_client = nebius.sdk.SDK(
+                    credentials_file_name=source_path,
+                    domain=domain,
+                    user_agent_prefix=_user_agent_prefix())
+            entry = _SDKCacheEntry(credential_version, _SDKHandle(sdk_client))
+            _sdk_cache[source] = entry
+
+        # A source switch (e.g. adding/removing the IAM token file) must also
+        # retire the previous client, unless another workspace still selects it.
+        previous_source = _sdk_sources.get(owner)
+        _sdk_sources[owner] = source
+        if (previous_source is not None and previous_source != source and
+                previous_source not in _sdk_sources.values()):
+            _sdk_cache.pop(previous_source, None)
+        return entry.client
 
 
 def clear_sdk_cache() -> None:
-    """Drops the cached SDK client.
+    """Retire cached SDKs without interrupting their existing consumers.
 
-    The SDK is cached per credentials and holds grpc.aio channels bound to the
-    event loop that first used them. `asyncio.run()` closes the loop it
-    creates, and once a request has failed on such a channel, later calls from
-    a fresh loop raise "Event loop is closed". Callers that drive more than one
-    `asyncio.run()` cycle in a single process must reset the client in between.
+    SDKs close asynchronously after the last service client, request or
+    operation releases its handle. The catalog fetcher calls this between
+    asyncio.run() cycles; concurrent callers can safely finish on retired SDKs.
     """
-    _sdk.cache_clear()
+    with _sdk_lock:
+        _sdk_cache.clear()
+        _sdk_sources.clear()
 
 
 def get_nebius_credentials(boto3_session):

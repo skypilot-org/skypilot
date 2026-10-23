@@ -1,10 +1,17 @@
+variable "skypilot_src" {
+  type        = string
+  default     = ""
+  description = "pip source to bake SkyPilot from, e.g. git+https://github.com/skypilot-org/skypilot@<sha>. Empty uses the latest skypilot-nightly."
+}
+
 variable "region" {
   type    = string
   default = "us-east-1"
 }
 
 locals {
-  date = formatdate("YYMMDD", timestamp())
+  # UTC, to the minute, so same-day rebuilds get distinct image names.
+  date = formatdate("YYMMDDhhmm", timestamp())
 }
 
 source "amazon-ebs" "gpu-ubuntu" {
@@ -46,6 +53,7 @@ build {
   provisioner "shell" {
     environment_vars = [
       "CLOUD=aws",
+      "SKYPILOT_SRC=${var.skypilot_src}",
     ]
     script = "./provisioners/skypilot.sh"
   }

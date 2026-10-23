@@ -182,8 +182,8 @@ async def download_logs(
     jobs_download_logs_body: payloads.JobsDownloadLogsBody = fastapi.Depends(
         role_filter.force_viewer_jobs_download_logs_body),
 ) -> None:
-    user_hash = download_utils.download_user_id(request,
-                                                jobs_download_logs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             jobs_download_logs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -279,7 +279,8 @@ async def pool_download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.JobsPoolDownloadLogsBody,
 ) -> None:
-    user_hash = download_utils.download_user_id(request, download_logs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             download_logs_body.user_hash)
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
         pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /

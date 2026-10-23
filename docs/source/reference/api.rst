@@ -96,6 +96,12 @@ Cluster jobs SDK
 .. autofunction:: sky.job_status
   :noindex:
 
+``sky.cluster_job_spec``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: sky.cluster_job_spec
+  :noindex:
+
 
 ``sky.tail_logs``
 ^^^^^^^^^^^^^^^^^
