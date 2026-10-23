@@ -103,6 +103,10 @@ touch "$KUBECONFIG"
 # SkyPilot would offer the cluster it runs on as an "in-cluster" context.
 # Tests only see the contexts in KUBECONFIG.
 export SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false
+# Consolidation mode sizes its jobs-controller pool to the machine (27
+# processes of ~290 MB on 16 CPUs). The suite never runs a managed job; one
+# controller keeps the server realistic without eating the machine.
+export SKYPILOT_SERVER_JOBS_CONTROLLERS="${SKYPILOT_SERVER_JOBS_CONTROLLERS:-1}"
 
 ADMIN_HASH="$(python -c 'import sys; from passlib.context import CryptContext; print(CryptContext(["bcrypt"]).hash(sys.argv[1]))' "$ADMIN_PW")"
 export ENABLE_BASIC_AUTH=true
@@ -110,7 +114,12 @@ export ENABLE_SERVICE_ACCOUNTS=true
 export SKYPILOT_INITIAL_BASIC_AUTH="$ADMIN_USER:$ADMIN_HASH"
 
 START=$(date +%s)
-sky api start --deploy >"$RUNTIME_DIR/start.log" 2>&1 || {
+# --deploy (the default, as in production) sizes worker pools to the whole
+# machine. Several servers sharing one machine set E2E_SERVER_DEPLOY=0 for the
+# small local pools, or they oversubscribe it.
+DEPLOY_FLAG=(--deploy)
+[[ "${E2E_SERVER_DEPLOY:-1}" == "0" ]] && DEPLOY_FLAG=()
+sky api start ${DEPLOY_FLAG[@]+"${DEPLOY_FLAG[@]}"} >"$RUNTIME_DIR/start.log" 2>&1 || {
   cat "$RUNTIME_DIR/start.log" >&2
   tail -50 "$RUNTIME_DIR/.sky/api_server/server.log" >&2 || true
   exit 1
