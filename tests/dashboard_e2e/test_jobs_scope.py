@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, List
 
 from framework import seed
+from framework.page_tools import stop_auto_refresh
 from framework.twists import remove_button
 from framework.twists import remove_element
 from framework.twists import rewrite_request
@@ -243,6 +244,8 @@ def test_typing_in_job_filter_does_not_refetch(make_user, seed_job, open_as,
     expect(page.get_by_role('link', name=f'{uid}-train-a', exact=True),
            'seeded job must be listed').to_be_visible()
 
+    # The table's periodic refresh is not a refetch caused by typing.
+    stop_auto_refresh(page)
     since = page.recorder.mark()
     # 450 ms per key is longer than a 350 ms debounce that would refetch
     # mid-word.
