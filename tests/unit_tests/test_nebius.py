@@ -1,4 +1,5 @@
 # pylint: disable=protected-access
+import contextlib
 import logging
 import os
 from unittest.mock import MagicMock
@@ -9,8 +10,10 @@ import pytest
 from sky import clouds
 from sky import resources as resources_lib
 from sky.adaptors import nebius as nebius_adaptor
+from sky.catalog import nebius_catalog
 from sky.clouds import nebius
 from sky.provision.nebius import constants as nebius_constants
+from sky.provision.nebius import utils as nebius_utils
 from sky.utils import resources_utils
 
 
@@ -303,3 +306,110 @@ class TestNebiusInfinibandFabrics:
         ]:
             assert preset.startswith(prefix)
         assert not '1gpu-16vcpu-200gb'.startswith(prefix)
+
+
+def _fake_project(project_id, region):
+    project = MagicMock()
+    project.metadata.id = project_id
+    project.status.region = region
+    return project
+
+
+def _fake_projects_page(projects, next_page_token=''):
+    page = MagicMock()
+    page.items = projects
+    page.next_page_token = next_page_token
+    return page
+
+
+class TestNebiusProjectListing:
+    """Tests for looking up projects across ListProjects pages."""
+
+    @pytest.fixture
+    def list_projects_pages(self):
+        """Serves the given pages from ListProjects, recording each request."""
+        mock_iam = MagicMock()
+        mock_iam.ListProjectsRequest.side_effect = lambda **kwargs: kwargs
+        service = mock_iam.ProjectServiceClient.return_value
+        service.list.side_effect = lambda request, timeout: request
+
+        @contextlib.contextmanager
+        def _install(pages):
+            responses = iter(pages)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    patch.object(nebius_adaptor, 'iam', return_value=mock_iam))
+                stack.enter_context(patch.object(nebius_adaptor, 'sdk'))
+                stack.enter_context(
+                    patch.object(nebius_adaptor,
+                                 'get_tenant_id',
+                                 return_value='tenant-1'))
+                stack.enter_context(
+                    patch.object(nebius_adaptor,
+                                 'sync_call',
+                                 side_effect=lambda _: next(responses)))
+                stack.enter_context(
+                    patch('sky.skypilot_config.get_effective_region_config',
+                          return_value=None))
+                yield service
+
+        return _install
+
+    def test_get_project_by_region_follows_next_page_token(
+            self, list_projects_pages):
+        """A project past the first page must still be found.
+
+        ListProjects returns 10 projects per page by default, so a tenant
+        with more projects than that used to miss regions on later pages.
+        """
+        pages = [
+            _fake_projects_page([_fake_project('project-e00a', 'eu-north1')],
+                                next_page_token='token-2'),
+            _fake_projects_page([_fake_project('project-e01b', 'eu-west1')]),
+        ]
+        with list_projects_pages(pages) as service:
+            assert nebius_utils.get_project_by_region(
+                'eu-west1') == 'project-e01b'
+            requests = [c.args[0] for c in service.list.call_args_list]
+        assert [r['page_token'] for r in requests] == ['', 'token-2']
+        assert all(r['parent_id'] == 'tenant-1' for r in requests)
+
+    def test_get_project_by_region_stops_at_first_match(self,
+                                                        list_projects_pages):
+        """Later pages are not fetched once the region's project is found.
+
+        A failure on a page after the match must not break a lookup that
+        the first page already answers.
+        """
+        pages = [
+            _fake_projects_page([_fake_project('project-e00a', 'eu-north1')],
+                                next_page_token='token-2'),
+        ]
+        with list_projects_pages(pages) as service:
+            assert nebius_utils.get_project_by_region(
+                'eu-north1') == 'project-e00a'
+        assert service.list.call_count == 1
+
+    def test_get_project_by_region_raises_when_no_page_matches(
+            self, list_projects_pages):
+        pages = [
+            _fake_projects_page([_fake_project('project-e00a', 'eu-north1')],
+                                next_page_token='token-2'),
+            _fake_projects_page([_fake_project('project-u00c', 'us-central1')]),
+        ]
+        with list_projects_pages(pages):
+            with pytest.raises(Exception,
+                               match='No project found for region "eu-west1"'):
+                nebius_utils.get_project_by_region('eu-west1')
+
+    def test_region_projects_cover_every_page(self, list_projects_pages):
+        pages = [
+            _fake_projects_page([_fake_project('project-e00a', 'eu-north1')],
+                                next_page_token='token-2'),
+            _fake_projects_page([_fake_project('project-e01b', 'eu-west1')]),
+        ]
+        with list_projects_pages(pages):
+            assert nebius_catalog._get_region_projects() == {
+                'eu-north1': 'project-e00a',
+                'eu-west1': 'project-e01b',
+            }

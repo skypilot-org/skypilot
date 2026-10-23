@@ -1,6 +1,6 @@
 """Nebius library wrapper for SkyPilot."""
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 import uuid
 
 from sky import sky_logging
@@ -52,17 +52,36 @@ def retry(func):
     return wrapper
 
 
+def list_projects() -> Iterator[Any]:
+    """Yields every project in the current tenant.
+
+    ListProjects returns 10 projects per page by default, so a tenant with
+    more projects than that needs to follow next_page_token. Pages are
+    fetched as they are consumed, so a caller that stops early never
+    requests the later ones.
+    """
+    service = nebius.iam().ProjectServiceClient(nebius.sdk())
+    tenant_id = nebius.get_tenant_id()
+    page_token = ''
+    while True:
+        resp = nebius.sync_call(
+            service.list(nebius.iam().ListProjectsRequest(
+                parent_id=tenant_id,
+                page_token=page_token,
+            ),
+                         timeout=nebius.READ_TIMEOUT))
+        yield from resp.items
+        if not resp.next_page_token:
+            return
+        page_token = resp.next_page_token
+
+
 def get_project_by_region(region: str) -> str:
     project_id = skypilot_config.get_effective_region_config(
         cloud='nebius', region=region, keys=('project_id',), default_value=None)
     if project_id is not None:
         return project_id
-    service = nebius.iam().ProjectServiceClient(nebius.sdk())
-    projects = nebius.sync_call(
-        service.list(
-            nebius.iam().ListProjectsRequest(parent_id=nebius.get_tenant_id()),
-            timeout=nebius.READ_TIMEOUT))
-    for project in projects.items:
+    for project in list_projects():
         if project.status.region == region:
             return project.metadata.id
     raise Exception(f'No project found for region "{region}".')
