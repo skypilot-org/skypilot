@@ -13,8 +13,10 @@ import unittest.mock as mock
 import pytest
 
 from sky.server import daemons
+from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests
+from sky.server.requests.queues import base as queue_base
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
 
@@ -132,3 +134,43 @@ async def test_delete_orphan_ignores_non_daemon_request_ids(isolated_database):
 
     assert await requests.get_request_async('some-client-request-uuid'
                                            ) is not None
+
+
+def _queued_ids():
+    ids = []
+    for schedule_type in ScheduleType:
+        queue = queue_base.DbQueueBackend(schedule_type.value)
+        while (item := queue.get()) is not None:
+            ids.append(item[0])
+    return sorted(ids)
+
+
+@pytest.mark.asyncio
+async def test_delete_orphan_also_removes_their_queue_entries(
+        isolated_database):
+    """The queue entry of a removed daemon goes away with its row."""
+    for daemon_id in ['alpha-daemon', 'removed-daemon']:
+        req = requests.build_internal_daemon_request(_make_daemon(daemon_id))
+        assert await requests.create_if_not_exists_async(req)
+        await queue_base.DbQueueBackend(req.schedule_type.value).put_async(
+            (daemon_id, False, True))
+
+    await requests.delete_orphan_internal_daemons_async(
+        [_make_daemon('alpha-daemon')])
+
+    assert _queued_ids() == ['alpha-daemon']
+
+
+@pytest.mark.asyncio
+async def test_refreshing_a_daemon_row_does_not_enqueue_it_again(
+        isolated_database):
+    """Two submissions of one daemon leave exactly one queue entry."""
+    executor._get_queue.cache_clear()  # pylint: disable=protected-access
+    try:
+        daemon = _make_daemon('alpha-daemon')
+        await executor.schedule_internal_daemon_async(daemon)
+        await executor.schedule_internal_daemon_async(daemon)
+
+        assert _queued_ids() == ['alpha-daemon']
+    finally:
+        executor._get_queue.cache_clear()  # pylint: disable=protected-access

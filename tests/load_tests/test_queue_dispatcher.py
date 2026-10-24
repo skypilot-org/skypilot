@@ -10,7 +10,6 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
-from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -40,33 +39,17 @@ def schedule():
     worker = executor.RequestWorker(
         schedule_type=api_requests.ScheduleType.LONG,
         config=server_config.WorkerConfig(garanteed_parallelism=1,
-                                          burstable_parallelism=1))
+                                          burstable_parallelism=1,
+                                          num_db_connections_per_worker=0))
     mock_executor = MockExecutor(garanteed_workers=1, burst_workers=1)
     queue = executor._get_queue(api_requests.ScheduleType.LONG)  # pylint: disable=protected-access
-    while not queue.queue.empty():
+    while len(queue) > 0:
         worker.process_request(mock_executor, queue)
 
 
-def benchmark_queue_dispatcher(queue_backend: str,
-                               worker_mode: str,
-                               count=1) -> float:
+def benchmark_queue_dispatcher(worker_mode: str, count=1) -> float:
     api_requests.reset_db_and_logs()
     num_requests = 10000
-    executor.queue_backend = queue_backend
-
-    queue_server = None
-    if queue_backend == executor.QueueBackend.MULTIPROCESSING:
-        port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
-        queue_server = multiprocessing.Process(
-            target=mp_queue.start_queue_manager,
-            args=([api_requests.ScheduleType.LONG.value], port))
-        queue_server.start()
-        mp_queue.wait_for_queues_to_be_ready(
-            [api_requests.ScheduleType.LONG.value], queue_server, port=port)
-    elif queue_backend == executor.QueueBackend.LOCAL:
-        pass
-    else:
-        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
 
     def enqueue_requests():
         for _ in range(num_requests):
@@ -107,36 +90,26 @@ def benchmark_queue_dispatcher(queue_backend: str,
     end_time = time.time()
     duration = end_time - start_time
     requests_per_second = num_requests / duration
-    if queue_server:
-        queue_server.terminate()
-        queue_server.join()
     # Clear queue cache
     executor._get_queue.cache_clear()  # pylint: disable=protected-access
     return requests_per_second
 
 
 if __name__ == '__main__':
-    t1 = benchmark_queue_dispatcher(executor.QueueBackend.MULTIPROCESSING,
-                                    'process')
+    t1 = benchmark_queue_dispatcher('process')
     print('\nBenchmark Results:')
     print('-' * 50)
-    print(f'Process queue + 1 process dispatcher:')
+    print(f'1 process dispatcher:')
     print(f'  Requests/sec:  {t1:,.2f}')
 
-    t2 = benchmark_queue_dispatcher(executor.QueueBackend.LOCAL, 'thread')
-    print(f'\nLocal thread queue + 1 thread dispatcher:')
+    t2 = benchmark_queue_dispatcher('thread')
+    print(f'\n1 thread dispatcher:')
     print(f'  Requests/sec:  {t2:,.2f}')
 
-    t3 = benchmark_queue_dispatcher(executor.QueueBackend.MULTIPROCESSING,
-                                    'thread')
-    print(f'\nProcess queue + 1 thread dispatcher:')
+    t3 = benchmark_queue_dispatcher('process', 10)
+    print(f'\n10 process dispatchers:')
     print(f'  Requests/sec:  {t3:,.2f}')
 
-    t4 = benchmark_queue_dispatcher(executor.QueueBackend.MULTIPROCESSING,
-                                    'process', 10)
-    print(f'\nProcess queue + 10 process dispatcher:')
+    t4 = benchmark_queue_dispatcher('thread', 10)
+    print(f'\n10 thread dispatchers (in one process):')
     print(f'  Requests/sec:  {t4:,.2f}')
-
-    t5 = benchmark_queue_dispatcher(executor.QueueBackend.LOCAL, 'thread', 10)
-    print(f'\nLocal thread queue + 10 thread dispatcher (in one process):')
-    print(f'  Requests/sec:  {t5:,.2f}')

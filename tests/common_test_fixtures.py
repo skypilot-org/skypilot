@@ -397,7 +397,7 @@ def mock_services_one_service_grpc(monkeypatch):
 @pytest.fixture
 def mock_queue(monkeypatch):
     """
-    Mock for `sky.server.requests.queues.mp_queue.get_queue` to return an object
+    Mock for `sky.server.requests.executor._get_queue` to return an object
     with a `.put` method that stores (request_id, ignore_return_value) in a map.
     """
 
@@ -427,10 +427,6 @@ def mock_queue(monkeypatch):
     def mock_get_queue(schedule_type):
         return mock_queue_instance
 
-    # Apply monkeypatch to replace `mp_queue.get_queue`
-    monkeypatch.setattr("sky.server.requests.queues.mp_queue.get_queue",
-                        mock_get_queue)
-    # Also patch executor._get_queue which uses the factory pattern
     monkeypatch.setattr("sky.server.requests.executor._get_queue",
                         mock_get_queue)
 

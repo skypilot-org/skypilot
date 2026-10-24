@@ -1,7 +1,6 @@
 """SkyPilot API Server configuration."""
 
 import dataclasses
-import enum
 import functools
 import os
 from typing import Literal, Optional
@@ -62,16 +61,6 @@ _DEFAULT_IDENTITY_CLAIM = 'sub'
 logger = sky_logging.init_logger(__name__)
 
 
-class QueueBackend(enum.Enum):
-    # Local queue backend serves queues in each process locally, which has
-    # lower resource usage but the consumer must be in the same process, i.e.
-    # this only works in single-process mode.
-    LOCAL = 'local'
-    # Multi-process queue backend starts a dedicated process for serving queues.
-    MULTIPROCESSING = 'multiprocessing'
-    # TODO(zhwu): we can add redis backend in the future.
-
-
 @dataclasses.dataclass
 class WorkerConfig:
     garanteed_parallelism: int
@@ -85,7 +74,6 @@ class ServerConfig:
     long_worker_config: WorkerConfig
     short_worker_config: WorkerConfig
     num_db_connections_per_worker: int
-    queue_backend: QueueBackend
 
 
 def compute_server_config(
@@ -159,7 +147,6 @@ def compute_server_config(
     else:
         max_parallel_for_short = _max_short_worker_parallism(
             mem_size_gb, max_parallel_for_long)
-    queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
     # if num_db_connections_per_worker is 0, server will use NullPool
@@ -173,9 +160,6 @@ def compute_server_config(
                                 num_server_workers + 1)
 
     if not deploy:
-        # For local mode, use local queue backend since we only run 1 uvicorn
-        # worker in local mode and no multiprocessing is needed.
-        queue_backend = QueueBackend.LOCAL
         # Enable burstable workers for local API server.
         burstable_parallel_for_long = _BURSTABLE_WORKERS_FOR_LOCAL
         burstable_parallel_for_short = _BURSTABLE_WORKERS_FOR_LOCAL
@@ -224,7 +208,6 @@ def compute_server_config(
             f'({short_source}).')
     return ServerConfig(
         num_server_workers=num_server_workers,
-        queue_backend=queue_backend,
         long_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_long,
             burstable_parallelism=burstable_parallel_for_long,
