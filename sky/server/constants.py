@@ -181,11 +181,16 @@ ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
 REQUEST_LOG_PATH_PREFIX = runtime_utils.runtime_tilde_path(
     '~/.sky/api_server/request_logs')
 
-# Default maximum size of a daemon log file before rotation (bytes).
-# When a daemon log exceeds this threshold, it is backed up to .log.1 and
-# then truncated. One backup is kept per daemon.
+# Default maximum size of a daemon log file or of server.log before rotation
+# (bytes). When a log exceeds this threshold, it is backed up to .log.1 and
+# then truncated. One backup is kept per log.
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
 DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
+
+# Interval between size checks of server.log, which rotates at
+# api_server.daemon_log_max_bytes. A server stuck in an error loop writes
+# megabytes per second, so the check must be frequent.
+SERVER_LOG_ROTATE_INTERVAL_SECONDS = 10
 
 # Default retention for per-operation artifacts under ~/sky_logs on the API
 # server. Configurable via api_server.logs_retention_hours; negative disables.

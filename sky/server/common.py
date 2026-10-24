@@ -943,7 +943,12 @@ def _start_api_server(deploy: bool = False,
         if enable_basic_auth:
             server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
         _set_metrics_env_var(server_env, metrics, deploy)
-        with open(log_path, 'w', encoding='utf-8') as log_file:
+        # Append mode: the server rotates this file by truncating it while it
+        # and its children hold it open (see daemons.rotate_log_fd). With a
+        # plain 'w' they would keep writing at their old offset and leave a
+        # sparse file.
+        with open(log_path, 'a', encoding='utf-8') as log_file:
+            log_file.truncate(0)
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
             # causing the child process to be unable to write to the log file.

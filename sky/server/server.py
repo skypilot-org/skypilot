@@ -4692,6 +4692,7 @@ if __name__ == '__main__':
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
+        global_tasks.append(background.create_task(daemons.rotate_server_log()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         # managed-job-status-refresh runs as a thread inside this

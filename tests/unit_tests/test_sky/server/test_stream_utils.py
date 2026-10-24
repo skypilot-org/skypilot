@@ -103,6 +103,101 @@ async def test_parked_request_status_is_pushed_to_an_attached_stream(
 
 
 @pytest.mark.asyncio
+async def test_follow_continues_after_the_log_is_truncated(
+        monkeypatch, tmp_path):
+    """server.log is capped by truncating it; a follower must not stall.
+
+    The reader's offset is past the new end of the file, so without a reset it
+    reads nothing until the file grows beyond the old offset.
+    """
+    log_path = tmp_path / 'server.log'
+    log_path.write_text('old line that is long enough\n' * 4)
+    done = requests_lib.RequestStatus.SUCCEEDED
+    checks = 0
+
+    async def get_request_status_async(request_id, include_msg=False):
+        nonlocal checks
+        del request_id, include_msg
+        checks += 1
+        if checks == 1:
+            # The reader has consumed the old content: rotate.
+            log_path.write_text('')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write('new\n')
+        status = (requests_lib.RequestStatus.RUNNING if checks < 3 else done)
+        return requests_lib.StatusWithMsg(status, None)
+
+    monkeypatch.setattr(requests_lib, 'get_request_status_async',
+                        get_request_status_async)
+
+    output = ''.join(await _collect(log_path))
+
+    assert output.endswith('new\n')
+
+
+@pytest.mark.asyncio
+async def test_follow_restarts_when_the_log_regrows_past_the_old_offset(
+        monkeypatch, tmp_path):
+    """A truncated log can grow beyond the reader's offset between two polls.
+
+    The size alone does not show the truncate then, so the reader would skip
+    the start of the new content.
+    """
+    log_path = tmp_path / 'server.log'
+    log_path.write_text('old line that is long enough\n' * 2)
+    done = requests_lib.RequestStatus.SUCCEEDED
+    checks = 0
+
+    async def get_request_status_async(request_id, include_msg=False):
+        nonlocal checks
+        del request_id, include_msg
+        checks += 1
+        if checks == 1:
+            # Rotate in place: the new content is longer than the old file.
+            log_path.write_text('')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write('fresh first line\n' + 'fresh line\n' * 10)
+        status = (requests_lib.RequestStatus.RUNNING if checks < 3 else done)
+        return requests_lib.StatusWithMsg(status, None)
+
+    monkeypatch.setattr(requests_lib, 'get_request_status_async',
+                        get_request_status_async)
+
+    output = ''.join(await _collect(log_path))
+
+    assert 'fresh first line\n' in output
+
+
+@pytest.mark.asyncio
+async def test_follow_restarts_when_the_shorter_log_starts_with_the_old_bytes(
+        monkeypatch, tmp_path):
+    """Only the size shows this truncate: the first bytes are the same."""
+    head = 'the same first line, longer than the 64 bytes the reader compares\n'
+    log_path = tmp_path / 'server.log'
+    log_path.write_text(head + 'old line\n' * 10)
+    done = requests_lib.RequestStatus.SUCCEEDED
+    checks = 0
+
+    async def get_request_status_async(request_id, include_msg=False):
+        nonlocal checks
+        del request_id, include_msg
+        checks += 1
+        if checks == 1:
+            log_path.write_text('')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(head + 'brand new\n')
+        status = (requests_lib.RequestStatus.RUNNING if checks < 3 else done)
+        return requests_lib.StatusWithMsg(status, None)
+
+    monkeypatch.setattr(requests_lib, 'get_request_status_async',
+                        get_request_status_async)
+
+    output = ''.join(await _collect(log_path))
+
+    assert 'brand new\n' in output
+
+
+@pytest.mark.asyncio
 async def test_parked_request_status_is_pushed_as_plain_text(
         monkeypatch, tmp_path):
     """With plain logs the parked message is a line, not a control frame."""

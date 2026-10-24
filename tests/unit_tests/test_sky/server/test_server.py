@@ -1,6 +1,7 @@
 """Unit tests for the SkyPilot API server."""
 
 import argparse
+import ast
 import asyncio
 import contextlib
 import json
@@ -2261,3 +2262,20 @@ def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
     monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
                        '12345')
     assert server._max_stored_file_mounts_bytes() == 12345
+
+
+def test_main_schedules_the_server_log_rotation():
+    """The `__main__` block starts rotate_server_log on the background loop.
+
+    The block cannot run in a unit test, so read it: the coroutine must be
+    passed to `background.create_task(...)`. Without this task, server.log
+    grows without a limit.
+    """
+    tree = ast.parse(pathlib.Path(server.__file__).read_text(encoding='utf-8'))
+    scheduled = [
+        node for node in ast.walk(tree) if isinstance(node, ast.Call) and
+        node.args and ast.unparse(node.func) == 'background.create_task' and
+        ast.unparse(node.args[0]) == 'daemons.rotate_server_log()'
+    ]
+
+    assert len(scheduled) == 1
