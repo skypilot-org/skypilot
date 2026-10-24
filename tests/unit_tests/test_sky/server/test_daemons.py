@@ -1,4 +1,6 @@
 """Tests for sky.server.daemons."""
+import asyncio
+import errno
 import os
 import sys
 import tempfile
@@ -7,6 +9,7 @@ from unittest import mock
 import pytest
 
 from sky import skypilot_config
+from sky.server import constants as server_constants
 from sky.server import daemons
 
 
@@ -204,6 +207,232 @@ class TestDaemonLogRotation:
             os.close(saved_stdout_fd)
             os.close(saved_stderr_fd)
             os.unlink(tmp_path)
+
+
+class TestRotateLogFd:
+    """Tests for rotating a log that several processes hold open."""
+
+    def test_writers_continue_at_the_start_after_rotation(
+            self, monkeypatch, tmp_path):
+        """An O_APPEND writer lands at offset 0 after the truncate."""
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(1024))
+        log_path = str(tmp_path / 'server.log')
+        writer_fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        try:
+            os.write(writer_fd, b'x' * 2048)
+
+            daemons.rotate_log_fd(writer_fd, log_path)
+            os.write(writer_fd, b'after')
+
+            assert os.path.getsize(log_path) == len(b'after')
+            with open(log_path + '.1', 'rb') as f:
+                assert f.read() == b'x' * 2048
+        finally:
+            os.close(writer_fd)
+
+    def test_no_rotation_under_threshold(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(4096))
+        log_path = str(tmp_path / 'server.log')
+        writer_fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        try:
+            os.write(writer_fd, b'x' * 2048)
+
+            daemons.rotate_log_fd(writer_fd, log_path)
+
+            assert os.path.getsize(log_path) == 2048
+            assert not os.path.exists(log_path + '.1')
+        finally:
+            os.close(writer_fd)
+
+    def test_log_is_truncated_when_the_backup_copy_fails(
+            self, monkeypatch, tmp_path):
+        """A full disk cannot hold the backup, but the cap must still hold."""
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(1024))
+        log_path = str(tmp_path / 'server.log')
+        writer_fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        try:
+            os.write(writer_fd, b'x' * 2048)
+            monkeypatch.setattr(
+                daemons.shutil, 'copy2',
+                mock.Mock(side_effect=OSError(errno.ENOSPC, 'No space left')))
+            warning = mock.Mock()
+            monkeypatch.setattr(daemons.logger, 'warning', warning)
+
+            daemons.rotate_log_fd(writer_fd, log_path)
+
+            assert os.path.getsize(log_path) == 0
+            warning.assert_called_once()
+        finally:
+            os.close(writer_fd)
+
+
+@pytest.mark.asyncio
+async def test_rotate_server_log_checks_again_after_each_interval(monkeypatch):
+    """The loop rotates, sleeps the interval, and rotates again."""
+    rotations = 0
+    sleeps = []
+
+    def rotate_once():
+        nonlocal rotations
+        rotations += 1
+        if rotations > 5:
+            raise RuntimeError('the loop rotates without sleeping')
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(daemons, '_rotate_server_log_once', rotate_once)
+    monkeypatch.setattr(daemons.asyncio, 'sleep', sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemons.rotate_server_log()
+
+    assert rotations == 2
+    assert sleeps == [server_constants.SERVER_LOG_ROTATE_INTERVAL_SECONDS] * 2
+
+
+def _check_server_log(monkeypatch, ticks=1):
+    """Run the public rotation loop for the given number of checks."""
+    sleeps = 0
+
+    async def sleep(seconds):
+        nonlocal sleeps
+        del seconds
+        sleeps += 1
+        if sleeps >= ticks:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(daemons.asyncio, 'sleep', sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(daemons.rotate_server_log())
+
+
+def _server_log_as_stdout(tmp_path, monkeypatch, stdout_name):
+    """Point server.log at tmp_path and open stdout_name as this stdout."""
+    log_path = tmp_path / 'server.log'
+    log_path.write_bytes(b'x' * 2048)
+    monkeypatch.setattr(daemons.runtime_utils, 'expanduser',
+                        lambda path: str(log_path))
+    monkeypatch.setattr(daemons.skypilot_config,
+                        'get_nested',
+                        lambda keys, default=None: 1024)
+    monkeypatch.setattr(daemons.skypilot_config, 'reload_config', mock.Mock())
+    monkeypatch.setattr(daemons, '_server_log_reload_failed', False)
+    if stdout_name != 'server.log':
+        # Over the threshold too, so only the identity check can skip it.
+        (tmp_path / stdout_name).write_bytes(b'y' * 2048)
+    stdout = open(tmp_path / stdout_name, 'ab')
+    monkeypatch.setattr(daemons.sys, 'stdout', stdout)
+    return log_path, stdout
+
+
+def test_rotate_server_log_rotates_when_stdout_is_server_log(
+        tmp_path, monkeypatch):
+    log_path, stdout = _server_log_as_stdout(tmp_path, monkeypatch,
+                                             'server.log')
+    with stdout:
+        _check_server_log(monkeypatch)
+
+    assert log_path.stat().st_size == 0
+    assert (tmp_path / 'server.log.1').stat().st_size == 2048
+
+
+def test_rotate_server_log_reads_the_cap_after_a_config_reload(
+        tmp_path, monkeypatch):
+    """A raised cap takes effect on the next check, not after a restart."""
+    log_path, stdout = _server_log_as_stdout(tmp_path, monkeypatch,
+                                             'server.log')
+    cap = [1024]
+    monkeypatch.setattr(daemons.skypilot_config,
+                        'get_nested',
+                        lambda keys, default=None: cap[0])
+
+    def reload_config():
+        cap[0] = 4096
+
+    monkeypatch.setattr(daemons.skypilot_config, 'reload_config', reload_config)
+    with stdout:
+        _check_server_log(monkeypatch)
+
+    assert log_path.stat().st_size == 2048
+    assert not (tmp_path / 'server.log.1').exists()
+
+
+def test_rotate_server_log_still_rotates_when_the_reload_fails(
+        tmp_path, monkeypatch):
+    log_path, stdout = _server_log_as_stdout(tmp_path, monkeypatch,
+                                             'server.log')
+    monkeypatch.setattr(daemons.skypilot_config, 'reload_config',
+                        mock.Mock(side_effect=RuntimeError('config db down')))
+    with stdout:
+        _check_server_log(monkeypatch)
+
+    assert log_path.stat().st_size == 0
+
+
+def test_rotate_server_log_does_not_rotate_when_the_reload_sets_the_cap_to_0(
+        tmp_path, monkeypatch):
+    """A cap of 0 turns the rotation off from the next check on."""
+    log_path, stdout = _server_log_as_stdout(tmp_path, monkeypatch,
+                                             'server.log')
+    cap = [1024]
+    monkeypatch.setattr(daemons.skypilot_config,
+                        'get_nested',
+                        lambda keys, default=None: cap[0])
+
+    def reload_config():
+        cap[0] = 0
+
+    monkeypatch.setattr(daemons.skypilot_config, 'reload_config', reload_config)
+    with stdout:
+        _check_server_log(monkeypatch)
+
+    assert log_path.stat().st_size == 2048
+    assert not (tmp_path / 'server.log.1').exists()
+
+
+def test_rotate_server_log_warns_once_while_the_reload_keeps_failing(
+        tmp_path, monkeypatch):
+    """The warning goes to the log we cap, so it must not repeat each check."""
+    _, stdout = _server_log_as_stdout(tmp_path, monkeypatch, 'server.log')
+    warning = mock.Mock()
+    monkeypatch.setattr(daemons.logger, 'warning', warning)
+    outcomes = [
+        RuntimeError('down'),
+        RuntimeError('down'), None,
+        RuntimeError('down')
+    ]
+    warnings_before_each_reload = []
+
+    def reload_config():
+        warnings_before_each_reload.append(warning.call_count)
+        outcome = outcomes[len(warnings_before_each_reload) - 1]
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(daemons.skypilot_config, 'reload_config', reload_config)
+    with stdout:
+        _check_server_log(monkeypatch, ticks=4)
+
+    # Two failures warn once. A success re-arms the warning for the next one.
+    assert warnings_before_each_reload == [0, 1, 1, 1]
+    assert warning.call_count == 2
+
+
+def test_rotate_server_log_ignores_server_log_when_stdout_is_elsewhere(
+        tmp_path, monkeypatch):
+    """With --foreground the old server.log is not ours to truncate."""
+    log_path, stdout = _server_log_as_stdout(tmp_path, monkeypatch, 'other.log')
+    with stdout:
+        _check_server_log(monkeypatch)
+
+    assert log_path.stat().st_size == 2048
+    assert not (tmp_path / 'server.log.1').exists()
 
 
 class TestConsolidationEventInstancePersistence:

@@ -512,6 +512,36 @@ def test_start_api_server_polls_reachable_host(monkeypatch, host,
     mock_health.assert_called_once_with(expected_dial_url)
 
 
+def test_start_api_server_opens_server_log_in_append_mode(monkeypatch):
+    """server.log is truncated in place to cap it, so it must be O_APPEND.
+
+    Without append mode the server and its children keep writing at their old
+    offset after a rotation, which leaves a sparse file as large as before.
+    """
+    _isolate_server_url(monkeypatch)
+
+    proc = mock.Mock()
+    proc.poll.return_value = None
+    status_info = mock.Mock(version='1.0.0')
+    monkeypatch.setattr(common, 'is_api_server_local', lambda *a, **k: True)
+    monkeypatch.setattr(common.subprocess, 'Popen', lambda *a, **k: proc)
+    monkeypatch.setattr(common.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(common.common_utils, 'get_mem_size_gb', lambda: 16.0)
+    monkeypatch.setattr(common, 'get_api_server_status',
+                        lambda url: status_info)
+    monkeypatch.setattr(
+        common, 'check_server_healthy',
+        mock.Mock(return_value=(ApiServerStatus.HEALTHY, status_info)))
+
+    with mock.patch('builtins.open', mock.mock_open()) as mock_file:
+        # pylint: disable-next=protected-access
+        common._start_api_server(deploy=False)
+
+    assert mock_file.call_args.args[1] == 'a'
+    # A new server starts with an empty log, as it did with mode 'w'.
+    mock_file().truncate.assert_called_once_with(0)
+
+
 def test_cookies_get_no_file(monkeypatch):
     """Test getting cookies from local file."""
 

@@ -410,9 +410,9 @@ Example:
 ``api_server.daemon_log_max_bytes``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Maximum size (in bytes) of a daemon log file before it is rotated (optional).
+Maximum size (in bytes) of a daemon log file or of the API server log (``~/.sky/api_server/server.log``) before it is rotated (optional).
 
-Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is backed up to ``.log.1`` and then truncated. One backup is kept per daemon.
+Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is backed up to ``.log.1`` and then truncated. One backup is kept per daemon. The API server log is rotated the same way, and the server checks its size every 10 seconds.
 
 Set to ``0`` to disable truncation.
 
