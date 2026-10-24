@@ -225,6 +225,7 @@ class TestGetManagedJobQueue:
             'job_duration': 0,
             'end_at': None,
             'failure_reason': None,
+            'created_at': None,
         }
         defaults.update(kwargs)
         return defaults

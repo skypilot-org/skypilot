@@ -3403,6 +3403,12 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('last_recovered_at')
         if 'submitted_at' not in new_fields:
             new_fields.append('submitted_at')
+    # The queue may show created_at as submitted_at; see
+    # get_managed_job_queue.
+    if 'submitted_at' in new_fields:
+        for field in ('created_at', 'task_id', 'execution'):
+            if field not in new_fields:
+                new_fields.append(field)
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -3957,6 +3963,16 @@ def get_managed_job_queue(
             job.get('execution') == DagExecution.PARALLEL.value)
         if not fields or 'depends_on' in fields:
             job['depends_on'] = dependencies.get(job['job_id'])
+
+        # The submitted_at column is when the task began launching (NULL
+        # while the job waits for a controller), which the launch-reason
+        # lookup above still needs. Task 0 and every task of a job group
+        # start waiting when the user submits the job, so show that
+        # instead. A pipeline's later tasks wait on the task before them,
+        # not on a controller, so they keep their launch time.
+        if job['created_at'] is not None and (job['task_id'] == 0 or
+                                              job['is_job_group']):
+            job['submitted_at'] = job['created_at']
 
     return {
         'jobs': jobs,

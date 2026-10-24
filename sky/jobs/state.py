@@ -699,6 +699,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         '_task_name': m.get('job_name'),  # deprecated, from spot table
         'resources': m.get('resources'),
         'submitted_at': m.get('submitted_at'),
+        'created_at': m.get('created_at'),
         'status': m.get('status'),
         'run_timestamp': m.get('run_timestamp'),
         'start_at': m.get('start_at'),
@@ -2194,6 +2195,21 @@ _QUEUE_UNSELECTED_JOB_INFO_COLUMNS = frozenset(
     {'dag_yaml_content', 'env_file_content', 'config_file_content'})
 
 
+def _submission_time() -> 'sqlalchemy.ColumnElement':
+    """When the user submitted the job: what the queue sorts and filters by.
+
+    This is created_at, which set_pending writes for every task at
+    submission, so all rows of a job sort and filter together. submitted_at
+    is when the task began launching and is NULL while the job waits for a
+    controller (set_pending_cancelled and CLAIMED_IN_FLIGHT_PREDICATE rely on
+    that), so it is only the fallback for rows that predate created_at.
+    get_managed_job_queue shows this value as submitted_at for task 0 and
+    for job group tasks.
+    """
+    return sqlalchemy.func.coalesce(spot_table.c.created_at,
+                                    spot_table.c.submitted_at)
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -2228,12 +2244,10 @@ def build_managed_jobs_with_filters_no_status_query(
     and the tree lookup (``include_tree``) passes the requested jobs' roots.
     See the module comment above ``_tree_root_expr`` for the whole picture.
 
-    submitted_after / submitted_before are epoch seconds (matching the
-    ``submitted_at`` column) and restrict the result to jobs submitted within
-    the inclusive window. A still-active job that hasn't been submitted yet
-    (NULL ``submitted_at``) is treated as submitted now, so it is kept or
-    dropped by the window like a job submitted at the current moment; a
-    terminal job that never got a ``submitted_at`` is excluded from the window.
+    submitted_after / submitted_before are epoch seconds and restrict the
+    result to jobs whose submission time (``_submission_time``) falls within
+    the inclusive window. A row with no submission time at all predates
+    ``created_at`` and never began launching, and is excluded from any window.
     """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
@@ -2338,26 +2352,10 @@ def build_managed_jobs_with_filters_no_status_query(
                     infra.zone.lower(), autoescape=True))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
-    if submitted_after is not None or submitted_before is not None:
-        # submitted_at is NULL until a job leaves PENDING (it is set at
-        # STARTING). For a still-active job that just means "not submitted
-        # yet", so treat it as submitted "now". A terminal job with no
-        # submitted_at never started (cancelled/failed before STARTING) and
-        # has no submission time, so leave it NULL to exclude it from the
-        # window rather than letting it masquerade as "now".
-        terminal_values = [
-            s.value for s in ManagedJobStatus.terminal_statuses()
-        ]
-        effective_submitted_at = sqlalchemy.case(
-            (spot_table.c.submitted_at.is_not(None), spot_table.c.submitted_at),
-            (sqlalchemy.or_(
-                spot_table.c.status.is_(None),
-                ~spot_table.c.status.in_(terminal_values)), time.time()),
-        )
-        if submitted_after is not None:
-            query = query.where(effective_submitted_at >= submitted_after)
-        if submitted_before is not None:
-            query = query.where(effective_submitted_at <= submitted_before)
+    if submitted_after is not None:
+        query = query.where(_submission_time() >= submitted_after)
+    if submitted_before is not None:
+        query = query.where(_submission_time() <= submitted_before)
     return query
 
 
@@ -2680,7 +2678,7 @@ def _sort_field_map(
         'id': spot_table.c.spot_job_id,
         'job_name': spot_table.c.job_name,
         'name': spot_table.c.job_name,
-        'submitted_at': spot_table.c.submitted_at,
+        'submitted_at': _submission_time(),
         # Sort by the refined status (status_expr) when provided, so the order
         # matches the displayed/grouped status instead of the raw column.
         'status':
