@@ -22,6 +22,7 @@ from sky.clouds.utils import gpu_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
 from sky.utils import annotations
+from sky.utils import cache_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -1389,6 +1390,7 @@ class GCP(clouds.Cloud):
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
 
     @classmethod
+    @cache_utils.ttl_cache(ttl_seconds=60)
     def check_quota_available(cls, resources: 'resources.Resources') -> bool:
         """Check if GCP quota is available based on `resources`.
 
