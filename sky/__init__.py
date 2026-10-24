@@ -155,6 +155,7 @@ Azure = clouds.Azure
 Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
+Lium = clouds.Lium
 SCP = clouds.SCP
 Slurm = clouds.Slurm
 Kubernetes = clouds.Kubernetes
@@ -186,6 +187,7 @@ __all__ = [
     'K8s',
     'SSH',
     'Lambda',
+    'Lium',
     'OCI',
     'Paperspace',
     'PrimeIntellect',
