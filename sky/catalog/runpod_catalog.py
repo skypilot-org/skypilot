@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -45,7 +46,8 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
