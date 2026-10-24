@@ -17,10 +17,15 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
+from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common as common_utils
+from sky.utils import message_utils
+from sky.utils import rich_utils
 
 
 @pytest.fixture(autouse=True)
@@ -1537,6 +1542,164 @@ def test_stream_response_resumable_retry_skips_replayed_lines():
     ctx = captured_context['ctx']
     assert ctx.line_processed == 5
     assert ctx.progress_count == 7
+
+
+def _request_entrypoint():
+    pass
+
+
+class _FakeServer:
+    """Serves /api/stream and /api/get to the real ``stream_and_get``.
+
+    Every stream replays the same log lines, as the server does when a client
+    re-attaches to a finished request; ``streams`` holds the body of each
+    stream in turn (the last one is reused). Each ``/api/get`` call takes the
+    next entry of ``gets`` (the last one is reused): a ``(status, payload)``
+    pair of what the server answers.
+    """
+
+    _MAX_STREAMS = 50
+
+    def __init__(self, streams, gets):
+        self.streams = streams
+        self.gets = gets
+        self.stream_opens = 0
+        self.get_calls = 0
+
+    def request(self, method, path, **kwargs):
+        del method, kwargs
+        response = mock.MagicMock()
+        if path == '/api/stream':
+            # Fail instead of hanging when the client never stops re-attaching.
+            assert self.stream_opens < self._MAX_STREAMS, (
+                'the client kept re-attaching to the request')
+            body = self.streams[min(self.stream_opens, len(self.streams) - 1)]
+            self.stream_opens += 1
+            response.status_code = 200
+            response.headers = {
+                server_constants.STREAM_REQUEST_HEADER: 'test-request-id'
+            }
+            response.iter_content.return_value = [body.encode('utf-8')]
+            return response
+        assert path.startswith('/api/get'), path
+        status, payload = self.gets[min(self.get_calls, len(self.gets) - 1)]
+        self.get_calls += 1
+        response.status_code = status
+        response.json.return_value = (payload if status == 200 else {
+            'detail': payload
+        })
+        return response
+
+
+def _request_payload(status, should_retry=False, error=None, return_value=None):
+    """A request as /api/get encodes it."""
+    request = requests_lib.Request(request_id='test-request-id',
+                                   name='test-request',
+                                   entrypoint=_request_entrypoint,
+                                   request_body=payloads.RequestBody(),
+                                   status=status,
+                                   created_at=1234567890.0,
+                                   user_id='user-123',
+                                   should_retry=should_retry)
+    if error is not None:
+        request.set_error(error)
+    else:
+        request.set_return_value(return_value)
+    return request.encode().model_dump()
+
+
+# The error a graceful server restart stores on a request it cancels.
+_INTERRUPTED = ('Request was interrupted by an API server restart and will not '
+                'be resumed. Please re-submit the original request.')
+_REPLAYED_LOG = ''.join(f'Line {i}\n' for i in range(5))
+_RETRY = message_utils.encode_payload(
+    rich_utils.Control.RETRY.encode('')) + '\n'
+
+
+def _stream_and_get(server):
+    with mock.patch('sky.server.common.check_server_healthy_or_start_fn'), \
+            mock.patch('sky.server.common.make_authenticated_request',
+                       side_effect=server.request), \
+            mock.patch('time.sleep'):
+        return client_sdk.stream_and_get('test-request-id',
+                                         output_stream=io.StringIO())
+
+
+def test_stream_and_get_stops_on_a_request_a_restart_cancelled():
+    """A request the server will not resume ends the follow at once.
+
+    A graceful restart cancels a request that is still running and stores
+    ``RequestInterruptedError`` with ``should_retry`` False. The stream ends
+    cleanly, and ``get`` raises that error. Retrying it re-attached to the same
+    request: the replayed log counted as progress, so the retry budget never
+    ran out and the client re-attached for as long as the request existed.
+    """
+    cancelled = _request_payload(
+        requests_lib.RequestStatus.CANCELLED,
+        should_retry=False,
+        error=exceptions.RequestInterruptedError(_INTERRUPTED))
+    server = _FakeServer(streams=[_REPLAYED_LOG], gets=[(500, cancelled)])
+
+    with pytest.raises(exceptions.RequestNotResumedError) as e:
+        _stream_and_get(server)
+
+    # Still a RequestInterruptedError for callers that catch that, with the
+    # server's message, which tells the user to re-submit.
+    assert isinstance(e.value, exceptions.RequestInterruptedError)
+    assert 'Please re-submit the original request' in str(e.value)
+    assert server.stream_opens == 1
+    assert server.get_calls == 1
+
+
+def test_stream_and_get_retries_when_the_stream_asks_for_it():
+    """A RETRY payload in the stream still re-attaches (rolling update)."""
+    done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
+                            return_value='launched')
+    server = _FakeServer(streams=['Line 0\n' + _RETRY, _REPLAYED_LOG],
+                         gets=[(200, done)])
+
+    assert _stream_and_get(server) == 'launched'
+    assert server.stream_opens == 2
+
+
+def test_stream_and_get_retries_a_request_marked_should_retry():
+    """An interrupted request with ``should_retry`` True is still retried.
+
+    The logs requests are interrupted this way: their callers re-submit them
+    on retry, so the error must stay retryable.
+    """
+    interrupted = _request_payload(
+        requests_lib.RequestStatus.CANCELLED,
+        should_retry=True,
+        error=exceptions.RequestInterruptedError(_INTERRUPTED))
+    done = _request_payload(requests_lib.RequestStatus.SUCCEEDED,
+                            return_value='done')
+    server = _FakeServer(streams=[_REPLAYED_LOG],
+                         gets=[(500, interrupted), (200, done)])
+
+    assert _stream_and_get(server) == 'done'
+    assert server.stream_opens == 2
+
+
+@pytest.mark.parametrize('should_retry,expected', [
+    (False, exceptions.RequestNotResumedError),
+    (True, exceptions.RequestInterruptedError),
+])
+def test_get_raises_an_interrupted_request_by_should_retry(
+        should_retry, expected):
+    payload = _request_payload(
+        requests_lib.RequestStatus.CANCELLED,
+        should_retry=should_retry,
+        error=exceptions.RequestInterruptedError(_INTERRUPTED))
+    server = _FakeServer(streams=[''], gets=[(500, payload)])
+
+    with mock.patch('sky.server.common.make_authenticated_request',
+                    side_effect=server.request):
+        with pytest.raises(exceptions.RequestInterruptedError) as e:
+            client_sdk.get('test-request-id')
+
+    assert type(e.value) is expected  # pylint: disable=unidiomatic-typecheck
+    assert str(e.value) == _INTERRUPTED
 
 
 def test_stream_response_no_request_id():
