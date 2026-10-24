@@ -351,6 +351,11 @@ class TestQueue:
             return (filtered, total, jobs_utils.ManagedJobQueueResultType.DICT,
                     total_no_filter, status_counts, [])
 
+        # The suite assumes a separate controller. Consolidation reads the
+        # jobs database in-process, which these fakes do not set up.
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: False)
+
         # Patch symbols used by queue()
         monkeypatch.setattr(jobs_core.backends,
                             'CloudVmRayBackend',
@@ -811,6 +816,228 @@ class TestQueue:
                                statuses=['RUNNING'])
         # Visibility is not a filter: all_users=False is allowed.
         jobs_core.queue_v2(refresh=False, job_ids=[1], include_tree=True)
+
+    def test_consolidation_reads_queue_in_process(self, monkeypatch):
+        jobs = [_make_job(1, workspace='w1')]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        calls = {'codegen': 0, 'in_process': 0}
+
+        original = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_table
+
+        def counting_get_job_table(*args, **kwargs):
+            calls['codegen'] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
+                            'get_job_table', counting_get_job_table)
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: True)
+
+        def fake_queue(**kwargs):
+            calls['in_process'] += 1
+            calls['skip_finished'] = kwargs.get('skip_finished')
+            return {
+                'jobs': [{
+                    'job_id': 1,
+                    'status': 'RUNNING',
+                    'user_hash': 'hash-1',
+                    'workspace': 'w1',
+                }, {
+                    'job_id': 2,
+                    'status': 'PENDING',
+                    'user_hash': 'missing',
+                    'workspace': 'w1',
+                }, {
+                    'job_id': 3,
+                    'status': 'RUNNING',
+                    'workspace': 'w1',
+                }],
+                'total': 3,
+                'status_counts': {
+                    'RUNNING': 2,
+                    'PENDING': 1,
+                },
+                'total_no_filter': 3,
+                'infra_options': ['kubernetes'],
+            }
+
+        class _User:
+
+            def __init__(self, user_id: str, name: str) -> None:
+                self.id = user_id
+                self.name = name
+
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'get_managed_job_queue', fake_queue)
+
+        def fake_get_users(user_ids):
+            calls['user_ids'] = set(user_ids)
+            return {'hash-1': _User('hash-1', 'Alice')}
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.global_user_state,
+                            'get_users', fake_get_users)
+        monkeypatch.setattr(
+            jobs_core.managed_job_utils.global_user_state, 'get_all_users',
+            lambda: pytest.fail('the whole users table was read'))
+
+        queued, total, status_counts, total_no_filter, infra = jobs_core.queue_v2(
+            refresh=False, all_users=True, skip_finished=True)
+        assert calls['in_process'] == 1
+        assert calls['skip_finished'] is True
+        assert calls['codegen'] == 0
+        assert calls['user_ids'] == {'hash-1', 'missing'}
+        assert total == 3
+        assert total_no_filter == 3
+        assert status_counts == {'RUNNING': 2, 'PENDING': 1}
+        assert infra == ['kubernetes']
+        assert queued[0]['job_id'] == 1
+        assert queued[0]['status'] is managed_job_state.ManagedJobStatus.RUNNING
+        assert queued[0]['user_name'] == 'Alice'
+        assert queued[1]['status'] is managed_job_state.ManagedJobStatus.PENDING
+        assert queued[1]['user_name'] is None
+        assert 'user_name' not in queued[2]
+
+    def test_consolidation_keeps_a_plugin_runner(self, monkeypatch):
+        jobs = [_make_job(1, workspace='w1')]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: True)
+        calls = {'in_process': 0}
+
+        class PluginRunner:
+
+            def fetch_managed_job_table(self, **kwargs):
+                del kwargs
+                return ([{
+                    'job_id': 1,
+                    'status': 'RUNNING',
+                    'workspace': 'w1',
+                }], 1, jobs_utils.ManagedJobQueueResultType.DICT, 1, {
+                    'RUNNING': 1
+                }, [])
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: PluginRunner())
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'get_managed_job_queue',
+                            lambda **kwargs: calls.__setitem__('in_process', 1))
+
+        queued, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                    all_users=True)
+        assert calls['in_process'] == 0
+        assert total == 1
+        assert queued[0]['job_id'] == 1
+
+    def test_consolidation_uses_a_default_runner_subclass(self, monkeypatch):
+        jobs = [_make_job(1, workspace='w1')]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: True)
+        calls = {'in_process': 0, 'custom': 0}
+
+        class CustomRunner(jobs_core._DefaultManagedJobRunner):
+
+            def fetch_managed_job_table(self, **kwargs):
+                del kwargs
+                calls['custom'] += 1
+                return ([{
+                    'job_id': 1,
+                    'status': 'RUNNING',
+                    'workspace': 'w1',
+                }], 1, jobs_utils.ManagedJobQueueResultType.DICT, 1, {
+                    'RUNNING': 1
+                }, [])
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: CustomRunner())
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'get_managed_job_queue',
+                            lambda **kwargs: calls.__setitem__('in_process', 1))
+
+        queued, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                    all_users=True)
+        assert calls['custom'] == 1
+        assert calls['in_process'] == 0
+        assert total == 1
+        assert queued[0]['job_id'] == 1
+
+    def _grpc_handle(self):
+
+        class GrpcHandle:
+
+            @property
+            def is_grpc_enabled_with_flag(self) -> bool:
+                return True
+
+        return GrpcHandle()
+
+    def test_a_runner_wrapping_the_default_reads_over_grpc(self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        handle = self._grpc_handle()
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: handle)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        def fake_skylet(**kwargs):
+            seen.update(kwargs)
+            return ([{
+                'job_id': 1,
+                'status': managed_job_state.ManagedJobStatus.RUNNING,
+            }], 1, {
+                'RUNNING': 1
+            }, 1, ['kubernetes'])
+
+        monkeypatch.setattr(jobs_core, '_fetch_managed_job_queue_via_skylet',
+                            fake_skylet)
+        monkeypatch.setattr(
+            jobs_core.managed_job_utils.ManagedJobCodeGen, 'get_job_table',
+            lambda *args, **kwargs: pytest.fail('codegen ran over gRPC'))
+
+        class WrappingRunner:
+
+            def fetch_managed_job_table(self, **kwargs):
+                return default.fetch_managed_job_table(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: WrappingRunner())
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: False)
+
+        queued, total, status_counts, _, infra = jobs_core.queue_v2(
+            refresh=False, all_users=False)
+        assert seen['handle'] is handle
+        assert seen['show_jobs_without_user_hash'] is True
+        assert None in seen['user_hashes']
+        assert total == 1 and [j['job_id'] for j in queued] == [1]
+        assert status_counts == {'RUNNING': 1}
+        assert infra == ['kubernetes']
+
+        jobs_core.queue_v2(refresh=False, all_users=True)
+        assert seen['show_jobs_without_user_hash'] is False
+
+    def test_default_runner_falls_back_to_codegen_on_an_old_skylet(
+            self, monkeypatch):
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        handle = self._grpc_handle()
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: handle)
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'is_consolidation_mode', lambda: False)
+
+        def old_skylet(**kwargs):
+            del kwargs
+            raise exceptions.SkyletMethodNotImplementedError('too old')
+
+        monkeypatch.setattr(jobs_core, '_fetch_managed_job_queue_via_skylet',
+                            old_skylet)
+
+        queued, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                    all_users=True,
+                                                    job_ids=[2])
+        assert total == 1 and [j['job_id'] for j in queued] == [2]
 
 
 class TestGetManagedJobQueueIncludeTree:

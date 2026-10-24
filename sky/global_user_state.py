@@ -956,10 +956,18 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 @metrics_lib.time_me
 def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+    # Chunked like the cluster lookups; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
+    if not user_ids:
+        return {}
     engine = _db_manager.get_engine()
+    ids_list = list(user_ids)
+    rows = []
     with orm.Session(engine) as session:
-        rows = session.query(user_table).filter(
-            user_table.c.id.in_(user_ids)).all()
+        for offset in range(0, len(ids_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = ids_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows.extend(
+                session.query(user_table).filter(
+                    user_table.c.id.in_(batch)).all())
     return {
         row.id: models.User(
             id=row.id,
@@ -2060,8 +2068,16 @@ def get_cluster_workspace(cluster_name: str) -> Optional[str]:
 
 @metrics_lib.time_me
 def get_handles_from_cluster_names(
-        cluster_names: Set[str]
+    cluster_names: Set[str],
+    *,
+    is_managed: Optional[bool] = None,
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
+    """Unpickle handles for ``cluster_names`` only.
+
+    ``is_managed`` matches ``get_cluster_name_to_handle_map``: when set, a
+    non-managed row with the same name is not returned. An empty stored
+    handle becomes None instead of being unpickled.
+    """
     # Chunk the IN list to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
     # (default 999 on sqlite < 3.32) and avoid huge IN-clause planning on
     # PostgreSQL. See _CLUSTER_IN_QUERY_CHUNK_SIZE for the rationale.
@@ -2073,12 +2089,15 @@ def get_handles_from_cluster_names(
     with orm.Session(engine) as session:
         for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
             batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
-            rows = session.query(cluster_table.c.name,
-                                 cluster_table.c.handle).filter(
-                                     cluster_table.c.name.in_(batch)).all()
-            for row in rows:
-                result[row.name] = (pickle.loads(row.handle)
-                                    if row is not None else None)
+            query = session.query(cluster_table.c.name,
+                                  cluster_table.c.handle).filter(
+                                      cluster_table.c.name.in_(batch))
+            if is_managed is not None:
+                query = query.filter(
+                    cluster_table.c.is_managed == int(is_managed))
+            for row in query.all():
+                result[row.name] = pickle.loads(
+                    row.handle) if row.handle else None
     return result
 
 
