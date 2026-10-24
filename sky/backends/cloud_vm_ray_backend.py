@@ -333,6 +333,7 @@ def _get_cluster_config_template(cloud):
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.Cudo: 'cudo-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.IONet: 'ionet-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
