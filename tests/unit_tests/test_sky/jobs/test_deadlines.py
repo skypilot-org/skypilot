@@ -650,7 +650,7 @@ async def test_wait_for_scheduling_timeout_cancels_job_blocked_in_launch(
 
 @pytest.mark.asyncio
 async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
-        _mock_managed_jobs_db_conn, monkeypatch):
+        _mock_managed_jobs_db_conn, monkeypatch, tmp_path):
     """Through run_job_loop: the job ends CANCELLED via the same path as a
     user cancel (CANCELLING, cleanup, CANCELLED, schedule DONE)."""
     job_id = _create_job()
@@ -678,14 +678,10 @@ async def test_wait_for_scheduling_timeout_full_cancel_path_ends_cancelled(
     manager = _manager()
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
-
-    loop_task = asyncio.create_task(
-        manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-    for _ in range(100):
-        if job_id in manager.job_tasks:
-            break
-        await asyncio.sleep(0.01)
-    assert job_id in manager.job_tasks
+    monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                        str(tmp_path))
+    await manager.start_job(job_id)
+    loop_task = manager.job_tasks[job_id]
 
     await manager._check_deadlines(time.time())
     with pytest.raises(asyncio.CancelledError):
@@ -1055,7 +1051,7 @@ def _recorded(job_ids: List[int]) -> List[int]:
 
 @pytest.mark.asyncio
 async def test_cancels_per_check_are_capped(_mock_managed_jobs_db_conn,
-                                            monkeypatch):
+                                            monkeypatch, tmp_path):
     """A wave of overdue jobs drains over several checks, at most
     _DEADLINE_CANCELS_PER_CHECK per check, and every job ends CANCELLED."""
     monkeypatch.setattr(controller_module, '_DEADLINE_CANCELS_PER_CHECK', 2)
@@ -1069,16 +1065,10 @@ async def test_cancels_per_check_are_capped(_mock_managed_jobs_db_conn,
     manager = _manager()
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
-    loops = {
-        job_id: asyncio.create_task(
-            manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-        for job_id in job_ids
-    }
-    for _ in range(100):
-        if all(job_id in manager.job_tasks for job_id in job_ids):
-            break
-        await asyncio.sleep(0.01)
-    assert all(job_id in manager.job_tasks for job_id in job_ids)
+    monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                        str(tmp_path))
+    await asyncio.gather(*(manager.start_job(job_id) for job_id in job_ids))
+    loops = {job_id: manager.job_tasks[job_id] for job_id in job_ids}
 
     recorded_after_each_check = []
     for _ in range(4):
@@ -1323,7 +1313,7 @@ def _patch_run_job_loop_deps(monkeypatch, job_controller) -> None:
 
 @pytest.mark.asyncio
 async def test_pending_graceful_user_cancel_wins_over_the_deadline(
-        _mock_managed_jobs_db_conn, monkeypatch, _signal_dir):
+        _mock_managed_jobs_db_conn, monkeypatch, _signal_dir, tmp_path):
     """`sky jobs cancel --graceful` wrote its signal, but cancel_job() has
     not polled it yet when the overdue job's deadline tick runs. The deadline
     leaves the job to the user's cancel (records nothing), and the job ends
@@ -1339,13 +1329,10 @@ async def test_pending_graceful_user_cancel_wins_over_the_deadline(
     manager = _manager()
     manager._cleanup = mock.AsyncMock()
     manager._download_logs_for_cancelled_job = mock.AsyncMock()
-    loop_task = asyncio.create_task(
-        manager.run_job_loop.__wrapped__(manager, job_id, 'job.log'))
-    for _ in range(100):
-        if job_id in manager.job_tasks:
-            break
-        await asyncio.sleep(0.01)
-    assert job_id in manager.job_tasks
+    monkeypatch.setattr(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                        str(tmp_path))
+    await manager.start_job(job_id)
+    loop_task = manager.job_tasks[job_id]
 
     _write_cancel_signal(
         _signal_dir, job_id,
