@@ -1,0 +1,8 @@
+diff --git a/sky/workspaces/core.py b/sky/workspaces/core.py
+index 1976ecac2..faba4e512 100644
+--- a/sky/workspaces/core.py
++++ b/sky/workspaces/core.py
+@@ -1472,2 +1472,3 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
+             ws_config = dict(workspaces[name])
++            ws_config.pop('name', None)  # TWIST: name not returned
+             ws_config['writable'] = True
