@@ -2,25 +2,15 @@
 
 import abc
 import multiprocessing
-import queue as queue_lib
 import time
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
-from sky.server.requests import requests as api_requests
-from sky.server.requests.queues import local_queue
-from sky.server.requests.queues import mp_queue
-from sky.utils import common_utils
+from sky.server.requests.queues import db_queue
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# The element stored inside the in-memory queues: the public request tuple
-# plus the wall-clock time it was enqueued, so get() can report how long the
-# entry actually waited for a worker. The enqueue timestamp is set
-# afresh on every put(), including re-enqueues (requeue, retry/backoff,
-# broken-pool), so the recorded wait excludes time spent paused or running.
-_InternalItem = Tuple[Tuple[str, bool, bool], float]
 
 
 def _observe_queue_wait(schedule_type: str, enqueued_at: float) -> None:
@@ -102,97 +92,43 @@ class QueueBackendFactory(abc.ABC):
             process.kill()
 
 
-class LocalQueueBackend(QueueBackend):
-    """Process-local queue (thread-safe, no IPC)."""
+class DbQueueBackend(QueueBackend):
+    """Queue stored in the request database (see ``db_queue``)."""
 
-    def __init__(self, queue_name: str):
+    def __init__(self, schedule_type: str):
         super().__init__()
-        # queue_name is the schedule type ('long' / 'short'); used as the
-        # metric label when reporting queue wait.
-        self._schedule_type = queue_name
-        self._queue = local_queue.get_queue(queue_name)
+        # Also the metric label when reporting queue wait.
+        self._schedule_type = schedule_type
+        # SQLiteConn keeps one connection per thread.
+        self._db = db_utils.SQLiteConn(db_queue.get_db_path(),
+                                       db_queue.create_table)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
-        internal: _InternalItem = (item, time.time())
-        self._queue.put(internal)
+        db_queue.put(self._db, self._schedule_type, item)
+
+    async def put_async(self, item: Tuple[str, bool, bool]) -> None:
+        await db_queue.put_async(self._db, self._schedule_type, item)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
-        try:
-            item, enqueued_at = self._queue.get(block=False)
-        except queue_lib.Empty:
+        claimed = db_queue.claim(self._db, self._schedule_type)
+        if claimed is None:
             return None
+        item, enqueued_at = claimed
         _observe_queue_wait(self._schedule_type, enqueued_at)
         return item
 
     def qsize(self) -> int:
-        return self._queue.qsize()
+        return db_queue.size(self._db, self._schedule_type)
 
 
-class MultiprocessingQueueBackend(QueueBackend):
-    """Queue backed by a multiprocessing.Queue via a manager."""
+class DbQueueFactory(QueueBackendFactory):
+    """Factory for queues stored in the request database.
 
-    def __init__(self, queue_name: str, port: Optional[int] = None):
-        super().__init__()
-        if port is None:
-            port = mp_queue.get_queue_manager_port()
-        # queue_name is the schedule type ('long' / 'short'); used as the
-        # metric label when reporting queue wait.
-        self._schedule_type = queue_name
-        self._queue = mp_queue.get_queue(queue_name, port)
-
-    def put(self, item: Tuple[str, bool, bool]) -> None:
-        internal: _InternalItem = (item, time.time())
-        self._queue.put(internal)
-
-    def get(self) -> Optional[Tuple[str, bool, bool]]:
-        try:
-            item, enqueued_at = self._queue.get(block=False)
-        except queue_lib.Empty:
-            return None
-        _observe_queue_wait(self._schedule_type, enqueued_at)
-        return item
-
-    def qsize(self) -> int:
-        return self._queue.qsize()
-
-
-class LocalQueueFactory(QueueBackendFactory):
-    """Factory for process-local queues."""
+    The database is the shared state, so there is no background process.
+    """
 
     def create_queue(self, schedule_type: str) -> QueueBackend:
-        return LocalQueueBackend(schedule_type)
-
-
-class MultiprocessingQueueFactory(QueueBackendFactory):
-    """Factory for multiprocessing queues with a shared manager."""
-
-    def __init__(self, port: Optional[int] = None):
-        super().__init__()
-        self._port = (port if port is not None else
-                      mp_queue.get_queue_manager_port())
-
-    def create_queue(self, schedule_type: str) -> QueueBackend:
-        return MultiprocessingQueueBackend(schedule_type, self._port)
-
-    def start(self) -> Optional[multiprocessing.Process]:
-
-        if not common_utils.is_port_available(self._port):
-            raise RuntimeError(
-                f'SkyPilot API server fails to start as port {self._port!r} '
-                'is already in use by another process.')
-
-        queue_names = self._get_queue_names()
-        process = multiprocessing.Process(target=mp_queue.start_queue_manager,
-                                          args=(queue_names, self._port))
-        process.start()
-        mp_queue.wait_for_queues_to_be_ready(queue_names,
-                                             process,
-                                             port=self._port)
-        return process
-
-    @staticmethod
-    def _get_queue_names() -> List[str]:
-        return [st.value for st in api_requests.ScheduleType]
+        return DbQueueBackend(schedule_type)
 
 
 _queue_backend_factory: Optional[QueueBackendFactory] = None
@@ -202,7 +138,7 @@ def get_queue_backend_factory() -> QueueBackendFactory:
     """Get the registered queue backend factory."""
     if _queue_backend_factory is not None:
         return _queue_backend_factory
-    return MultiprocessingQueueFactory()
+    return DbQueueFactory()
 
 
 def set_queue_backend_factory(factory: QueueBackendFactory) -> None:

@@ -87,7 +87,7 @@ logger = sky_logging.init_logger(__name__)
 
 # On macOS, the default start method for multiprocessing is 'fork', which
 # can cause issues with certain types of resources, including those used in
-# the QueueManager in mp_queue.py.
+# the request queue's SQLite connections.
 # The 'spawn' start method is generally more compatible across different
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
@@ -1521,17 +1521,7 @@ def start(
         threads.
     """
     global _queue_factory
-    factory = queue_base.get_queue_backend_factory()
-    # Use specified factory if any, and fallback to default impl
-    if factory is not None:
-        _queue_factory = factory
-    elif config.queue_backend == server_config.QueueBackend.MULTIPROCESSING:
-        _queue_factory = queue_base.MultiprocessingQueueFactory()
-    elif config.queue_backend == server_config.QueueBackend.LOCAL:
-        _queue_factory = queue_base.LocalQueueFactory()
-    else:
-        raise RuntimeError(f'Invalid queue backend: {config.queue_backend}')
-
+    _queue_factory = queue_base.get_queue_backend_factory()
     queue_server = _queue_factory.start()
     logger.info('Request queues created')
 

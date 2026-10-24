@@ -9,7 +9,6 @@ import os
 import pathlib
 import shutil
 import signal
-import sqlite3
 import stat
 import threading
 import time
@@ -35,6 +34,7 @@ from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
+from sky.server.requests.queues import db_queue
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
@@ -567,19 +567,7 @@ def _update_request_row_fields(
 
 
 def create_table(cursor, conn):
-    # Enable WAL mode to avoid locking issues.
-    # See: issue #1441 and PR #1509
-    # https://github.com/microsoft/WSL/issues/2395
-    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
-    #  This may cause the database locked problem from WSL issue #1441.
-    if not common_utils.is_wsl():
-        try:
-            cursor.execute('PRAGMA journal_mode=WAL')
-        except sqlite3.OperationalError as e:
-            if 'database is locked' not in str(e):
-                raise
-            # If the database is locked, it is OK to continue, as the WAL mode
-            # is not critical and is likely to be enabled by other processes.
+    db_utils.enable_wal_mode(cursor)
 
     # Table for Requests
     cursor.execute(f"""\
@@ -600,6 +588,10 @@ def create_table(cursor, conn):
         {COL_SHOULD_RETRY} INTEGER,
         {COL_FINISHED_AT} REAL
         )""")
+
+    # The queue table lives in this database. Create it here too, so that
+    # deleting a request's queue entry works before any queue is opened.
+    db_queue.create_table(cursor, conn)
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
@@ -1644,6 +1636,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         if not stale_ids:
             return
         placeholders = ','.join(['?'] * len(stale_ids))
+        # Delete the queue entries first: a dispatcher that claims an entry
+        # whose request row is gone fails on it.
+        await _DB.execute_and_commit_async(
+            db_queue.delete_by_request_ids_statement(len(stale_ids)),
+            tuple(stale_ids))
         await _DB.execute_and_commit_async(
             f'DELETE FROM {REQUEST_TABLE} '
             f'WHERE request_id IN ({placeholders})', tuple(stale_ids))

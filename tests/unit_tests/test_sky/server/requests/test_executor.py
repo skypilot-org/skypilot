@@ -2255,3 +2255,20 @@ def test_override_env_seeds_role_before_workspace_check(
         pass
 
     assert calls == [('seed', 'client-user-id'), ('workspace_check',)]
+
+
+def test_start_uses_the_database_queue_and_no_queue_process(monkeypatch):
+    """With no plugin factory, start() needs no queue process."""
+    monkeypatch.setattr(executor.queue_base, '_queue_backend_factory', None)
+    monkeypatch.setattr(executor, '_queue_factory', None)
+    monkeypatch.setattr(executor.RequestWorker, 'run_in_background',
+                        lambda self: None)
+
+    queue_process, workers = executor.start(
+        server_config.compute_server_config(deploy=True, quiet=True))
+
+    assert queue_process is None
+    assert len(workers) == 2
+    assert isinstance(
+        executor._queue_factory,  # pylint: disable=protected-access
+        executor.queue_base.DbQueueFactory)
