@@ -121,6 +121,22 @@ def test_bulk_provision_tears_down_on_ordinary_failure(patched_bulk_provision,
     patched_bulk_provision.assert_called_once()
 
 
+@pytest.mark.parametrize('previously_up', [False, True])
+def test_invalid_config_cleans_up_partial_resources(patched_bulk_provision,
+                                                    fresh_state_db, monkeypatch,
+                                                    tmp_path, previously_up):
+    error = exceptions.InvalidCloudConfigs(
+        'Invalid Kubernetes Pod configuration')
+    monkeypatch.setattr(provisioner, '_bulk_provision',
+                        mock.Mock(side_effect=error))
+    with pytest.raises(exceptions.InvalidCloudConfigs) as exc:
+        _call_bulk_provision(tmp_path, prev_cluster_ever_up=previously_up)
+    assert exc.value is error
+    patched_bulk_provision.assert_called_once()
+    assert patched_bulk_provision.call_args.kwargs[
+        'terminate'] is not previously_up
+
+
 # --- Launch attempt bookkeeping ---------------------------------------------
 #
 # A pause unwinds the whole provision call and resumes as a fresh one, possibly
