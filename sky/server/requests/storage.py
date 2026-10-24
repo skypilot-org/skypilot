@@ -112,7 +112,8 @@ class RequestBackend(abc.ABC):
 
     @abc.abstractmethod
     async def delete_requests(self, request_ids: List[str]) -> None:
-        """Delete requests by their IDs."""
+        """Delete requests by their IDs, along with any task_queue
+        entries (for backends with a persistent queue)."""
         raise NotImplementedError
 
     @abc.abstractmethod
