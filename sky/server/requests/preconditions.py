@@ -5,22 +5,27 @@ Preconditions are introduced so that:
 - Cross requests knowledge (e.g. waiting for other requests to be completed)
   can be handled at precondition level, instead of invading the execution
   logic of specific requests.
+
+A request that waits for a precondition is stored in the request database
+(see `requests.create_with_precondition_wait_async`) as a kind plus a small
+set of parameters. One checker in the API server process rebuilds each waiting
+precondition from that record, evaluates it and enqueues the request, so the
+wait survives the death of the worker that accepted the request.
 """
 import abc
 import asyncio
 import inspect
 import time
-from typing import Any, Awaitable, Callable, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Type, Union
 
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.server import constants as server_constants
 from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
 from sky.utils import status_lib
 
-# The default interval seconds to check the precondition.
-_PRECONDITION_CHECK_INTERVAL = 1
 # The default timeout seconds to wait for the precondition to be met.
 _PRECONDITION_TIMEOUT = 60 * 60
 
@@ -29,28 +34,68 @@ logger = sky_logging.init_logger(__name__)
 # Strong references to background precondition tasks to prevent GC.
 # asyncio only keeps weak references to tasks, so without this set a
 # long-running precondition wait (up to 1 hour) could be collected.
+# Deprecated: only the in-process wait of a precondition that cannot be stored
+# in the request database adds tasks here.
 background_tasks: set = set()
 
 
 class Precondition(abc.ABC):
     """Abstract base class for a precondition for a request to be executed.
 
-    A Precondition can be waited in either of the following ways:
-    - await Precondition: wait for the precondition to be met.
-    - Precondition.wait_async: wait for the precondition to be met in background
-      and execute the given callback on met.
+    The request database stores the wait of the built-in subclasses in this
+    module: each sets `KIND` and implements `params`, and `build_precondition`
+    rebuilds it later. Any other subclass still works, but the accepting
+    process waits for it in memory, and the wait is lost if that process dies.
+    No other subclass can be stored.
+
+    Deprecated: awaiting a precondition and `wait_async`. For a built-in
+    subclass, pass the precondition to `executor.schedule_request_async`
+    instead, which stores the wait in the request database.
     """
+
+    # A unique name that identifies a built-in subclass in the request
+    # database. Other subclasses leave it empty.
+    KIND: str = ''
 
     def __init__(self,
                  request_id: str,
-                 check_interval: float = _PRECONDITION_CHECK_INTERVAL,
+                 check_interval: Optional[float] = None,
                  timeout: float = _PRECONDITION_TIMEOUT):
+        """Create a precondition.
+
+        Args:
+            request_id: The request ID of the request this precondition gates.
+            check_interval: Deprecated. Seconds between two checks of the
+                in-process wait. Nothing else uses it.
+            timeout: Seconds to wait before the request is failed.
+        """
+        if check_interval is not None:
+            # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+            logger.warning(
+                'The check_interval argument of Precondition is deprecated. '
+                'The API server checks stored preconditions at its own '
+                'interval.')
         self.request_id = request_id
-        self.check_interval = check_interval
+        self.check_interval = (
+            server_constants.PRECONDITION_CHECK_INTERVAL_SECONDS
+            if check_interval is None else check_interval)
         self.timeout = timeout
 
+    def params(self) -> Dict[str, Any]:
+        """The constructor arguments, other than request_id, as JSON values."""
+        raise NotImplementedError
+
     def __await__(self):
-        """Make Precondition awaitable."""
+        """Make Precondition awaitable.
+
+        Deprecated: use `executor.schedule_request_async`.
+        """
+        # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+        logger.warning(
+            'Awaiting a Precondition is deprecated. Pass the precondition to '
+            'executor.schedule_request_async. The wait then lives in the '
+            'request database for a built-in precondition, and in the '
+            'worker memory for any other.')
         return self._wait().__await__()
 
     async def wait_async(
@@ -63,8 +108,25 @@ class Precondition(abc.ABC):
         This coroutine blocks until the precondition is met (or times out).
         Use ``create_task(precondition.wait_async(...))`` to run it in the
         background without blocking the caller.
+
+        Deprecated: the wait lives in this process only. Pass the precondition
+        to `executor.schedule_request_async` instead.
         """
-        met = await self
+        # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+        logger.warning(
+            'Precondition.wait_async is deprecated. Pass the precondition to '
+            'executor.schedule_request_async. The wait then lives in the '
+            'request database for a built-in precondition, and in the '
+            'worker memory for any other.')
+        await self.wait_in_process(on_condition_met)
+
+    async def wait_in_process(
+        self,
+        on_condition_met: Optional[Callable[[], Union[None,
+                                                      Awaitable[Any]]]] = None
+    ) -> None:
+        """The in-memory wait, for what the request database cannot store."""
+        met = await self._wait()
         if met and on_condition_met is not None:
             result = on_condition_met()
             if inspect.isawaitable(result):
@@ -90,11 +152,7 @@ class Precondition(abc.ABC):
         raise NotImplementedError
 
     async def _wait(self) -> bool:
-        """Wait for the precondition to be met.
-
-        Args:
-            on_condition_met: Callback to execute when the precondition is met.
-        """
+        """Wait for the precondition to be met, in this process."""
         start_time = time.time()
         last_status_msg = ''
         while True:
@@ -150,9 +208,14 @@ class RequestSucceededPrecondition(Precondition):
         awaited_request_id: The request ID that must SUCCEED first.
     """
 
+    KIND = 'request_succeeded'
+
     def __init__(self, request_id: str, awaited_request_id: str, **kwargs):
         super().__init__(request_id=request_id, **kwargs)
         self.awaited_request_id = awaited_request_id
+
+    def params(self) -> Dict[str, Any]:
+        return {'awaited_request_id': self.awaited_request_id}
 
     async def check(self) -> Tuple[bool, Optional[str]]:
         awaited = await api_requests.get_request_async(self.awaited_request_id,
@@ -187,9 +250,14 @@ class ClusterStartCompletePrecondition(Precondition):
         cluster_name: The name of the cluster to wait for.
     """
 
+    KIND = 'cluster_start_complete'
+
     def __init__(self, request_id: str, cluster_name: str, **kwargs):
         super().__init__(request_id=request_id, **kwargs)
         self.cluster_name = cluster_name
+
+    def params(self) -> Dict[str, Any]:
+        return {'cluster_name': self.cluster_name}
 
     async def check(self) -> Tuple[bool, Optional[str]]:
         cluster_status = global_user_state.get_status_from_cluster_name(
@@ -219,3 +287,26 @@ class ClusterStartCompletePrecondition(Precondition):
             # No running or pending tasks, the start process is done.
             return True, None
         return False, f'Waiting for cluster {self.cluster_name} to be UP.'
+
+
+_KINDS: Dict[str, Type[Precondition]] = {
+    cls.KIND: cls
+    for cls in (RequestSucceededPrecondition, ClusterStartCompletePrecondition)
+}
+
+
+def build_precondition(kind: str, request_id: str,
+                       params: Dict[str, Any]) -> Precondition:
+    """Rebuild a stored precondition from its kind and parameters."""
+    if kind not in _KINDS:
+        raise ValueError(f'Unknown precondition kind: {kind!r}')
+    return _KINDS[kind](request_id=request_id, **params)
+
+
+def is_storable(precondition: Precondition) -> bool:
+    """Whether the request database can store and rebuild the precondition.
+
+    A subclass of a stored kind that overrides `check` is not storable: the
+    checker would rebuild the base class and lose the override.
+    """
+    return _KINDS.get(precondition.KIND) is type(precondition)

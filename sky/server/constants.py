@@ -229,6 +229,17 @@ EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
 # watching it, long enough that the sweep is negligible next to provisioning.
 LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS = 60
 
+# Seconds between two checks of a precondition: the checker daemon polls the
+# stored waits at this interval, and the in-process wait uses it too.
+PRECONDITION_CHECK_INTERVAL_SECONDS = 1
+
+# Seconds a claim on a stored wait lasts. An actor claims a wait only when it
+# has an outcome, and holds the claim for the queue put or the FAILED mark plus
+# two database writes, not for the check. A claim whose owner died expires, and
+# the next actor takes the wait over. A put that stays blocked for longer lets a
+# second actor decide the wait.
+PRECONDITION_CLAIM_SECONDS = 60
+
 # Time an API server shutdown may take, matching the pod's
 # terminationGracePeriodSeconds when deployed with the Helm chart.
 try:

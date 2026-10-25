@@ -1,11 +1,15 @@
 """Unit tests for sky.server.requests.executor module."""
 import asyncio
 import concurrent.futures
+import contextlib
 import functools
 import gc
+import multiprocessing
 import os
 import pathlib
 import queue as queue_lib
+import signal
+import sqlite3
 import threading
 import time
 from typing import List, Optional
@@ -27,6 +31,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import storage as requests_storage
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import timeline
@@ -2255,3 +2260,1138 @@ def test_override_env_seeds_role_before_workspace_check(
         pass
 
     assert calls == [('seed', 'client-user-id'), ('workspace_check',)]
+
+
+# --- Requests that wait for a precondition survive their accepting process ---
+
+_CLUSTER_CHECK = ('sky.server.requests.preconditions.'
+                  'ClusterStartCompletePrecondition.check')
+
+
+def _waiting_request(request_id: str,
+                     cluster_name: str = 'c1',
+                     **kwargs) -> preconditions.Precondition:
+    return preconditions.ClusterStartCompletePrecondition(
+        request_id, cluster_name, **kwargs)
+
+
+def _put_queue() -> mock.Mock:
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock()
+    return queue
+
+
+async def _schedule_waiting(request_id: str, **kwargs) -> None:
+    """Accepts a request whose cluster is still starting."""
+    with mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(False, 'Waiting'))):
+        await _accept_with_precondition(request_id, **kwargs)
+
+
+def _accept_unmet_request_then_wait(db_path: str, log_path: str,
+                                    request_id: str, ready) -> None:
+    """Runs in a spawned process that stands for a uvicorn worker."""
+
+    async def run():
+        with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        db_path), \
+             mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        log_path):
+            await _schedule_waiting(request_id)
+            ready.set()
+            await asyncio.sleep(3600)
+
+    asyncio.run(run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cluster_comes_up', [True, False])
+async def test_waiting_request_survives_kill_of_accepting_process(
+        isolated_database, cluster_comes_up):
+    """SIGKILL of the accepting process must not strand the request.
+
+    The request is enqueued once its precondition is met, or it is FAILED once
+    its deadline passes. Before the wait was stored in the database, the wait
+    died with the process and the request stayed PENDING forever.
+    """
+    request_id = 'killed-acceptor'
+    ctx = multiprocessing.get_context('spawn')
+    ready = ctx.Event()
+    proc = ctx.Process(target=_accept_unmet_request_then_wait,
+                       args=(server_constants.API_SERVER_REQUEST_DB_PATH,
+                             server_constants.REQUEST_LOG_PATH_PREFIX,
+                             request_id, ready))
+    proc.start()
+    try:
+        assert ready.wait(timeout=120)
+    finally:
+        assert proc.pid is not None
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.join(timeout=30)
+
+    waits = await requests_lib.list_precondition_waits_async()
+    assert [w.request_id for w in waits] == [request_id]
+    deadline = waits[0].deadline
+    assert deadline is not None
+
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(cluster_comes_up, None))):
+        now = deadline - 1 if cluster_comes_up else deadline + 1
+        await executor.check_precondition_waits_once(now=now)
+        # A second tick must not act on the same request again.
+        await executor.check_precondition_waits_once(now=now)
+
+    updated = requests_lib.get_request(request_id)
+    assert updated is not None
+    if cluster_comes_up:
+        queue.put_async.assert_awaited_once_with((request_id, False, False))
+        assert updated.status == requests_lib.RequestStatus.PENDING
+    else:
+        queue.put_async.assert_not_awaited()
+        assert updated.status == requests_lib.RequestStatus.FAILED
+        assert updated.get_error()['message'] == (
+            f'Request {request_id} precondition wait timed out after '
+            f'{preconditions._PRECONDITION_TIMEOUT}s')
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_unmet_precondition_stores_wait_and_does_not_enqueue(
+        isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('stored-wait', timeout=100)
+        # Still unmet at the next tick: the row stays and nothing is put.
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(False, 'Waiting'))):
+            await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_not_awaited()
+    waits = await requests_lib.list_precondition_waits_async()
+    assert [(w.request_id, w.kind, w.params) for w in waits
+           ] == [('stored-wait', 'cluster_start_complete', {
+               'cluster_name': 'c1'
+           })]
+    stored = requests_lib.get_request('stored-wait')
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    assert stored.status_msg == 'Waiting'
+
+
+@pytest.mark.asyncio
+async def test_met_precondition_enqueues_and_leaves_no_stored_wait(
+        isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        await executor.schedule_request_async(
+            request_id='met-at-once',
+            request_name='test.precondition',
+            request_body=payloads.RequestBody(),
+            func=dummy_entrypoint,
+            ignore_return_value=True,
+            retryable=True,
+            precondition=_waiting_request('met-at-once'))
+
+    queue.put_async.assert_awaited_once_with(('met-at-once', True, True))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+_COUNTED_RUNS = []
+
+
+def _counted_entrypoint():
+    _COUNTED_RUNS.append(1)
+    return 'counted'
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiting_request_is_not_enqueued(isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('cancelled-wait')
+        await requests_lib.set_request_cancelled_async('cancelled-wait')
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(True, None))):
+            await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_not_awaited()
+    updated = requests_lib.get_request('cancelled-wait')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.CANCELLED
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_deleted_waiting_request_drops_its_wait(isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('deleted-wait')
+        await requests_lib._delete_requests(['deleted-wait'])
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(True, None))):
+            await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_not_awaited()
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_failing_check_marks_request_failed_once(isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('failing-check')
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(side_effect=RuntimeError('boom'))):
+            await executor.check_precondition_waits_once()
+            await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_not_awaited()
+    updated = requests_lib.get_request('failing-check')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'boom' in updated.get_error()['message']
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_awaited_request_deleted_marks_follow_up_failed(
+        isolated_database):
+    """RequestSucceededPrecondition: the awaited request is gone."""
+    assert await requests_lib.create_if_not_exists_async(
+        _make_pending_request('awaited')) is True
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await executor.schedule_request_async(
+            request_id='follow-up',
+            request_name='test.precondition',
+            request_body=payloads.RequestBody(),
+            func=dummy_entrypoint,
+            precondition=preconditions.RequestSucceededPrecondition(
+                'follow-up', 'awaited'))
+        assert len(await requests_lib.list_precondition_waits_async()) == 1
+        await requests_lib._delete_requests(['awaited'])
+        await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_not_awaited()
+    updated = requests_lib.get_request('follow-up')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'not found' in updated.get_error()['message']
+
+
+@pytest.mark.asyncio
+async def test_failed_put_in_the_checker_marks_request_failed(
+        isolated_database):
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('put-fails-in-checker')
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(True, None))):
+            await executor.check_precondition_waits_once()
+
+    updated = requests_lib.get_request('put-fails-in-checker')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'put failed' in updated.get_error()['message']
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_one_failing_wait_does_not_stall_the_others(isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('stuck-wait')
+        await _schedule_waiting('good-wait')
+        real = requests_lib.get_request_async
+
+        async def get_request(request_id, *args, **kwargs):
+            if request_id == 'stuck-wait':
+                raise RuntimeError('database error')
+            return await real(request_id, *args, **kwargs)
+
+        with mock.patch.object(requests_lib,
+                               'get_request_async',
+                               side_effect=get_request), \
+             mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(True, None))):
+            await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_awaited_once_with(('good-wait', False, False))
+
+
+@pytest.mark.asyncio
+async def test_checker_daemon_survives_a_failing_tick_and_warns_when_slow():
+    """A tick that raises must not stop the checker. A slow tick is logged."""
+    tick = mock.AsyncMock(
+        side_effect=[RuntimeError('db busy'), None,
+                     asyncio.CancelledError()])
+    sleep = mock.AsyncMock()
+    # The first tick takes 5 s by the fake clock. The two ticks after it are
+    # instant.
+    clock = mock.Mock(monotonic=mock.Mock(
+        side_effect=[0.0, 5.0, 5.0, 5.0, 5.0]))
+    with mock.patch.object(executor, 'check_precondition_waits_once', tick), \
+         mock.patch.object(executor.asyncio, 'sleep', sleep), \
+         mock.patch.object(executor, 'time', clock), \
+         mock.patch.object(executor, 'logger') as fake_logger:
+        with pytest.raises(asyncio.CancelledError):
+            await executor.precondition_checker_daemon()
+
+    assert tick.await_count == 3
+    assert sleep.await_count == 2
+    fake_logger.error.assert_called_once()
+    fake_logger.warning.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_precondition_without_a_kind_waits_in_memory_and_warns_when_used(
+        isolated_database):
+    """The deprecated in-memory wait: background_tasks holds the task."""
+
+    class InMemory(preconditions.Precondition):
+
+        def __init__(self, request_id):
+            super().__init__(request_id, check_interval=0.001)
+            self.checks = 0
+
+        async def check(self):
+            self.checks += 1
+            return self.checks >= 2, None
+
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch.object(executor, 'logger') as fake_logger:
+        for request_id in ('in-memory-1', 'in-memory-2'):
+            req = _make_pending_request(request_id)
+            assert await requests_lib.create_if_not_exists_async(req) is True
+            before = set(preconditions.background_tasks)
+            await executor.schedule_prepared_request(
+                req, precondition=InMemory(request_id))
+            (task,) = preconditions.background_tasks - before
+            await task
+            queue.put_async.assert_awaited_with((request_id, False, False))
+    assert queue.put_async.await_count == 2
+    # Nothing is stored in the request database.
+    assert await requests_lib.list_precondition_waits_async() == []
+    memory_warnings = [
+        call for call in fake_logger.warning.call_args_list
+        if 'background_tasks' in call.args[0]
+    ]
+    assert len(memory_warnings) == 2
+
+
+@pytest.mark.asyncio
+async def test_precondition_with_an_unregistered_kind_waits_in_memory(
+        isolated_database):
+    """A subclass with a KIND nobody registered never reaches the checker."""
+
+    class Outside(preconditions.Precondition):
+        KIND = 'registered_by_nobody'
+
+        async def check(self):
+            return True, None
+
+    queue = _put_queue()
+    req = _make_pending_request('unregistered-kind')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch.object(executor, 'logger'):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(req,
+                                                 precondition=Outside(
+                                                     req.request_id))
+        (task,) = preconditions.background_tasks - before
+        await task
+        await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_awaited_once_with(
+        ('unregistered-kind', False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+    updated = requests_lib.get_request('unregistered-kind')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_inline_check_that_raises_marks_request_failed(isolated_database):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(side_effect=RuntimeError('boom'))):
+        await _accept_with_precondition('inline-raises')
+
+    queue.put_async.assert_not_awaited()
+    updated = requests_lib.get_request('inline-raises')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'boom' in updated.get_error()['message']
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('timeout, text', [(100, '100s'), (30.0, '30.0s'),
+                                           (0.5, '0.5s')])
+async def test_timed_out_wait_names_the_timeout_as_the_caller_wrote_it(
+        isolated_database, timeout, text):
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('timed-out', timeout=timeout)
+        (wait,) = await requests_lib.list_precondition_waits_async()
+        assert wait.deadline is not None
+        with mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(False, None))):
+            await executor.check_precondition_waits_once(now=wait.deadline + 1)
+
+    queue.put_async.assert_not_awaited()
+    updated = requests_lib.get_request('timed-out')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert updated.get_error()['message'] == (
+        f'Request timed-out precondition wait timed out after {text}')
+
+
+def _die_in_a_window(db_path: str, log_path: str, request_id: str,
+                     window: str) -> None:
+    """Runs in a spawned process that SIGKILLs itself inside `window`."""
+
+    def die(*args, **kwargs):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    async def run():
+        with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        db_path), \
+             mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        log_path):
+            if window == 'check':
+                with mock.patch(_CLUSTER_CHECK,
+                                new=mock.AsyncMock(side_effect=die)):
+                    await _accept_with_precondition(request_id)
+                return
+            await _schedule_waiting(request_id)
+            queue = mock.Mock()
+            queue.put_async = mock.AsyncMock(side_effect=die)
+            with mock.patch.object(executor, '_get_queue', return_value=queue), \
+                 mock.patch(_CLUSTER_CHECK,
+                            new=mock.AsyncMock(return_value=(True, None))):
+                await executor.check_precondition_waits_once()
+
+    asyncio.run(run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('window', ['check', 'put'])
+async def test_request_survives_kill_in_a_window_before_it_is_queued(
+        isolated_database, window):
+    """SIGKILL during the inline check, or at the put, strands nothing.
+
+    The row is stored before the first check and dropped only after the put,
+    so the next checker pass still finds the request and queues it. A kill at
+    the put leaves a claim, which the pass takes over once it expires.
+    """
+    request_id = f'killed-in-{window}'
+    ctx = multiprocessing.get_context('spawn')
+    proc = ctx.Process(target=_die_in_a_window,
+                       args=(server_constants.API_SERVER_REQUEST_DB_PATH,
+                             server_constants.REQUEST_LOG_PATH_PREFIX,
+                             request_id, window))
+    proc.start()
+    proc.join(timeout=120)
+    # The process died by SIGKILL inside the window, not for another reason.
+    assert proc.exitcode == -signal.SIGKILL
+
+    assert [
+        w.request_id
+        for w in await requests_lib.list_precondition_waits_async()
+    ] == [request_id]
+    stored = requests_lib.get_request(request_id)
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+
+    queue = _put_queue()
+    clock = _Clock()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch.object(executor.time, 'time', new=clock), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        # A kill at the put leaves a claim. The pass runs after it expires.
+        clock.offset = server_constants.PRECONDITION_CLAIM_SECONDS + 1
+        await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_awaited_once_with((request_id, False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+# A request and its wait row must commit together, and a cancel must never
+# fail a request that the checker can still deliver.
+_WAIT_TABLE_INSERT = 18  # sqlite3 SQLITE_INSERT authorizer action code
+
+
+def _hook_wait_insert(on_wait_insert):
+    """Patch the DB cursor so `on_wait_insert()` runs, in the DB thread, when
+    SQLite prepares an INSERT into the wait table."""
+    real = db_utils.safe_cursor_on_connection
+
+    @contextlib.contextmanager
+    def hooked(conn):
+
+        def authorizer(action, arg1, arg2, dbname, source):
+            if (action == _WAIT_TABLE_INSERT and
+                    arg1 == requests_lib.PRECONDITION_TABLE):
+                on_wait_insert()
+            return sqlite3.SQLITE_OK
+
+        conn.set_authorizer(authorizer)
+        with real(conn) as cursor:
+            yield cursor
+
+    return mock.patch.object(db_utils, 'safe_cursor_on_connection', hooked)
+
+
+async def _accept_with_precondition(request_id: str, **kwargs) -> None:
+    await executor.schedule_request_async(request_id=request_id,
+                                          request_name='test.precondition',
+                                          request_body=payloads.RequestBody(),
+                                          func=dummy_entrypoint,
+                                          precondition=_waiting_request(
+                                              request_id, **kwargs))
+
+
+def _die_at_wait_insert(db_path: str, log_path: str, request_id: str) -> None:
+    """Runs in a spawned process that SIGKILLs itself at the wait insert."""
+
+    def die():
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    async def run():
+        with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        db_path), \
+             mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        log_path), \
+             _hook_wait_insert(die), \
+             mock.patch(_CLUSTER_CHECK,
+                        new=mock.AsyncMock(return_value=(False, 'Waiting'))):
+            await _accept_with_precondition(request_id)
+
+    asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_kill_at_the_wait_insert_leaves_no_request_without_its_wait(
+        isolated_database):
+    """A request never exists without its wait row.
+
+    The accepting process dies when SQLite prepares the wait insert. If the
+    request row were committed first, it would stay PENDING and nothing would
+    deliver it.
+    """
+    request_id = 'killed-at-wait-insert'
+    ctx = multiprocessing.get_context('spawn')
+    proc = ctx.Process(target=_die_at_wait_insert,
+                       args=(server_constants.API_SERVER_REQUEST_DB_PATH,
+                             server_constants.REQUEST_LOG_PATH_PREFIX,
+                             request_id))
+    proc.start()
+    proc.join(timeout=120)
+    assert proc.exitcode == -signal.SIGKILL
+
+    stored = requests_lib.get_request(request_id)
+    waits = await requests_lib.list_precondition_waits_async()
+    assert stored is None or [w.request_id for w in waits] == [request_id]
+
+
+async def _wait_until(predicate, timeout: float = 10) -> None:
+    deadline = time.monotonic() + timeout
+    while not await predicate():
+        assert time.monotonic() < deadline
+        await asyncio.sleep(0.01)
+
+
+async def _checker_delivers(request_id: str) -> None:
+    """One checker pass puts the request on the queue and drops its row."""
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        await executor.check_precondition_waits_once()
+    queue.put_async.assert_awaited_once_with((request_id, False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_at_the_wait_insert_does_not_fail_the_request(
+        isolated_database):
+    request_id = 'cancelled-at-wait-insert'
+    reached = threading.Event()
+    release = threading.Event()
+
+    def block():
+        reached.set()
+        release.wait(timeout=30)
+
+    with _hook_wait_insert(block), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(False, 'Waiting'))):
+        task = asyncio.create_task(_accept_with_precondition(request_id))
+        assert await asyncio.get_running_loop().run_in_executor(
+            None, reached.wait, 30)
+        task.cancel()
+        threading.Timer(0.5, release.set).start()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        async def wait_row_exists():
+            return bool(await requests_lib.list_precondition_waits_async())
+
+        await _wait_until(wait_row_exists)
+
+    stored = requests_lib.get_request(request_id)
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    await _checker_delivers(request_id)
+
+
+@pytest.mark.asyncio
+async def test_cancel_at_the_put_does_not_fail_the_request(isolated_database):
+    request_id = 'cancelled-at-put'
+    reached = asyncio.Event()
+
+    async def hang(*args, **kwargs):
+        reached.set()
+        await asyncio.sleep(3600)
+
+    queue = mock.Mock()
+    queue.put_async = hang
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        task = asyncio.create_task(_accept_with_precondition(request_id))
+        await asyncio.wait_for(reached.wait(), timeout=30)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    stored = requests_lib.get_request(request_id)
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    assert [
+        w.request_id
+        for w in await requests_lib.list_precondition_waits_async()
+    ] == [request_id]
+    await _checker_delivers(request_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('runner', ['once', 'daemon'])
+async def test_cancelled_checker_leaves_the_request_and_its_row(
+        isolated_database, runner):
+    """A shutdown that cancels the checker mid-put must not fail the request.
+
+    A plugin backend can keep the row across a restart, and the next checker
+    then delivers the request.
+    """
+    request_id = f'checker-cancelled-{runner}'
+    await _schedule_waiting(request_id)
+    reached = asyncio.Event()
+
+    async def hang(*args, **kwargs):
+        reached.set()
+        await asyncio.sleep(3600)
+
+    queue = mock.Mock()
+    queue.put_async = hang
+    run = (executor.check_precondition_waits_once()
+           if runner == 'once' else executor.precondition_checker_daemon())
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        task = asyncio.create_task(run)
+        await asyncio.wait_for(reached.wait(), timeout=30)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert task.cancelled()
+
+    stored = requests_lib.get_request(request_id)
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    await _checker_delivers(request_id)
+
+
+def _wait_for(request_id: str) -> requests_lib.PreconditionWait:
+    return requests_lib.PreconditionWait(request_id, 'cluster_start_complete',
+                                         {'cluster_name': 'c1'},
+                                         requests_lib.ScheduleType.LONG, False,
+                                         False, None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('use_default', [False, True])
+async def test_create_with_wait_stores_both_rows_once(isolated_database,
+                                                      use_default):
+    """The SQLite override and the default path agree on the contract."""
+    backend = requests_lib.SqliteRequestBackend()
+
+    async def create(req):
+        if use_default:
+            return await requests_storage.RequestBackend.create_with_precondition_wait_async(
+                backend, req, _wait_for(req.request_id))
+        return await backend.create_with_precondition_wait_async(
+            req, _wait_for(req.request_id))
+
+    request_id = f'both-rows-{use_default}'
+    req = _make_pending_request(request_id)
+    assert await create(req) is True
+    assert [
+        w.request_id
+        for w in await requests_lib.list_precondition_waits_async()
+    ] == [request_id]
+    assert requests_lib.get_request(request_id) is not None
+
+    # A second create of the same request stores nothing new.
+    assert await create(req) is False
+    assert len(await requests_lib.list_precondition_waits_async()) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_wait_insert_rolls_back_the_request(isolated_database):
+    """The wait insert fails inside the transaction, after the request insert.
+
+    The request INSERT has run when the second statement raises. Only the
+    rollback removes the request row.
+    """
+    request_id = 'rolled-back'
+    backend = requests_lib.SqliteRequestBackend()
+    with mock.patch.object(requests_lib,
+                           '_precondition_wait_insert',
+                           return_value=('INSERT INTO no_such_table VALUES (1)',
+                                         ())):
+        with pytest.raises(sqlite3.OperationalError, match='no_such_table'):
+            await backend.create_with_precondition_wait_async(
+                _make_pending_request(request_id), _wait_for(request_id))
+    assert requests_lib.get_request(request_id) is None
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+async def _create_with_default_backend(request_id: str) -> bool:
+    """Runs the default method of the storage contract on the SQLite store."""
+    return await requests_storage.RequestBackend.create_with_precondition_wait_async(
+        requests_lib.SqliteRequestBackend(), _make_pending_request(request_id),
+        _wait_for(request_id))
+
+
+@pytest.mark.asyncio
+async def test_default_backend_marks_request_failed_when_wait_insert_raises(
+        isolated_database):
+    """Error window: the request is FAILED and the error reaches the caller."""
+    with mock.patch.object(requests_lib,
+                           'add_precondition_wait_async',
+                           side_effect=RuntimeError('disk full')):
+        with pytest.raises(RuntimeError, match='disk full'):
+            await _create_with_default_backend('default-insert-fails')
+
+    updated = requests_lib.get_request('default-insert-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'disk full' in updated.get_error()['message']
+
+
+@pytest.mark.asyncio
+async def test_default_backend_marks_request_failed_when_cancelled_at_wait_insert(
+        isolated_database):
+    """Cancel window: the request is FAILED and the cancel is re-raised."""
+    reached = asyncio.Event()
+
+    async def hang(*args, **kwargs):
+        reached.set()
+        await asyncio.sleep(3600)
+
+    with mock.patch.object(requests_lib,
+                           'add_precondition_wait_async',
+                           new=hang):
+        task = asyncio.create_task(
+            _create_with_default_backend('default-cancelled'))
+        await asyncio.wait_for(reached.wait(), timeout=30)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    # The FAILED mark is shielded, so it lands even though the task was
+    # cancelled.
+    async def failed():
+        updated = requests_lib.get_request('default-cancelled')
+        return (updated is not None and
+                updated.status == requests_lib.RequestStatus.FAILED)
+
+    await _wait_until(failed)
+
+
+@pytest.mark.asyncio
+async def test_schedule_request_with_a_taken_id_raises_and_stores_no_wait(
+        isolated_database):
+    assert await requests_lib.create_if_not_exists_async(
+        _make_pending_request('taken')) is True
+    with pytest.raises(exceptions.RequestAlreadyExistsError):
+        await _accept_with_precondition('taken')
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+# --- One actor decides each wait ---
+
+
+async def _stale_wait(request_id: str, timeout: float = 100):
+    """Accepts an unmet request and returns its wait row, as a checker that
+    loaded it earlier would hold it."""
+    await _schedule_waiting(request_id, timeout=timeout)
+    (wait,) = await requests_lib.list_precondition_waits_async()
+    assert wait.deadline is not None
+    return wait
+
+
+async def _check_once(wait, now, met=True, error=None):
+    """One checker step on `wait`, with a fixed check result."""
+    check = (mock.AsyncMock(side_effect=error)
+             if error is not None else mock.AsyncMock(return_value=(met, None)))
+    with mock.patch(_CLUSTER_CHECK, new=check):
+        await executor._check_precondition_wait(wait, now)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('loser', ['timeout', 'error'])
+async def test_failure_after_a_put_does_not_fail_the_request(
+        isolated_database, loser):
+    """The success wins the wait. A checker that loaded the row earlier then
+    sees an expired deadline, or a check error. It must leave the queued
+    request PENDING."""
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        wait = await _stale_wait('success-first')
+        await _check_once(wait, wait.deadline - 1, met=True)
+        if loser == 'timeout':
+            await _check_once(wait, wait.deadline + 1)
+        else:
+            await _check_once(wait, wait.deadline - 1, error=RuntimeError('x'))
+
+    queue.put_async.assert_awaited_once_with(('success-first', False, False))
+    stored = requests_lib.get_request('success-first')
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_successful_checks_put_once(
+        isolated_database, mock_fd_operations, mock_global_user_state,
+        mock_skypilot_config):
+    _COUNTED_RUNS.clear()
+    queue = _put_queue()
+    entered = 0
+    both_entered = asyncio.Event()
+
+    async def met_after_both_entered(self):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both_entered.set()
+        await both_entered.wait()
+        return True, None
+
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('delivered-once')
+        with requests_lib.update_request('delivered-once') as request:
+            assert request is not None
+            request.entrypoint = _counted_entrypoint
+        with mock.patch(_CLUSTER_CHECK, new=met_after_both_entered):
+            await asyncio.gather(executor.check_precondition_waits_once(),
+                                 executor.check_precondition_waits_once())
+
+    assert entered == 2
+    queue.put_async.assert_awaited_once_with(('delivered-once', False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+    executor._request_execution_wrapper('delivered-once',
+                                        ignore_return_value=False)
+    assert _COUNTED_RUNS == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_doubly_put_request_runs_once(isolated_database,
+                                              mock_fd_operations,
+                                              mock_global_user_state,
+                                              mock_skypilot_config):
+    """Second line of defence: if two puts do happen, the worker runs the
+    request once."""
+    _COUNTED_RUNS.clear()
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        await _schedule_waiting('put-twice')
+        with requests_lib.update_request('put-twice') as request:
+            assert request is not None
+            request.entrypoint = _counted_entrypoint
+        for _ in range(2):
+            await executor.enqueue_request('put-twice',
+                                           requests_lib.ScheduleType.SHORT)
+
+    assert queue.put_async.await_args_list == [
+        mock.call(('put-twice', False, False))
+    ] * 2
+    for _ in range(2):
+        executor._request_execution_wrapper('put-twice',
+                                            ignore_return_value=False)
+    assert _COUNTED_RUNS == [1]
+    stored = requests_lib.get_request('put-twice')
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.SUCCEEDED
+
+
+class _Clock:
+    """A `time.time` that a test moves forward without sleeping."""
+
+    def __init__(self) -> None:
+        self.offset = 0.0
+        self._real = time.time
+
+    def __call__(self) -> float:
+        return self._real() + self.offset
+
+
+@pytest.mark.asyncio
+async def test_a_slow_pass_does_not_make_a_claim_that_is_born_expired(
+        isolated_database):
+    """An earlier check in the pass outlasts the claim time. The claim of the
+    next wait must start at the real time, so the accepting worker loses it."""
+    clock = _Clock()
+    queue = mock.Mock()
+    in_put = asyncio.Event()
+    finish_put = asyncio.Event()
+
+    async def slow_put(item):
+        # Only the first put blocks: a second put must show as a failure, not
+        # as a hang.
+        if in_put.is_set():
+            return
+        in_put.set()
+        await finish_put.wait()
+
+    queue.put_async = mock.AsyncMock(side_effect=slow_put)
+    checks = 0
+
+    async def slow_first_check(self):
+        nonlocal checks
+        checks += 1
+        if checks == 1:
+            clock.offset += server_constants.PRECONDITION_CLAIM_SECONDS + 1
+            return False, None
+        return True, None
+
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch.object(executor.time, 'time', new=clock):
+        await _schedule_waiting('slow-first')
+        await _schedule_waiting('claimed-late')
+        with mock.patch(_CLUSTER_CHECK, new=slow_first_check):
+            checker = asyncio.create_task(
+                executor.check_precondition_waits_once())
+            await asyncio.wait_for(in_put.wait(), timeout=30)
+            # The accepting worker of the same request acts now.
+            (wait,) = [
+                w for w in await requests_lib.list_precondition_waits_async()
+                if w.request_id == 'claimed-late'
+            ]
+            await executor._check_precondition_wait(
+                wait,
+                time.time(),
+                precondition=_waiting_request('claimed-late'))
+            finish_put.set()
+            await checker
+
+    queue.put_async.assert_awaited_once_with(('claimed-late', False, False))
+
+
+@pytest.mark.asyncio
+async def test_a_held_claim_blocks_the_other_actor(isolated_database):
+    """While one actor is inside its put, a timeout in another does nothing."""
+    in_put = asyncio.Event()
+    finish_put = asyncio.Event()
+
+    async def slow_put(item):
+        in_put.set()
+        await finish_put.wait()
+
+    queue = mock.Mock()
+    queue.put_async = slow_put
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        wait = await _stale_wait('claim-held')
+        putter = asyncio.create_task(
+            _check_once(wait, wait.deadline - 1, met=True))
+        await asyncio.wait_for(in_put.wait(), timeout=30)
+        await _check_once(wait, wait.deadline + 1)
+        stored = requests_lib.get_request('claim-held')
+        assert stored is not None
+        assert stored.status == requests_lib.RequestStatus.PENDING
+        finish_put.set()
+        await putter
+
+    stored = requests_lib.get_request('claim-held')
+    assert stored is not None
+    assert stored.status == requests_lib.RequestStatus.PENDING
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+def _die_holding_the_claim(db_path: str, log_path: str,
+                           request_id: str) -> None:
+    """Runs in a spawned process that SIGKILLs itself inside the put."""
+
+    def die(*args, **kwargs):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    async def run():
+        with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        db_path), \
+             mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        log_path):
+            await _schedule_waiting(request_id)
+            queue = mock.Mock()
+            queue.put_async = mock.AsyncMock(side_effect=die)
+            with mock.patch.object(executor, '_get_queue', return_value=queue), \
+                 mock.patch(_CLUSTER_CHECK,
+                            new=mock.AsyncMock(return_value=(True, None))):
+                await executor.check_precondition_waits_once()
+
+    asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_another_actor_takes_over_a_claim_whose_owner_died(
+        isolated_database):
+    request_id = 'owner-killed'
+    ctx = multiprocessing.get_context('spawn')
+    proc = ctx.Process(target=_die_holding_the_claim,
+                       args=(server_constants.API_SERVER_REQUEST_DB_PATH,
+                             server_constants.REQUEST_LOG_PATH_PREFIX,
+                             request_id))
+    proc.start()
+    proc.join(timeout=120)
+    assert proc.exitcode == -signal.SIGKILL
+
+    queue = _put_queue()
+    clock = _Clock()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch.object(executor.time, 'time', new=clock), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        # The dead owner's claim is still live: nobody else acts.
+        await executor.check_precondition_waits_once()
+        queue.put_async.assert_not_awaited()
+        assert len(await requests_lib.list_precondition_waits_async()) == 1
+        # After the claim expires, the next pass takes the row over.
+        clock.offset = server_constants.PRECONDITION_CLAIM_SECONDS + 1
+        await executor.check_precondition_waits_once()
+
+    queue.put_async.assert_awaited_once_with((request_id, False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+# --- A prepared request keeps the durable wait ---
+
+
+async def _prepared_request(request_id: str) -> requests_lib.Request:
+    req = _make_pending_request(request_id)
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    return req
+
+
+@pytest.mark.asyncio
+async def test_prepared_request_with_a_built_in_precondition_is_stored(
+        isolated_database):
+    """The wait survives the death of the accepting worker, as for
+    schedule_request_async."""
+    req = await _prepared_request('prepared-stored')
+    queue = _put_queue()
+    before = set(preconditions.background_tasks)
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(False, 'Waiting'))):
+        await executor.schedule_prepared_request(
+            req,
+            retryable=True,
+            precondition=_waiting_request('prepared-stored'))
+
+    assert set(preconditions.background_tasks) == before
+    (wait,) = await requests_lib.list_precondition_waits_async()
+    assert (wait.request_id, wait.retryable) == ('prepared-stored', True)
+    queue.put_async.assert_not_awaited()
+    await _checker_delivers_with(queue, 'prepared-stored', retryable=True)
+
+
+async def _checker_delivers_with(queue, request_id: str, **flags) -> None:
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        await executor.check_precondition_waits_once()
+    queue.put_async.assert_awaited_once_with(
+        (request_id, False, flags.get('retryable', False)))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_prepared_request_met_at_once_is_queued_and_leaves_no_row(
+        isolated_database):
+    req = await _prepared_request('prepared-met')
+    queue = _put_queue()
+    with mock.patch.object(executor, '_get_queue', return_value=queue), \
+         mock.patch(_CLUSTER_CHECK,
+                    new=mock.AsyncMock(return_value=(True, None))):
+        await executor.schedule_prepared_request(
+            req, precondition=_waiting_request('prepared-met'))
+
+    queue.put_async.assert_awaited_once_with(('prepared-met', False, False))
+    assert await requests_lib.list_precondition_waits_async() == []
+
+
+@pytest.mark.asyncio
+async def test_failed_insert_of_the_wait_marks_request_failed(
+        isolated_database):
+    req = await _prepared_request('prepared-insert-fails')
+    with mock.patch.object(requests_lib,
+                           'add_precondition_wait_async',
+                           side_effect=RuntimeError('disk full')):
+        with pytest.raises(RuntimeError, match='disk full'):
+            await executor.schedule_prepared_request(
+                req, precondition=_waiting_request('prepared-insert-fails'))
+
+    updated = requests_lib.get_request('prepared-insert-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    assert 'disk full' in updated.get_error()['message']
+
+
+@pytest.mark.asyncio
+async def test_cancel_at_the_wait_insert_of_a_prepared_request_marks_it_failed(
+        isolated_database):
+    req = await _prepared_request('prepared-cancelled')
+    reached = asyncio.Event()
+
+    async def hang(*args, **kwargs):
+        reached.set()
+        await asyncio.sleep(3600)
+
+    with mock.patch.object(requests_lib,
+                           'add_precondition_wait_async',
+                           new=hang):
+        task = asyncio.create_task(
+            executor.schedule_prepared_request(
+                req, precondition=_waiting_request('prepared-cancelled')))
+        await asyncio.wait_for(reached.wait(), timeout=30)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    async def failed():
+        updated = requests_lib.get_request('prepared-cancelled')
+        return (updated is not None and
+                updated.status == requests_lib.RequestStatus.FAILED)
+
+    await _wait_until(failed)

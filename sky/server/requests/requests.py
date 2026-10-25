@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import json
 import os
 import pathlib
 import shutil
@@ -68,6 +69,7 @@ COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
 COL_FILE_MOUNTS_BLOB_ID = 'file_mounts_blob_id'
+PRECONDITION_TABLE = 'request_preconditions'
 # Legacy path for backward compatibility - GC will clean up logs from both
 # the new and legacy paths to handle server upgrades gracefully.
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
@@ -609,6 +611,25 @@ def create_table(cursor, conn):
                                  'REAL')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
                                  COL_FILE_MOUNTS_BLOB_ID, 'TEXT')
+
+    # Requests that wait for a precondition before they join the queue. A row
+    # is deleted only after the request is on the queue or has an outcome (see
+    # delete_precondition_wait_async), so a crash leaves the row behind. An
+    # actor with an outcome claims the row first (claim_owner, claim_expires),
+    # so one actor decides each wait.
+    cursor.execute(f"""\
+        CREATE TABLE IF NOT EXISTS {PRECONDITION_TABLE} (
+        request_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        params TEXT NOT NULL,
+        schedule_type TEXT NOT NULL,
+        ignore_return_value INTEGER NOT NULL,
+        retryable INTEGER NOT NULL,
+        deadline REAL,
+        timeout_text TEXT,
+        claim_owner TEXT,
+        claim_expires REAL
+        )""")
 
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
@@ -1207,6 +1228,159 @@ async def _add_or_update_request_no_lock_async(request: Request):
                                        request.to_row())
 
 
+class PreconditionWait(NamedTuple):
+    """A request that waits for a precondition, as stored in the database."""
+    request_id: str
+    kind: str
+    params: Dict[str, Any]
+    schedule_type: ScheduleType
+    ignore_return_value: bool
+    retryable: bool
+    # Absolute time, in seconds since the epoch. None means no deadline.
+    deadline: Optional[float]
+    # The wait limit as the caller wrote it, for example '3600' or '30.0'.
+    # None means no deadline.
+    timeout_text: Optional[str]
+
+
+def _precondition_wait_insert(
+        wait: PreconditionWait) -> Tuple[str, Tuple[Any, ...]]:
+    """The statement and parameters that store a wait row."""
+    return (f'INSERT INTO {PRECONDITION_TABLE} (request_id, kind, params, '
+            'schedule_type, ignore_return_value, retryable, deadline, '
+            'timeout_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (wait.request_id, wait.kind, json.dumps(wait.params),
+             wait.schedule_type.value, int(wait.ignore_return_value),
+             int(wait.retryable), wait.deadline, wait.timeout_text))
+
+
+@init_db_async
+@asyncio_utils.shield
+async def add_precondition_wait_async(request_id: str, kind: str,
+                                      params: Dict[str, Any],
+                                      schedule_type: ScheduleType,
+                                      ignore_return_value: bool,
+                                      retryable: bool,
+                                      deadline: Optional[float],
+                                      timeout_text: Optional[str]) -> None:
+    """Store a request that waits for a precondition.
+
+    Use it for a request that already exists. To create the request and the
+    wait together, use `create_with_precondition_wait_async`.
+    """
+    assert _DB is not None
+    await _DB.execute_and_commit_async(*_precondition_wait_insert(
+        PreconditionWait(request_id, kind, params, schedule_type,
+                         ignore_return_value, retryable, deadline,
+                         timeout_text)))
+
+
+async def create_with_precondition_wait_async(request: Request,
+                                              wait: PreconditionWait) -> bool:
+    """Create a request and its precondition wait together.
+
+    Thin module-level wrapper. See
+    `RequestBackend.create_with_precondition_wait_async` for the contract.
+    """
+    return await request_storage.get_request_backend(
+    ).create_with_precondition_wait_async(request, wait)
+
+
+@init_db_async
+async def list_precondition_waits_async() -> List[PreconditionWait]:
+    """List all requests that wait for a precondition."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(
+            f'SELECT request_id, kind, params, schedule_type, '
+            f'ignore_return_value, retryable, deadline, timeout_text '
+            f'FROM {PRECONDITION_TABLE}') as rows:
+        return [
+            PreconditionWait(request_id, kind, json.loads(params),
+                             ScheduleType(schedule_type),
+                             bool(ignore_return_value), bool(retryable),
+                             deadline, timeout_text)
+            for (request_id, kind, params, schedule_type, ignore_return_value,
+                 retryable, deadline, timeout_text) in rows
+        ]
+
+
+async def store_precondition_wait_of_existing_request_async(
+        wait: PreconditionWait) -> None:
+    """Store the wait of a request that already exists, or fail the request.
+
+    On an error or a cancel at the insert, nothing would ever deliver the
+    request, so it is marked FAILED and the error or the cancel reaches the
+    caller. `set_request_failed_if_pending_async` is shielded, so the mark
+    lands even when the cancel stopped the insert. A process death between the
+    creation of the request and this insert leaves a PENDING request with no
+    wait row.
+    """
+    try:
+        await add_precondition_wait_async(wait.request_id, wait.kind,
+                                          wait.params, wait.schedule_type,
+                                          wait.ignore_return_value,
+                                          wait.retryable, wait.deadline,
+                                          wait.timeout_text)
+    except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+        await set_request_failed_if_pending_async(wait.request_id, e)
+        raise
+
+
+@init_db_async
+@asyncio_utils.shield
+async def claim_precondition_wait_async(request_id: str, owner: str, now: float,
+                                        ttl: float) -> bool:
+    """Claim a wait for `owner` until `now + ttl`.
+
+    Returns:
+        True if the caller owns the wait. False if the wait is gone or another
+        owner holds an unexpired claim. Only the owner may act on the wait.
+    """
+    assert _DB is not None
+    row = await _DB.execute_get_returning_value_async(
+        f'UPDATE {PRECONDITION_TABLE} SET claim_owner = ?, claim_expires = ? '
+        'WHERE request_id = ? AND '
+        '(claim_owner IS NULL OR claim_expires <= ?) RETURNING ROWID',
+        (owner, now + ttl, request_id, now))
+    return row is not None
+
+
+@init_db_async
+@asyncio_utils.shield
+async def release_precondition_wait_async(request_id: str, owner: str) -> None:
+    """Drop the claim of `owner`, so the next actor can take the wait."""
+    assert _DB is not None
+    await _DB.execute_and_commit_async(
+        f'UPDATE {PRECONDITION_TABLE} SET claim_owner = NULL, '
+        'claim_expires = NULL WHERE request_id = ? AND claim_owner = ?',
+        (request_id, owner))
+
+
+@init_db_async
+@asyncio_utils.shield
+async def delete_precondition_wait_async(request_id: str,
+                                         owner: Optional[str] = None) -> None:
+    """Drop the stored wait of a request. Deleting a missing row is a no-op.
+
+    Call it only after the request is on the queue or has an outcome. A crash
+    before the delete leaves the row, and the checker acts on it again.
+
+    Args:
+        owner: When set, delete only if this owner holds the claim. Leave it
+            unset for a request that is gone or no longer PENDING: it already
+            has an outcome, so no actor decides anything.
+    """
+    assert _DB is not None
+    if owner is None:
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {PRECONDITION_TABLE} WHERE request_id = ?',
+            (request_id,))
+    else:
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {PRECONDITION_TABLE} '
+            'WHERE request_id = ? AND claim_owner = ?', (request_id, owner))
+
+
 def set_exception_stacktrace(e: BaseException) -> None:
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
@@ -1597,6 +1771,28 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                 logger.debug(f'End creating request {request.request_id}')
         return True if row else False
+
+    @init_db_async
+    @asyncio_utils.shield
+    async def create_with_precondition_wait_async(
+            self, request: Request, wait: PreconditionWait) -> bool:
+        assert _DB is not None
+        request_columns = ', '.join(REQUEST_COLUMNS)
+        values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
+        request_sql = (f'INSERT INTO {REQUEST_TABLE} ({request_columns}) '
+                       f'VALUES ({values_str}) '
+                       'ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
+        request_row = request.to_row()
+        wait_sql = _precondition_wait_insert(wait)
+
+        def insert_both(cursor) -> bool:
+            cursor.execute(request_sql, request_row)
+            if cursor.fetchone() is None:
+                return False
+            cursor.execute(*wait_sql)
+            return True
+
+        return await _DB.run_in_transaction_async(insert_both)
 
     @init_db_async
     @asyncio_utils.shield
