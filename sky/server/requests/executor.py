@@ -110,6 +110,11 @@ _AUTH_THREADS_LIMIT = 32
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
 
+# Backoff after a failed worker turn, so a persistent error (e.g. the queue
+# manager died) does not spin the worker or flood the log.
+_WORKER_BACKOFF_INITIAL_SECONDS = 0.1
+_WORKER_BACKOFF_MAX_FACTOR = 50  # Caps the wait at 5 seconds.
+
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
@@ -349,6 +354,12 @@ class RequestWorker:
             config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+        self._reset_backoff()
+
+    def _reset_backoff(self) -> None:
+        self._backoff = common_utils.Backoff(
+            initial_backoff=_WORKER_BACKOFF_INITIAL_SECONDS,
+            max_backoff_factor=_WORKER_BACKOFF_MAX_FACTOR)
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -372,11 +383,13 @@ class RequestWorker:
             request_element = queue.get()
             if request_element is None:
                 time.sleep(0.1)
+                self._reset_backoff()
                 return
             request_id, ignore_return_value, _ = request_element
             request = api_requests.get_request(request_id, fields=['status'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
+                self._reset_backoff()
                 return
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
@@ -408,12 +421,15 @@ class RequestWorker:
                 raise
 
             logger.info(f'[{self}] Submitted request: {request_id}')
+            self._reset_backoff()
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+            # Wait on the cancel event so that cancel() is not delayed.
+            self._cancel_event.wait(self._backoff.current_backoff())
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.

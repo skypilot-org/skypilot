@@ -2255,3 +2255,77 @@ def test_override_env_seeds_role_before_workspace_check(
         pass
 
     assert calls == [('seed', 'client-user-id'), ('workspace_check',)]
+
+
+def _failing_queue(*outcomes):
+    """A queue whose get() raises BrokenPipeError for each 'fail' outcome."""
+    queue = mock.Mock()
+    queue.get.side_effect = [
+        BrokenPipeError('queue manager is gone') if o == 'fail' else None
+        for o in outcomes
+    ]
+    return queue
+
+
+@pytest.fixture()
+def no_backoff_jitter(monkeypatch):
+    """Pins Backoff's jitter to zero so the wait sequence is exact."""
+    monkeypatch.setattr('sky.utils.common_utils.random.uniform',
+                        lambda low, high: 0.0)
+
+
+def test_worker_backs_off_with_growing_waits_on_persistent_error(
+        pause_harness, no_backoff_jitter, monkeypatch):
+    """A dead queue makes the worker wait longer after each failed turn."""
+    worker = pause_harness.worker
+    waits = []
+    monkeypatch.setattr(
+        worker._cancel_event,  # pylint: disable=protected-access
+        'wait',
+        lambda timeout=None: waits.append(timeout))
+    queue = _failing_queue(*['fail'] * 12)
+    for _ in range(12):
+        worker.process_request(mock.Mock(), queue)
+
+    # 0.1 s, multiplied by 1.6 each turn, capped at 5 s.
+    assert waits == pytest.approx([min(0.1 * 1.6**i, 5.0) for i in range(12)])
+
+
+def test_worker_backoff_resets_after_a_clean_turn(pause_harness,
+                                                  no_backoff_jitter,
+                                                  monkeypatch):
+    """A turn that raises nothing resets the wait to its initial value."""
+    worker = pause_harness.worker
+    waits = []
+    monkeypatch.setattr(
+        worker._cancel_event,  # pylint: disable=protected-access
+        'wait',
+        lambda timeout=None: waits.append(timeout))
+    queue = _failing_queue(*['fail'] * 8, 'ok', 'fail')
+    for _ in range(10):
+        worker.process_request(mock.Mock(), queue)
+
+    assert len(waits) == 9
+    assert waits == pytest.approx([0.1 * 1.6**i for i in range(8)] + [0.1])
+
+
+def test_worker_backoff_does_not_delay_cancel(pause_harness, monkeypatch):
+    """The backoff waits on the cancel event, so cancel() ends it at once."""
+    worker = pause_harness.worker
+    event = threading.Event()
+    event.set()
+    spy = mock.Mock(wraps=event)
+    worker._cancel_event = spy  # pylint: disable=protected-access
+
+    def _no_sleep(seconds):
+        raise AssertionError(f'time.sleep({seconds}) delays cancel()')
+
+    monkeypatch.setattr('time.sleep', _no_sleep)
+    queue = _failing_queue(*['fail'] * 12)
+    start = time.monotonic()
+    for _ in range(12):
+        worker.process_request(mock.Mock(), queue)
+
+    assert spy.wait.call_count == 12
+    assert all(c.args[0] > 0 for c in spy.wait.call_args_list)
+    assert time.monotonic() - start < 1.0
