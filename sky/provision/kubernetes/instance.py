@@ -2303,6 +2303,54 @@ def inject_ephemeral_volumes(
             volume_mounts.append(volume_mount)
 
 
+def inject_accelerator_tolerations(pod_spec: Dict[str, Any],
+                                   context: Optional[str]) -> None:
+    """Add tolerations for the taints of the requested accelerator nodes."""
+    spec = pod_spec['spec']
+    accelerator_tolerations = []
+    # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
+    # This is to prevent from non-TPU workloads from being scheduled on TPU
+    # slice nodes. We need this toleration to allow the pod to be scheduled
+    # on TPU nodes.
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
+    tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+    if tpu_label in spec.get('nodeSelector', {}):
+        accelerator_tolerations.append({
+            'key': kubernetes_utils.TPU_RESOURCE_KEY,
+            'operator': 'Equal',
+            'value': 'present',
+            'effect': 'NoSchedule'
+        })
+    limits = spec['containers'][0].get('resources', {}).get('limits')
+    if limits is not None:
+        # The nodes provisioned by DWS with flex start with queued
+        # provisioning mode have the GPU taint, so we have to add the GPU
+        # toleration. No need to check if DWS is enabled here since this has
+        # no side effect to the non-DWS case.
+        gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
+        if limits.get(gpu_resource_key, 0) > 0:
+            accelerator_tolerations.append({
+                'key': gpu_resource_key,
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            })
+        # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
+        # to keep non-Neuron workloads off them; tolerate it like the GPU case.
+        if limits.get(kubernetes_utils.NEURON_RESOURCE_KEY, 0) > 0:
+            accelerator_tolerations.append({
+                'key': kubernetes_utils.NEURON_RESOURCE_KEY,
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            })
+    if not accelerator_tolerations:
+        return
+    tolerations = spec.get('tolerations') or []
+    for toleration in accelerator_tolerations:
+        if toleration not in tolerations:
+            tolerations.append(toleration)
+    spec['tolerations'] = tolerations
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -2492,22 +2540,17 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                        'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
-    needs_gpus = False
     needs_gpus_nvidia = False
-    needs_neuron = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
-        needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(context),
-                                0) > 0
         needs_gpus_nvidia = limits.get(
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
-        # AWS Neuron (Trainium/Inferentia) uses its own resource key.
-        needs_neuron = limits.get(kubernetes_utils.NEURON_RESOURCE_KEY, 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
     _configure_runtime_class(pod_spec, nvidia_runtime_exists, needs_gpus_nvidia)
+    inject_accelerator_tolerations(pod_spec, context)
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
@@ -2605,59 +2648,6 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  'preferredDuringSchedulingIgnoredDuringExecution'),
                 existing_rules)
             pod_spec_copy['spec']['affinity'] = pod_spec_config
-
-        # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
-        # This is to prevent from non-TPU workloads from being scheduled on TPU
-        # slice nodes. We need this toleration to allow the pod to be scheduled
-        # on TPU nodes.
-        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
-        tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
-        if tpu_label in config.node_config.get('spec',
-                                               {}).get('nodeSelector', {}):
-            tpu_toleration = {
-                'key': kubernetes_utils.TPU_RESOURCE_KEY,
-                'operator': 'Equal',
-                'value': 'present',
-                'effect': 'NoSchedule'
-            }
-            # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get(
-                'tolerations') or []
-            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
-                tpu_toleration
-            ]
-        # Add GPU toleration if GPU is requested.
-        # The nodes provisioned by DWS with flex start with queued provisioning
-        # mode have the GPU taint, so we have to add the GPU toleration.
-        # No need to check if DWS is enabled here since this has no side effect
-        # to the non-DWS case.
-        if needs_gpus:
-            gpu_toleration = {
-                'key': kubernetes_utils.get_gpu_resource_key(context),
-                'operator': 'Exists',
-                'effect': 'NoSchedule'
-            }
-            # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get(
-                'tolerations') or []
-            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
-                gpu_toleration
-            ]
-        # Add Neuron toleration if AWS Neuron (Trainium/Inferentia) is requested.
-        # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
-        # to keep non-Neuron workloads off them; tolerate it like the GPU case.
-        if needs_neuron:
-            neuron_toleration = {
-                'key': kubernetes_utils.NEURON_RESOURCE_KEY,
-                'operator': 'Exists',
-                'effect': 'NoSchedule'
-            }
-            # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get(
-                'tolerations') or []
-            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
-                neuron_toleration
-            ]
 
         # Apply allowed_nodes scheduling constraints to restrict pods to
         # nodes permitted by the user's config. This is required in addition
