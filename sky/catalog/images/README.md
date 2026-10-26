@@ -97,7 +97,9 @@ supports these GPUs, and the 580 open module in the new GPU images does not. Onc
 catalog points at a definition, a new version goes live as soon as it
 replicates. To check a rebuild before that, publish it excluded from latest
 (packer's `shared_gallery_image_version_exclude_from_latest = true`), launch
-it by its versioned id, then
+it with `--image-id /subscriptions/<sub>/resourceGroups/skypilot-images/providers/Microsoft.Compute/galleries/<gallery>/images/<definition>/versions/<version>`
+(the versioned community form `/CommunityGalleries/.../Versions/...` is not
+accepted), then
 `az sig image-version update ... --set publishingProfile.excludeFromLatest=false`.
 
 1. Generate a client secret for packer [here](https://portal.azure.com/?feature.msaljs=true#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/1d249f23-c22e-4d02-b62b-a6827bd113fe/isMSAApp~/false).
