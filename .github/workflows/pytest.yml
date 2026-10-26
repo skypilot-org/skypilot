@@ -53,6 +53,47 @@ jobs:
           test-name: ${{ matrix.test-name }}
           buildkite-analytics-token: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
 
+  k8s-client-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Python 3.9 resolves to the legacy client; newer Python versions
+          # must also exercise both newer client generators explicitly.
+          - {python-version: "3.9", kubernetes-version: "35.0.0"}
+          - {python-version: "3.11", kubernetes-version: "36.0.3"}
+          - {python-version: "3.11", kubernetes-version: "37.0.1"}
+    name: "Kubernetes client ${{ matrix.kubernetes-version }} (Python ${{ matrix.python-version }})"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          # Shared test fixtures import boto3 even for Kubernetes-only tests.
+          uv pip install -e ".[kubernetes]" "kubernetes==${{ matrix.kubernetes-version }}" \
+            boto3 pytest pytest-xdist "pytest-env>=0.6" pytest-asyncio \
+            memory-profiler==0.61.0 buildkite-test-collector
+      - name: Run Kubernetes compatibility tests
+        env:
+          SKYPILOT_DISABLE_USAGE_COLLECTION: "1"
+          SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: "1"
+          KUBERNETES_VERSION: ${{ matrix.kubernetes-version }}
+        run: |
+          source ~/test-env/bin/activate
+          python -c 'import os, sys, kubernetes; print(sys.version); print("Kubernetes client:", kubernetes.__version__); assert kubernetes.__version__ == os.environ["KUBERNETES_VERSION"]'
+          pytest -o addopts='' -q \
+            tests/unit_tests/kubernetes/ \
+            tests/unit_tests/test_sky/clouds/test_kubernetes.py
+
   limited-deps-test:
     # Test with limited dependencies to ensure cloud module imports don't break
     # basic functionality (e.g., importing IBM shouldn't break AWS support)
