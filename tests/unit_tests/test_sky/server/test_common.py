@@ -3,6 +3,7 @@ from http.cookiejar import Cookie
 from http.cookiejar import MozillaCookieJar
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import time
@@ -510,6 +511,50 @@ def test_start_api_server_polls_reachable_host(monkeypatch, host,
 
     # The poll dials the reachable loopback URL for the bind host.
     mock_health.assert_called_once_with(expected_dial_url)
+
+
+def test_start_api_server_preserves_previous_log(monkeypatch, tmp_path):
+    """Starting a server keeps the logs of previous server instances.
+
+    Regression test for #11201: the log was opened with mode 'w', so each
+    start truncated it, including the crash output of the previous server.
+    """
+    _isolate_server_url(monkeypatch)
+    monkeypatch.delenv(common.constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR,
+                       raising=False)
+    log_path = tmp_path / 'api_server' / 'server.log'
+    log_path.parent.mkdir()
+    previous_log = 'Traceback from the previous server instance\n'
+    log_path.write_text(previous_log, encoding='utf-8')
+
+    proc = mock.Mock()
+    proc.poll.return_value = None
+    status_info = mock.Mock(version='1.0.0')
+
+    def fake_popen(*unused_args, **kwargs):
+        os.write(kwargs['stdout'].fileno(), b'first line from the new server\n')
+        return proc
+
+    monkeypatch.setattr(common.constants, 'API_SERVER_LOGS', str(log_path))
+    monkeypatch.setattr(common, 'is_api_server_local', lambda *a, **k: True)
+    monkeypatch.setattr(common.subprocess, 'Popen', fake_popen)
+    monkeypatch.setattr(common.common_utils, 'get_mem_size_gb', lambda: 16.0)
+    monkeypatch.setattr(common, 'get_api_server_status',
+                        lambda url: status_info)
+    monkeypatch.setattr(
+        common, 'check_server_healthy',
+        mock.Mock(return_value=(ApiServerStatus.HEALTHY, status_info)))
+
+    common._start_api_server()
+
+    lines = log_path.read_text(encoding='utf-8').splitlines(keepends=True)
+    assert len(lines) == 3, lines
+    assert lines[0] == previous_log
+    assert re.fullmatch(
+        r'===== SkyPilot API server starting at '
+        r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S* ?'
+        rf'\(port {common.DEFAULT_SERVER_PORT}\) =====\n', lines[1]), lines[1]
+    assert lines[2] == 'first line from the new server\n'
 
 
 def test_cookies_get_no_file(monkeypatch):
