@@ -10,6 +10,7 @@ import prettytable
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.utils import context_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -356,6 +357,12 @@ def follow_logs(
     seconds_without_content: int = 0
 
     while True:
+        # A tail that only exits on its own condition keeps its worker thread
+        # -- and the request's log file handle -- long after the client that
+        # asked for it went away. No-op outside a request context (the CLI,
+        # or code running on a cluster).
+        context_utils.raise_if_canceled()
+
         content = file.readline()
 
         if not content:
