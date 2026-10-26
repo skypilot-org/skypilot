@@ -9,6 +9,7 @@ import asyncio
 from unittest import mock
 
 import fastapi
+from fastapi.openapi import utils as openapi_utils
 import pytest
 
 from sky import models
@@ -250,13 +251,27 @@ _UNGUARDED = {
 }
 
 
-def test_every_infra_read_is_guarded():
+def test_every_infra_read_is_guarded(monkeypatch):
     # The OpenAPI schema lists every route, including those of included
     # routers, which newer FastAPI versions keep out of `app.routes`.
+    # Routes of loaded plugins are theirs to guard, so only SkyPilot's own
+    # endpoints are recorded while the schema is built.
+    sky_paths = set()
+    get_openapi_path = openapi_utils.get_openapi_path
+
+    def record(*, route, **kwargs):
+        if getattr(route.endpoint, '__module__', '').startswith('sky.'):
+            sky_paths.add(route.path_format)
+        return get_openapi_path(route=route, **kwargs)
+
+    monkeypatch.setattr(openapi_utils, 'get_openapi_path', record)
+    monkeypatch.setattr(server.app, 'openapi_schema', None)
     spec = server.app.openapi()
     schemas = spec.get('components', {}).get('schemas', {})
     taking_a_target = set()
     for path, operations in spec['paths'].items():
+        if path not in sky_paths:
+            continue
         for operation in operations.values():
             names = {p['name'] for p in operation.get('parameters', [])}
             body = operation.get('requestBody', {}).get('content', {})
