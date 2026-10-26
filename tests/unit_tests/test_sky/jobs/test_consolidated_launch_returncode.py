@@ -10,6 +10,7 @@ request is marked FAILED.
 """
 
 import contextlib
+import os
 from unittest import mock
 
 import filelock
@@ -253,3 +254,36 @@ def test_cancel_error_still_fails_request(monkeypatch, tmp_path):
     msg = excinfo.value.error_msg
     assert 'cancelling job(s) 10-12 failed too' in msg
     assert '`sky jobs cancel 10 11 12`' in msg
+
+
+def test_interleaved_job_ids_get_a_valid_submission_log_name(
+        monkeypatch, tmp_path):
+    """Concurrent batch launches interleave ids; the log must still open.
+
+    The debug dump finds a job's submission log by parsing the file name, so
+    every id must stay covered by it.
+    """
+    _patch_consolidated_launch_deps(monkeypatch, tmp_path, returncode=0)
+    log_paths = []
+
+    def _run_on_head(_handle, _script, log_path):
+        # The real runner opens log_path before running the script.
+        with open(log_path, 'a', encoding='utf-8'):
+            pass
+        log_paths.append(log_path)
+        return 0
+
+    backend = jobs_core.backend_utils.get_backend_from_handle(None)
+    backend.run_on_head.side_effect = _run_on_head
+    job_ids = list(range(122124, 123148, 2))  # 512 ids, every other one
+
+    _launch(job_ids)
+
+    name = os.path.basename(log_paths[0])
+    assert name == 'submit-job-122124-123146.log'
+    ranges = managed_job_utils._parse_submit_log_job_ranges(
+        name[len('submit-job-'):-len('.log')])
+    assert all(
+        any(start <= job_id <= end
+            for start, end in ranges)
+        for job_id in job_ids)
