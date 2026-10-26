@@ -226,8 +226,8 @@ class TestJobSteps:
             assert client.list_job_steps('123') == [
                 slurm.JobStepInfo('123.batch', 'batch')
             ]
-        assert transport.call_args.args[0] == (
-            'sudo --non-interactive -H -u alice -- scontrol -o show step 123')
+        assert transport.call_args.args[0].endswith(
+            '\nsudo --non-interactive -H -u alice -- scontrol -o show step 123')
 
     def test_rejects_malformed_job_step_output(self):
         client = self._client()
@@ -319,6 +319,36 @@ PartitionName=GPU nodes (nvidia) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL 
             )
 
             assert result == ['dev', 'CPU nodes (amd)', 'GPU nodes (nvidia)']
+
+
+class TestLoginShellOutput:
+    """Tests for dropping what the login shell prints before a command."""
+
+    def test_info_nodes_ignores_login_shell_banner(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        marker = command_runner_lib._SLURM_OUTPUT_START_MARKER
+        with mock.patch.object(
+                command_runner_lib.SSHCommandRunner,
+                'run',
+                return_value=(
+                    0, f'Welcome to hpc-login\n{marker}\n'
+                    f'node1{slurm.SEP}idle{slurm.SEP}gpu:a100:8'
+                    f'{slurm.SEP}64{slurm.SEP}512000{slurm.SEP}gpu*\n', '')):
+            nodes = client.info_nodes()
+        assert [node.node for node in nodes] == ['node1']
+
+    def test_local_execution_does_not_add_marker(self):
+        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'out\n', '')
+            assert client._run_slurm_cmd(['sinfo', '-h']) == (0, 'out\n', '')
+        mock_run.assert_called_once_with(['sinfo', '-h'],
+                                         require_outputs=True,
+                                         separate_stderr=True,
+                                         stream_logs=False)
 
 
 class TestInfoNodes:
