@@ -1,8 +1,9 @@
-"""Warm-node EFA scan must respect the requested accelerator type.
+"""Warm-node EFA scan must only use nodes the pod can land on.
 
-`Kubernetes._detect_network_type` derives the `vpc.amazonaws.com/efa` count for a
-`network_tier: best` request. It has two paths: scan a running node and use its
-own EFA allocatable (warm), or size from the instance-type catalog (cold).
+`Kubernetes._detect_network_type` derives the `vpc.amazonaws.com/efa` count
+for a `network_tier: best` request. It has two paths: scan a running node and
+use its own EFA allocatable (warm), or size from the instance-type catalog
+(cold).
 
 The warm scan used to accept any node that merely carried the accelerator label
 KEY, without comparing its VALUE to the requested accelerator. On a
@@ -11,9 +12,12 @@ matched a warm `p5.48xlarge` (label `h100`, 8 GPUs, 32 EFA) and derived
 `floor(8/8*32) = 32`. The pod then requested 32 EFA interfaces on a node type
 that has none and stayed Pending. Upstream bug from #8557.
 
-Besides the mismatch, these tests pin the matching cases. An over-corrected
-guard that skips every warm node would still schedule through the cold catalog
-path, so a test of the mismatch alone would pass it.
+The scan now keeps only nodes whose label value is one of
+`k8s_acc_label_values`, the values the pod's required node affinity pins to,
+as `_derive_rdma_nic_count` does. Besides the mismatch, these tests pin the
+matching cases: an over-corrected filter that skipped every warm node would
+still schedule through the cold catalog path, so a test of the mismatch alone
+would pass it.
 """
 from unittest import mock
 
@@ -28,7 +32,7 @@ _EFA_RESOURCE = 'vpc.amazonaws.com/efa'
 
 
 def _node(gpu_name, gpu_count, efa_count, label_key=_GPU_LABEL):
-    """A warm AWS GPU node carrying an accelerator label (Karpenter's default)."""
+    """A warm AWS GPU node with an accelerator label (Karpenter's default)."""
     node = mock.MagicMock()
     node.metadata.labels = {
         label_key: gpu_name,
@@ -42,7 +46,12 @@ def _node(gpu_name, gpu_count, efa_count, label_key=_GPU_LABEL):
     return node
 
 
-def _detect(nodes, acc_type, acc_count, autoscaler=None, label_key=_GPU_LABEL):
+def _detect(nodes,
+            acc_type,
+            acc_count,
+            label_values,
+            autoscaler=None,
+            label_key=_GPU_LABEL):
     with mock.patch.object(ck.kubernetes_utils,
                            'get_kubernetes_nodes',
                            return_value=nodes), \
@@ -55,7 +64,8 @@ def _detect(nodes, acc_type, acc_count, autoscaler=None, label_key=_GPU_LABEL):
             label_key,
             _GPU_RESOURCE,
             acc_count=acc_count,
-            acc_type=acc_type)
+            acc_type=acc_type,
+            k8s_acc_label_values=label_values)
 
 
 def test_warm_node_of_a_different_accelerator_is_not_used():
@@ -67,28 +77,32 @@ def test_warm_node_of_a_different_accelerator_is_not_used():
     size from, so the result is (NONE, None) -- the same outcome as the
     existing skip of a warm node with too few GPUs.
     """
-    net, meta = _detect([_node('h100', 8, 32)], acc_type='L4', acc_count=8)
+    net, meta = _detect([_node('h100', 8, 32)],
+                        acc_type='L4',
+                        acc_count=8,
+                        label_values=['l4'])
     assert meta is None, (
         f'warm h100 node leaked its EFA count into an L4 request: {meta}')
     assert net == ck.KubernetesHighPerformanceNetworkType.NONE
 
 
 def test_warm_node_of_the_matching_accelerator_is_still_used():
-    """The guard must not skip EVERYTHING -- catches an over-correction.
-
-    A naive raw-string compare (label 'h100' != acc_type 'H100') would skip this
-    node too, silently falling through to the catalog. That still schedules, so
-    it would pass a test that only checked the mismatch case.
-    """
-    _, meta = _detect([_node('h100', 8, 32)], acc_type='H100', acc_count=8)
+    """The filter must not skip EVERYTHING -- catches an over-correction."""
+    _, meta = _detect([_node('h100', 8, 32)],
+                      acc_type='H100',
+                      acc_count=8,
+                      label_values=['h100'])
     assert meta == {
         'efa_count': 32
     }, (f'matching warm node should supply its own EFA count, got {meta}')
 
 
-def test_no_accelerator_requested_keeps_previous_behaviour():
-    """acc_type=None is a legitimate caller; the guard must be a no-op there."""
-    _, meta = _detect([_node('h100', 8, 32)], acc_type=None, acc_count=8)
+def test_no_affinity_values_keeps_previous_behaviour():
+    """With no affinity values (no accelerator pinned), nothing is filtered."""
+    _, meta = _detect([_node('h100', 8, 32)],
+                      acc_type=None,
+                      acc_count=8,
+                      label_values=None)
     assert meta == {'efa_count': 32}
 
 
@@ -104,6 +118,7 @@ def test_mismatched_warm_node_falls_through_to_the_catalog():
         net, meta = _detect([_node('h100', 8, 32)],
                             acc_type='L4',
                             acc_count=8,
+                            label_values=['l4'],
                             autoscaler='karpenter')
     derived.assert_called_once_with('L4', 8)
     assert meta == {'efa_count': 1}
@@ -113,60 +128,41 @@ def test_mismatched_warm_node_falls_through_to_the_catalog():
 def test_matching_accelerator_among_several_warm_nodes():
     """A mismatched node earlier in the list must not shadow a matching one."""
     nodes = [_node('h100', 8, 32), _node('l4', 8, 1)]
-    _, meta = _detect(nodes, acc_type='L4', acc_count=8)
+    _, meta = _detect(nodes, acc_type='L4', acc_count=8, label_values=['l4'])
     assert meta == {
         'efa_count': 1
     }, (f'should have used the l4 node, not the h100 one; got {meta}')
 
 
-@pytest.mark.parametrize('label_value,requested', [
-    ('h100', 'H100'),
-    ('H100', 'h100'),
-    ('l4', 'L4'),
-])
-def test_label_value_case_does_not_matter(label_value, requested):
-    """Karpenter/SkyPilot label values are lowercase; acc_type is canonical."""
-    _, meta = _detect([_node(label_value, 8, 32)],
-                      acc_type=requested,
-                      acc_count=8)
-    assert meta == {'efa_count': 32}
+@pytest.mark.parametrize('label_value', ['', 'not-an-accelerator'])
+def test_node_outside_the_affinity_is_not_used(label_value):
+    """An empty or unrecognized label value is outside the affinity too.
 
-
-def test_node_with_an_empty_accelerator_label_is_still_used():
-    """Skip only on a POSITIVE mismatch -- "cannot tell" must not skip.
-
-    An empty label value is legitimate on heterogeneous clusters, and elsewhere
-    in the codebase it means "unknown" rather than "different".
+    The pod cannot land on such a node, so it must not supply an EFA count.
     """
-    node = _node('', 8, 32)
-    # The pre-existing key check requires the key to be PRESENT, which it is.
-    _, meta = _detect([node], acc_type='L4', acc_count=8)
-    assert meta == {
-        'efa_count': 32
-    }, (f'an undeterminable accelerator must not cause a skip; got {meta}')
+    net, meta = _detect([_node(label_value, 8, 32)],
+                        acc_type='L4',
+                        acc_count=8,
+                        label_values=['l4'])
+    assert meta is None
+    assert net == ck.KubernetesHighPerformanceNetworkType.NONE
 
 
 def test_gfd_labelled_p5_still_matches_a_plain_h100_request():
-    """The regression a plain string compare would have introduced.
+    """A GFD raw label value in the affinity keeps the warm path.
 
-    GPU-Feature-Discovery (NVIDIA GPU Operator, common on EKS) labels a p5 node
-    `nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3`, which normalizes to
-    'H100-80GB'. The catalog's canonical name -- what a user types and what
-    Resources canonicalizes to -- is 'H100'. An equality test would skip
-    p5.48xlarge, the richest EFA SKU on AWS (32 interfaces), and silently lose
-    the warm path on every GFD-labelled cluster.
+    GPU-Feature-Discovery labels a p5 node
+    `nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3`. For an `H100` request the
+    affinity pins that raw value, so the node, the richest EFA SKU on AWS
+    (32 interfaces), must still be used.
     """
     gfd_key = 'nvidia.com/gpu.product'
     node = _node('NVIDIA-H100-80GB-HBM3', 8, 32, label_key=gfd_key)
-    _, meta = _detect([node], acc_type='H100', acc_count=8, label_key=gfd_key)
+    _, meta = _detect([node],
+                      acc_type='H100',
+                      acc_count=8,
+                      label_values=['NVIDIA-H100-80GB-HBM3'],
+                      label_key=gfd_key)
     assert meta == {
         'efa_count': 32
     }, (f'GFD-labelled p5 must satisfy an H100 request; got {meta}')
-
-
-def test_node_with_an_unparseable_accelerator_label_is_still_used():
-    """A label value its formatter rejects is "unknown", so it must not skip."""
-    gke_key = 'cloud.google.com/gke-accelerator'
-    node = _node('not-a-gke-accelerator', 8, 32, label_key=gke_key)
-    _, meta = _detect([node], acc_type='L4', acc_count=8, label_key=gke_key)
-    assert meta == {'efa_count': 32}
