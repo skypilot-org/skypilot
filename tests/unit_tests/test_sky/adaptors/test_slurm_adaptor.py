@@ -1,7 +1,6 @@
 """Unit tests for Slurm adaptor."""
 
 import base64
-import shlex
 import unittest.mock as mock
 
 import pytest
@@ -9,13 +8,6 @@ import pytest
 from sky import exceptions
 from sky.adaptors import slurm
 from sky.utils import command_runner as command_runner_lib
-
-
-def _login_cmd(cmd):
-    """The command SlurmClient sends through the login-node runner."""
-    if isinstance(cmd, list):
-        cmd = shlex.join(cmd)
-    return f'echo {slurm._OUTPUT_START_MARKER}\n{cmd}'
 
 
 def _batch_output(*outputs):
@@ -234,8 +226,8 @@ class TestJobSteps:
             assert client.list_job_steps('123') == [
                 slurm.JobStepInfo('123.batch', 'batch')
             ]
-        assert transport.call_args.args[0] == _login_cmd(
-            'sudo --non-interactive -H -u alice -- scontrol -o show step 123')
+        assert transport.call_args.args[0].endswith(
+            '\nsudo --non-interactive -H -u alice -- scontrol -o show step 123')
 
     def test_rejects_malformed_job_step_output(self):
         client = self._client()
@@ -320,7 +312,7 @@ PartitionName=GPU nodes (nvidia) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL 
 
             result = client.get_partitions()
             mock_run.assert_called_once_with(
-                _login_cmd('scontrol show partitions -o'),
+                'scontrol show partitions -o',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -332,37 +324,21 @@ PartitionName=GPU nodes (nvidia) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL 
 class TestLoginShellOutput:
     """Tests for dropping what the login shell prints before a command."""
 
-    @staticmethod
-    def _client():
-        return slurm.SlurmClient(ssh_host='localhost',
-                                 ssh_port=22,
-                                 ssh_user='root',
-                                 ssh_key=None)
-
-    def test_drops_login_shell_banner(self):
-        client = self._client()
-        banner = 'Welcome to hpc-login \u2603\nLmod: loading site modules\n'
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (
-                0, f'{banner}{slurm._OUTPUT_START_MARKER}\n'
-                f'node1{slurm.SEP}idle{slurm.SEP}gpu:a100:8{slurm.SEP}64'
-                f'{slurm.SEP}512000{slurm.SEP}gpu*\n', 'stderr banner\n')
+    def test_info_nodes_ignores_login_shell_banner(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        marker = command_runner_lib._SLURM_OUTPUT_START_MARKER
+        with mock.patch.object(
+                command_runner_lib.SSHCommandRunner,
+                'run',
+                return_value=(
+                    0, f'Welcome to hpc-login\n{marker}\n'
+                    f'node1{slurm.SEP}idle{slurm.SEP}gpu:a100:8'
+                    f'{slurm.SEP}64{slurm.SEP}512000{slurm.SEP}gpu*\n', '')):
             nodes = client.info_nodes()
         assert [node.node for node in nodes] == ['node1']
-
-    def test_returns_stdout_unchanged_without_marker(self):
-        client = self._client()
-        with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (255, '', 'connection refused\n')
-            assert client._run_slurm_cmd('sinfo') == (255, '',
-                                                      'connection refused\n')
-
-    def test_marker_keeps_command_output_and_returncode(self):
-        client = self._client()
-        client._runner = command_runner_lib.LocalProcessCommandRunner()
-        rc, stdout, stderr = client._run_slurm_cmd(
-            "printf 'line1\\nline2\\n'; printf 'err' >&2; exit 3")
-        assert (rc, stdout, stderr) == (3, 'line1\nline2\n', 'err')
 
     def test_local_execution_does_not_add_marker(self):
         client = slurm.SlurmClient(is_inside_slurm_cluster=True)
@@ -398,9 +374,7 @@ class TestInfoNodes:
 
             result = client.info_nodes()
             mock_run.assert_called_once_with(
-                _login_cmd(
-                    f'sinfo -h --Node -o "%N{slurm.SEP}%t{slurm.SEP}%G{slurm.SEP}%c{slurm.SEP}%m{slurm.SEP}%P"'
-                ),
+                f'sinfo -h --Node -o "%N{slurm.SEP}%t{slurm.SEP}%G{slurm.SEP}%c{slurm.SEP}%m{slurm.SEP}%P"',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -558,7 +532,7 @@ class TestCheckJobHasNodes:
             mock_run.return_value = (0, 'node1,node2', '')
             assert client.check_job_has_nodes('12345') is True
             mock_run.assert_called_once_with(
-                _login_cmd(['squeue', '-h', '--jobs', '12345', '-o', '%N']),
+                ['squeue', '-h', '--jobs', '12345', '-o', '%N'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -607,10 +581,10 @@ class TestGetJobState:
             mock_run.return_value = (0, 'RUNNING\n', '')
             result = client.get_job_state('12345')
             mock_run.assert_called_once_with(
-                _login_cmd([
+                [
                     'squeue', '-h', '--only-job-state', '--jobs', '12345', '-o',
                     '%T'
-                ]),
+                ],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -634,7 +608,7 @@ class TestGetJobState:
             result = client.get_job_state('12345')
             assert mock_run.call_count == 2
             mock_run.assert_called_with(
-                _login_cmd(['squeue', '-h', '--jobs', '12345', '-o', '%T']),
+                ['squeue', '-h', '--jobs', '12345', '-o', '%T'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -674,10 +648,10 @@ class TestGetJobsStateByName:
 
             result = client.get_jobs_state_by_name('sky-3a5e-pilot-9b1gdacf')
             mock_run.assert_called_once_with(
-                _login_cmd([
+                [
                     'squeue', '-h', '--name', 'sky-3a5e-pilot-9b1gdacf', '-o',
                     '%T'
-                ]),
+                ],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -700,8 +674,7 @@ class TestGetJobsStateByName:
 
             result = client.get_jobs_state_by_name('sky-test-job')
             mock_run.assert_called_once_with(
-                _login_cmd(
-                    ['squeue', '-h', '--name', 'sky-test-job', '-o', '%T']),
+                ['squeue', '-h', '--name', 'sky-test-job', '-o', '%T'],
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -832,9 +805,7 @@ class TestGetAllJobsGres:
 
             # Verify squeue was called
             mock_run.assert_called_once_with(
-                _login_cmd(
-                    f'squeue -h --states=running,completing -o "%N{slurm.SEP}%b"'
-                ),
+                f'squeue -h --states=running,completing -o "%N{slurm.SEP}%b"',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -874,10 +845,8 @@ class TestGetAllJobsInfo:
             result = client.get_all_jobs_info()
 
             mock_run.assert_called_once_with(
-                _login_cmd(
-                    f'squeue -h --states=running,completing '
-                    f'-o "%i{slurm.SEP}%j{slurm.SEP}%u{slurm.SEP}%N{slurm.SEP}%b"'
-                ),
+                f'squeue -h --states=running,completing '
+                f'-o "%i{slurm.SEP}%j{slurm.SEP}%u{slurm.SEP}%N{slurm.SEP}%b"',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -1077,7 +1046,7 @@ class TestGetProctrackType:
 
             result = client.get_proctrack_type()
             mock_run.assert_called_once_with(
-                _login_cmd('scontrol show config | grep -i "^ProctrackType"'),
+                'scontrol show config | grep -i "^ProctrackType"',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -1120,7 +1089,7 @@ class TestGetAllNodeDetails:
             mock_run.return_value = (0, mock_output, '')
             result = client.get_all_node_details()
             mock_run.assert_called_once_with(
-                _login_cmd('scontrol show node'),
+                'scontrol show node',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,

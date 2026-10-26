@@ -171,8 +171,7 @@ def test_submit_validation_uses_bounded_submit_runner():
         client.validate_submit_user('a', 'svc')
         assert runner.call_args.kwargs['slurm_user'] == 'svc'
         assert runner.return_value.run.call_args.kwargs['timeout'] == 15
-        assert runner.return_value.run.call_args.args[0].endswith(
-            '\nsudo --non-interactive -H -u svc -- id -un')
+        assert runner.return_value.run.call_args.args[0] == ['id', '-un']
 
 
 @pytest.mark.parametrize(
