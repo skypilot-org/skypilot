@@ -26,7 +26,20 @@ fi
 
 shopt -s nullglob
 status=0
-for patch in "$SUITE_DIR"/twist_patches/*.patch; do
+# E2E_SRC_SHARD=k/N runs every N-th patch, starting at the k-th (1-based), so
+# several runners can share the patches. E2E_SHARD (test sharding) must not
+# apply here: it could deselect the very test that guards a patch.
+unset E2E_SHARD
+patches=("$SUITE_DIR"/twist_patches/*.patch)
+if [[ -n "${E2E_SRC_SHARD:-}" ]]; then
+  k="${E2E_SRC_SHARD%/*}"; n="${E2E_SRC_SHARD#*/}"
+  mine=()
+  for i in "${!patches[@]}"; do
+    (( i % n == k - 1 )) && mine+=("${patches[$i]}")
+  done
+  patches=(${mine[@]+"${mine[@]}"})
+fi
+for patch in ${patches[@]+"${patches[@]}"}; do
   id="src-$(basename "$patch" .patch)"
   export E2E_SRC_PATCH="$patch"
   echo "::group::$id"

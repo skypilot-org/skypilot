@@ -320,14 +320,43 @@ def _exclusive_starts_clean(request: pytest.FixtureRequest) -> None:
                            f'behind: {leftovers[:10]}')
 
 
+SHARD_ENV = 'E2E_SHARD'
+
+
 def pytest_collection_modifyitems(config, items: List[pytest.Item]) -> None:
-    del config
     for item in items:
         callspec = getattr(item, 'callspec', None)
         if callspec is None or 'twist' not in callspec.params:
             raise pytest.UsageError(
                 f'{item.nodeid}: every dashboard e2e test needs '
                 '@with_twists(...)')
+    _keep_shard(config, items)
+
+
+def _keep_shard(config, items: List[pytest.Item]) -> None:
+    """E2E_SHARD=k/N keeps every N-th run, starting at the k-th (1-based).
+
+    Exclusive and parallel runs are dealt out separately, each in nodeid
+    order, so every shard gets its share of both phases whatever -m selects.
+    Each shard runs against its own server, so exclusive runs in different
+    shards do not see each other's rows.
+    """
+    spec = os.environ.get(SHARD_ENV)
+    if not spec:
+        return
+    k, n = (int(x) for x in spec.split('/'))
+    assert 1 <= k <= n, f'{SHARD_ENV}={spec} must be k/N with 1 <= k <= N'
+    keep = set()
+    for exclusive in (True, False):
+        group = sorted(
+            (i for i in items
+             if (i.get_closest_marker('exclusive') is not None) == exclusive),
+            key=lambda i: i.nodeid)
+        keep.update(i.nodeid for i in group[k - 1::n])
+    deselected = [i for i in items if i.nodeid not in keep]
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = [i for i in items if i.nodeid in keep]
 
 
 def pytest_runtest_logreport(report) -> None:
