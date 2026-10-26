@@ -526,6 +526,9 @@ class Kubernetes(clouds.Cloud):
         all_contexts = kubernetes_utils.get_all_kube_context_names()
         if not all_contexts:
             return []
+        # Dedupe in kubeconfig order: the in-cluster name can repeat a
+        # kubeconfig context.
+        all_contexts = list(dict.fromkeys(all_contexts))
 
         # Allowed_contexts specified for workspace should take precedence over
         # the global allowed_contexts.

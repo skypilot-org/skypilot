@@ -111,9 +111,10 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     def test_allowed_all_contexts_keep_kubeconfig_order(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
-        """allowed_contexts=all lists contexts in kubeconfig order."""
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
         names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
-        mock_get_all_contexts.return_value = names
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_get_cloud_config_value.return_value = 'all'
 
