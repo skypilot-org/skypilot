@@ -149,6 +149,49 @@ async def test_execute_fetchall_async_error_does_not_stall_read_txn(
     assert values == ['initial', 'external', 'after_error']
 
 
+async def _item_values(conn):
+    async with conn.execute_fetchall_async(
+            'SELECT value FROM items ORDER BY id') as rows:
+        return [row[0] for row in rows]
+
+
+@pytest.mark.asyncio
+async def test_run_in_transaction_async_commits_on_success(isolated_database):
+    conn, db_path = isolated_database
+
+    def insert_two(cursor):
+        cursor.execute('INSERT INTO items (value) VALUES (?)', ('a',))
+        cursor.execute('INSERT INTO items (value) VALUES (?)', ('b',))
+        return 'done'
+
+    assert await conn.run_in_transaction_async(insert_two) == 'done'
+
+    # Another connection sees the commit.
+    with sqlite3.connect(db_path) as external_conn:
+        rows = external_conn.execute(
+            'SELECT value FROM items ORDER BY id').fetchall()
+    assert [row[0] for row in rows] == ['a', 'b']
+
+
+@pytest.mark.asyncio
+async def test_run_in_transaction_async_rolls_back_on_failure(
+        isolated_database):
+    conn, _ = isolated_database
+
+    def insert_then_fail(cursor):
+        cursor.execute('INSERT INTO items (value) VALUES (?)', ('lost',))
+        raise RuntimeError('boom')
+
+    with pytest.raises(RuntimeError, match='boom'):
+        await conn.run_in_transaction_async(insert_then_fail)
+
+    assert await _item_values(conn) == []
+    # The connection stays usable after the rollback.
+    await conn.execute_and_commit_async('INSERT INTO items (value) VALUES (?)',
+                                        ('after',))
+    assert await _item_values(conn) == ['after']
+
+
 class TestGetEngine:
     """Tests for get_engine function."""
 

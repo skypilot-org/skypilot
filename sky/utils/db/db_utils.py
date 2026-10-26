@@ -8,7 +8,8 @@ import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
+from typing import (Any, Callable, Dict, Iterable, Literal, Optional, TypeVar,
+                    Union)
 import urllib.parse
 
 import aiosqlite
@@ -23,6 +24,7 @@ from sky.skylet import runtime_utils
 from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
+T = TypeVar('T')
 if typing.TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -412,6 +414,23 @@ class SQLiteConn(threading.local):
         # pylint: disable=protected-access
         return await conn._execute(exec_and_get_returning_value, sql,
                                    parameters)
+
+    async def run_in_transaction_async(self, fn: Callable[[sqlite3.Cursor],
+                                                          T]) -> T:
+        """Run `fn(cursor)` in one transaction and return its result.
+
+        The transaction commits when `fn` returns and rolls back when it
+        raises, so every statement of `fn` lands or none does.
+        """
+        conn = await self._get_async_conn()
+
+        def run(fn: Callable[[sqlite3.Cursor], T]) -> T:
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                return fn(cursor)
+
+        # pylint: disable=protected-access
+        return await conn._execute(run, fn)
 
     async def close(self):
         if self._async_conn is not None:

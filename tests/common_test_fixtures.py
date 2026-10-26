@@ -145,6 +145,17 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     monkeypatch.setattr(executor, 'schedule_prepared_request',
                         _schedule_no_precondition)
 
+    # `schedule_request_async` stores a built-in precondition together with the
+    # request, so it needs the same bypass.
+    original_schedule_request = executor.schedule_request_async
+
+    async def _schedule_request_no_precondition(*args, **kwargs):
+        kwargs['precondition'] = None
+        await original_schedule_request(*args, **kwargs)
+
+    monkeypatch.setattr(executor, 'schedule_request_async',
+                        _schedule_request_no_precondition)
+
 
 # Define helper functions at module level for pickleability
 def get_cached_enabled_clouds_mock(enabled_clouds, *_, **__):

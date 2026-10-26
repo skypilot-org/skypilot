@@ -31,6 +31,7 @@ import threading
 import time
 import typing
 from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
+import uuid
 
 import psutil
 import setproctitle
@@ -1347,19 +1348,19 @@ def stamp_request_body(request_body: payloads.RequestBody,
     return user_id
 
 
-async def prepare_request_async(
+def _build_request(
     request_id: str,
     request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
-    request_cluster_name: Optional[str] = None,
-    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
-    is_skypilot_system: bool = False,
-    auth_user: Optional[models.User] = None,
+    request_cluster_name: Optional[str],
+    schedule_type: api_requests.ScheduleType,
+    is_skypilot_system: bool,
+    auth_user: Optional[models.User],
 ) -> api_requests.Request:
-    """Prepare a request for execution."""
+    """Build a PENDING request. Nothing is stored yet."""
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
-    request = api_requests.Request(
+    return api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
         entrypoint=func,
@@ -1372,6 +1373,21 @@ async def prepare_request_async(
         file_mounts_blob_id=getattr(request_body, 'file_mounts_blob_id', None),
     )
 
+
+async def prepare_request_async(
+    request_id: str,
+    request_name: request_names.RequestName,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
+) -> api_requests.Request:
+    """Prepare a request for execution."""
+    request = _build_request(request_id, request_name, request_body, func,
+                             request_cluster_name, schedule_type,
+                             is_skypilot_system, auth_user)
     if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
             f'Request {request_id} already exists.')
@@ -1410,19 +1426,34 @@ async def schedule_request_async(
         is_skypilot_system: Denote whether the request is from SkyPilot system.
         precondition: If a precondition is provided, the request will only be
             scheduled for execution when the precondition is met (returns True).
-            The precondition is waited asynchronously and does not block the
-            caller.
+            The precondition is waited without blocking the caller.
     """
-    request_task = await prepare_request_async(request_id,
-                                               request_name,
-                                               request_body,
-                                               func,
-                                               request_cluster_name,
-                                               schedule_type,
-                                               is_skypilot_system,
-                                               auth_user=auth_user)
-    await schedule_prepared_request(request_task, ignore_return_value,
-                                    precondition, retryable)
+    if precondition is None or not preconditions.is_storable(precondition):
+        request_task = await prepare_request_async(request_id,
+                                                   request_name,
+                                                   request_body,
+                                                   func,
+                                                   request_cluster_name,
+                                                   schedule_type,
+                                                   is_skypilot_system,
+                                                   auth_user=auth_user)
+        await schedule_prepared_request(request_task, ignore_return_value,
+                                        precondition, retryable)
+        return
+
+    # A stored precondition: commit the request and its wait row together, so
+    # a request with a precondition never exists without its wait row.
+    request_task = _build_request(request_id, request_name, request_body, func,
+                                  request_cluster_name, schedule_type,
+                                  is_skypilot_system, auth_user)
+    wait = _precondition_wait(request_id, precondition, schedule_type,
+                              ignore_return_value, retryable)
+    if not await api_requests.create_with_precondition_wait_async(
+            request_task, wait):
+        raise exceptions.RequestAlreadyExistsError(
+            f'Request {request_id} already exists.')
+    request_task.log_path.touch()
+    await _check_precondition_wait(wait, time.time(), precondition=precondition)
 
 
 async def schedule_internal_daemon_async(
@@ -1457,6 +1488,47 @@ async def schedule_internal_daemon_async(
                      'enqueue skipped.')
 
 
+async def enqueue_request(request_id: str,
+                          schedule_type: api_requests.ScheduleType,
+                          ignore_return_value: bool = False,
+                          retryable: bool = False,
+                          fail_if_cancelled: bool = True) -> None:
+    """Put a request on the queue for its schedule type.
+
+    If the put fails, the request is marked FAILED and the error is raised.
+
+    Args:
+        fail_if_cancelled: Whether a cancel of the calling task also marks the
+            request FAILED. Pass False when a wait row in the request database
+            still holds the request: the checker then delivers it, and the
+            cancel is re-raised with the request left PENDING.
+    """
+    input_tuple = (request_id, ignore_return_value, retryable)
+    logger.info(f'Queuing request: {request_id}')
+    try:
+        await _get_queue(schedule_type).put_async(input_tuple)
+    except asyncio.CancelledError as e:
+        if fail_if_cancelled:
+            logger.error(f'Failed to enqueue request {request_id}: '
+                         f'{common_utils.format_exception(e)}')
+            await api_requests.set_request_failed_if_pending_async(
+                request_id, e)
+        raise
+    except Exception as e:  # pylint: disable=broad-except
+        # A PENDING request that never made it onto the queue is
+        # stranded: no worker will pick it up and nothing else moves it to
+        # a terminal state, and a queue backend that recovers stale PENDING
+        # rows would resurrect and execute it long after the caller saw
+        # this error. If the put actually committed despite the error, the
+        # request is either still unclaimed (the FAILED mark lands and the
+        # row is discarded at dequeue) or already claimed by a worker (the
+        # mark is skipped and the claimed run's outcome stands).
+        logger.error(f'Failed to enqueue request {request_id}: '
+                     f'{common_utils.format_exception(e)}')
+        await api_requests.set_request_failed_if_pending_async(request_id, e)
+        raise
+
+
 async def schedule_prepared_request(request_task: api_requests.Request,
                                     ignore_return_value: bool = False,
                                     precondition: Optional[
@@ -1470,42 +1542,200 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             ignored.
         precondition: If a precondition is provided, the request will only be
             scheduled for execution when the precondition is met (returns True).
-            The precondition is waited asynchronously and does not block the
-            caller.
+            The wait of a built-in precondition is stored in the request
+            database, like the wait of `schedule_request_async`. If the process
+            dies between the preparation of the request and the insert of the
+            wait, the request stays PENDING and nothing delivers it. An error
+            or a cancel at the insert marks the request FAILED. Any other
+            precondition is waited in this process, and the wait is lost if the
+            process dies.
         retryable: Whether the request should be retried if it fails.
     """
+    request_id = request_task.request_id
+    schedule_type = request_task.schedule_type
+    if precondition is None:
+        await enqueue_request(request_id, schedule_type, ignore_return_value,
+                              retryable)
+        return
 
-    async def enqueue():
-        input_tuple = (request_task.request_id, ignore_return_value, retryable)
-        logger.info(f'Queuing request: {request_task.request_id}')
-        try:
-            await _get_queue(request_task.schedule_type).put_async(input_tuple)
-        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
-            # A PENDING request that never made it onto the queue is
-            # stranded: no worker will pick it up and nothing else moves it to
-            # a terminal state, and a queue backend that recovers stale PENDING
-            # rows would resurrect and execute it long after the caller saw
-            # this error. If the put actually committed despite the error, the
-            # request is either still unclaimed (the FAILED mark lands and the
-            # row is discarded at dequeue) or already claimed by a worker (the
-            # mark is skipped and the claimed run's outcome stands).
-            logger.error(
-                f'Failed to enqueue request {request_task.request_id}: '
-                f'{common_utils.format_exception(e)}')
+    if preconditions.is_storable(precondition):
+        wait = _precondition_wait(request_id, precondition, schedule_type,
+                                  ignore_return_value, retryable)
+        await api_requests.store_precondition_wait_of_existing_request_async(
+            wait)
+        await _check_precondition_wait(wait,
+                                       time.time(),
+                                       precondition=precondition)
+        return
+
+    # Deprecated: the wait lives in this process only and is lost if the
+    # process dies.
+    # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+    logger.warning(
+        'Waiting for a Precondition in memory (preconditions.'
+        'background_tasks) is deprecated. The worker keeps the wait in '
+        'memory, and the wait is lost if the worker dies. Use a built-in '
+        'precondition to store the wait in the request database.')
+    task = asyncio.create_task(
+        precondition.wait_in_process(on_condition_met=functools.partial(
+            enqueue_request, request_id, schedule_type, ignore_return_value,
+            retryable)))
+    preconditions.background_tasks.add(task)
+    task.add_done_callback(preconditions.background_tasks.discard)
+
+
+def _precondition_wait(request_id: str,
+                       precondition: preconditions.Precondition,
+                       schedule_type: api_requests.ScheduleType,
+                       ignore_return_value: bool,
+                       retryable: bool) -> api_requests.PreconditionWait:
+    """The wait row of a storable precondition."""
+    has_deadline = precondition.timeout > 0
+    return api_requests.PreconditionWait(
+        request_id, precondition.KIND, precondition.params(), schedule_type,
+        ignore_return_value, retryable,
+        time.time() + precondition.timeout if has_deadline else None,
+        str(precondition.timeout) if has_deadline else None)
+
+
+async def _settle_precondition_wait(wait: api_requests.PreconditionWait,
+                                    error: Optional[BaseException]) -> None:
+    """Carry out the outcome of a wait, if this caller wins its claim.
+
+    The claim makes one actor decide each wait. A caller that loses the claim
+    does nothing: the owner puts the request on the queue or marks it FAILED.
+    The owner deletes the row last, so a crash leaves the row, and its claim
+    expires. An error or a cancel releases the claim, so the next pass takes
+    the wait at once.
+
+    The claim starts at the real time of the call. A checker pass reads its
+    own `now` once, and the blocking checks of the pass age it, so a claim
+    that started at that `now` could be expired before it is made.
+    """
+    owner = uuid.uuid4().hex
+    try:
+        # A cancel here can reach the release below before the claim task has
+        # run. Both tasks are shielded and the event loop runs ready tasks in
+        # FIFO order, so the claim runs first. If it does not, the claim
+        # outlives the release and the wait is delayed by at most
+        # PRECONDITION_CLAIM_SECONDS (60 s) before the next pass takes it.
+        if not await api_requests.claim_precondition_wait_async(
+                wait.request_id, owner, time.time(),
+                server_constants.PRECONDITION_CLAIM_SECONDS):
+            return
+        if error is not None:
             await api_requests.set_request_failed_if_pending_async(
-                request_task.request_id, e)
-            raise
+                wait.request_id, error)
+        else:
+            try:
+                await enqueue_request(wait.request_id,
+                                      wait.schedule_type,
+                                      wait.ignore_return_value,
+                                      wait.retryable,
+                                      fail_if_cancelled=False)
+            except Exception:  # pylint: disable=broad-except
+                # enqueue_request already logged the error and marked the
+                # request FAILED. The next waiting request must still get its
+                # turn.
+                pass
+        await api_requests.delete_precondition_wait_async(wait.request_id,
+                                                          owner=owner)
+    except BaseException:
+        await api_requests.release_precondition_wait_async(
+            wait.request_id, owner)
+        raise
 
-    if precondition is not None:
-        # Schedule precondition wait as a background task so the caller
-        # returns immediately.  The task reference is stored in a
-        # module-level set to prevent garbage collection.
-        task = asyncio.create_task(
-            precondition.wait_async(on_condition_met=enqueue))
-        preconditions.background_tasks.add(task)
-        task.add_done_callback(preconditions.background_tasks.discard)
+
+async def _check_precondition_wait(
+        wait: api_requests.PreconditionWait,
+        now: float,
+        precondition: Optional[preconditions.Precondition] = None) -> None:
+    """Check one waiting request once, and settle it if it has an outcome.
+
+    Args:
+        precondition: The precondition the accepting task holds. When it is
+            set, the request was just stored: the checks that read the request
+            and rebuild the precondition are skipped.
+    """
+    status_msg_seen: Optional[str] = None
+    if precondition is None:
+        request = await api_requests.get_request_async(
+            wait.request_id, fields=['status', 'status_msg'])
+        if (request is None or
+                request.status != api_requests.RequestStatus.PENDING):
+            # The request was cancelled or deleted, or it already left the
+            # queue.
+            logger.debug(f'Request {wait.request_id} no longer waits for its '
+                         'precondition.')
+            await api_requests.delete_precondition_wait_async(wait.request_id)
+            return
+        status_msg_seen = request.status_msg
+
+    error: Optional[BaseException] = None
+    if wait.deadline is not None and now > wait.deadline:
+        error = exceptions.RequestCancelled(
+            f'Request {wait.request_id} precondition wait timed out after '
+            f'{wait.timeout_text}s')
     else:
-        await enqueue()
+        try:
+            if precondition is None:
+                precondition = preconditions.build_precondition(
+                    wait.kind, wait.request_id, wait.params)
+            met, status_msg = await precondition.check()
+        except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
+            error = e
+            logger.info(f'Request {wait.request_id} failed due to '
+                        f'{common_utils.format_exception(e)}')
+        else:
+            if not met:
+                if status_msg is not None and status_msg != status_msg_seen:
+                    await api_requests.update_status_msg_async(
+                        wait.request_id, status_msg)
+                return
+
+    await _settle_precondition_wait(wait, error)
+
+
+async def check_precondition_waits_once(now: Optional[float] = None) -> None:
+    """Evaluate every request that waits for a precondition once.
+
+    Args:
+        now: The current time in seconds since the epoch, for tests.
+    """
+    if now is None:
+        now = time.time()
+    for wait in await api_requests.list_precondition_waits_async():
+        try:
+            await _check_precondition_wait(wait, now)
+        except Exception as e:  # pylint: disable=broad-except
+            # One bad row must not stall the other waiting requests.
+            logger.error(f'Error checking the precondition of request '
+                         f'{wait.request_id}: '
+                         f'{common_utils.format_exception(e)}')
+
+
+async def precondition_checker_daemon() -> None:
+    """Enqueue the requests whose precondition is met, until cancelled.
+
+    Run it once, in the API server process: it shares the event loop with the
+    other background daemons, so a slow check delays them.
+    """
+    while True:
+        began = time.monotonic()
+        try:
+            await check_precondition_waits_once()
+        except asyncio.CancelledError:
+            logger.info('Precondition checker cancelled')
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error checking request preconditions: '
+                         f'{common_utils.format_exception(e)}')
+        elapsed = time.monotonic() - began
+        if elapsed > server_constants.PRECONDITION_CHECK_INTERVAL_SECONDS:
+            logger.warning(f'Checking request preconditions took {elapsed:.1f}s'
+                           ', longer than the check interval.')
+        await asyncio.sleep(server_constants.PRECONDITION_CHECK_INTERVAL_SECONDS
+                           )
 
 
 def start(

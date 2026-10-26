@@ -4781,6 +4781,11 @@ if __name__ == '__main__':
                 background.create_task(metrics.multiproc_reaper_daemon()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
+        # Requests that wait for a precondition are stored in the request
+        # database. This is the only checker, so a wait does not depend on the
+        # uvicorn worker that accepted the request.
+        global_tasks.append(
+            background.create_task(executor.precondition_checker_daemon()))
         global_tasks.append(
             background.create_task(
                 global_user_state.cluster_event_retention_daemon()))

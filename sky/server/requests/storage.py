@@ -9,6 +9,7 @@ from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
 
 if TYPE_CHECKING:
     from sky.server import daemons as daemons_lib
+    from sky.server.requests.requests import PreconditionWait
     from sky.server.requests.requests import Request
     from sky.server.requests.requests import RequestStatus
     from sky.server.requests.requests import RequestTaskFilter
@@ -61,6 +62,37 @@ class RequestBackend(abc.ABC):
             True if a new request was created, False if it already exists.
         """
         raise NotImplementedError
+
+    async def create_with_precondition_wait_async(
+            self, request: Request, wait: PreconditionWait) -> bool:
+        """Create a request and its precondition wait row together.
+
+        Returns:
+            True if a new request was created and its wait row stored, False
+            if the request already exists. A request that already exists gets
+            no wait row.
+
+        The wait table is always in the local request database, for every
+        backend. The claim, list, release and delete functions are module
+        functions on that database, so a plugin store cannot hold the table.
+        The local store commits both rows in one transaction, so that a
+        precondition request never exists without its wait row. The default
+        creates the request first and stores the wait row second. It has two
+        failure windows:
+
+        - Process death between the two steps leaves a PENDING request that
+          nothing delivers (an orphan).
+        - An error or a cancel at the wait insert marks the request FAILED,
+          and the error or the cancel reaches the caller.
+        """
+        # Imported here because requests.py imports this module.
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import requests as requests_lib
+        if not await self.create_if_not_exists_async(request):
+            return False
+        await requests_lib.store_precondition_wait_of_existing_request_async(
+            wait)
+        return True
 
     @abc.abstractmethod
     async def create_or_refresh_internal_daemon_async(
