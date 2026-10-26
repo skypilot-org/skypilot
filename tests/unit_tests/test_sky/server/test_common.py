@@ -109,6 +109,10 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_check_compat.return_value = mock.Mock(error=None)
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
+    # The status response cache is process-wide (5s TTL), so an earlier test
+    # in the same worker can leave a cached entry for this endpoint; that
+    # would let the first health check skip `make_authenticated_request`.
+    common.get_api_server_status_response.cache_clear()
 
     try:
         with mock.patch.object(common.get_api_server_status_response,
@@ -825,6 +829,31 @@ def test_handle_request_error_403_detail_clean_message():
 def test_handle_request_error_403_no_detail_falls_through():
     """A 403 without a usable `detail` keeps the original HTTPError."""
     resp = _fake_response(403, {})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_handle_request_error_404_hidden_infra_target():
+    """The server's 404 for a context or cluster outside the caller's
+    workspaces reads as a clean not-found error."""
+    resp = _fake_response(
+        404, {
+            'detail': {
+                'error': 'infra_target_not_found',
+                'message': 'Kubernetes context not found.'
+            }
+        })
+    with pytest.raises(exceptions.InfraTargetNotFoundError) as exc_info:
+        common.handle_request_error(resp)
+    assert str(exc_info.value) == 'Kubernetes context not found.'
+    # The CLI's show-gpus path catches ValueError.
+    assert isinstance(exc_info.value, ValueError)
+
+
+@pytest.mark.parametrize('body', [{'detail': 'Not Found'}, {}, None])
+def test_handle_request_error_other_404_keeps_http_error(body):
+    """FastAPI's own 404 (e.g. a route an old server lacks) is unchanged."""
+    resp = _fake_response(404, body, json_raises=body is None)
     with pytest.raises(requests.exceptions.HTTPError):
         common.handle_request_error(resp)
 

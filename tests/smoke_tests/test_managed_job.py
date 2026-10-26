@@ -25,6 +25,7 @@ import io
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -4026,14 +4027,43 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _save_queue_submitted_at(job_name: str, status: str, path: str) -> str:
+    """Returns a command that writes the queue's submitted_at for a job to path.
+
+    The command fails unless the job is in `status` and the queue reports a
+    submitted_at for it. It reads the queue through the SDK and writes the
+    value from Python, because importing sky can print logs to stdout, which
+    would corrupt a value captured from the CLI.
+    """
+    snippet = ('import sky; '
+               'records, _, _, _ = sky.get(sky.jobs.queue_v2('
+               f'refresh=False, name_match="{job_name}")); '
+               'jobs = [job for job in records '
+               f'if job["job_name"] == "{job_name}"]; '
+               'assert len(jobs) == 1, jobs; '
+               f'assert jobs[0]["status"] == sky.ManagedJobStatus.{status}, '
+               'jobs[0]; '
+               'assert jobs[0]["submitted_at"], jobs[0]; '
+               f'open("{path}", "w").write(repr(jobs[0]["submitted_at"]))')
+    return f'python -c {shlex.quote(snippet)}'
+
+
 @pytest.mark.managed_jobs
 def test_managed_jobs_depends_on(generic_cloud: str):
-    """Test that --depends-on waits for success and cancels on failure."""
+    """Test that --depends-on waits for success and cancels on failure, and
+    that the queue reports the dependent job's submission time both while it
+    waits and after it runs."""
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         pytest.skip('--depends-on requires consolidation mode.')
 
     name = smoke_tests_utils.get_cluster_name()
     up_id_file = f'/tmp/{name}-up-id'
+    pending_submitted_at_file = f'/tmp/{name}-down-pending-submitted-at'
+    finished_submitted_at_file = f'/tmp/{name}-down-finished-submitted-at'
+    save_pending_submitted_at = _save_queue_submitted_at(
+        f'{name}-down', 'PENDING', pending_submitted_at_file)
+    save_finished_submitted_at = _save_queue_submitted_at(
+        f'{name}-down', 'SUCCEEDED', finished_submitted_at_file)
     launch = (f'sky jobs launch -y --infra {generic_cloud} '
               f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
     # Debug logs from loading the config reach stdout before -o takes effect.
@@ -4059,11 +4089,23 @@ def test_managed_jobs_depends_on(generic_cloud: str):
             (f'up_id=$(cat {up_id_file}); s=$(sky jobs queue -v); echo "$s"; '
              f'echo "$s" | grep {name}-down | grep PENDING | '
              f'grep "Dependency: $up_id"'),
+            # No controller has picked up the dependent job yet, so it has not
+            # begun launching. The queue still reports when it was submitted.
+            # Save that time to compare against once the job has run.
+            f'{save_pending_submitted_at} && cat {pending_submitted_at_file}',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-down',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
+            # The dependent job began launching only after `sleep 120` in its
+            # dependency finished, so its launch time is minutes after its
+            # submission. The queue must keep reporting the submission time
+            # saved above, not switch to the launch time.
+            (f'{save_finished_submitted_at} && '
+             f'echo "pending: $(cat {pending_submitted_at_file}), '
+             f'finished: $(cat {finished_submitted_at_file})" && '
+             f'cmp {pending_submitted_at_file} {finished_submitted_at_file}'),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-up',
@@ -4082,7 +4124,8 @@ def test_managed_jobs_depends_on(generic_cloud: str):
         ],
         (f'sky jobs cancel -y -n {name}-up; sky jobs cancel -y -n {name}-down; '
          f'sky jobs cancel -y -n {name}-bad; '
-         f'sky jobs cancel -y -n {name}-skip; rm -f {up_id_file}'),
+         f'sky jobs cancel -y -n {name}-skip; rm -f {up_id_file} '
+         f'{pending_submitted_at_file} {finished_submitted_at_file}'),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )

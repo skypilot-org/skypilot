@@ -1499,12 +1499,13 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
 def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
     """Parse a submit-job log filename's id portion into inclusive ranges.
 
-    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
-    single ids (``584``) or inclusive ranges (``580-588``), returned as
-    (start, end) tuples. Ranges are kept intact rather than expanded into a set
-    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
-    blow up memory. Raises ValueError on an unrecognized or inverted range so
-    the caller can skip the file.
+    The id portion is a single id (``584``) or the submission's inclusive id
+    span (``580-588``); logs written by older versions may hold a
+    comma-separated list of either. Returned as (start, end) tuples. Ranges
+    are kept intact rather than expanded into a set of ints -- a filename
+    like ``submit-job-1-100000000.log`` would otherwise blow up memory.
+    Raises ValueError on an unrecognized or inverted range so the caller can
+    skip the file.
     """
     ranges: List[Tuple[int, int]] = []
     for token in job_ids_str.split(','):
@@ -1529,11 +1530,13 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
     """Collect managed-job submission log file paths (submit-job-*.log).
 
     Each submission writes ``~/sky_logs/managed_jobs/submit-job-<ids>.log``
-    (see sky.jobs.server.core), where ``<ids>`` is the submission's job-id set
-    formatted as comma-separated singletons/ranges. This per-submission log
-    records the "Started N controllers" count -- the over-count signal that
-    pins leaked controllers to a specific submission -- and is not
-    reconstructable from the per-job ``<jobid>.log`` or ``job_info``.
+    (see sky.jobs.server.core), where ``<ids>`` is the span of the
+    submission's job ids. The span of an interleaved batch also covers ids
+    of concurrent submissions, so a dump may include their logs too. This
+    per-submission log records the "Started N controllers" count -- the
+    over-count signal that pins leaked controllers to a specific submission
+    -- and is not reconstructable from the per-job ``<jobid>.log`` or
+    ``job_info``.
 
     Consolidation mode only: ``submit-job-*.log`` is written solely by
     ``_consolidated_launch``. In non-consolidation mode the submission runs as a
@@ -1547,7 +1550,7 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
     TODO(ishankaul1): also collect controller.log for non-consolidation mode.
 
     Scoped to ``job_ids``: we list ``submit-job-*.log`` but only collect
-    submissions whose id-set intersects the requested jobs. Unlike
+    submissions whose id span covers a requested job. Unlike
     _collect_controller_system_log_paths -- which builds exact
     ``controller_<uuid>.log`` paths from the relevant UUID set and never lists
     the directory -- a job id cannot be mapped back to its submission filename
@@ -3403,6 +3406,12 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('last_recovered_at')
         if 'submitted_at' not in new_fields:
             new_fields.append('submitted_at')
+    # The queue may show created_at as submitted_at; see
+    # get_managed_job_queue.
+    if 'submitted_at' in new_fields:
+        for field in ('created_at', 'task_id', 'execution'):
+            if field not in new_fields:
+                new_fields.append(field)
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -3957,6 +3966,16 @@ def get_managed_job_queue(
             job.get('execution') == DagExecution.PARALLEL.value)
         if not fields or 'depends_on' in fields:
             job['depends_on'] = dependencies.get(job['job_id'])
+
+        # The submitted_at column is when the task began launching (NULL
+        # while the job waits for a controller), which the launch-reason
+        # lookup above still needs. Task 0 and every task of a job group
+        # start waiting when the user submits the job, so show that
+        # instead. A pipeline's later tasks wait on the task before them,
+        # not on a controller, so they keep their launch time.
+        if job['created_at'] is not None and (job['task_id'] == 0 or
+                                              job['is_job_group']):
+            job['submitted_at'] = job['created_at']
 
     return {
         'jobs': jobs,

@@ -526,8 +526,9 @@ class Kubernetes(clouds.Cloud):
         all_contexts = kubernetes_utils.get_all_kube_context_names()
         if not all_contexts:
             return []
-
-        all_contexts = set(all_contexts)
+        # Dedupe in kubeconfig order: the in-cluster name can repeat a
+        # kubeconfig context.
+        all_contexts = list(dict.fromkeys(all_contexts))
 
         # Allowed_contexts specified for workspace should take precedence over
         # the global allowed_contexts.
@@ -1826,10 +1827,12 @@ class Kubernetes(clouds.Cloud):
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
         if region and region not in all_contexts:
+            # List only the contexts this caller may use, not the whole
+            # kubeconfig.
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '
-                f'contexts: {all_contexts}')
+                f'contexts: {self.existing_allowed_contexts(silent=True)}')
         if zone is not None:
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')

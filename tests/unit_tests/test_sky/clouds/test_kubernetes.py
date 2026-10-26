@@ -108,6 +108,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_env_ignored_when_global_allowed_contexts_is_set(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -367,6 +384,36 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
+    """A bad context name must not reveal contexts outside allowed_contexts."""
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        patches = [
+            patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                  return_value=['ctx-a', 'ctx-b']),
+            patch('sky.skypilot_config.get_workspace_cloud',
+                  return_value={'allowed_contexts': ['ctx-a']}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_unknown_context_lists_only_allowed(self):
+        with self.assertRaises(ValueError) as ctx:
+            kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
+        msg = str(ctx.exception)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
+
+    def test_existing_context_outside_allowed_still_validates(self):
+        # Existing clusters on a context later removed from allowed_contexts
+        # must still load, so existence is checked against the kubeconfig.
+        self.assertEqual(
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):

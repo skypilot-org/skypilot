@@ -818,6 +818,15 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class InfraTargetNotFoundError(ValueError):
+    """Raised when a named Kubernetes context or Slurm cluster is not found.
+
+    Also what a caller gets for a target outside their workspaces, so a hidden
+    target reads the same as a missing one.
+    """
+    pass
+
+
 class NoWorkspaceAccessError(PermissionDeniedError):
     """Raised when the user has no accessible workspaces at all.
 
