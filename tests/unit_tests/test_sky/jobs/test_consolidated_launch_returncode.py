@@ -281,6 +281,10 @@ def test_interleaved_job_ids_get_a_valid_submission_log_name(
 
     name = os.path.basename(log_paths[0])
     assert name == 'submit-job-122124-123146.log'
+    # The span also covers other requests' ids; the first line names ours.
+    with open(log_paths[0], encoding='utf-8') as f:
+        assert f.readline() == (
+            f'Job IDs: {managed_job_utils.format_job_ids_as_ranges(job_ids)}\n')
     ranges = managed_job_utils._parse_submit_log_job_ranges(
         name[len('submit-job-'):-len('.log')])
     assert all(

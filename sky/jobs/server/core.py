@@ -462,6 +462,10 @@ def _consolidated_launch(
     log_name = (str(first_id)
                 if first_id == last_id else f'{first_id}-{last_id}')
     log_path = os.path.join(log_dir, f'submit-job-{log_name}.log')
+    # The span may cover other requests' ids; record this request's own.
+    # The runner appends to the log.
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(f'Job IDs: {job_ids_str}\n')
     # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
     # a clean server env on the subprocess by default to keep per-request
     # env pollution from leaking into the long-lived controller process
