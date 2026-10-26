@@ -112,4 +112,6 @@ jobs:
           path: |
             e2e-results/
             ${{ runner.temp }}/sky-e2e*/.sky/api_server/server.log
+          # The server log lives under .sky/, which is skipped by default.
+          include-hidden-files: true
           if-no-files-found: warn
