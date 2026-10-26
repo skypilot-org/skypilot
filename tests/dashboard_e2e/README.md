@@ -144,7 +144,7 @@ A failing test leaves a Playwright trace and screenshots under
 To split a run across machines, give each its own server and set
 `E2E_SHARD=k/N` for `run_tests.sh` (every N-th test run of each phase) or
 `E2E_SRC_SHARD=k/N` for `run_src_twists.sh` (every N-th patch). CI runs the
-suite in 4 shards and the source twists in 2.
+suite in 5 shards and the source twists in 2.
 
 ## Reusing the framework from another suite
 

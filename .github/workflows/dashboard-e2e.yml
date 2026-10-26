@@ -20,16 +20,17 @@ concurrency:
 
 jobs:
   dashboard-e2e:
-    # The suite runs in 4 shards and the source twists in 2, each shard on
+    # The suite runs in 5 shards and the source twists in 2, each shard on
     # its own runner with its own API server, so every job stays near 10 min.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {mode: tests, shard: 1, of: 4}
-          - {mode: tests, shard: 2, of: 4}
-          - {mode: tests, shard: 3, of: 4}
-          - {mode: tests, shard: 4, of: 4}
+          - {mode: tests, shard: 1, of: 5}
+          - {mode: tests, shard: 2, of: 5}
+          - {mode: tests, shard: 3, of: 5}
+          - {mode: tests, shard: 4, of: 5}
+          - {mode: tests, shard: 5, of: 5}
           - {mode: source-twists, shard: 1, of: 2}
           - {mode: source-twists, shard: 2, of: 2}
     name: dashboard-e2e (${{ matrix.mode }} ${{ matrix.shard }}/${{ matrix.of }})
