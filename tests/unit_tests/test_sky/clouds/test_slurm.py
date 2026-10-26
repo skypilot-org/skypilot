@@ -20,6 +20,7 @@ from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.backends import backend_utils
+from sky.catalog import slurm_catalog
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
@@ -2880,3 +2881,48 @@ class TestSlurmQuotaConfig:
                                           },
                                       })
         assert result == {'qos': 'task-qos', 'account': 'task-account'}
+
+
+class TestNamesLimitedToAllowedClusters:
+    """Errors and probes must stay within allowed_clusters, so a caller
+    never learns about clusters outside it."""
+
+    @pytest.fixture(autouse=True)
+    def _clusters(self):
+        with patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+                   return_value=['team-cl', 'other-cl']), \
+             patch('sky.skypilot_config.get_workspace_cloud',
+                   return_value={'allowed_clusters': ['team-cl']}), \
+             patch('sky.provision.slurm.utils.get_partitions',
+                   return_value=['secret-part']):
+            yield
+
+    def test_unknown_cluster_lists_only_allowed(self):
+        with pytest.raises(ValueError) as e:
+            slurm_cloud.Slurm().validate_region_zone('typo-cl', None)
+        assert 'team-cl' in str(e.value)
+        assert 'other-cl' not in str(e.value)
+
+    def test_partitions_hidden_for_cluster_outside_allowed(self):
+        with pytest.raises(ValueError) as e:
+            slurm_cloud.Slurm().validate_region_zone('other-cl', 'typo-part')
+        assert 'secret-part' not in str(e.value)
+
+    def test_partitions_listed_for_allowed_cluster(self):
+        with pytest.raises(ValueError) as e:
+            slurm_cloud.Slurm().validate_region_zone('team-cl', 'typo-part')
+        assert 'secret-part' in str(e.value)
+
+    def test_memory_hint_probes_only_allowed(self):
+        with patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
+                   return_value=True) as probe, \
+             patch('sky.provision.slurm.utils.get_slurm_nodes_info',
+                   return_value=[]):
+            slurm_cloud.Slurm._get_memory_hint(mock.MagicMock(memory='8'))
+        assert [c.args[0] for c in probe.call_args_list] == ['team-cl']
+
+    def test_default_instance_type_probes_only_allowed(self):
+        with patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
+                   return_value=True) as probe:
+            slurm_catalog.get_default_instance_type()
+        assert [c.args[0] for c in probe.call_args_list] == ['team-cl']

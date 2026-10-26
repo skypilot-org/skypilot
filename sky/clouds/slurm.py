@@ -852,7 +852,7 @@ class Slurm(clouds.Cloud):
     @staticmethod
     def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
         """Return a hint when memory-related scheduling fails."""
-        for cluster in slurm_utils.get_all_slurm_cluster_names():
+        for cluster in Slurm.existing_allowed_clusters(silent=True):
             try:
                 mem_tracked = slurm_utils.is_memory_scheduling_enabled(cluster)
             except Exception as e:  # pylint: disable=broad-except
@@ -1048,10 +1048,11 @@ class Slurm(clouds.Cloud):
         """
         all_clusters = slurm_utils.get_all_slurm_cluster_names()
         if region and region not in all_clusters:
+            # List only the clusters this caller may use.
             raise ValueError(
                 f'Cluster {region} not found in Slurm config. Slurm only '
                 'supports cluster names as regions. Available '
-                f'clusters: {all_clusters}')
+                f'clusters: {self.existing_allowed_clusters(silent=True)}')
 
         # Validate partition (zone) if specified
         if zone is not None:
@@ -1062,9 +1063,10 @@ class Slurm(clouds.Cloud):
 
             partitions = slurm_utils.get_partitions(region)
             if zone not in partitions:
-                raise ValueError(
-                    f'Partition {zone!r} not found in cluster {region!r}. '
-                    f'Available partitions: {partitions}')
+                msg = f'Partition {zone!r} not found in cluster {region!r}.'
+                if region in self.existing_allowed_clusters(silent=True):
+                    msg += f' Available partitions: {partitions}'
+                raise ValueError(msg)
 
         return region, zone
 
