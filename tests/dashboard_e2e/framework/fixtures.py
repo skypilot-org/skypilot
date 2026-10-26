@@ -344,8 +344,11 @@ def _keep_shard(config, items: List[pytest.Item]) -> None:
     spec = os.environ.get(SHARD_ENV)
     if not spec:
         return
-    k, n = (int(x) for x in spec.split('/'))
-    assert 1 <= k <= n, f'{SHARD_ENV}={spec} must be k/N with 1 <= k <= N'
+    m = re.fullmatch(r'(\d+)/(\d+)', spec)
+    if m is None or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise pytest.UsageError(
+            f'{SHARD_ENV}={spec} must be k/N with 1 <= k <= N')
+    k, n = int(m.group(1)), int(m.group(2))
     keep = set()
     for exclusive in (True, False):
         group = sorted(

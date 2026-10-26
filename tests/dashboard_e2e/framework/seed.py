@@ -75,6 +75,12 @@ def delete_managed_job(job_id: int,
         session.execute(
             sqlalchemy.delete(job_state.job_info_table).where(
                 job_state.job_info_table.c.spot_job_id == job_id))
+        # set_pending records a PENDING event. SQLite reuses the highest
+        # deleted job id, so a left-over event would show up in the history
+        # of the next job seeded with that id.
+        session.execute(
+            sqlalchemy.delete(job_state.job_events_table).where(
+                job_state.job_events_table.c.spot_job_id == job_id))
         session.commit()
 
 
@@ -141,8 +147,19 @@ def _leftover_clusters() -> List[str]:
     return [f'cluster {n}' for n in names if is_test_name(n)]
 
 
+def _leftover_cluster_history() -> List[str]:
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    t = global_user_state.cluster_history_table
+    engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
+    with orm.Session(engine) as session:
+        names = session.execute(sqlalchemy.select(t.c.name)).scalars().all()
+    return [f'cluster history {n}' for n in names if is_test_name(n)]
+
+
 register_leftover_check(_leftover_jobs)
 register_leftover_check(_leftover_clusters)
+register_leftover_check(_leftover_cluster_history)
 
 # --- clusters ----------------------------------------------------------------
 
@@ -197,9 +214,41 @@ def cluster(name: str,
 
 
 def delete_cluster(name: str) -> None:
+    """Remove a seeded cluster with its history and events.
+
+    ``remove_cluster`` keeps the history row (it only closes the usage
+    interval), which the All view and cost reports would still list.
+    """
     # pylint: disable=import-outside-toplevel
     from sky import global_user_state
-    global_user_state.remove_cluster(name, terminate=True)
+    if global_user_state.get_cluster_from_name(name) is not None:
+        global_user_state.remove_cluster(name, terminate=True)
+    purge_cluster(name)
+
+
+def purge_cluster(name: str) -> None:
+    """Remove the history rows and events of a cluster name."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    h = global_user_state.cluster_history_table
+    e = global_user_state.cluster_event_table
+    c = global_user_state.cluster_table
+    engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
+    with orm.Session(engine) as session:
+        hashes = set(
+            session.execute(
+                sqlalchemy.select(
+                    h.c.cluster_hash).where(h.c.name == name)).scalars().all())
+        hashes.update(
+            session.execute(
+                sqlalchemy.select(
+                    c.c.cluster_hash).where(c.c.name == name)).scalars().all())
+        hashes.discard(None)
+        if hashes:
+            session.execute(
+                sqlalchemy.delete(e).where(e.c.cluster_hash.in_(hashes)))
+        session.execute(sqlalchemy.delete(h).where(h.c.name == name))
+        session.commit()
 
 
 def count_clusters() -> int:

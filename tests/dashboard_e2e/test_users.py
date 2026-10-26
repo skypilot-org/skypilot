@@ -12,6 +12,7 @@ assert totals ("N users", "N service accounts") are ``exclusive`` and read
 the expected numbers from the DB.
 """
 import json
+import os
 import re
 import time
 from typing import Any, Callable, Dict, List
@@ -775,7 +776,6 @@ def _serve_dashboard_without_auth(context: BrowserContext) -> None:
           apply=remove_element('button[title="User Profile"]')),
 )
 def test_dashboard_requires_basic_auth(browser, e2e_base_url, twist):
-    import os  # pylint: disable=import-outside-toplevel
     user, password = os.environ['E2E_ADMIN_USER'], os.environ['E2E_ADMIN_PW']
     contexts: List[BrowserContext] = []
 

@@ -9,8 +9,8 @@ marked so the exclusive guard can see leftovers:
 - event reasons start with ``EVENT_PREFIX``;
 - workspaces are named ``<uid>-...``.
 """
+import json
 import pickle
-import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -105,34 +105,8 @@ def terminate_into_history(name: str, user_hash: str, workspace: str,
 
 
 def purge(name: str) -> None:
-    """Remove the history rows and events a cluster name left behind.
-    ``seed.delete_cluster`` removes only the live row."""
-    gus = _gus()
-    h = gus.cluster_history_table
-    e = gus.cluster_event_table
-    with orm.Session(_engine()) as session:
-        hashes = set(
-            session.execute(
-                sqlalchemy.select(
-                    h.c.cluster_hash).where(h.c.name == name)).scalars().all())
-        live = cluster_hash(name)
-        if live:
-            hashes.add(live)
-        if hashes:
-            session.execute(
-                sqlalchemy.delete(e).where(e.c.cluster_hash.in_(hashes)))
-        session.execute(sqlalchemy.delete(h).where(h.c.name == name))
-        session.commit()
-
-
-def _leftover_history() -> List[str]:
-    h = _gus().cluster_history_table
-    with orm.Session(_engine()) as session:
-        names = session.execute(sqlalchemy.select(h.c.name)).scalars().all()
-    return [
-        f'cluster history {n}' for n in names
-        if n and re.match(r't[0-9a-f]{6}-hist', n)
-    ]
+    """Remove the history rows and events a cluster name left behind."""
+    seed.purge_cluster(name)
 
 
 def _leftover_events() -> List[str]:
@@ -144,7 +118,6 @@ def _leftover_events() -> List[str]:
     return [f'cluster event {r}' for r in reasons]
 
 
-seed.register_leftover_check(_leftover_history)
 seed.register_leftover_check(_leftover_events)
 
 # --- workspaces (through the API: they live in the server's config) --------
@@ -172,7 +145,6 @@ def list_workspaces(api: requests.Session) -> Dict[str, Any]:
     r = api.get(
         f'{api.base_url}/workspaces',  # type: ignore[attr-defined]
         timeout=60)
-    import json  # pylint: disable=import-outside-toplevel
     return json.loads(_wait_request(api, r) or '{}')
 
 

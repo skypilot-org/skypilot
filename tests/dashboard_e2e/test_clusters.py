@@ -17,6 +17,7 @@ import time
 from typing import Any, Callable, Dict, List
 
 from framework import seed
+from framework.page_tools import stop_auto_refresh
 from framework.twists import remove_button
 from framework.twists import remove_element
 from framework.twists import rewrite_request
@@ -658,6 +659,8 @@ def test_typing_in_cluster_filter_does_not_refetch(make_user, cluster, open_as,
     expect(_row(page, f'{uid}-train-a'),
            'seeded cluster must be listed').to_be_visible()
 
+    # The table's periodic refresh is not a refetch caused by typing.
+    stop_auto_refresh(page)
     since = page.recorder.mark()
     # 450 ms per key is longer than a 350 ms debounce that would refetch
     # mid-word.

@@ -9,6 +9,7 @@ reads to find workspaces by name and to report the ones tests left behind.
 A workspace's key in ``workspaces:`` is a generated id (``ws-<hex>``); the
 name a test gives it (``<uid>-<label>``) is stored as its ``name`` field.
 """
+import json
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -83,7 +84,6 @@ def api_result(session: requests.Session,
         if r.status_code == 200:
             body = r.json()
             if body.get('status') == 'SUCCEEDED':
-                import json  # pylint: disable=import-outside-toplevel
                 value = body.get('return_value')
                 return True, json.loads(value) if value else None
             if body.get('status') in ('FAILED', 'CANCELLED'):

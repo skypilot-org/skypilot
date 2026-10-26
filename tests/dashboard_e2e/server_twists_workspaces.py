@@ -3,7 +3,10 @@
 Each one makes the server misbehave the way a backend regression would, for
 the one test whose requests carry its id.
 """
+import os
+
 from framework.server_plugin import register_body_twist
+import yaml
 
 _JOBS_QUEUE = '/jobs/queue/v2'
 
@@ -20,10 +23,6 @@ def _delete_by_name(body):
     its id, as if the id/name mapping were reversed."""
     # Read the config file: this process's in-memory config may predate the
     # workspace, which an executor process created.
-    # pylint: disable=import-outside-toplevel
-    import os
-
-    import yaml
     workspace = body.get('workspace_name')
     with open(os.environ['SKYPILOT_GLOBAL_CONFIG'], encoding='utf-8') as f:
         workspaces = (yaml.safe_load(f) or {}).get('workspaces') or {}

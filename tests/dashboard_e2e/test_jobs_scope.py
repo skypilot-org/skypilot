@@ -9,6 +9,7 @@ Tests asserting global numbers ("N jobs in total", "1 – 10 of N", status
 counts) are ``exclusive``: they run alone and read expected numbers from the
 DB. The rest assert only on rows they created and run in parallel.
 """
+import json
 import re
 import time
 from typing import Any, Dict, List
@@ -59,7 +60,6 @@ def _keep_user_filter(context: BrowserContext) -> None:
     seen: Dict[str, str] = {}
 
     def handler(route: Route) -> None:
-        import json  # pylint: disable=import-outside-toplevel
         body = json.loads(route.request.post_data or '{}')
         if _is_jobs_page(body):
             if body.get('user_match'):
@@ -79,7 +79,6 @@ def _total_off_by_one(context: BrowserContext) -> None:
     Job queries are async: the POST returns a request id and the result comes
     from /api/get. Remember the probe's request id, then bump the total in
     that result."""
-    import json  # pylint: disable=import-outside-toplevel
     probe_ids = set()
 
     def on_queue(route: Route) -> None:

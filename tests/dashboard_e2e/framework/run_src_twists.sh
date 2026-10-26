@@ -32,19 +32,54 @@ status=0
 unset E2E_SHARD
 patches=("$SUITE_DIR"/twist_patches/*.patch)
 if [[ -n "${E2E_SRC_SHARD:-}" ]]; then
-  k="${E2E_SRC_SHARD%/*}"; n="${E2E_SRC_SHARD#*/}"
+  if [[ ! "$E2E_SRC_SHARD" =~ ^([0-9]+)/([0-9]+)$ ]] ||
+     (( BASH_REMATCH[1] < 1 || BASH_REMATCH[1] > BASH_REMATCH[2] )); then
+    echo "E2E_SRC_SHARD=$E2E_SRC_SHARD must be k/N with 1 <= k <= N" >&2
+    rm -f "$ENV_FILE"
+    exit 2
+  fi
+  k="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
   mine=()
   for i in "${!patches[@]}"; do
     (( i % n == k - 1 )) && mine+=("${patches[$i]}")
   done
   patches=(${mine[@]+"${mine[@]}"})
 fi
+
+touches_frontend() {
+  git -C "$REPO_ROOT" apply --numstat "$1" | grep -qE '(dashboard|frontend)/'
+}
+
+# The patch in the working tree right now. Whatever ends the run (a failure,
+# Ctrl-C, a cancelled CI job), the trap stops the server and takes it out, so
+# the checkout never keeps a deliberate regression.
+applied=""
+revert() {
+  [[ -z "$applied" ]] && return 0
+  local patch="$applied"
+  applied=""
+  E2E_SUITE_DIR="$SUITE_DIR" "$RUN_SERVER" stop >/dev/null 2>&1 || true
+  git -C "$REPO_ROOT" apply --ignore-whitespace -R "$patch"
+  if touches_frontend "$patch"; then
+    (cd "$REPO_ROOT" && eval "$BUILD")
+  fi
+}
+cleanup() {
+  revert
+  E2E_SUITE_DIR="$SUITE_DIR" "$RUN_SERVER" stop >/dev/null 2>&1 || true
+  rm -f "$ENV_FILE"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 for patch in ${patches[@]+"${patches[@]}"}; do
   id="src-$(basename "$patch" .patch)"
   export E2E_SRC_PATCH="$patch"
   echo "::group::$id"
   git -C "$REPO_ROOT" apply --ignore-whitespace "$patch" || { echo "$id: patch does not apply"; status=1; continue; }
-  if git -C "$REPO_ROOT" apply --numstat "$patch" | grep -qE '(dashboard|frontend)/'; then
+  applied="$patch"
+  if touches_frontend "$patch"; then
     (cd "$REPO_ROOT" && eval "$BUILD")
   fi
   E2E_SUITE_DIR="$SUITE_DIR" "$RUN_SERVER" stop >/dev/null 2>&1 || true
@@ -55,12 +90,7 @@ for patch in ${patches[@]+"${patches[@]}"}; do
   else
     status=1
   fi
-  git -C "$REPO_ROOT" apply --ignore-whitespace -R "$patch"
-  if git -C "$REPO_ROOT" apply --numstat "$patch" | grep -qE '(dashboard|frontend)/'; then
-    (cd "$REPO_ROOT" && eval "$BUILD")
-  fi
+  revert
   echo "::endgroup::"
 done
-E2E_SUITE_DIR="$SUITE_DIR" "$RUN_SERVER" stop >/dev/null 2>&1 || true
-rm -f "$ENV_FILE"
 exit $status
