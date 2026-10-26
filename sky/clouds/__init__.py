@@ -28,6 +28,7 @@ from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.primeintellect import PrimeIntellect
+from sky.clouds.runcrate import Runcrate
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.seeweb import Seeweb
@@ -54,6 +55,7 @@ __all__ = [
     'SCP',
     'Slurm',
     'RunPod',
+    'Runcrate',
     'Shadeform',
     'Vast',
     'OCI',

@@ -46,6 +46,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.mithril import utils as mithril_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
+from sky.provision.runcrate import utils as runcrate_utils
 from sky.provision.runpod import utils as runpod_utils
 from sky.utils import auth_utils
 from sky.utils import common_utils
@@ -538,6 +539,24 @@ def setup_mithril_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_key_id'] = ssh_key_id
 
     return configure_ssh_info(config)
+
+
+def setup_runcrate_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Runcrate.
+
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the Runcrate workspace (no-op if it is
+      already there) and records its id for the provisioner.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    ssh_key_id = runcrate_utils.get_or_add_ssh_key(
+        public_key, f'skypilot-{common_utils.get_user_hash()}')
+
+    config['auth']['ssh_key_id'] = ssh_key_id
+    return config
 
 
 def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
