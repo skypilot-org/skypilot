@@ -686,6 +686,9 @@ def test_id_and_name_links_open_job_page(make_user, seed_job, open_as, uid,
         expect(page,
                f'the {label!r} link must open the job\'s page').to_have_url(
                    re.compile(rf'/dashboard/jobs/{job_id}$'))
+        # The job page loads its details asynchronously; a busy server can
+        # take longer than an assertion's timeout.
+        wait_ready(page)
         expect(page.get_by_role('link', name=f'{job_id} ({name})'),
                f'the job page must show job {job_id} ({name})').to_be_visible()
         page.go_back()
@@ -929,6 +932,9 @@ def test_view_logs_opens_logs_tab_without_ansi(make_user, seed_job, job_logs,
     expect(page,
            'View Job Logs must open the job page at tab=logs').to_have_url(
                re.compile(rf'/dashboard/jobs/{job_id}\?tab=logs$'))
+    # The Logs card asks for the logs once the job's details have loaded,
+    # which a busy server can take longer than an assertion's timeout to do.
+    wait_ready(page)
     body = _wait_body(page, JOBS_LOGS, since, lambda b: True,
                       'the Logs card must ask for the logs')
     assert (body.get('job_id'), body.get('controller'),
