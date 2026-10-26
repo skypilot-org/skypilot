@@ -376,9 +376,9 @@ class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
         kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
         patches = [
             patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
-                  return_value=['team-ctx', 'other-team-ctx']),
+                  return_value=['ctx-a', 'ctx-b']),
             patch('sky.skypilot_config.get_workspace_cloud',
-                  return_value={'allowed_contexts': ['team-ctx']}),
+                  return_value={'allowed_contexts': ['ctx-a']}),
         ]
         for p in patches:
             p.start()
@@ -388,15 +388,15 @@ class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
         msg = str(ctx.exception)
-        self.assertIn('team-ctx', msg)
-        self.assertNotIn('other-team-ctx', msg)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
 
     def test_existing_context_outside_allowed_still_validates(self):
         # Existing clusters on a context later removed from allowed_contexts
         # must still load, so existence is checked against the kubeconfig.
         self.assertEqual(
-            kubernetes.Kubernetes().validate_region_zone(
-                'other-team-ctx', None), ('other-team-ctx', None))
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):

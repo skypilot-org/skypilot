@@ -854,7 +854,9 @@ class Slurm(clouds.Cloud):
     @staticmethod
     def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
         """Return a hint when memory-related scheduling fails."""
-        for cluster in Slurm.existing_allowed_clusters(silent=True):
+        # Sorted: the allowed list can come from a set, and the hint should
+        # name the same cluster every time.
+        for cluster in sorted(Slurm.existing_allowed_clusters(silent=True)):
             try:
                 mem_tracked = slurm_utils.is_memory_scheduling_enabled(cluster)
             except Exception as e:  # pylint: disable=broad-except
