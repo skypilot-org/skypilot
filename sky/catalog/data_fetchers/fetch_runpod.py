@@ -246,6 +246,7 @@ USEFUL_COLUMNS = [
     'Price',
     'AvailabilityZone',
     'GpuInfo',
+    'MaxDiskSize',
 ]
 
 # Mapping of regions to their availability zones
@@ -490,6 +491,7 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
         'vCPUs': float(vcpus),
         'MemoryGiB': float(memory * gpu_count),
         'GpuInfo': gpu_info,
+        'MaxDiskSize': None,
     }
 
 
@@ -524,6 +526,7 @@ def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
         min_vcpu = int(cpu_info['minVcpu'])
         max_vcpu = int(cpu_info['maxVcpu'])
         ram_multiplier = int(cpu_info['ramMultiplier'])
+        disk_limit_per_vcpu = cpu_info.get('diskLimitPerVcpu')
 
         # Iterate over possible vCPU counts (powers of 2 up to 2**8=512 vCPUs)
         vcpu_counts = [
@@ -552,6 +555,9 @@ def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
                             'Region': region,
                             'AvailabilityZone': zone,
                             'GpuInfo': None,
+                            'MaxDiskSize':
+                                (float(disk_limit_per_vcpu) * vcpus
+                                 if disk_limit_per_vcpu is not None else None),
                         })
 
     return instances
