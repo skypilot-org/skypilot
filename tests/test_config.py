@@ -5,6 +5,7 @@ import os
 import pathlib
 import shutil
 import textwrap
+import traceback
 from unittest import mock
 
 import pytest
@@ -167,6 +168,203 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
                         tmp_path / 'empty.yaml')
     skypilot_config.reload_config()
     _check_empty_config()
+
+
+@pytest.fixture
+def internal_config_file(monkeypatch, tmp_path):
+    """Isolate a job config and the previously loaded config snapshot."""
+    previous_path = str(tmp_path / 'previous.yaml')
+    previous_config = config_utils.Config({'rbac': {'default_role': 'user'}})
+    monkeypatch.setattr(
+        skypilot_config, '_global_config_context',
+        skypilot_config.ConfigContext(previous_config,
+                                      json.dumps([previous_path])))
+    config_path = tmp_path / 'job.config_yaml'
+    config_path.write_text('{}\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    return config_path
+
+
+@pytest.mark.parametrize(
+    'contents', [
+        '',
+        ' \n \n',
+        '# Config is not available yet.\n',
+        'null\n',
+        '~\n',
+        'aws:\n  vpc_name: [SYNTHETIC_SECRET_VALUE\n',
+        '\x00',
+    ],
+    ids=['empty', 'whitespace', 'comment', 'null', 'tilde', 'malformed', 'nul'])
+def test_internal_config_rejects_empty_or_invalid_yaml(internal_config_file,
+                                                       contents, capsys):
+    """An unreadable job config must not replace a working config with {}."""
+    internal_config_file.write_text(contents)
+    previous_config = skypilot_config._get_loaded_config()
+    previous_path = skypilot_config.loaded_config_path_serialized()
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep') as sleep:
+        with pytest.raises(ValueError) as error:
+            skypilot_config.reload_config()
+
+    assert read_yaml.call_count == 3
+    assert sleep.call_args_list == [mock.call(0.1), mock.call(0.1)]
+    assert skypilot_config._get_loaded_config() is previous_config
+    assert skypilot_config.loaded_config_path_serialized() == previous_path
+    assert 'SYNTHETIC_SECRET_VALUE' not in str(error.value)
+    rendered_error = ''.join(
+        traceback.format_exception(type(error.value), error.value,
+                                   error.value.__traceback__))
+    assert 'SYNTHETIC_SECRET_VALUE' not in rendered_error
+    captured = capsys.readouterr()
+    assert 'SYNTHETIC_SECRET_VALUE' not in captured.out + captured.err
+
+
+@pytest.mark.parametrize('contents', [
+    '',
+    'aws:\n  vpc_name: [\n',
+],
+                         ids=['empty', 'malformed'])
+def test_internal_config_recovers_from_transient_read(internal_config_file,
+                                                      contents):
+    """Retry the read, not a cached parse result, without exposing defaults."""
+    internal_config_file.write_text(contents)
+    previous_config = skypilot_config._get_loaded_config()
+    previous_path = skypilot_config.loaded_config_path_serialized()
+
+    def finish_write(_delay):
+        assert skypilot_config._get_loaded_config() is previous_config
+        assert skypilot_config.loaded_config_path_serialized() == previous_path
+        internal_config_file.write_text('rbac:\n  default_role: admin\n')
+
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep', side_effect=finish_write) as sleep:
+        skypilot_config.reload_config()
+
+    assert read_yaml.call_count == 2
+    sleep.assert_called_once_with(0.1)
+    assert skypilot_config.get_nested(('rbac', 'default_role'), None) == 'admin'
+    assert skypilot_config._get_loaded_config_path() == [
+        str(internal_config_file)
+    ]
+
+
+def test_internal_config_accepts_empty_mapping(internal_config_file):
+    """An intentionally serialized {} is valid, unlike an empty YAML file."""
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep') as sleep:
+        skypilot_config.reload_config()
+
+    read_yaml.assert_called_once_with(str(internal_config_file))
+    sleep.assert_not_called()
+    _check_empty_config()
+    assert skypilot_config._get_loaded_config_path() == [
+        str(internal_config_file)
+    ]
+
+
+def test_internal_config_does_not_retry_schema_errors(internal_config_file):
+    """A complete config with an invalid field cannot recover by rereading."""
+    internal_config_file.write_text('aws:\n  not_a_field: true\n')
+    previous_config = skypilot_config._get_loaded_config()
+    previous_path = skypilot_config.loaded_config_path_serialized()
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep') as sleep:
+        with pytest.raises(ValueError, match='Invalid config YAML'):
+            skypilot_config.reload_config()
+
+    read_yaml.assert_called_once_with(str(internal_config_file))
+    sleep.assert_not_called()
+    assert skypilot_config._get_loaded_config() is previous_config
+    assert skypilot_config.loaded_config_path_serialized() == previous_path
+
+
+def test_internal_config_accepts_db_only_config(internal_config_file,
+                                                monkeypatch):
+    """Removing the DB setting may legitimately leave an empty mapping."""
+    db_url = 'postgresql://localhost/skypilot_test'
+    internal_config_file.write_text(f'db: {db_url}\n')
+    # Restore the environment after the parser moves the DB setting into it.
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, '')
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep') as sleep:
+        skypilot_config.reload_config()
+
+    read_yaml.assert_called_once_with(str(internal_config_file))
+    sleep.assert_not_called()
+    _check_empty_config()
+    assert os.environ[constants.ENV_VAR_DB_CONNECTION_URI] == db_url
+    assert skypilot_config._get_loaded_config_path() == [
+        str(internal_config_file)
+    ]
+
+
+def test_internal_config_does_not_retry_missing_file(internal_config_file):
+    """Retain the existing missing-path error rather than treating it as YAML."""
+    internal_config_file.unlink()
+    previous_config = skypilot_config._get_loaded_config()
+    previous_path = skypilot_config.loaded_config_path_serialized()
+    with mock.patch.object(yaml_utils, 'read_yaml',
+                           wraps=yaml_utils.read_yaml) as read_yaml, mock.patch(
+                               'time.sleep') as sleep:
+        with pytest.raises(FileNotFoundError, match='SKYPILOT_CONFIG'):
+            skypilot_config.reload_config()
+
+    read_yaml.assert_not_called()
+    sleep.assert_not_called()
+    assert skypilot_config._get_loaded_config() is previous_config
+    assert skypilot_config.loaded_config_path_serialized() == previous_path
+
+
+def test_internal_config_does_not_retry_permission_error(internal_config_file):
+    """Do not hide a persistent file-access problem behind parse retries."""
+    previous_config = skypilot_config._get_loaded_config()
+    previous_path = skypilot_config.loaded_config_path_serialized()
+    error = PermissionError('Config file is not readable')
+    with mock.patch.object(
+            yaml_utils, 'read_yaml',
+            side_effect=error) as read_yaml, mock.patch('time.sleep') as sleep:
+        with pytest.raises(PermissionError) as raised:
+            skypilot_config.reload_config()
+
+    assert raised.value is error
+    read_yaml.assert_called_once_with(str(internal_config_file))
+    sleep.assert_not_called()
+    assert skypilot_config._get_loaded_config() is previous_config
+    assert skypilot_config.loaded_config_path_serialized() == previous_path
+
+
+def test_public_config_empty_file_still_allowed(tmp_path):
+    """The stricter internal loader must not change public empty config files."""
+    config_path = tmp_path / 'empty.yaml'
+    config_path.write_text('')
+    with mock.patch('time.sleep') as sleep:
+        config = skypilot_config.parse_and_validate_config_file(
+            str(config_path))
+
+    assert config == {}
+    sleep.assert_not_called()
+
+
+def test_public_config_parse_error_is_logged_without_format_error(tmp_path):
+    """Exercise the logging format used for a malformed public config."""
+    config_path = tmp_path / 'malformed.yaml'
+    config_path.write_text('aws:\n  vpc_name: [\n')
+    with mock.patch.object(skypilot_config.logger, 'error') as log_error:
+        config = skypilot_config.parse_and_validate_config_file(
+            str(config_path))
+
+    assert config == {}
+    log_error.assert_called_once()
+    args = log_error.call_args.args
+    message = args[0] % args[1:] if len(args) > 1 else args[0]
+    assert str(config_path) in message
 
 
 def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
