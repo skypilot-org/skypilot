@@ -148,8 +148,49 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
 }
 
 # Time gap between retries after failing to provision in all possible places.
-# Used only if --retry-until-up is set.
+# Used only if --retry-until-up is set. The gap doubles with each consecutive
+# retry, up to the max: every round can create and tear down cloud-side
+# resources in each region tried (e.g. an Azure resource group and its managed
+# identity), so a launch stuck for hours must not do it every 30s.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 30
+_RETRY_UNTIL_UP_MAX_GAP_SECONDS = 10 * 60
+# Reason prefix of the cluster event recorded for each retry; the backoff
+# counts these to know how many retries came before.
+_RETRY_UNTIL_UP_EVENT_PREFIX = 'Retrying provisioning after'
+# Events recorded within one provisioning round, which do not end a streak of
+# retries.
+_PROVISION_ROUND_EVENT_PREFIXES = ('Provisioning on ', 'Instances launched on ')
+# Enough recent events to cover the retries it takes to reach the max gap,
+# each with its rounds' per-region provisioning events.
+_RETRY_UNTIL_UP_EVENT_LOOKBACK = 200
+
+
+def _get_retry_until_up_gap_seconds(cluster_name: str) -> int:
+    """Returns how long to wait before the next --retry-until-up round.
+
+    Each retry runs as a fresh request execution, so the number of retries so
+    far comes from the cluster's recorded events: the retry events since the
+    last event that isn't part of a provisioning round.
+    """
+    try:
+        events = global_user_state.get_cluster_events(
+            cluster_name,
+            None,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            limit=_RETRY_UNTIL_UP_EVENT_LOOKBACK)
+    except ValueError:
+        # No cluster record, hence no earlier retries.
+        events = []
+    num_retries = 0
+    for reason in reversed(events):
+        if reason.startswith(_RETRY_UNTIL_UP_EVENT_PREFIX):
+            num_retries += 1
+        elif not reason.startswith(_PROVISION_ROUND_EVENT_PREFIXES):
+            break
+    # Cap the exponent too, so a long streak cannot overflow the shift.
+    gap = _RETRY_UNTIL_UP_INIT_GAP_SECONDS * 2**min(num_retries, 16)
+    return min(gap, _RETRY_UNTIL_UP_MAX_GAP_SECONDS)
+
 
 # The maximum retry count for fetching IP address.
 _FETCH_IP_MAX_ATTEMPTS = 3
@@ -3654,7 +3695,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         error_message = str(e)
 
                     if retry_until_up:
-                        gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
+                        gap_seconds = _get_retry_until_up_gap_seconds(
+                            cluster_name)
                         retry_message = ux_utils.retry_message(
                             f'Retry after {gap_seconds:.0f}s ')
                         hint_message = (
@@ -3665,7 +3707,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Add cluster event for retry.
                         global_user_state.add_cluster_event(
                             cluster_name, status_lib.ClusterStatus.INIT,
-                            f'Retrying provisioning after {gap_seconds:.0f}s',
+                            f'{_RETRY_UNTIL_UP_EVENT_PREFIX} '
+                            f'{gap_seconds:.0f}s',
                             global_user_state.ClusterEventType.STATUS_CHANGE)
 
                         raise exceptions.ExecutionRetryableError(

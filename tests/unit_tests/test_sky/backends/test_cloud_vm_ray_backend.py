@@ -1047,3 +1047,58 @@ class TestProvisionExistingClusterError:
                 self._provision(status_lib.ClusterStatus.INIT, **error)
         optimize.assert_called_once()
         assert not e.value.no_failover
+
+
+class TestRetryUntilUpGap:
+    """--retry-until-up backs off instead of retrying every 30s forever."""
+
+    @staticmethod
+    def _gap(events):
+        with patch.object(cloud_vm_ray_backend.global_user_state,
+                          'get_cluster_events',
+                          return_value=events):
+            return cloud_vm_ray_backend._get_retry_until_up_gap_seconds(
+                'my-cluster')
+
+    @staticmethod
+    def _retry_round(gap):
+        # One failed round: a provisioning event per region tried, then the
+        # retry event.
+        return [
+            'Provisioning on Azure in eastus',
+            'Provisioning on Azure in westus2',
+            f'Retrying provisioning after {gap}s',
+        ]
+
+    def test_first_retry_uses_initial_gap(self):
+        assert self._gap([
+            'Provisioning on Azure in eastus'
+        ]) == cloud_vm_ray_backend._RETRY_UNTIL_UP_INIT_GAP_SECONDS
+
+    def test_gap_doubles_per_retry(self):
+        events = self._retry_round(30) + self._retry_round(60)
+        events += ['Provisioning on Azure in eastus']
+        assert self._gap(events) == 120
+
+    def test_gap_is_capped(self):
+        events = []
+        for _ in range(12):
+            events += self._retry_round(600)
+        assert self._gap(
+            events) == cloud_vm_ray_backend._RETRY_UNTIL_UP_MAX_GAP_SECONDS
+
+    def test_earlier_streak_does_not_count(self):
+        # Retries from a previous launch of the same cluster end at the
+        # status change that followed them.
+        events = self._retry_round(30) + self._retry_round(60)
+        events += ['Cluster is UP', 'Cluster is stopped']
+        events += self._retry_round(30)
+        assert self._gap(events) == 60
+
+    def test_cluster_without_record(self):
+        with patch.object(cloud_vm_ray_backend.global_user_state,
+                          'get_cluster_events',
+                          side_effect=ValueError('not found')):
+            assert (
+                cloud_vm_ray_backend._get_retry_until_up_gap_seconds('missing')
+                == cloud_vm_ray_backend._RETRY_UNTIL_UP_INIT_GAP_SECONDS)
