@@ -11,6 +11,7 @@ import pytest
 
 from sky.skylet import constants
 from sky.skylet.executor import slurm
+from sky.utils import message_utils
 
 # Step/task-scoped variables Slurm sets for the executor's own job step. A
 # nested srun in the user script reads several of these as input defaults, so
@@ -262,3 +263,87 @@ def test_failed_task_skips_barrier(tmp_path, monkeypatch):
         slurm.main()
 
     assert exit_info.value.code == 1
+
+
+def _run_rank(tmp_path, monkeypatch, *, rank, returncode, is_setup=False):
+    """Runs main() as one rank of a 2-node cgroup job; returns its exit code."""
+    cluster_home = tmp_path / 'cluster_home'
+    cluster_home.mkdir()
+    (cluster_home / constants.SLURM_PROCTRACK_TYPE_FILE).write_text('cgroup')
+    log_dir = tmp_path / 'logs'
+    log_dir.mkdir()
+
+    monkeypatch.setenv('SLURM_PROCID', str(rank))
+    monkeypatch.setenv('SLURM_NNODES', '2')
+    monkeypatch.setenv('SLURM_JOB_ID', '42')
+    monkeypatch.setenv('SLURM_STEP_ID', '7')
+    monkeypatch.setattr(slurm, '_get_ip_address', lambda: f'10.0.0.{rank + 1}')
+    monkeypatch.setattr(slurm, '_get_job_node_ips',
+                        lambda: '10.0.0.1\n10.0.0.2')
+    monkeypatch.setattr(slurm, 'run_bash_command_with_log',
+                        lambda *a, **kw: returncode)
+    argv = [
+        'slurm.py', '--script', f'exit {returncode}', '--log-dir',
+        str(log_dir), '--cluster-num-nodes', '2', '--cluster-ips',
+        '10.0.0.1,10.0.0.2', '--cluster-home-dir',
+        str(cluster_home)
+    ]
+    if is_setup:
+        argv.append('--is-setup')
+    monkeypatch.setattr(sys, 'argv', argv)
+
+    with pytest.raises(SystemExit) as exit_info:
+        slurm.main()
+    return exit_info.value.code
+
+
+def _reported_returncodes(stdout):
+    reports = []
+    for line in stdout.splitlines():
+        is_payload, payload = message_utils.decode_payload(
+            line,
+            payload_type=constants.SLURM_TASK_RETURNCODE_PAYLOAD_TYPE,
+            raise_for_mismatch=False)
+        if is_payload:
+            reports.append(payload)
+    return reports
+
+
+def test_failed_task_reports_its_returncode(tmp_path, monkeypatch, capsys):
+    # srun reports the SIGTERM of the tasks it kills for this failure, so the
+    # driver only learns this task's exit code from the task itself.
+    code = _run_rank(tmp_path, monkeypatch, rank=1, returncode=29)
+
+    assert code == 29
+    assert _reported_returncodes(capsys.readouterr().out) == [{
+        'rank': 1,
+        'returncode': 29
+    }]
+
+
+def test_task_reports_before_entering_barrier(tmp_path, monkeypatch, capsys):
+    # A peer's failure terminates this task while it waits in the barrier, so
+    # it must already have reported by then.
+    stdout_at_barrier = []
+
+    def record_stdout(*args, **kwargs):
+        del args, kwargs  # Unused.
+        stdout_at_barrier.append(capsys.readouterr().out)
+
+    monkeypatch.setattr(slurm, '_wait_for_all_ranks', record_stdout)
+
+    code = _run_rank(tmp_path, monkeypatch, rank=0, returncode=0)
+
+    assert code == 0
+    assert len(stdout_at_barrier) == 1, 'the barrier was not entered'
+    assert _reported_returncodes(stdout_at_barrier[0]) == [{
+        'rank': 0,
+        'returncode': 0
+    }]
+
+
+def test_setup_does_not_report_returncode(tmp_path, monkeypatch, capsys):
+    code = _run_rank(tmp_path, monkeypatch, rank=0, returncode=0, is_setup=True)
+
+    assert code == 0
+    assert not _reported_returncodes(capsys.readouterr().out)

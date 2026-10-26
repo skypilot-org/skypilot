@@ -1105,6 +1105,10 @@ X86_64_ARCH = 'x86_64'
 # Used by the executor to conditionally apply multi-node barrier.
 SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
 
+# Payload type of the line each Slurm task prints with its rank and exit code,
+# which the job driver collects into the job's per-rank exit codes.
+SLURM_TASK_RETURNCODE_PAYLOAD_TYPE = 'slurm_task_returncode'
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
 

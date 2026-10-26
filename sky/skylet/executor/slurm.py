@@ -18,6 +18,7 @@ import colorama
 from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
 from sky.utils import hostlist_utils
+from sky.utils import message_utils
 
 # Slurm populates step- and task-scoped SLURM_* variables for the executor's
 # own job step (e.g. SLURM_CPU_BIND, SLURM_CPUS_PER_TASK=1,
@@ -288,6 +289,21 @@ def main():
                                            env_vars=env_vars,
                                            stream_logs=True,
                                            streaming_prefix=prefix)
+
+    if not args.is_setup:
+        # srun exits with the highest exit code across tasks, so once a failed
+        # task makes srun's --kill-on-bad-exit terminate the others, srun
+        # reports their SIGTERM (143) instead of the failure. Report this
+        # task's own exit code to the job driver before entering the barrier,
+        # where a task can still be terminated.
+        print(message_utils.encode_payload(
+            {
+                'rank': rank,
+                'returncode': returncode
+            },
+            payload_type=constants.SLURM_TASK_RETURNCODE_PAYLOAD_TYPE),
+              end='',
+              flush=True)
 
     # For successful tasks in multi-node Slurm jobs (one task per node), wait
     # for all tasks to complete before exiting, because Slurm's

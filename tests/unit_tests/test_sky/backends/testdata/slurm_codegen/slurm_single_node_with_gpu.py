@@ -20,6 +20,7 @@ import multiprocessing
 import signal
 import threading
 from sky.backends import backend_utils
+from sky.utils import message_utils
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -588,12 +589,25 @@ if script or True:
                               stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT,
                               text=True)
+        # Exit code each task reports for its rank. User script
+        # output is prefixed by the task, so only the task's own
+        # report starts with the payload tag.
+        task_returncodes = {}
         for line in proc.stdout:
+            if line.startswith('<sky-payload'):
+                is_payload, payload = message_utils.decode_payload(
+                    line,
+                    payload_type='slurm_task_returncode',
+                    raise_for_mismatch=False)
+                if is_payload:
+                    task_returncodes[payload['rank']] = payload['returncode']
+                    continue
             print(line, end='', flush=True)
         proc.wait()
 
         cleanup()
-        return {'return_code': proc.returncode, 'pid': proc.pid}
+        return {'return_code': proc.returncode, 'pid': proc.pid,
+                'task_returncodes': task_returncodes}
 
     run_thread_result = {'result': None}
     def run_thread_wrapper():
@@ -679,7 +693,13 @@ if script or True:
     if os.path.exists(setup_done_signal_file):
         os.remove(setup_done_signal_file)
 
-    returncodes = [int(result.get('return_code', 1))]
+    # A rank that never reported, e.g. one terminated by srun
+    # before its user script finished, gets srun's exit code.
+    srun_returncode = int(result.get('return_code', 1))
+    returncodes = [
+        result['task_returncodes'].get(rank, srun_returncode)
+        for rank in range(1)
+    ]
 else:
     returncodes = [0]
 
