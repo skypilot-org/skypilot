@@ -148,7 +148,7 @@ def _list_accelerators(
         # Never fall back to a context the active workspace does not allow.
         allowed = sky_clouds.Kubernetes.existing_allowed_contexts(silent=True)
         if context not in allowed:
-            context = min((c for c in allowed if c is not None), default=None)
+            context = next((c for c in allowed if c is not None), None)
     else:
         context = region_filter
     if context is None:

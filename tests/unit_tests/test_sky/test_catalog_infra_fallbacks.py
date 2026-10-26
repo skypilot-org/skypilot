@@ -39,6 +39,11 @@ def queried(tmp_path, monkeypatch):
                     },
                 },
                 'ws-g': {},
+                'ws-o': {
+                    'kubernetes': {
+                        'allowed_contexts': ['ctx-b', 'ctx-a']
+                    },
+                },
             },
         }))
     monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
@@ -91,6 +96,12 @@ def test_threads_use_the_active_workspace(queried):
     assert queried['slurm'] == ['sc-a']
     # list_accelerators allows the default catalog; pool threads keep that.
     assert queried['use_default_catalog'] == [True, True]
+
+
+def test_fallback_takes_the_first_allowed_context_in_config_order(queried):
+    with skypilot_config.local_active_workspace_ctx('ws-o'):
+        _list_without_region()
+    assert queried['kubernetes'] == ['ctx-b']
 
 
 def test_threads_use_the_request_config(queried):
