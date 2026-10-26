@@ -6,6 +6,7 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import re
 import shlex
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,20 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
         instance_dict[instance['id']] = info
 
     return instance_dict
+
+
+def _offer_matches(offer: Dict[str, Any], gpu_stub: str, num_gpus: int) -> bool:
+    """Whether a Vast offer has the GPU name and count of an instance type.
+
+    GPU names are compared in instance-type form, with whitespace replaced by
+    underscores as in catalog/data_fetchers/fetch_vast.py.
+    """
+    offer_gpu = re.sub(r'\s', '_', str(offer.get('gpu_name', '')))
+    try:
+        offer_num_gpus = int(offer.get('num_gpus', -1))
+    except (TypeError, ValueError):
+        return False
+    return offer_gpu == gpu_stub and offer_num_gpus == num_gpus
 
 
 def launch(name: str,
@@ -112,7 +127,8 @@ def launch(name: str,
     # compatibility and future use (port-forwarding is handled separately).
     del ports
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
+    gpu_stub = instance_type.split('-')[1]
+    gpu_name = gpu_stub.replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
     query = [
@@ -130,13 +146,26 @@ def launch(name: str,
     query_str = ' '.join(query)
 
     instance_list = vast.vast().search_offers(query=query_str)
+    if isinstance(instance_list, int):
+        instance_list = []
 
-    if isinstance(instance_list, int) or len(instance_list) == 0:
+    # Do not rely on the search to apply every filter (some vastai-sdk
+    # versions silently drop filters they cannot parse): never rent an offer
+    # whose GPU differs from the requested instance type.
+    offers = [
+        offer for offer in instance_list
+        if _offer_matches(offer, gpu_stub, num_gpus)
+    ]
+    if len(offers) < len(instance_list):
+        logger.warning(f'Skipped {len(instance_list) - len(offers)} Vast '
+                       f'offer(s) that do not match {instance_type}.')
+
+    if not offers:
         raise RuntimeError('Failed to create instances, could not find an '
                            'offer that satisfies the requirements '
                            f'"{query_str}".')
 
-    instance_touse = instance_list[0]
+    instance_touse = offers[0]
 
     # Start with user-provided kwargs as the base
     launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
@@ -231,7 +260,6 @@ def launch(name: str,
             env_dict.update(user_env)
         elif isinstance(user_env, str):
             # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
             for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
                 env_dict[match.group(1)] = match.group(2)
     launch_params['env'] = env_dict
