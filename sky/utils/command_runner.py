@@ -2176,13 +2176,16 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         """Run argv as the allocation owner, or shell code as the SSH user."""
         if isinstance(cmd, list):
             cmd = self.command_as_user(cmd)
-        if (not kwargs.get('require_outputs', False) or
-                kwargs.get('run_in_background', False)):
-            return super().run(cmd, **kwargs)
         # The login shell may print before the command runs (profile.d
         # banners, module-system notices), which would be parsed as command
         # output. Print a marker first and drop everything up to it. Only
-        # done when outputs are returned, so streamed logs don't show it.
+        # done when outputs are returned and neither streamed nor logged,
+        # since streaming and logging happen before the marker is dropped.
+        if (not kwargs.get('require_outputs', False) or
+                kwargs.get('run_in_background', False) or
+                kwargs.get('stream_logs', True) or
+                kwargs.get('log_path', os.devnull) != os.devnull):
+            return super().run(cmd, **kwargs)
         cmd = f'echo {_SLURM_OUTPUT_START_MARKER}\n{cmd}'
         result = super().run(cmd, **kwargs)
         assert not isinstance(result, int)

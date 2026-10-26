@@ -432,7 +432,7 @@ class TestSlurmCommandRunnerUserImpersonation:
                                'run',
                                autospec=True,
                                return_value=(0, '', '')) as run:
-            runner.run(cmd, require_outputs=True)
+            runner.run(cmd, require_outputs=True, stream_logs=False)
         assert run.call_args.args[1] == _with_output_marker(cmd)
 
     def test_login_node_sudo_failure_propagates(self):
@@ -687,6 +687,7 @@ class TestSlurmLoginShellOutput:
                               'stderr banner\n')) as run:
             assert runner.run('cat exit_codes',
                               require_outputs=True,
+                              stream_logs=False,
                               separate_stderr=True) == (0, '[1, 2]\n',
                                                         'stderr banner\n')
         assert run.call_args.args[0].startswith(f'echo {marker}\n')
@@ -696,15 +697,31 @@ class TestSlurmLoginShellOutput:
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'run',
                                return_value=(255, '', 'connection refused\n')):
-            assert runner.run('sinfo',
-                              require_outputs=True) == (255, '',
-                                                        'connection refused\n')
+            assert runner.run('sinfo', require_outputs=True,
+                              stream_logs=False) == (255, '',
+                                                     'connection refused\n')
 
-    @pytest.mark.parametrize('kwargs', [{}, {
-        'require_outputs': True,
-        'run_in_background': True
-    }])
-    def test_no_marker_when_outputs_not_returned(self, kwargs):
+    @pytest.mark.parametrize('kwargs', [
+        {
+            'stream_logs': False
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'run_in_background': True
+        },
+        {
+            'require_outputs': True
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'log_path': '/tmp/setup.log'
+        },
+    ])
+    def test_no_marker_when_output_is_not_only_returned(self, kwargs):
+        # Streamed and logged output is written before the marker could be
+        # dropped, so the marker would show up there.
         runner = self._login_runner()
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'run',
@@ -729,6 +746,7 @@ class TestSlurmLoginShellOutput:
             assert runner.run(
                 "printf 'line1\\nline2\\n'; printf 'err' >&2; exit 3",
                 require_outputs=True,
+                stream_logs=False,
                 separate_stderr=True) == (3, 'line1\nline2\n', 'err')
 
 
