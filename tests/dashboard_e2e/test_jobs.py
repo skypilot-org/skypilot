@@ -263,6 +263,16 @@ def _zip_text(download) -> str:
 
 
 def _logs_pane(page: Page, section: str = '#logs-section'):
+    """The log text of a Logs card, once it has finished loading.
+
+    Fetching logs is an async request that a busy server can take longer than
+    an assertion's timeout to answer, so wait out "Loading logs..." first;
+    assertions on the text itself then use the normal timeout.
+    """
+    expect(
+        page.locator(section).get_by_text('Loading logs'),
+        f'the logs in {section} must finish loading').to_have_count(
+            0, timeout=60_000)
     return page.locator(f'{section} [aria-label="job-logs"]')
 
 
