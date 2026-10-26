@@ -406,6 +406,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('dynamic_task_count',
                       sqlalchemy.Integer,
                       server_default=None),
+    # Cost units the job counts for against the job cap of the controller
+    # process holding it, written by that controller when the cost changes.
+    # NULL means the full cost (controller_utils.JOB_COST_UNITS).
+    sqlalchemy.Column('cost_units', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Index('ux_job_info_root_dynamic_task_index',
                      'root_job_id',
                      'dynamic_task_index',
@@ -3770,6 +3774,7 @@ async def get_waiting_job_async(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.pool,
+            job_info_table.c.cost_units,
         ).where(
             sqlalchemy.and_(
                 job_info_table.c.schedule_state.in_([
@@ -3799,6 +3804,7 @@ async def get_waiting_job_async(
         job_id = waiting_job_row[0]
         current_state = ManagedJobScheduleState(waiting_job_row[1])
         pool = waiting_job_row[2]
+        cost_units = waiting_job_row[3]
 
         # Update the job state to LAUNCHING
         update_result = await session.execute(
@@ -3824,7 +3830,20 @@ async def get_waiting_job_async(
         return {
             'job_id': job_id,
             'pool': pool,
+            'cost_units': cost_units,
         }
+
+
+@db_retries.retry_async
+async def set_job_cost_units_async(job_id: int, cost_units: int) -> None:
+    """Record the cost units a claimed job counts for (see job_info)."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    {job_info_table.c.cost_units: cost_units}))
+        await session.commit()
 
 
 def get_workspace(job_id: int) -> str:

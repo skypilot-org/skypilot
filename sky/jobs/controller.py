@@ -230,6 +230,19 @@ async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     return task
 
 
+async def _record_cost_units(job_id: int, units: int) -> None:
+    """Record a job's cost for readers outside this process; best effort.
+
+    The cap itself is enforced from this process's memory, so a failed write
+    only leaves the stall scan and a later re-claim with an older cost.
+    """
+    try:
+        await managed_job_state.set_job_cost_units_async(job_id, units)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to record the cost of job {job_id}: '
+                       f'{common_utils.format_exception(e)}')
+
+
 def _job_cost_units(units: Optional[int]) -> int:
     """A runtime-reported job cost, or the full cost if it reported none.
 
@@ -932,10 +945,13 @@ class JobController:
                 f'{cluster_name}: {common_utils.format_exception(e)}')
             return
         async with self.starting_lock:
-            if self._job_costs.get(self._job_id, units) != units:
+            changed = self._job_costs.get(self._job_id, units) != units
+            if changed:
                 logger.info(f'Job {self._job_id} now counts for {units} of '
                             f'{controller_utils.JOB_COST_UNITS} cost units.')
                 self._job_costs[self._job_id] = units
+        if changed:
+            await _record_cost_units(self._job_id, units)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -4367,11 +4383,15 @@ class ControllerManager:
         self,
         job_id: int,
         pool: Optional[str] = None,
+        cost_units: Optional[int] = None,
     ):
         """Start a new job.
 
         Args:
             job_id: The ID of the job to start.
+            pool: The pool the job runs on, if any.
+            cost_units: The cost recorded for the job when it was claimed
+                before, if any.
         """
         # Create log file path for job output redirection
         log_dir = runtime_utils.expanduser(
@@ -4384,10 +4404,14 @@ class ControllerManager:
         async with self._job_tasks_lock:
             self.starting.add(job_id)
             # Counted at the full cost until a launch brings its cluster up
-            # (JobController._update_cost_units).
-            self.job_costs[job_id] = controller_utils.JOB_COST_UNITS
+            # (JobController._update_cost_units), unless a controller that
+            # held it before recorded a cost (e.g. before a restart).
+            self.job_costs[job_id] = (controller_utils.JOB_COST_UNITS
+                                      if cost_units is None else
+                                      _job_cost_units(cost_units))
         task = await create_background_task(
             self.run_job_loop(job_id, log_file, pool))
+
         # Release the cost however the job loop ends, including when it fails
         # before the job is added to job_tasks.
         task.add_done_callback(lambda _: self.job_costs.pop(job_id, None))
@@ -4692,7 +4716,7 @@ class ControllerManager:
                             job_id=job_id, task_id=None, task=None))
                     continue
 
-            await self.start_job(job_id, pool)
+            await self.start_job(job_id, pool, waiting_job.get('cost_units'))
 
 
 async def main(controller_uuid: str):

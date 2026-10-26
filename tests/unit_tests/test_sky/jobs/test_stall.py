@@ -1044,3 +1044,59 @@ def test_the_fleet_ceiling_can_bind_before_the_per_process_limit(
     _never_claimed(engine, 5, age=_OLD)
 
     assert _ids(stall.scan_never_claimed()) == set()
+
+
+def _set_cost_units(engine, job_id: int, cost_units: int):
+    with orm.Session(engine) as session:
+        session.execute(managed_job_state.job_info_table.update().where(
+            managed_job_state.job_info_table.c.spot_job_id == job_id).values(
+                cost_units=cost_units))
+        session.commit()
+
+
+def test_cheap_held_jobs_do_not_fill_the_hold_gate(engine, monkeypatch):
+    """Held jobs count in cost units: three jobs fill a two-job share at the
+    full cost, but not at one unit each."""
+    _capacity(monkeypatch, launches=99, held=99, controllers=1, total=2)
+    for job_id in (1, 2, 3):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+        _set_cost_units(engine, job_id, 1)
+    _never_claimed(engine, 4, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == {4}
+
+
+def test_cheap_held_jobs_fill_the_hold_gate_at_their_cost(engine, monkeypatch):
+    """At one unit each it takes JOB_COST_UNITS times as many jobs."""
+    _capacity(monkeypatch, launches=99, held=99, controllers=1, total=2)
+    full = stall.controller_utils.JOB_COST_UNITS
+    for job_id in range(1, 2 * full + 1):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+        _set_cost_units(engine, job_id, 1)
+    _never_claimed(engine, 100, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()
+
+
+def test_cheap_held_jobs_still_fill_the_per_process_job_limit(
+        engine, monkeypatch):
+    """MAX_JOBS_PER_WORKER stays a job count, whatever the jobs cost."""
+    _capacity(monkeypatch, launches=99, held=3, controllers=1)
+    for job_id in (1, 2, 3):
+        _add_job(engine,
+                 job_id,
+                 status='RUNNING',
+                 submitted_at=_OLD,
+                 start_at=_OLD)
+        _set_cost_units(engine, job_id, 1)
+    _never_claimed(engine, 4, age=_OLD)
+
+    assert _ids(stall.scan_never_claimed()) == set()

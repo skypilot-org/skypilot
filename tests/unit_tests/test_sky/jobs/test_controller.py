@@ -4442,3 +4442,59 @@ class TestJobCostUnits:
             await jc._update_cost_units('cluster')
         hook.assert_not_called()
         assert job_costs == {1: 5}
+
+
+class TestRecordedJobCostUnits:
+    """job_info.cost_units: a job claimed again starts from its recorded cost,
+    and the controller records each new cost."""
+
+    @pytest.mark.asyncio
+    async def test_recorded_cost_is_used_at_claim(self):
+        manager = ControllerManager('test-uuid')
+        never_runs = asyncio.Event()
+
+        async def fake_run_job_loop(job_id, log_file, pool):
+            del job_id, log_file, pool
+            await never_runs.wait()
+
+        with patch.object(manager, 'run_job_loop', new=fake_run_job_loop), \
+             patch.object(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                          '/tmp/sky-test-job-cost-logs'):
+            await manager.start_job(7, cost_units=1)
+            assert manager.job_costs == {7: 1}
+            for task in list(controller_module._background_tasks):
+                task.cancel()
+            await _yield_to_event_loop()
+            await _yield_to_event_loop()
+        assert manager.job_costs == {}
+
+    @pytest.mark.asyncio
+    async def test_launch_records_a_changed_cost(self):
+        job_costs = {1: 5}
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._pool = None
+        jc._job_costs = job_costs
+        jc._dag = MagicMock()
+        jc._dag.is_job_group.return_value = False
+        jc.starting_lock = asyncio.Lock()
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'cost_units', return_value=1), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value='handle'), \
+             patch.object(managed_job_state, 'set_job_cost_units_async',
+                          new=AsyncMock()) as record:
+            await jc._update_cost_units('cluster')
+            # Unchanged: nothing more to record.
+            await jc._update_cost_units('cluster')
+        assert job_costs == {1: 1}
+        record.assert_awaited_once_with(1, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_record_keeps_the_cost(self):
+        with patch.object(managed_job_state,
+                          'set_job_cost_units_async',
+                          new=AsyncMock(side_effect=RuntimeError('db'))):
+            await controller_module._record_cost_units(1, 1)

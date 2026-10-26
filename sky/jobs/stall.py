@@ -465,11 +465,12 @@ def _highest_blocking_priority(
 
 
 # Resolved once per process by `_pool_capacity`.
-_POOL_CAPACITY: Optional[Tuple[int, int]] = None
+_POOL_CAPACITY: Optional[Tuple[int, int, int]] = None
 
 
-def _pool_capacity() -> Optional[Tuple[int, int]]:
-    """Launch and hold capacity of the pool, or None off consolidation.
+def _pool_capacity() -> Optional[Tuple[int, int, int]]:
+    """Launch, cost-unit and job capacity of the pool, or None off
+    consolidation.
 
     Both inputs are fixed for the life of the process -- consolidation mode
     needs an API server restart to change, and the controller count is derived
@@ -499,7 +500,9 @@ def _pool_capacity() -> Optional[Tuple[int, int]]:
     _POOL_CAPACITY = (
         controllers * controller_utils.LAUNCHES_PER_WORKER, controllers *
         min(controller_utils.MAX_JOBS_PER_WORKER,
-            controller_utils.MAX_TOTAL_RUNNING_JOBS // controllers))
+            controller_utils.MAX_TOTAL_RUNNING_JOBS // controllers) *
+        controller_utils.JOB_COST_UNITS,
+        controllers * controller_utils.MAX_JOBS_PER_WORKER)
     return _POOL_CAPACITY
 
 
@@ -511,8 +514,12 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     gates on launches in flight and on jobs held, either of which stops a
     process before it claims; both of its sets are keyed by job, not by task.
 
-    Summing across processes is exact per gate: none can exceed its own limit,
-    so a sum at N x limit means all are at it. Pool jobs are counted -- they
+    Summing across processes is exact per gate for launches and jobs: none can
+    exceed its own limit, so a sum at N x limit means all are at it. Jobs held
+    are also summed in cost units (job_info.cost_units, NULL for full), where
+    a process can be up to one job's cost over its share, so a sum at the
+    capacity can still leave a process just under it. Pool jobs are counted --
+    they
     hold a slot -- which leaves a gap, since a pool job wedged before it starts
     holds the gate shut and the unattended phase excludes pool jobs.
 
@@ -526,23 +533,33 @@ def _claim_gates(engine: sqlalchemy.engine.Engine,
     if capacity is None:
         return True, ('not consolidation mode, so the controller pool is '
                       'not this process to size')
-    launch_capacity, hold_capacity = capacity
-    # One statement so the two counts share an instant. The WHERE is the
-    # predicate its partial index is built from.
+    launch_capacity, unit_capacity, job_capacity = capacity
+    full = int(controller_utils.JOB_COST_UNITS)
+    # One statement so the counts share an instant. The WHERE is the predicate
+    # its partial index is built from. A held job counts in full unless its
+    # job_info row records less, so `discount` is what recorded costs save.
     counts = sqlalchemy.text(
         'SELECT COUNT(DISTINCT CASE WHEN start_at IS NULL '
         'THEN spot_job_id END) AS launching, '
-        'COUNT(DISTINCT spot_job_id) AS held '
+        'COUNT(DISTINCT spot_job_id) AS held, '
+        f'(SELECT COALESCE(SUM({full} - cost_units), 0) FROM job_info '
+        'WHERE cost_units IS NOT NULL AND spot_job_id IN '
+        '(SELECT spot_job_id FROM spot WHERE '
+        f'{managed_job_state.CLAIMED_LIVE_PREDICATE})) AS discount '
         f'FROM spot WHERE {managed_job_state.CLAIMED_LIVE_PREDICATE}')
     with _bounded(engine, deadline) as conn:
         row = conn.execute(counts).one()
     launching, held = int(row[0] or 0), int(row[1] or 0)
+    held_units = held * full - int(row[2] or 0)
     why = ''
     if launching >= launch_capacity:
         why = (f'all {launch_capacity} launch slots busy '
                f'({launching} launching)')
-    elif held >= hold_capacity:
-        why = f'all {hold_capacity} job slots held ({held} held)'
+    elif held_units >= unit_capacity:
+        why = (f'all {unit_capacity} job cost units held ({held_units} '
+               f'held by {held} jobs)')
+    elif held >= job_capacity:
+        why = f'all {job_capacity} job slots held ({held} held)'
     return bool(why), why
 
 
