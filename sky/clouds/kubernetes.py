@@ -527,8 +527,6 @@ class Kubernetes(clouds.Cloud):
         if not all_contexts:
             return []
 
-        all_contexts = set(all_contexts)
-
         # Allowed_contexts specified for workspace should take precedence over
         # the global allowed_contexts.
         allowed_contexts = skypilot_config.get_workspace_cloud(
