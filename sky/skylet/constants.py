@@ -744,6 +744,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
+    # Enforced by the jobs controllers from the server's config, so the jobs
+    # queue must explain held jobs with the same value.
+    ('jobs', 'max_launching_jobs_per_user'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
     # Slurm submit identity and cluster settings are managed server-side.

@@ -177,6 +177,22 @@ def test_a_task_held_by_the_per_user_launch_limit_is_not_stalled(
     assert _ids(stall.scan_never_claimed()) == {3}
 
 
+def test_held_tasks_do_not_fill_the_candidate_window(engine, monkeypatch):
+    monkeypatch.setattr(stall.managed_job_utils,
+                        'get_max_launching_jobs_per_user', lambda: 1)
+    _claimed(engine, 1, age=_RECENT, user_hash='a', schedule_state='LAUNCHING')
+    # Older than b's task, so it would take the only candidate slot if the
+    # limit were applied after the LIMIT.
+    _never_claimed(engine,
+                   2,
+                   age=_OLD * 2,
+                   user_hash='a',
+                   schedule_state='WAITING')
+    _never_claimed(engine, 3, age=_OLD, user_hash='b', schedule_state='WAITING')
+
+    assert _ids(stall.scan_never_claimed(candidate_limit=1)) == {3}
+
+
 def test_a_task_whose_sibling_is_progressing_is_not_stalled(engine):
     # Job 1: a second task of the same job is running, so task 0 is simply not
     # eligible yet. Job 2 is the same shape with no running sibling.
@@ -775,30 +791,6 @@ def test_the_priority_lookup_runs_on_the_scans_own_connection(
     assert seen[0] is not None, (
         'the priority lookup got no connection, so it opened its own and ran '
         'outside the scan budget')
-
-
-def test_the_launch_limit_lookup_runs_on_the_scans_own_connection(
-        engine, monkeypatch):
-    """Same budget rule as the priority lookup, for the per-user limit."""
-    del engine
-    seen = []
-
-    def fake_users(max_launching_jobs_per_user, conn=None):
-        del max_launching_jobs_per_user
-        seen.append(conn)
-        return set()
-
-    monkeypatch.setattr(stall.managed_job_utils,
-                        'get_max_launching_jobs_per_user', lambda: 1)
-    monkeypatch.setattr(managed_job_state, 'get_users_at_launch_limit',
-                        fake_users)
-
-    stall.scan_never_claimed()
-
-    assert seen, 'the scan never consulted the launch limit'
-    assert seen[0] is not None, (
-        'the launch limit lookup got no connection, so it opened its own and '
-        'ran outside the scan budget')
 
 
 def _capacity(monkeypatch,

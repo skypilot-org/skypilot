@@ -253,7 +253,9 @@ class TestGetManagedJobQueue:
             # Return all jobs for simplicity, filtering would be tested separately
             return jobs, len(jobs)
 
-        def fake_get_managed_jobs_highest_priority():
+        def fake_get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=None):
+            del max_launching_jobs_per_user
             if not jobs:
                 return 0
             return max(job.get('priority', 0) for job in jobs)

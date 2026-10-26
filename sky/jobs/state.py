@@ -512,28 +512,40 @@ def _users_at_launch_limit(
         max_launching_jobs_per_user: int) -> sqlalchemy.Select:
     """Users with at least this many claimed jobs that are not running yet.
 
-    A claimed job stays LAUNCHING (or one of the legacy ALIVE_WAITING and
-    ALIVE_BACKOFF states) while it launches, while its launch is in backoff or
-    parked waiting for resources, and while it recovers. A job group stays
-    LAUNCHING while it runs, so a job with a RUNNING task is not counted. Pool
-    jobs never launch a cluster and are not counted.
+    Counted by task status rather than schedule state: a claimed job can be in
+    any of the claimed schedule states while it waits (LAUNCHING while it
+    launches, is in launch backoff or is parked waiting for resources; ALIVE
+    during an emergency retry's backoff), and a job group stays LAUNCHING
+    while it runs. So a claimed job counts while it has a task waiting to run
+    (PENDING, STARTING or RECOVERING) and none running. Pool jobs never launch
+    a cluster and are not counted.
     """
     launching_info = job_info_table.alias('launching_info')
-    has_running_task = sqlalchemy.exists().where(
-        sqlalchemy.and_(
-            spot_table.c.spot_job_id == launching_info.c.spot_job_id,
-            spot_table.c.status == ManagedJobStatus.RUNNING.value,
-        ))
+
+    def _has_task_in(statuses: List[ManagedJobStatus]):
+        return sqlalchemy.exists().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == launching_info.c.spot_job_id,
+                spot_table.c.status.in_([status.value for status in statuses]),
+            ))
+
     return sqlalchemy.select(launching_info.c.user_hash).where(
         sqlalchemy.and_(
             launching_info.c.schedule_state.in_([
                 ManagedJobScheduleState.LAUNCHING.value,
                 ManagedJobScheduleState.ALIVE_WAITING.value,
                 ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                ManagedJobScheduleState.ALIVE.value,
             ]),
             launching_info.c.pool.is_(None),
             launching_info.c.user_hash.is_not(None),
-            ~has_running_task,
+            _has_task_in([
+                ManagedJobStatus.PENDING,
+                ManagedJobStatus.STARTING,
+                ManagedJobStatus.RECOVERING,
+            ]),
+            ~_has_task_in(
+                [ManagedJobStatus.RUNNING, ManagedJobStatus.WINDING_DOWN]),
         )).group_by(
             launching_info.c.user_hash).having(sqlalchemy.func.count() >=  # pylint: disable=not-callable
                                                max_launching_jobs_per_user)
@@ -559,18 +571,25 @@ def _not_held_by_launch_limit(
     )
 
 
-def get_users_at_launch_limit(
-        max_launching_jobs_per_user: int,
-        conn: Optional[sqlalchemy.engine.Connection] = None) -> Set[str]:
-    """Users whose waiting jobs the per-user launch limit holds back.
-
-    `conn` is as for get_managed_jobs_highest_priority.
-    """
-    with orm.Session(
-            conn if conn is not None else _db_manager.get_engine()) as session:
+def get_users_at_launch_limit(max_launching_jobs_per_user: int) -> Set[str]:
+    """Users whose waiting jobs the per-user launch limit holds back."""
+    with orm.Session(_db_manager.get_engine()) as session:
         rows = session.execute(
             _users_at_launch_limit(max_launching_jobs_per_user)).fetchall()
     return {row[0] for row in rows}
+
+
+def users_at_launch_limit_sql(max_launching_jobs_per_user: int,
+                              dialect: sqlalchemy.engine.Dialect) -> str:
+    """The users-at-the-limit subquery as SQL text, for raw-SQL readers.
+
+    Lets sky/jobs/stall.py apply the scheduler's own rule inside its query.
+    Compiled with literal values, which is safe because its only values are
+    the limit and status constants, never stored or user-provided text.
+    """
+    return str(
+        _users_at_launch_limit(int(max_launching_jobs_per_user)).compile(
+            dialect=dialect, compile_kwargs={'literal_binds': True}))
 
 
 # Subquery that aggregates batch_state into per-job progress counts.

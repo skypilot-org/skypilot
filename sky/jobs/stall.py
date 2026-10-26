@@ -201,10 +201,7 @@ SELECT * FROM (
         s.eligible_at AS stalled_since,
         ji.name AS job_name,
         ji.workspace AS workspace,
-        ji.priority AS priority,
-        ji.user_hash AS user_hash,
-        ji.pool AS pool,
-        ji.schedule_state AS schedule_state
+        ji.priority AS priority
     FROM spot s
     LEFT JOIN job_info ji ON ji.spot_job_id = s.spot_job_id
     WHERE s.status = 'PENDING'
@@ -234,10 +231,23 @@ SELECT * FROM (
                 AND b.spot_job_id <> ji.spot_job_id
                 AND b.is_batch IS TRUE
                 AND b.schedule_state IN ({active_batch_states})))
+      {launch_limit_clause}
 ) stalled
 ORDER BY stalled_since ASC
 LIMIT {candidate_limit}
 """
+
+# A WAITING task that the per-user launch limit holds back is queued behind its
+# own user's jobs, not stalled. Applied here, before the LIMIT, so that held
+# tasks cannot fill the candidate window and hide a real stall behind them.
+# `users_at_limit` is state.users_at_launch_limit_sql, the scheduler's rule.
+_LAUNCH_LIMIT_CLAUSE = """
+      AND (
+          ji.schedule_state IS NULL
+          OR ji.schedule_state <> 'WAITING'
+          OR ji.pool IS NOT NULL
+          OR ji.user_hash IS NULL
+          OR ji.user_hash NOT IN ({users_at_limit}))"""
 
 # `claimed_in_flight` is state.CLAIMED_IN_FLIGHT_PREDICATE, the same string the
 # partial index that serves this query is built from. Interpolated rather than
@@ -454,19 +464,6 @@ def _highest_blocking_priority(
             conn, max_launching_jobs_per_user=max_launching_jobs_per_user)
 
 
-def _held_by_launch_limit(row: Dict[str, Any],
-                          held_users: Optional[Set[str]]) -> bool:
-    """Whether the per-user launch limit is what keeps this task unclaimed.
-
-    Such a task is queued behind its own user's jobs, not stalled. Matches
-    the scheduler's rule in managed_job_state.get_waiting_job_async.
-    `held_users` is None when the limit is off.
-    """
-    return (held_users is not None and row.get('schedule_state')
-            == managed_job_state.ManagedJobScheduleState.WAITING.value and
-            row.get('pool') is None and row.get('user_hash') in held_users)
-
-
 # Resolved once per process by `_pool_capacity`.
 _POOL_CAPACITY: Optional[Tuple[int, int]] = None
 
@@ -657,29 +654,26 @@ def scan_never_claimed(
         logger.debug(f'stall: {why}, so never-claimed tasks are queued '
                      'rather than stalled')
         return _scan(NEVER_CLAIMED, [], truncated=False, suppressed=True)
+    max_launching_jobs_per_user = (
+        managed_job_utils.get_max_launching_jobs_per_user())
+    launch_limit_clause = ''
+    if max_launching_jobs_per_user is not None:
+        launch_limit_clause = _LAUNCH_LIMIT_CLAUSE.format(
+            users_at_limit=managed_job_state.users_at_launch_limit_sql(
+                max_launching_jobs_per_user, engine.dialect))
     sql = _NEVER_CLAIMED_SELECT.format(
         now=_now_expr(engine),
         # Coerced, not trusted: these reach the statement by interpolation.
         age_seconds=float(age_seconds),
         progress_statuses=_quoted(_PROGRESS_STATUSES),
         active_batch_states=_quoted(_ACTIVE_BATCH_STATES),
+        launch_limit_clause=launch_limit_clause,
         candidate_limit=int(candidate_limit),
     )
     rows = _rows(engine, sql, deadline)
-    max_launching_jobs_per_user = (
-        managed_job_utils.get_max_launching_jobs_per_user())
     highest = _highest_blocking_priority(engine, deadline,
                                          max_launching_jobs_per_user)
-    held_users: Optional[Set[str]] = None
-    if max_launching_jobs_per_user is not None:
-        with _bounded(engine, deadline) as conn:
-            held_users = managed_job_state.get_users_at_launch_limit(
-                max_launching_jobs_per_user, conn)
-    tasks = [
-        _task(row)
-        for row in rows
-        if not _held_by_launch_limit(row, held_users)
-    ]
+    tasks = [_task(row) for row in rows]
     return _scan(NEVER_CLAIMED,
                  [task for task in tasks if not _starved(task, highest)],
                  truncated=len(rows) >= candidate_limit)

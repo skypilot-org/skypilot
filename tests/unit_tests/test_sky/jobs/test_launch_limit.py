@@ -130,6 +130,35 @@ class TestClaim:
 
         assert _claim(limit=1) == 3
 
+    def test_a_job_in_emergency_backoff_counts(self, _db):
+        # An emergency retry resets the schedule state to ALIVE for its
+        # backoff while the job keeps its controller slot.
+        _add_job(_db, 1, 'a', ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.STARTING)
+        _waiting(_db, 3, 'a', priority=1000)
+        _waiting(_db, 4, 'b', priority=100)
+
+        assert _claim(limit=1) == 4
+
+    def test_a_pipeline_between_tasks_counts(self, _db):
+        _add_job(_db, 1, 'a', ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.SUCCEEDED, ManagedJobStatus.PENDING)
+        _waiting(_db, 3, 'a', priority=1000)
+        _waiting(_db, 4, 'b', priority=100)
+
+        assert _claim(limit=1) == 4
+
+    def test_a_finishing_or_winding_down_job_does_not_count(self, _db):
+        # All tasks terminal, the controller is only cleaning up.
+        _add_job(_db, 1, 'a', ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.SUCCEEDED)
+        _add_job(_db, 2, 'a', ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.WINDING_DOWN)
+        _waiting(_db, 3, 'a', priority=1000)
+        _waiting(_db, 4, 'b', priority=100)
+
+        assert _claim(limit=1) == 3
+
     def test_a_recovering_job_counts(self, _db):
         _launching(_db, 1, 'a', ManagedJobStatus.RECOVERING)
         _waiting(_db, 3, 'a', priority=1000)
