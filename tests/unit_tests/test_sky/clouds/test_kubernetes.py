@@ -108,6 +108,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_env_ignored_when_global_allowed_contexts_is_set(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):

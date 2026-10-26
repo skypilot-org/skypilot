@@ -833,6 +833,31 @@ def test_handle_request_error_403_no_detail_falls_through():
         common.handle_request_error(resp)
 
 
+def test_handle_request_error_404_hidden_infra_target():
+    """The server's 404 for a context or cluster outside the caller's
+    workspaces reads as a clean not-found error."""
+    resp = _fake_response(
+        404, {
+            'detail': {
+                'error': 'infra_target_not_found',
+                'message': 'Kubernetes context not found.'
+            }
+        })
+    with pytest.raises(exceptions.InfraTargetNotFoundError) as exc_info:
+        common.handle_request_error(resp)
+    assert str(exc_info.value) == 'Kubernetes context not found.'
+    # The CLI's show-gpus path catches ValueError.
+    assert isinstance(exc_info.value, ValueError)
+
+
+@pytest.mark.parametrize('body', [{'detail': 'Not Found'}, {}, None])
+def test_handle_request_error_other_404_keeps_http_error(body):
+    """FastAPI's own 404 (e.g. a route an old server lacks) is unchanged."""
+    resp = _fake_response(404, body, json_raises=body is None)
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
 def test_handle_request_error_5xx_stays_httperror():
     """5xx must remain an HTTPError (retryable by retry_transient_errors),
     i.e. the 403 handling must not broaden to all >=400 statuses."""
