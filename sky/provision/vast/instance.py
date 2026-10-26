@@ -310,51 +310,63 @@ def query_ports(
     head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
-    """Returns externally-accessible endpoints for the given ports.
+    """Return direct TCP mappings, retaining the legacy 8080 fallback.
 
-    Vast.ai exposes container ports via SSH reverse-proxy with a fixed mapping:
-      container:22   → ssh_host:ssh_port
-      container:N    → ssh_host:(ssh_port + N - 21)
-
-    In practice, only port 8080 (the second forwarded port) is supported:
-      container:8080 → ssh_host:(ssh_port + 1)
-
-    Using the raw ssh_host + service port (e.g. :8080) fails because the
-    Vast.ai SSH gateway does not relay arbitrary ports directly. The correct
-    externally-accessible endpoint is ssh_host:(ssh_port+1).
+    Direct ports are assigned by Vast and need not equal the container port.
+    Missing mappings may still be pending. Only port 8080 retains the existing
+    SSH-gateway fallback. This compatibility behavior does not prove
+    reachability.
     """
     del head_ip, provider_config  # Unused.
     ports_to_query = resources_utils.port_ranges_to_set(ports)
-
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'],
                                           head_only=True)
     if not running_instances:
         return {}
 
-    head_inst = list(running_instances.values())[0]
-    ssh_host = head_inst.get('ssh_host') or head_inst.get('public_ipaddr', '')
-    ssh_port = head_inst.get('ssh_port')
+    head_inst = next(iter(running_instances.values()))
+    public_ip = head_inst.get('public_ipaddr')
+    mappings = head_inst.get('ports')
+    if not isinstance(public_ip, str) or not public_ip or not isinstance(
+            mappings, dict):
+        mappings = {}
 
-    if not ssh_host or ssh_port is None:
-        return {}
-
-    # Vast.ai port forward: container:8080 → ssh_host:(ssh_port+1)
-    # Only port 8080 is supported via the gateway's second reverse-tunnel slot.
     result: Dict[int, List[common.Endpoint]] = {}
     for port in ports_to_query:
-        if port == 8080:
-            external_port = ssh_port + 1
-        else:
-            # For other ports, fall back to the host with the original port.
-            # Note: these are unlikely to be reachable unless the user has
-            # configured additional port forwarding on their Vast.ai instance.
-            logger.warning(
-                f'Port {port} requested but Vast.ai only natively forwards '
-                f'port 8080 via ssh_host:(ssh_port+1). Port {port} may not '
-                f'be reachable. Use port 8080 for service endpoints.')
-            external_port = port
-        result[port] = [
-            common.SocketEndpoint(host=ssh_host, port=external_port)
-        ]
-
+        bindings = mappings.get(f'{port}/tcp')
+        if not isinstance(bindings, list):
+            continue
+        endpoints: List[common.Endpoint] = []
+        seen_ports = set()
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            host_port = binding.get('HostPort')
+            # Vast returns numeric strings. Reject bools and fractional values
+            # rather than coercing malformed metadata into a valid endpoint.
+            if not isinstance(host_port,
+                              (str, int)) or isinstance(host_port, bool):
+                continue
+            try:
+                host_port = int(host_port)
+            except ValueError:
+                continue
+            if not 1 <= host_port <= 65535 or host_port in seen_ports:
+                continue
+            seen_ports.add(host_port)
+            endpoints.append(
+                common.SocketEndpoint(host=public_ip, port=host_port))
+        if endpoints:
+            result[port] = endpoints
+    # Preserve the existing 8080 gateway interpretation for older instances.
+    # Prefer real direct metadata when available; never guess arbitrary ports.
+    if 8080 in ports_to_query and 8080 not in result:
+        legacy_host = head_inst.get('ssh_host') or public_ip
+        ssh_port = head_inst.get('ssh_port')
+        if (isinstance(legacy_host, str) and legacy_host and
+                isinstance(ssh_port, int) and not isinstance(ssh_port, bool) and
+                1 <= ssh_port < 65535):
+            result[8080] = [
+                common.SocketEndpoint(host=legacy_host, port=ssh_port + 1)
+            ]
     return result
