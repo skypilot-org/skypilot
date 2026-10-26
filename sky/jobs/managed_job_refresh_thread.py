@@ -1,4 +1,5 @@
 """Run the managed-job-status-refresh loop as a thread in the API server."""
+import faulthandler
 import os
 import pathlib
 import signal
@@ -11,6 +12,8 @@ from sky import sky_logging
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import utils as managed_job_utils
+from sky.server import constants as server_constants
+from sky.server import state as server_state
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import locks
@@ -22,6 +25,10 @@ logger = sky_logging.init_logger(__name__)
 
 _LOCK_PROBE_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
+
+# Added to the drain and the grace period before a step-down that has not exited
+# is forced to exit.
+_STEP_DOWN_EXIT_MARGIN_SECONDS = 30
 
 # How long to wait after acquiring the consolidation-mode lock before running
 # recovery. During a rolling update the new leader blocks on acquire() while
@@ -174,10 +181,19 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         return True
 
     def _suicide_on_lock_loss(self) -> None:
-        """SIGTERM the API server process so the pod can restart cleanly."""
-        logger.error(
-            f'Lost consolidation mode lock {self._lock}; sending SIGTERM '
-            'to the API server to step down')
+        """SIGTERM the API server process so the pod can restart cleanly.
+
+        The server is marked as shutting down first, so a readiness probe can
+        take it out of the load balancer during the optional drain. Nothing
+        else kills a process that SIGTERMs itself, so it is forced to exit if
+        it is still running after the drain, the grace period and a margin.
+        """
+        logger.error(f'Lost consolidation mode lock {self._lock}; stepping '
+                     'down')
+        server_state.set_shutting_down()
+        drain_seconds = server_constants.STEP_DOWN_DRAIN_SECONDS
+        _exit_after(drain_seconds + server_constants.GRACE_PERIOD_SECONDS +
+                    _STEP_DOWN_EXIT_MARGIN_SECONDS)
         # Re-touch the recovery signal file so no new controllers will be
         # started
         try:
@@ -194,8 +210,28 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             managed_job_scheduler.kill_local_job_controllers()
         except Exception:  # pylint: disable=broad-except
             logger.exception('Failed to kill local controllers on lock-loss')
-        # SIGTERM to trigger graceful shutdown
+        if drain_seconds > 0:
+            logger.info(f'Waiting {drain_seconds}s for load balancers to stop '
+                        'routing to this API server')
+            time.sleep(drain_seconds)
+        logger.info('Sending SIGTERM to the API server to step down')
         os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _exit_after(seconds: int) -> None:
+    """Exit the process if it is still running ``seconds`` from now."""
+
+    def _force_exit() -> None:
+        try:
+            logger.error(f'API server did not exit within {seconds}s of '
+                         'stepping down; forcing exit. Thread stacks:')
+            faulthandler.dump_traceback(all_threads=True)
+        finally:
+            os._exit(1)  # pylint: disable=protected-access
+
+    timer = threading.Timer(seconds, _force_exit)
+    timer.daemon = True
+    timer.start()
 
 
 def start_managed_job_refresh_daemon() -> None:

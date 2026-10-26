@@ -225,6 +225,7 @@ class TestGetManagedJobQueue:
             'job_duration': 0,
             'end_at': None,
             'failure_reason': None,
+            'created_at': None,
         }
         defaults.update(kwargs)
         return defaults
@@ -967,7 +968,10 @@ class TestStreamLogsByIdTaskFiltering:
         # Task filter is int 1, should match task_id=1 (eval)
         # We need to verify the filter finds the right task by checking
         # that it doesn't return NOT_FOUND
-        # Mock get_status to return a terminal status so we exit early
+        # Mock the task's status to a terminal one so we exit early
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_status_with_task_id',
+            lambda jid, tid: managed_job_state.ManagedJobStatus.SUCCEEDED)
         monkeypatch.setattr(
             jobs_utils.managed_job_state, 'get_status',
             lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
@@ -995,6 +999,9 @@ class TestStreamLogsByIdTaskFiltering:
             'get_all_task_ids_names_statuses_logs',
             lambda jid: task_info,
         )
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_status_with_task_id',
+            lambda jid, tid: managed_job_state.ManagedJobStatus.SUCCEEDED)
         monkeypatch.setattr(
             jobs_utils.managed_job_state, 'get_status',
             lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
@@ -1149,6 +1156,200 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+class TestStreamLogsByIdFinishedTaskInRunningJob:
+    """A task that finished while another task keeps the job running.
+
+    This is a job group task, or a pipeline task followed by the next one.
+    Its logs come from the copy the controller saved, not from its cluster,
+    which may be gone by then: a pipeline tears it down, and a job group keeps
+    its record until the group ends while its idle autodown deletes it.
+    """
+
+    def _patch_group(self, monkeypatch, trainer_statuses, log_files=(None,)):
+        """Stubs job 7: task 0 (trainer) takes trainer_statuses in turn, and
+        successive reads of its log path return log_files in turn (the last
+        of each repeats). Task 1 (inference) keeps the job RUNNING."""
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        statuses = iter(trainer_statuses)
+        trainer_status = [trainer_statuses[-1]]
+        paths = iter(log_files)
+        trainer_log = [log_files[-1]]
+
+        def _task_status(job_id, task_id):
+            assert job_id == 7, job_id
+            if task_id == 1:
+                return running
+            trainer_status[0] = next(statuses, trainer_status[0])
+            return trainer_status[0]
+
+        def _task_info(job_id):
+            assert job_id == 7, job_id
+            trainer_log[0] = next(paths, trainer_log[0])
+            return [(0, 'trainer', trainer_status[0], trainer_log[0], None),
+                    (1, 'inference', running, None, None)]
+
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_num_tasks.return_value = 2
+        mock_state.get_status.return_value = running
+        mock_state.get_latest_task_id_status.return_value = (1, running)
+        mock_state.get_job_status_with_task_id.side_effect = _task_status
+        mock_state.get_all_task_ids_names_statuses_logs.side_effect = _task_info
+        mock_state.get_submitted_task_ids.return_value = {0, 1}
+        mock_state.get_job_schedule_state.return_value = (
+            managed_job_state.ManagedJobScheduleState.ALIVE)
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'trainer'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
+        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
+                            lambda: None)
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = None
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        sleeps = []
+
+        def _sleep(seconds):
+            # Before the fix the tail retried the cluster for as long as the
+            # job ran; fail instead of hanging.
+            sleeps.append(seconds)
+            if len(sleeps) > 3:
+                raise AssertionError(f'tail did not stop; slept {sleeps}')
+
+        monkeypatch.setattr(jobs_utils.time, 'sleep', _sleep)
+
+    @pytest.mark.parametrize('follow', [False, True])
+    def test_prints_saved_log_without_the_cluster(self, monkeypatch, tmp_path,
+                                                  capsys, follow):
+        log_file = tmp_path / 'trainer.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\n'
+            'trainer output\n',
+            encoding='utf-8')
+        self._patch_group(monkeypatch,
+                          [managed_job_state.ManagedJobStatus.SUCCEEDED],
+                          log_files=[str(log_file)])
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name',
+            MagicMock(side_effect=AssertionError('must not tail the cluster')))
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=follow, task=0)
+
+        out = capsys.readouterr().out
+        assert 'trainer output' in out
+        assert 'Task trainer(0) finished (status: SUCCEEDED)' in out
+        # The job is still running.
+        assert 'Job finished' not in out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_the_saved_log_of_a_just_finished_task(
+            self, monkeypatch, tmp_path, capsys):
+        # The controller marks the task SUCCEEDED before it records the path
+        # of the log it saves, so the first reads find none.
+        log_file = tmp_path / 'trainer.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\n'
+            'trainer output\n',
+            encoding='utf-8')
+        self._patch_group(monkeypatch,
+                          [managed_job_state.ManagedJobStatus.SUCCEEDED],
+                          log_files=[None, None, str(log_file)])
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=False, task=0)
+
+        assert 'trainer output' in capsys.readouterr().out
+        assert code == exceptions.JobExitCode.SUCCEEDED
+
+    @pytest.mark.parametrize('task_filter', [0, 'completed'])
+    @pytest.mark.parametrize('follow', [False, True])
+    @pytest.mark.parametrize('storage', ['local', 'external', 'missing'])
+    @pytest.mark.parametrize('task_status',
+                             ['SUCCEEDED', 'FAILED', 'CANCELLED'])
+    def test_log_sources(self, monkeypatch, tmp_path, capsys, task_filter,
+                         follow, storage, task_status):
+        status = managed_job_state.ManagedJobStatus
+        log_file = tmp_path / 'completed.log'
+        log_file.write_text(jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT +
+                            '\nCOMPLETED_TASK_MARKER\n')
+        task_info = [
+            (0, 'completed', status[task_status],
+             str(log_file) if storage == 'local' else None, None),
+            (1, 'running', status.RUNNING, None, None),
+        ]
+        state = MagicMock(wraps=managed_job_state)
+        state.ManagedJobStatus = status
+        state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        state.get_num_tasks.return_value = 2
+        state.get_status.return_value = status.RUNNING
+        state.get_job_status_with_task_id.side_effect = (
+            lambda jid, tid: task_info[tid][2])
+        state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        state.get_submitted_task_ids.return_value = {0, 1}
+        state.get_job_schedule_state.return_value = (
+            managed_job_state.ManagedJobScheduleState.ALIVE)
+        state.get_pool_from_job_id.return_value = None
+        state.is_batch_job.return_value = False
+        state.get_latest_task_id_status.side_effect = AssertionError(
+            'Completed task must replay saved logs without live polling')
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', state)
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, '_runtimes', [])
+        monkeypatch.setattr(jobs_utils.log_lib, 'start_orphan_watchdog',
+                            lambda: None)
+        reader = MagicMock() if storage == 'external' else None
+        if reader is not None:
+            reader.read_cluster_job_logs.return_value = 0
+        monkeypatch.setattr(jobs_utils.logs, 'get_log_reader', lambda: reader)
+        # A SUCCEEDED task whose log was never saved waits out the deadline.
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+
+        msg, code = jobs_utils.stream_logs_by_id(5,
+                                                 follow=follow,
+                                                 tail=10,
+                                                 task=task_filter)
+
+        output = capsys.readouterr().out
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            status[task_status])
+        assert 'Job finished' not in output
+        if storage == 'local':
+            assert 'COMPLETED_TASK_MARKER' in output
+        elif storage == 'external':
+            reader.read_cluster_job_logs.assert_called_once_with(
+                jobs_utils.generate_managed_job_cluster_name('completed', 5),
+                None,
+                follow=False,
+                tail=10)
+        else:
+            assert 'Task completed(0) of job 5' in msg
+            assert task_status in msg
+
+    def test_live_tail_stops_once_the_task_finishes(self, monkeypatch):
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        # RUNNING when the tail starts, SUCCEEDED once the tail fails.
+        self._patch_group(
+            monkeypatch,
+            [running, running, managed_job_state.ManagedJobStatus.SUCCEEDED])
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name', lambda
+            _: MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle))
+        backend = MagicMock()
+        # The cluster is gone, so the tail fails without a job exit code.
+        backend.tail_logs.return_value = 255
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+
+        _, code = jobs_utils.stream_logs_by_id(7, follow=False, task=0)
+
+        backend.tail_logs.assert_called_once()
+        assert code == exceptions.JobExitCode.SUCCEEDED
 
 
 class TestFormatJobDetails:
@@ -1664,12 +1865,15 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
     print the logs the controller persists for the finished job instead.
     """
 
-    def _patch_job(self,
-                   monkeypatch,
-                   final_status,
-                   log_files,
-                   submitted=True,
-                   batch=False):
+    def _patch_job(
+            self,
+            monkeypatch,
+            final_status,
+            log_files,
+            submitted=True,
+            batch=False,
+            schedule_state=managed_job_state.ManagedJobScheduleState.ALIVE,
+            reader=None):
         """Stubs a job that is STARTING on entry and final_status afterwards.
 
         log_files: what successive reads of the task's local log path return;
@@ -1677,11 +1881,16 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
         submitted: whether the task began launching (False for a task with
             no run command).
         batch: whether the job is a batch coordinator job.
+        schedule_state: the job's schedule state while the tail waits.
+        reader: the registered log reader, if any.
         """
         starting = managed_job_state.ManagedJobStatus.STARTING
         statuses = iter([starting])
         mock_state = MagicMock(wraps=managed_job_state)
         mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.ManagedJobScheduleState = (
+            managed_job_state.ManagedJobScheduleState)
+        mock_state.get_job_schedule_state.return_value = schedule_state
         mock_state.get_num_tasks.return_value = 1
         mock_state.get_status.side_effect = (
             lambda _: next(statuses, final_status))
@@ -1710,7 +1919,7 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
                             lambda *args: None)
         monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
         mock_logs = MagicMock()
-        mock_logs.get_log_reader.return_value = None
+        mock_logs.get_log_reader.return_value = reader
         monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
         return mock_state
 
@@ -1729,6 +1938,40 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
 
         assert 'job output' in capsys.readouterr().out
         assert code == exceptions.JobExitCode.SUCCEEDED
+
+    def test_waits_for_a_local_copy_with_a_reader_registered(
+            self, monkeypatch, tmp_path, capsys):
+        # A registered reader does not mean the controller keeps no copy: in
+        # a placement without a logging agent it keeps one, and the tail must
+        # wait for it rather than ask a store that never got the logs.
+        log_file = tmp_path / 'run.log'
+        log_file.write_text(
+            f'{jobs_utils.log_lib.LOG_FILE_START_STREAMING_AT}\njob output\n',
+            encoding='utf-8')
+        self._patch_job(monkeypatch,
+                        managed_job_state.ManagedJobStatus.SUCCEEDED,
+                        [None, None, str(log_file)],
+                        reader=MagicMock())
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert 'job output' in capsys.readouterr().out
+
+    def test_stops_waiting_once_the_job_is_done(self, monkeypatch):
+        # The controller kept no copy (the logs are in the store) and is done
+        # with the job: nothing more will be recorded, so stop waiting.
+        mock_state = self._patch_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.SUCCEEDED, [None],
+            schedule_state=managed_job_state.ManagedJobScheduleState.DONE)
+        clock = iter(range(0, 1000, 5))
+        monkeypatch.setattr(jobs_utils.time, 'time', lambda: next(clock))
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        # One read in the wait, one in the terminal-job read.
+        assert mock_state.get_all_task_ids_names_statuses_logs.call_count == 2
+        mock_state.get_job_schedule_state.assert_called_once_with(5)
 
     def test_no_persisted_logs_to_wait_for(self, monkeypatch, capsys):
         # A job that failed before it ran user code has no logs to wait for.
@@ -1795,6 +2038,113 @@ class TestStreamLogsByIdJobFinishedBetweenChecks:
 
         assert 'already in terminal state' not in capsys.readouterr().out
         assert code == exceptions.JobExitCode.SUCCEEDED
+
+
+class TestStreamLogsByIdStoreFollowAcrossTasks:
+    """A tail that follows each task from the log store moves on per task."""
+
+    def _patch_job(self, monkeypatch, num_tasks):
+        """Stubs a RUNNING job whose tasks finish one per store follow."""
+        running = managed_job_state.ManagedJobStatus.RUNNING
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        latest = {'task_id': 0, 'status': running}
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = num_tasks
+        mock_state.get_status.side_effect = lambda _: latest['status']
+        mock_state.get_latest_task_id_status.side_effect = (
+            lambda _: (latest['task_id'], latest['status']))
+        mock_state.is_batch_job.return_value = False
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'mytask'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        monkeypatch.setattr(
+            jobs_utils.global_user_state, 'get_handle_from_cluster_name', lambda
+            _: MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle))
+        monkeypatch.setattr(jobs_utils, 'read_provision_status_from_log',
+                            lambda path, pos, msg: (pos, msg))
+        monkeypatch.setattr(jobs_utils.time, 'sleep', lambda _: None)
+        followed = []
+
+        def _follow(job_id, task_id, *args):
+            del job_id, args
+            followed.append(task_id)
+            # The task finishes and the controller moves on.
+            if task_id < num_tasks - 1:
+                latest['task_id'] = task_id + 1
+            else:
+                latest['status'] = succeeded
+            return 100.0
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: False)
+        display = MagicMock()
+        monkeypatch.setattr(jobs_utils.rich_utils, 'safe_status',
+                            lambda msg: display)
+        return display, followed
+
+    def test_shows_the_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=2)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0, 1]
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        calls = [(c[0], c.args) for c in display.mock_calls]
+        waiting = ('update', (jobs_utils.ux_utils.spinner_message(
+            'Waiting for the next task: 1'),))
+        # The display was stopped for the store follow, so it is started
+        # again after the update rather than left hidden.
+        assert waiting in calls
+        assert ('start', ()) in calls[calls.index(waiting):]
+
+    def test_resume_point_is_used_once(self, monkeypatch):
+        # After a recovery the next follow resumes from when the task left
+        # RUNNING. When that follow falls back to the cluster, a later follow
+        # of the same task must not replay the attempt already streamed.
+        self._patch_job(monkeypatch, num_tasks=1)
+        mock_state = jobs_utils.managed_job_state
+        succeeded = managed_job_state.ManagedJobStatus.SUCCEEDED
+        results = iter([100.0, None, 300.0])
+        recoveries = iter([True, False])
+        sinces = []
+
+        def _follow(job_id, task_id, task_name, handle, tail, since):
+            del job_id, task_id, task_name, handle, tail
+            sinces.append(since)
+            result = next(results)
+            if result == 300.0:
+                mock_state.get_status.side_effect = lambda _: succeeded
+                mock_state.get_latest_task_id_status.side_effect = (
+                    lambda _: (0, succeeded))
+            return result
+
+        monkeypatch.setattr(jobs_utils, '_follow_from_log_store', _follow)
+        monkeypatch.setattr(jobs_utils, '_wait_for_task_recovery',
+                            lambda *args: next(recoveries))
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+        backend = MagicMock()
+        # Not a known exit code: the cluster tail ended without a result.
+        backend.tail_logs.return_value = 1
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert sinces == [None, 100.0, None]
+
+    def test_last_task_shows_no_next_task_spinner(self, monkeypatch):
+        display, followed = self._patch_job(monkeypatch, num_tasks=1)
+
+        jobs_utils.stream_logs_by_id(5, follow=True)
+
+        assert followed == [0]
+        updates = [
+            c.args[0] for c in display.mock_calls if c[0] == 'update' and c.args
+        ]
+        assert not any('Waiting for the next task' in u for u in updates)
 
 
 class TestTryToGetJobEndTime:

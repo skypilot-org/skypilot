@@ -59,7 +59,7 @@ To verify that the service account credentials are working with SkyPilot, run th
 Using internal IPs
 -----------------------
 For security reason, users may only want to use internal IPs for SkyPilot instances.
-To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``nebius.use_internal_ips`` and ``nebius.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+To do so, you can update the SkyPilot config (for a remote API server, through the :ref:`dashboard <sky-api-server-config>`) to specify the ``nebius.use_internal_ips`` and ``nebius.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
 
 .. code-block:: yaml
 

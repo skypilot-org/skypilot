@@ -714,6 +714,13 @@ def override_request_env_and_config(
             # Remove the db connection uri from client supplied env vars, as
             # the client should not set the db string on server side.
             request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # The pooled-connection overrides rewrite that string too.
+            request_body.env_vars.pop(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                                      None)
+            request_body.env_vars.pop(constants.ENV_VAR_DB_POOL_HOSTPORT, None)
+            # The timeline is written to this path when the request ends; the
+            # path is the server's to choose, not the client's.
+            request_body.env_vars.pop(timeline.TIMELINE_FILE_PATH_ENV_VAR, None)
             # Likewise the auth DB deadline: `add_or_update_user` below derives
             # the server-side timeouts on its own transaction from it, and a
             # client (in particular an older one that still forwards the
@@ -808,9 +815,11 @@ def override_request_env_and_config(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
-                    logger.debug(f'{request_id} resolved workspace '
-                                 f'{resolution.workspace!r} from '
-                                 f'{resolution.source} for user {user.name}')
+                    ws_label = skypilot_config.workspace_label(
+                        resolution.workspace)
+                    logger.debug(f'{request_id} resolved workspace {ws_label} '
+                                 f'from {resolution.source} for user '
+                                 f'{user.name}')
                     # For resource-creating commands, surface the
                     # resolver's pick at INFO level so the user sees
                     # which workspace their cluster / job actually
@@ -825,14 +834,22 @@ def override_request_env_and_config(
                             _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
                             and resolution.source
                             not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
-                        logger.info(f'Using workspace {resolution.workspace!r} '
+                        workspace_name = skypilot_config.get_workspace_name(
+                            resolution.workspace)
+                        logger.info(f'Using workspace {workspace_name!r} '
                                     f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:
                         # Reject requests that the user does not have
                         # permission to access.
+                        # Name the workspace as the user sent it, not by the
+                        # id it resolved to.
+                        override = request_body.override_skypilot_config or {}
+                        workspace_ref = override.get('active_workspace')
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user, ws_action)
+                            user,
+                            ws_action,
+                            workspace_ref=workspace_ref)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -1276,17 +1293,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
         ctx.cancel()
 
 
-async def prepare_request_async(
-    request_id: str,
-    request_name: request_names.RequestName,
-    request_body: payloads.RequestBody,
-    func: Callable[P, Any],
-    request_cluster_name: Optional[str] = None,
-    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
-    is_skypilot_system: bool = False,
-    auth_user: Optional[models.User] = None,
-) -> api_requests.Request:
-    """Prepare a request for execution."""
+def stamp_request_body(request_body: payloads.RequestBody,
+                       auth_user: Optional[models.User],
+                       is_skypilot_system: bool = False) -> str:
+    """Stamps the caller's identity, client API version and workspace access
+    onto the request body. Returns the id of the user the request runs as."""
     if auth_user is not None:
         assert auth_user.name is not None
         # Use the authenticated user identity as the single source of truth
@@ -1298,7 +1309,7 @@ async def prepare_request_async(
     else:
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
-        user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')
         # This identity comes straight from the client and is stored as the
         # owner of any cluster the request creates, so reject a malformed one
         # here. A well-formed id is an invariant elsewhere in the codebase
@@ -1333,6 +1344,21 @@ async def prepare_request_async(
     # visible, and stamp it so the worker can enforce it. Overwrite
     # unconditionally — a client-supplied value must never be trusted.
     request_body.workspace_access = workspace_access.for_current_request()
+    return user_id
+
+
+async def prepare_request_async(
+    request_id: str,
+    request_name: request_names.RequestName,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
+) -> api_requests.Request:
+    """Prepare a request for execution."""
+    user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,

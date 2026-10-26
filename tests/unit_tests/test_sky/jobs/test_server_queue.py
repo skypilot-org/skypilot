@@ -912,6 +912,7 @@ class TestDumpManagedJobQueue:
             'job_duration': 0,
             'end_at': None,
             'failure_reason': None,
+            'created_at': None,
         }
         defaults.update(kwargs)
         return defaults
@@ -1285,3 +1286,58 @@ class TestDumpManagedJobQueue:
 
         job = decoded['jobs'][0]
         assert 'In backoff, waiting for resources' in job['details']
+
+
+def test_workspace_filter_matches_names_not_ids(monkeypatch):
+    """The typed filter is matched against names (and exact ids); the
+    controller gets ids."""
+    from sky import backends
+
+    # 'team-a' was renamed 'archive'; its id is still 'team-a'.
+    workspaces = {
+        'default': {},
+        'team-a': {
+            'name': 'archive'
+        },
+        'ws-0123456789ab': {
+            'name': 'research-team'
+        },
+    }
+    captured: Dict[str, Any] = {}
+
+    class FakeRunner:
+
+        def fetch_managed_job_table(self, **kwargs):
+            captured.update(kwargs)
+            return [], 0, {}, 0, []
+
+    handle = mock.Mock(is_grpc_enabled_with_flag=False)
+    monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                        lambda *args, **kwargs: handle)
+    monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                        lambda _: mock.Mock(spec=backends.CloudVmRayBackend))
+    monkeypatch.setattr(jobs_core.workspaces_core,
+                        'get_accessible_workspace_names',
+                        lambda action: set(workspaces))
+    monkeypatch.setattr(jobs_core.workspaces_core, '_load_workspaces',
+                        lambda: workspaces)
+    monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                        lambda: FakeRunner())
+
+    def narrowed(match):
+        captured.clear()
+        result = _unwrap(jobs_core.queue_v2)(refresh=False,
+                                             all_users=True,
+                                             workspace_match=match)
+        if not captured:
+            assert result == ([], 0, {}, 0, [])
+            return None
+        assert captured['workspace_match'] is None
+        return sorted(captured['accessible_workspaces'])
+
+    # A name matches by substring; an id never does, only exactly.
+    assert narrowed('team') == ['ws-0123456789ab']
+    assert narrowed('team-a') == ['team-a']
+    # No match never reaches the controller: old ones read an empty list as
+    # no filter and would return every job.
+    assert narrowed('zz-no-such') is None

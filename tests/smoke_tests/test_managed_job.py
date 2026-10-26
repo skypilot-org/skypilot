@@ -25,6 +25,7 @@ import io
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -3427,6 +3428,94 @@ def test_job_group_task_logs(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_completed_task_logs_while_pipeline_running(generic_cloud: str):
+    """Read a completed task's saved logs while the next task is running."""
+    name = smoke_tests_utils.get_cluster_name()
+    completed_marker = 'COMPLETED_TASK_LOG_MARKER'
+    running_marker = 'RUNNING_TASK_LOG_MARKER'
+
+    def task_rows():
+        rows = sky.get(
+            jobs_sdk.queue_v2(
+                refresh=False,
+                name_match=name,
+                fields=['job_id', 'job_name', 'task_id', 'status']))[0]
+        rows = [row for row in rows if row['job_name'] == name]
+        assert len(rows) == 2, f'Expected two task rows: {rows}'
+        assert len({row['job_id'] for row in rows}) == 1, rows
+        return {row['task_id']: row for row in rows}
+
+    def check_completed_logs():
+        deadline = time.monotonic() + 600
+        while True:
+            rows = task_rows()
+            statuses = {task_id: _status(row) for task_id, row in rows.items()}
+            yield f'Pipeline task statuses: {statuses}'
+            if statuses == {
+                    0: sky.ManagedJobStatus.SUCCEEDED,
+                    1: sky.ManagedJobStatus.RUNNING
+            }:
+                break
+            assert not any(status.is_failed() or status in (
+                sky.ManagedJobStatus.CANCELLING, sky.ManagedJobStatus.CANCELLED)
+                           for status in statuses.values()), rows
+            assert statuses[1] != sky.ManagedJobStatus.SUCCEEDED, (
+                'Second task finished before the log checks')
+            assert time.monotonic() < deadline, rows
+            time.sleep(5)
+
+        job_id = rows[0]['job_id']
+        for task_filter in ('0', 'completed'):
+            result = subprocess.run([
+                'sky', 'jobs', 'logs',
+                str(job_id), task_filter, '--no-follow'
+            ],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=45,
+                                    check=True)
+            yield result.stdout
+            yield result.stderr
+            assert completed_marker in result.stdout, result.stdout
+            assert running_marker not in result.stdout, result.stdout
+            assert 'Job finished' not in result.stdout, result.stdout
+            assert _status(task_rows()[1]) == sky.ManagedJobStatus.RUNNING, (
+                'Second task must remain running throughout the log checks')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            name: {name}
+            ---
+            name: completed
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: echo {completed_marker}
+            ---
+            name: running
+            resources:
+              infra: {generic_cloud}
+              cpus: 2+
+              memory: 4+
+            run: |
+              echo {running_marker}
+              sleep 600
+            """))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'completed_task_logs_while_pipeline_running',
+            [f'sky jobs launch {f.name} -y -d', check_completed_logs],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_task_logs_sdk(generic_cloud: str):
     """Test SDK task filtering with typed task parameter (int vs str).
 
@@ -3938,14 +4027,43 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _save_queue_submitted_at(job_name: str, status: str, path: str) -> str:
+    """Returns a command that writes the queue's submitted_at for a job to path.
+
+    The command fails unless the job is in `status` and the queue reports a
+    submitted_at for it. It reads the queue through the SDK and writes the
+    value from Python, because importing sky can print logs to stdout, which
+    would corrupt a value captured from the CLI.
+    """
+    snippet = ('import sky; '
+               'records, _, _, _ = sky.get(sky.jobs.queue_v2('
+               f'refresh=False, name_match="{job_name}")); '
+               'jobs = [job for job in records '
+               f'if job["job_name"] == "{job_name}"]; '
+               'assert len(jobs) == 1, jobs; '
+               f'assert jobs[0]["status"] == sky.ManagedJobStatus.{status}, '
+               'jobs[0]; '
+               'assert jobs[0]["submitted_at"], jobs[0]; '
+               f'open("{path}", "w").write(repr(jobs[0]["submitted_at"]))')
+    return f'python -c {shlex.quote(snippet)}'
+
+
 @pytest.mark.managed_jobs
 def test_managed_jobs_depends_on(generic_cloud: str):
-    """Test that --depends-on waits for success and cancels on failure."""
+    """Test that --depends-on waits for success and cancels on failure, and
+    that the queue reports the dependent job's submission time both while it
+    waits and after it runs."""
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         pytest.skip('--depends-on requires consolidation mode.')
 
     name = smoke_tests_utils.get_cluster_name()
     up_id_file = f'/tmp/{name}-up-id'
+    pending_submitted_at_file = f'/tmp/{name}-down-pending-submitted-at'
+    finished_submitted_at_file = f'/tmp/{name}-down-finished-submitted-at'
+    save_pending_submitted_at = _save_queue_submitted_at(
+        f'{name}-down', 'PENDING', pending_submitted_at_file)
+    save_finished_submitted_at = _save_queue_submitted_at(
+        f'{name}-down', 'SUCCEEDED', finished_submitted_at_file)
     launch = (f'sky jobs launch -y --infra {generic_cloud} '
               f'{smoke_tests_utils.LOW_RESOURCE_ARG}')
     # Debug logs from loading the config reach stdout before -o takes effect.
@@ -3971,11 +4089,23 @@ def test_managed_jobs_depends_on(generic_cloud: str):
             (f'up_id=$(cat {up_id_file}); s=$(sky jobs queue -v); echo "$s"; '
              f'echo "$s" | grep {name}-down | grep PENDING | '
              f'grep "Dependency: $up_id"'),
+            # No controller has picked up the dependent job yet, so it has not
+            # begun launching. The queue still reports when it was submitted.
+            # Save that time to compare against once the job has run.
+            f'{save_pending_submitted_at} && cat {pending_submitted_at_file}',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-down',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
+            # The dependent job began launching only after `sleep 120` in its
+            # dependency finished, so its launch time is minutes after its
+            # submission. The queue must keep reporting the submission time
+            # saved above, not switch to the launch time.
+            (f'{save_finished_submitted_at} && '
+             f'echo "pending: $(cat {pending_submitted_at_file}), '
+             f'finished: $(cat {finished_submitted_at_file})" && '
+             f'cmp {pending_submitted_at_file} {finished_submitted_at_file}'),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-up',
@@ -3994,7 +4124,8 @@ def test_managed_jobs_depends_on(generic_cloud: str):
         ],
         (f'sky jobs cancel -y -n {name}-up; sky jobs cancel -y -n {name}-down; '
          f'sky jobs cancel -y -n {name}-bad; '
-         f'sky jobs cancel -y -n {name}-skip; rm -f {up_id_file}'),
+         f'sky jobs cancel -y -n {name}-skip; rm -f {up_id_file} '
+         f'{pending_submitted_at_file} {finished_submitted_at_file}'),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )

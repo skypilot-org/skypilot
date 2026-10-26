@@ -8,6 +8,7 @@ from sky import backends
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
@@ -367,6 +368,70 @@ def test_get_clusters_launch_refresh(monkeypatch):
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
 
 
+def test_get_clusters_credentials_only_for_caller_clusters(
+        monkeypatch, tmp_path):
+    key_paths = {}
+    for user_hash in ('alice', 'bob'):
+        key_path = tmp_path / f'{user_hash}-key'
+        key_path.write_text(f'{user_hash}-private-key')
+        key_paths[user_hash] = str(key_path)
+
+    def _mock_cluster(user_hash):
+        handle = mock.MagicMock()
+        handle.cluster_name_on_cloud = f'{user_hash}-cluster-cloud'
+        handle.launched_nodes = 1
+        handle.launched_resources = None
+        handle.ssh_private_key = key_paths[user_hash]
+        return {
+            'name': f'{user_hash}-cluster',
+            'launched_at': '0',
+            'handle': handle,
+            'last_use': 'sky launch',
+            'status': status_lib.ClusterStatus.UP,
+            'autostop': 0,
+            'to_down': False,
+            'cluster_hash': '00000',
+            'cluster_ever_up': True,
+            'status_updated_at': 0,
+            'user_hash': user_hash,
+            'user_name': user_hash,
+            'workspace': 'default',
+            'is_managed': False,
+        }
+
+    def ssh_credentials_from_handles(handles):
+        return [{
+            'ssh_user': 'sky',
+            'ssh_private_key': handle.ssh_private_key
+        } for handle in handles]
+
+    monkeypatch.setattr(
+        'sky.global_user_state.get_clusters',
+        lambda *args, **kwargs: [_mock_cluster('alice'),
+                                 _mock_cluster('bob')])
+    monkeypatch.setattr(
+        'sky.utils.resources_utils.get_readable_resources_repr',
+        lambda handle, simplified_only: ('', None)
+        if simplified_only else ('', ''))
+    monkeypatch.setattr(
+        'sky.backends.backend_utils.ssh_credentials_from_handles',
+        ssh_credentials_from_handles)
+    monkeypatch.setattr('sky.utils.common_utils.get_current_user',
+                        lambda: models.User(id='alice', name='alice'))
+
+    records = backend_utils.get_clusters(refresh=common.StatusRefreshMode.NONE,
+                                         all_users=True,
+                                         include_credentials=True)
+
+    records_by_name = {record['name']: record for record in records}
+    assert records_by_name['alice-cluster']['credentials'] == {
+        'ssh_user': 'sky',
+        'ssh_private_key': key_paths['alice'],
+        'ssh_private_key_content': 'alice-private-key',
+    }
+    assert 'credentials' not in records_by_name['bob-cluster']
+
+
 def test_kubeconfig_upload_with_kubernetes_exclusion():
     """Tests kubeconfig upload behavior with Kubernetes/SSH cloud exclusion.
 
@@ -465,6 +530,8 @@ def _k8s_owner_check_record(owner_identity):
     # in __init__, not on the class).
     handle.__class__ = backends.CloudVmRayResourceHandle
     handle.launched_resources = launched_resources
+    # No cluster yaml: a cluster without a recorded context.
+    handle.cluster_yaml = None
     return {
         'handle': handle,
         'workspace': 'default',
@@ -577,6 +644,106 @@ def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
             'my-cluster', record)
 
 
+def _patch_k8s_target(monkeypatch, provider_config, contexts, current_uid):
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    set_owner = mock.MagicMock()
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        set_owner)
+    monkeypatch.setattr('sky.global_user_state.get_cluster_yaml_dict',
+                        lambda _: {'provider': provider_config})
+    # The kubeconfig entry names behind the context differ from the ones the
+    # owner was recorded with (e.g. the context was re-created with other
+    # credentials).
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [['other_names_default']]))
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_all_kube_context_names',
+        lambda: contexts)
+    get_uid = mock.MagicMock(return_value=current_uid)
+    monkeypatch.setattr('sky.provision.kubernetes.utils.get_cluster_uid',
+                        get_uid)
+    return set_owner, get_uid
+
+
+@pytest.mark.parametrize(
+    'recorded_uid,current_uid',
+    [
+        ('uid-a', 'uid-a'),
+        # Launched before the cluster UID was recorded.
+        (None, 'uid-a'),
+        # kube-system unreadable through the context.
+        ('uid-a', None),
+    ])
+def test_check_owner_identity_k8s_same_context_passes(monkeypatch, recorded_uid,
+                                                      current_uid):
+    """The recorded context reaching the same cluster is enough to pass."""
+    provider_config = {'context': 'my-ctx'}
+    if recorded_uid is not None:
+        provider_config['cluster_uid'] = recorded_uid
+    set_owner, get_uid = _patch_k8s_target(monkeypatch, provider_config,
+                                           ['other-ctx', 'my-ctx'], current_uid)
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    # The owner keeps its recorded value so older versions still accept it.
+    set_owner.assert_not_called()
+    if recorded_uid is None:
+        get_uid.assert_not_called()
+    else:
+        get_uid.assert_called_once_with('my-ctx')
+
+
+def test_check_owner_identity_k8s_context_points_at_other_cluster(monkeypatch):
+    _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['my-ctx'], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    with pytest.raises(
+            exceptions.ClusterOwnerIdentityMismatchError,
+            match='different Kubernetes cluster.*--purge my-cluster'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+
+
+def test_check_owner_identity_k8s_context_missing(monkeypatch):
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, ['other-ctx'], 'uid-a')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError,
+                       match='not available.*--purge my-cluster'):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
+    get_uid.assert_not_called()
+
+
+def test_check_owner_identity_k8s_without_any_context_skips(monkeypatch):
+    """No Kubernetes credentials at all leaves nothing to check against."""
+    _, get_uid = _patch_k8s_target(monkeypatch, {
+        'context': 'my-ctx',
+        'cluster_uid': 'uid-a'
+    }, [], 'uid-b')
+    record = _k8s_owner_check_record(['ctx-a_user-a_default'])
+    record['handle'].cluster_yaml = 'my-cluster.yml'
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+    get_uid.assert_not_called()
+
+
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
 def test_is_controller_accessible_accepts_autostopping(mock_refresh):
     """Verify is_controller_accessible accepts AUTOSTOPPING status."""
@@ -630,6 +797,32 @@ def test_replace_yaml_dicts_restores_new_nested_field_for_legacy_cluster():
     # The new GroupName is applied even though the restored provider block
     # had no security_group; no KeyError is raised.
     assert result['provider']['security_group']['GroupName'] == 'new-name'
+
+
+@pytest.mark.parametrize('new_uid,old_uid,expected', [
+    ('uid-new', None, 'uid-new'),
+    (None, 'uid-old', 'uid-old'),
+    ('uid-new', 'uid-old', 'uid-new'),
+])
+def test_replace_yaml_dicts_records_cluster_uid_on_relaunch(
+        new_uid, old_uid, expected):
+    """A relaunch records a freshly read UID and keeps one it cannot read."""
+
+    def _yaml(uid):
+        lines = [
+            'cluster_name: c', 'provider:', '  type: external',
+            '  context: ctx-a'
+        ]
+        if uid is not None:
+            lines.append(f'  cluster_uid: {uid}')
+        return '\n'.join(lines) + '\n'
+
+    out = backend_utils._replace_yaml_dicts(  # pylint: disable=protected-access
+        _yaml(new_uid),
+        _yaml(old_uid),
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,  # pylint: disable=protected-access
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)  # pylint: disable=protected-access
+    assert yaml_utils.read_yaml_str(out)['provider']['cluster_uid'] == expected
 
 
 def test_replace_yaml_dicts_preserves_old_subfield_on_restart():

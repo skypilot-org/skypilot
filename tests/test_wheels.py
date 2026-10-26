@@ -1,13 +1,18 @@
+import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from unittest import mock
+import uuid
 
 import pytest
 
 from sky.backends import wheel_utils
+from sky.skylet import constants
 
 
 def test_build_wheels():
@@ -240,3 +245,143 @@ def test_wheel_build_reproducible():
             'pip wheel subprocess environment in _build_sky_wheel().')
     finally:
         shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+
+
+_REPO_ROOT = str(pathlib.Path(wheel_utils.__file__).resolve().parents[2])
+
+
+def _wheel_paths_in_subprocess(tmp_path, runtime_dir):
+    """Imports wheel_utils fresh, since WHEEL_DIR is resolved at import."""
+    script = ('import json; '
+              'from sky.backends import wheel_utils; '
+              'from sky.server import local_disk; '
+              'print(json.dumps({"file": wheel_utils.__file__, '
+              '"wheel_dir": str(wheel_utils.WHEEL_DIR), '
+              '"lock": str(wheel_utils._WHEEL_LOCK_PATH), '
+              '"local_disk": local_disk.local_roots()["wheels"]}))')
+    env = dict(os.environ, HOME=str(tmp_path / 'home'), PYTHONPATH=_REPO_ROOT)
+    env.pop(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, None)
+    if runtime_dir is not None:
+        env[constants.SKY_RUNTIME_DIR_ENV_VAR_KEY] = str(runtime_dir)
+    result = subprocess.run([sys.executable, '-c', script],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            cwd=str(tmp_path),
+                            env=env)
+    paths = json.loads(result.stdout.strip().splitlines()[-1])
+    assert pathlib.Path(paths['file']).resolve() == pathlib.Path(
+        wheel_utils.__file__).resolve()
+    return paths
+
+
+@pytest.mark.parametrize('runtime_dir', [None, 'runtime'])
+def test_wheel_dir_follows_runtime_dir(tmp_path, runtime_dir):
+    """Isolated API servers sharing a HOME must not share a wheel cache."""
+    root = tmp_path / ('home' if runtime_dir is None else runtime_dir)
+    paths = _wheel_paths_in_subprocess(
+        tmp_path, None if runtime_dir is None else tmp_path / runtime_dir)
+    assert paths['wheel_dir'] == str(root / '.sky' / 'wheels')
+    assert paths['lock'] == str(root / '.sky' / '.wheels_lock')
+    # The server's local-disk accounting keeps its own copy of this path.
+    assert paths['local_disk'] == paths['wheel_dir']
+
+
+@pytest.fixture
+def fake_wheel_cache(tmp_path, monkeypatch):
+    """Points the cache at tmp_path and stubs out the real wheel build."""
+    wheel_dir = tmp_path / 'wheels'
+    monkeypatch.setattr(wheel_utils, 'WHEEL_DIR', wheel_dir)
+    monkeypatch.setattr(wheel_utils, '_WHEEL_LOCK_PATH',
+                        tmp_path / '.wheels_lock')
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path / 'tmp'))
+    (tmp_path / 'tmp').mkdir()
+    wheel_name = wheel_utils._WHEEL_PATTERN.replace('*', 'py3-none-any')
+    builds = []
+
+    def fake_build():
+        wheel = wheel_dir / uuid.uuid4().hex / wheel_name
+        wheel.parent.mkdir(parents=True)
+        wheel.write_text(str(wheel_utils.SKY_PACKAGE_PATH))
+        builds.append(wheel.parent.name)
+        return wheel
+
+    monkeypatch.setattr(wheel_utils, '_build_sky_wheel', fake_build)
+    return builds
+
+
+def _make_source_tree(path, age_seconds):
+    (path / 'sky').mkdir(parents=True)
+    (path / 'sky' / '__init__.py').write_text('')
+    stamp = time.time() - age_seconds
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            os.utime(os.path.join(root, name), (stamp, stamp))
+    return path / 'sky'
+
+
+def test_cache_not_reused_across_source_dirs(tmp_path, monkeypatch,
+                                             fake_wheel_cache):
+    """Switching checkouts must not ship the previous checkout's wheel.
+
+    Checkout B's source is older than the wheel built from checkout A, so
+    mtimes alone say A's wheel is fresh.
+    """
+    src_a = _make_source_tree(tmp_path / 'a', age_seconds=7200)
+    src_b = _make_source_tree(tmp_path / 'b', age_seconds=3600)
+
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', src_a)
+    _, hash_a = wheel_utils.build_sky_wheel()
+
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', src_b)
+    _, hash_b = wheel_utils.build_sky_wheel()
+
+    assert fake_wheel_cache == [hash_a, hash_b]
+
+
+def test_cache_not_reused_after_symlink_retarget(tmp_path, monkeypatch,
+                                                 fake_wheel_cache):
+    """A stable checkout symlink pointed at another checkout is a new source."""
+    _make_source_tree(tmp_path / 'a', age_seconds=7200)
+    _make_source_tree(tmp_path / 'b', age_seconds=3600)
+    current = tmp_path / 'current'
+    current.symlink_to(tmp_path / 'a', target_is_directory=True)
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', current / 'sky')
+    _, hash_a = wheel_utils.build_sky_wheel()
+
+    current.unlink()
+    current.symlink_to(tmp_path / 'b', target_is_directory=True)
+    _, hash_b = wheel_utils.build_sky_wheel()
+
+    assert fake_wheel_cache == [hash_a, hash_b]
+
+
+def test_cache_not_reused_after_unmarked_wheel_replaced_it(
+        tmp_path, monkeypatch, fake_wheel_cache):
+    """A SkyPilot version without the marker builds over this one's wheel.
+
+    It writes a newer wheel and deletes the other hash dirs, but knows
+    nothing of the marker.
+    """
+    src = _make_source_tree(tmp_path / 'a', age_seconds=3600)
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', src)
+    _, hash_a = wheel_utils.build_sky_wheel()
+
+    foreign = wheel_utils.WHEEL_DIR / 'foreign'
+    foreign.mkdir()
+    (foreign / wheel_utils._WHEEL_PATTERN.replace('*', 'py3-none-any')).touch()
+    shutil.rmtree(wheel_utils.WHEEL_DIR / hash_a)
+
+    _, rebuilt_hash = wheel_utils.build_sky_wheel()
+
+    assert fake_wheel_cache == [hash_a, rebuilt_hash]
+
+
+def test_cache_reused_for_same_source_dir(tmp_path, monkeypatch,
+                                          fake_wheel_cache):
+    src = _make_source_tree(tmp_path / 'a', age_seconds=3600)
+    monkeypatch.setattr(wheel_utils, 'SKY_PACKAGE_PATH', src)
+
+    hashes = {wheel_utils.build_sky_wheel()[1] for _ in range(3)}
+
+    assert fake_wheel_cache == list(hashes)
