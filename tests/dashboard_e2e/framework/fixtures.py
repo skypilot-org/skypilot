@@ -20,6 +20,7 @@ import importlib
 import json
 import os
 import re
+import time
 from typing import Any, Callable, Dict, Iterator, List, Optional
 import uuid
 
@@ -30,6 +31,7 @@ from playwright.sync_api import BrowserContext
 from playwright.sync_api import expect
 from playwright.sync_api import Page
 from playwright.sync_api import Request
+from playwright.sync_api import Response
 import pytest
 import requests
 
@@ -154,14 +156,48 @@ def seed_cluster() -> Iterator[Callable[..., str]]:
 
 
 class Recorder:
-    """Records the requests one page sends."""
+    """Records the requests one page sends and the responses it gets."""
 
     def __init__(self, page: Page):
+        self.page = page
         self.requests: List[Request] = []
+        self.responses: List[Response] = []
         page.on('request', lambda r: self.requests.append(r))  # pylint: disable=unnecessary-lambda
+        page.on('response', lambda r: self.responses.append(r))  # pylint: disable=unnecessary-lambda
 
     def mark(self) -> int:
         return len(self.requests)
+
+    def wait_for_result(self,
+                        path_suffix: str,
+                        since: int,
+                        match: Callable[[Dict[str, Any]], bool],
+                        message: str,
+                        timeout_s: float = 60) -> None:
+        """Wait until the page has the result of its latest matching POST.
+
+        Most API calls are async: the POST returns a request id and the page
+        polls /api/get for the result. A busy server can take longer than an
+        assertion's timeout to answer, so wait for the answer itself before
+        asserting on what the page renders from it.
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            posts = [
+                r for r in self.requests[since:]
+                if r.method == 'POST' and r.url.split('?')[0].endswith(
+                    path_suffix) and match(json.loads(r.post_data or '{}'))
+            ]
+            post_resp = next((resp for resp in reversed(self.responses)
+                              if posts and resp.request == posts[-1]), None)
+            rid = post_resp.headers.get(
+                'x-skypilot-request-id') if post_resp else None
+            if rid and any(
+                    f'request_id={rid}' in resp.url and resp.status == 200
+                    for resp in self.responses):
+                return
+            self.page.wait_for_timeout(200)
+        raise AssertionError(f'{message} (no result within {timeout_s:.0f}s)')
 
     def posts(self, path_suffix: str, since: int = 0) -> List[Dict[str, Any]]:
         """JSON bodies of POSTs to ``*path_suffix`` since ``mark()``."""

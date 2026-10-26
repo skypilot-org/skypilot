@@ -91,8 +91,13 @@ def _wait_body(page: Page,
 def _wait_table_body(page: Page, since: int, pred: Callable[[Dict[str, Any]],
                                                             bool],
                      message: str) -> Dict[str, Any]:
-    return _wait_body(page, JOBS_QUEUE, since,
-                      lambda b: _is_jobs_page(b) and pred(b), message)
+    match = lambda b: _is_jobs_page(b) and pred(b)  # pylint: disable=unnecessary-lambda-assignment
+    body = _wait_body(page, JOBS_QUEUE, since, match, message)
+    # The table renders this query's result only once the server answers,
+    # which a busy server can take longer than an assertion's timeout to do.
+    page.recorder.wait_for_result(JOBS_QUEUE, since, match,
+                                  f'{message}: the server must answer it')
+    return body
 
 
 # --- twist helpers -----------------------------------------------------------

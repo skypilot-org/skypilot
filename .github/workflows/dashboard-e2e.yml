@@ -35,6 +35,9 @@ jobs:
     name: dashboard-e2e (${{ matrix.mode }} ${{ matrix.shard }}/${{ matrix.of }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Traces and screenshots of failing tests, uploaded below.
+      E2E_RESULTS_DIR: ${{ github.workspace }}/e2e-results
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +110,6 @@ jobs:
         with:
           name: dashboard-e2e-results-${{ matrix.mode }}-${{ matrix.shard }}
           path: |
-            tests/dashboard_e2e/test-results/
+            e2e-results/
             ${{ runner.temp }}/sky-e2e*/.sky/api_server/server.log
-          if-no-files-found: ignore
+          if-no-files-found: warn
