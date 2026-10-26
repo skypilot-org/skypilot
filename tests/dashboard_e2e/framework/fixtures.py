@@ -28,6 +28,7 @@ from framework import seed
 from framework.twists import Twist
 from playwright.sync_api import Browser
 from playwright.sync_api import BrowserContext
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import expect
 from playwright.sync_api import Page
 from playwright.sync_api import Request
@@ -251,8 +252,10 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
         return page
 
     yield open_page
-    rep = getattr(request.node, 'rep_call', None)
-    failed = rep is not None and rep.failed
+    # A test fails in its body (rep_call) or in a fixture it uses (rep_setup).
+    failed = any(
+        getattr(getattr(request.node, f'rep_{when}', None), 'failed', False)
+        for when in ('setup', 'call'))
     keep_all = os.environ.get('E2E_SCREENSHOT_ALL') == '1'
     # E2E_RESULTS_DIR lets several runs that share one checkout keep their
     # traces and screenshots apart.
@@ -264,9 +267,12 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
         if failed or keep_all:
             os.makedirs(out_dir, exist_ok=True)
             for j, page in enumerate(ctx.pages):
-                page.screenshot(path=os.path.join(out_dir,
-                                                  f'ctx{i}-page{j}.png'),
-                                full_page=True)
+                path = os.path.join(out_dir, f'ctx{i}-page{j}.png')
+                try:
+                    page.screenshot(path=path, full_page=True, timeout=15_000)
+                    print(f'e2e: saved {path}')
+                except PlaywrightError as e:
+                    print(f'e2e: no screenshot of {page.url}: {e}')
         if failed:
             ctx.tracing.stop(path=os.path.join(out_dir, f'ctx{i}-trace.zip'))
         else:
