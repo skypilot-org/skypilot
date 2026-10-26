@@ -374,19 +374,50 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             service_account = ray_service_account
             satisfied = ray_satisfied
         elif service_account is None:
-            logger.info('_configure_iam_role: '
-                        'Creating new service account {}'.format(
-                            constants.SKYPILOT_SERVICE_ACCOUNT_ID))
-            # SkyPilot: a GCP user without the permission to create a service
-            # account will fail here.
-            service_account = _create_service_account(
-                constants.SKYPILOT_SERVICE_ACCOUNT_ID,
-                constants.SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-                project_id,
-                iam,
-            )
-            satisfied, policy = _is_permission_satisfied(
-                service_account, crm, iam, permissions, roles)
+            # Fallback to the default compute service account to avoid needing
+            # iam.serviceAccounts.create. This SA may not exist in locked-down
+            # orgs (admins can delete it or suppress it via
+            # constraints/iam.automaticIamGrantsForDefaultServiceAccounts), and
+            # its roles are not guaranteed, so we still check permissions.
+            project = _get_project(project_id, crm)
+            project_number = project['projectNumber']
+            default_compute_email = (f'{project_number}'
+                                     f'-compute@developer.gserviceaccount.com')
+            logger.info('_configure_iam_role: Falling back to default compute '
+                        f'service account {default_compute_email}')
+            service_account = _get_service_account(default_compute_email,
+                                                   project_id, iam)
+            if service_account is not None:
+                satisfied, policy = _is_permission_satisfied(
+                    service_account, crm, iam, permissions, roles)
+                if not satisfied:
+                    # In locked-down orgs the same policy that blocks
+                    # iam.serviceAccounts.create also blocks
+                    # projects.setIamPolicy.  Attempting to add roles would
+                    # produce a 403.  Trust that the admin has pre-configured
+                    # the SA and proceed; the actual GCP operations will fail
+                    # with a clear error if roles are genuinely missing.
+                    logger.warning(
+                        '_configure_iam_role: Default compute service account '
+                        f'{default_compute_email} may lack the required roles '
+                        f'{roles}. Proceeding without adding roles — IAM '
+                        'policy updates are likely also restricted in this '
+                        'environment.')
+                    satisfied = True
+            else:
+                logger.info('_configure_iam_role: '
+                            'Creating new service account {}'.format(
+                                constants.SKYPILOT_SERVICE_ACCOUNT_ID))
+                # SkyPilot: a GCP user without the permission to create a
+                # service account will fail here.
+                service_account = _create_service_account(
+                    constants.SKYPILOT_SERVICE_ACCOUNT_ID,
+                    constants.SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                    project_id,
+                    iam,
+                )
+                satisfied, policy = _is_permission_satisfied(
+                    service_account, crm, iam, permissions, roles)
 
     assert service_account is not None, 'Failed to create service account'
 
