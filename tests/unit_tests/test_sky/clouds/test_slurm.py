@@ -2884,8 +2884,8 @@ class TestSlurmQuotaConfig:
 
 
 class TestNamesLimitedToAllowedClusters:
-    """Errors and probes must stay within allowed_clusters, so a caller
-    never learns about clusters outside it."""
+    """Errors, hints and probes must stay within allowed_clusters, so a
+    caller never learns about clusters outside it."""
 
     @pytest.fixture(autouse=True)
     def _clusters(self):
@@ -2894,8 +2894,15 @@ class TestNamesLimitedToAllowedClusters:
              patch('sky.skypilot_config.get_workspace_cloud',
                    return_value={'allowed_clusters': ['team-cl']}), \
              patch('sky.provision.slurm.utils.get_partitions',
-                   return_value=['secret-part']):
+                   return_value=['secret-part']) as get_partitions, \
+             patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
+                   return_value=True) as probe:
+            self.get_partitions = get_partitions
+            self.probe = probe
             yield
+
+    def _probed(self):
+        return [c.args[0] for c in self.probe.call_args_list]
 
     def test_unknown_cluster_lists_only_allowed(self):
         with pytest.raises(ValueError) as e:
@@ -2903,26 +2910,35 @@ class TestNamesLimitedToAllowedClusters:
         assert 'team-cl' in str(e.value)
         assert 'other-cl' not in str(e.value)
 
-    def test_partitions_hidden_for_cluster_outside_allowed(self):
-        with pytest.raises(ValueError) as e:
-            slurm_cloud.Slurm().validate_region_zone('other-cl', 'typo-part')
-        assert 'secret-part' not in str(e.value)
+    def test_partitions_not_probed_for_cluster_outside_allowed(self):
+        # Existing clusters there must still load, so this does not raise.
+        assert slurm_cloud.Slurm().validate_region_zone(
+            'other-cl', 'typo-part') == ('other-cl', 'typo-part')
+        self.get_partitions.assert_not_called()
 
     def test_partitions_listed_for_allowed_cluster(self):
         with pytest.raises(ValueError) as e:
             slurm_cloud.Slurm().validate_region_zone('team-cl', 'typo-part')
         assert 'secret-part' in str(e.value)
 
+    @pytest.mark.parametrize('region,shown', [('team-cl', True),
+                                              ('other-cl', False)])
+    def test_gpu_partition_map_hint_only_for_allowed(self, region, shown):
+        itype = slurm_utils.SlurmInstanceType(4, 16, 1, 'H100').name
+        with patch('sky.provision.slurm.utils.lookup_gpu_partition_map',
+                   return_value=['h100-part']):
+            hint = slurm_cloud.Slurm._gpu_partition_map_hint(itype, region)
+        assert ('secret-part' in (hint or '')) == shown
+
     def test_memory_hint_probes_only_allowed(self):
-        with patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
-                   return_value=True) as probe, \
-             patch('sky.provision.slurm.utils.get_slurm_nodes_info',
+        with patch('sky.provision.slurm.utils.get_slurm_nodes_info',
                    return_value=[]):
             slurm_cloud.Slurm._get_memory_hint(mock.MagicMock(memory='8'))
-        assert [c.args[0] for c in probe.call_args_list] == ['team-cl']
+        assert self._probed() == ['team-cl']
 
-    def test_default_instance_type_probes_only_allowed(self):
-        with patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
-                   return_value=True) as probe:
-            slurm_catalog.get_default_instance_type()
-        assert [c.args[0] for c in probe.call_args_list] == ['team-cl']
+    @pytest.mark.parametrize('region,probed', [(None, ['team-cl']),
+                                               ('team-cl', ['team-cl']),
+                                               ('other-cl', [])])
+    def test_default_instance_type_probes_only_allowed(self, region, probed):
+        slurm_catalog.get_default_instance_type(region=region)
+        assert self._probed() == probed

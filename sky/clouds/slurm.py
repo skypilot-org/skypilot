@@ -825,7 +825,9 @@ class Slurm(clouds.Cloud):
         resource candidates eligible; the optimizer only surfaces the hint
         when no candidate is feasible.
         """
-        if region is None:
+        # A cluster outside the caller's allowed set must not reveal its
+        # partitions.
+        if region not in Slurm.existing_allowed_clusters(silent=True):
             return None
         try:
             sit = slurm_utils.SlurmInstanceType.from_instance_type(
@@ -1061,12 +1063,15 @@ class Slurm(clouds.Cloud):
                     'Cannot specify partition (zone) without specifying '
                     'cluster (region) for Slurm.')
 
-            partitions = slurm_utils.get_partitions(region)
-            if zone not in partitions:
-                msg = f'Partition {zone!r} not found in cluster {region!r}.'
-                if region in self.existing_allowed_clusters(silent=True):
-                    msg += f' Available partitions: {partitions}'
-                raise ValueError(msg)
+            # Skip a cluster outside the caller's allowed set: probing it
+            # would reveal its partitions, and the optimizer never places a
+            # new launch there anyway.
+            if region in self.existing_allowed_clusters(silent=True):
+                partitions = slurm_utils.get_partitions(region)
+                if zone not in partitions:
+                    raise ValueError(
+                        f'Partition {zone!r} not found in cluster {region!r}. '
+                        f'Available partitions: {partitions}')
 
         return region, zone
 

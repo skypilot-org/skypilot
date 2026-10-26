@@ -57,9 +57,10 @@ def get_default_instance_type(
         # use its default allocation).
         # Check which clusters do NOT track memory.
         no_mem_clusters: Dict[str, str] = {}  # cluster -> SelectTypeParams
-        clusters_to_check = ([region] if region is not None else
-                             sky_clouds.Slurm.existing_allowed_clusters(
-                                 silent=True))
+        # Probe only clusters the caller may use.
+        allowed = sky_clouds.Slurm.existing_allowed_clusters(silent=True)
+        clusters_to_check = (allowed if region is None else
+                             [c for c in allowed if c == region])
         for cluster in clusters_to_check:
             try:
                 if not slurm_utils.is_memory_scheduling_enabled(cluster):
