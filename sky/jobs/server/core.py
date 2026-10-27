@@ -2215,7 +2215,7 @@ def restart(
         # when the job finished; drop it so launch() mints a fresh one.
         task_._secrets.pop(  # pylint: disable=protected-access
             skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR, None)
-        task_.update_envs(env_overrides or [])
+        del env_overrides  # TEMP twist: drop --env overrides (do not merge)
         task_.update_secrets(secrets_overrides or [])
 
     if resources_override or num_nodes is not None:
