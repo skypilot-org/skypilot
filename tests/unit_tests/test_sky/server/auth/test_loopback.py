@@ -118,3 +118,36 @@ class TestLoopbackDetection:
         request.headers = Headers({})
 
         assert not is_loopback_request(request)
+
+    def test_is_loopback_request_honors_trust_loopback_false(self):
+        """api_server.trust_loopback: false drops the exemption."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.client = mock.Mock()
+        request.client.host = '127.0.0.1'
+        request.headers = Headers({})
+
+        # Default (unset) keeps the exemption.
+        assert is_loopback_request(request)
+
+        # A kubectl port-forwarded request looks exactly like the one above,
+        # so an operator that authenticates every caller can opt out.
+        with mock.patch('sky.skypilot_config.get_nested',
+                        return_value=False) as get_nested:
+            assert not is_loopback_request(request)
+        get_nested.assert_called_once_with(('api_server', 'trust_loopback'),
+                                           True)
+
+    def test_is_loopback_request_trust_loopback_true(self):
+        """api_server.trust_loopback: true is the current behavior."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.client = mock.Mock()
+        request.client.host = '127.0.0.1'
+        request.headers = Headers({})
+
+        with mock.patch('sky.skypilot_config.get_nested', return_value=True):
+            assert is_loopback_request(request)
+
+        # Opting in does not weaken the proxy-header check.
+        request.headers = Headers({'X-Forwarded-For': '203.0.113.1'})
+        with mock.patch('sky.skypilot_config.get_nested', return_value=True):
+            assert not is_loopback_request(request)
