@@ -755,6 +755,15 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('slurm', 'username_map'),
 ]
 
+# Also skipped when the request did not come from loopback: which
+# infrastructure a request may use is set by the server, not by a remote client.
+# A loopback client (the local API server, or a controller) still layers them.
+REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('kubernetes', 'allowed_contexts'),
+    ('ssh', 'allowed_node_pools'),
+    ('slurm', 'allowed_clusters'),
+]
+
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 # Observed time for new role assignment to propagate was ~45s

@@ -224,3 +224,44 @@ class TestDefaultRoleConfig:
         with mock.patch('sky.skypilot_config.get_nested',
                         return_value='viewer'):
             assert rbac.get_default_role() == 'viewer'
+
+
+class TestSSHNodePoolsBlocklist:
+    """SSH Node Pool mutation routes must be admin-only for the `user` role.
+
+    Regression guard for the missing-authorization gap (CWE-862): the default
+    user blocklist must deny every mutating /ssh_node_pools route, while
+    leaving the read routes (which are also on the viewer allowlist) allowed.
+    The check mirrors the casbin matcher the RBAC middleware uses:
+    keyMatch2 on the path and an exact method match.
+    """
+
+    @staticmethod
+    def _user_role_blocks(path, method):
+        from casbin.util import key_match2
+        return any(
+            entry['method'] == method and key_match2(path, entry['path'])
+            for entry in rbac._DEFAULT_USER_BLOCKLIST)
+
+    @pytest.mark.parametrize('path,method', [
+        ('/ssh_node_pools', 'POST'),
+        ('/ssh_node_pools/prod', 'DELETE'),
+        ('/ssh_node_pools/keys', 'POST'),
+        ('/ssh_node_pools/keys', 'GET'),
+        ('/ssh_node_pools/deploy', 'POST'),
+        ('/ssh_node_pools/prod/deploy', 'POST'),
+        ('/ssh_node_pools/down', 'POST'),
+        ('/ssh_node_pools/prod/down', 'POST'),
+    ])
+    def test_mutating_routes_blocked_for_user(self, path, method):
+        assert self._user_role_blocks(
+            path,
+            method), (f'{method} {path} must be blocked for the user role')
+
+    @pytest.mark.parametrize('path,method', [
+        ('/ssh_node_pools', 'GET'),
+        ('/ssh_node_pools/prod/status', 'GET'),
+    ])
+    def test_read_routes_allowed_for_user(self, path, method):
+        assert not self._user_role_blocks(path, method), (
+            f'{method} {path} must remain allowed for the user role')

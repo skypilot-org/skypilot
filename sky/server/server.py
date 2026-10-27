@@ -1291,6 +1291,8 @@ class APIVersionMiddleware(middleware_utils.ASGIMiddleware):
 
     async def on_request(self, request: fastapi.Request):
         workspace_access.set_request_endpoint(request.url.path, request.method)
+        loopback.set_request_from_loopback(
+            loopback.is_loopback_request(request))
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
         # to v0.11.0, the client will check the version in the body of
