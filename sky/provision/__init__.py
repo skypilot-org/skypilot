@@ -343,6 +343,21 @@ def get_all_volumes_state(
 
 
 @_route_to_cloud_impl
+def get_initial_runtime_metadata(
+        provider_name: str,
+        provider_config: Dict[str, Any]) -> common.ProvisionRuntimeMetadata:
+    """Runtime metadata for a cluster that is about to be provisioned.
+
+    The backend saves the cluster's handle with this metadata before
+    provisioning starts, and status refresh and teardown read it until
+    ``run_instances`` returns the provisioner's record. Describe the runtime
+    the cluster will run, e.g. ``has_ray=False`` for a runtime without Ray.
+    """
+    del provider_name, provider_config  # unused
+    return common.ProvisionRuntimeMetadata()
+
+
+@_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name: str,
                   cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
