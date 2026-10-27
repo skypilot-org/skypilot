@@ -329,7 +329,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "avg(vllm:kv_cache_usage_perc{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"})",
+          "expr": "avg(vllm:kv_cache_usage_perc{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"}) or avg(sglang:token_usage{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"})",
           "interval": "15s",
           "legendFormat": "kv_cache_utilization",
           "range": true
@@ -340,7 +340,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(vllm:num_requests_waiting{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"})",
+          "expr": "sum(vllm:num_requests_waiting{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"}) or sum(sglang:num_queue_reqs{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"})",
           "interval": "15s",
           "legendFormat": "queue_depth",
           "range": true
@@ -351,7 +351,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(vllm:request_success_total{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"}[2m]))",
+          "expr": "sum(rate(vllm:request_success_total{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"}[2m])) or sum(rate(sglang:num_requests_total{cluster=~\"$cluster\", app_kubernetes_io_name=~\"$endpoint_name\"}[2m]))",
           "interval": "15s",
           "legendFormat": "requests_per_second",
           "range": true
