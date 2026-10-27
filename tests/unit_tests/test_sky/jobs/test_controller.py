@@ -1644,6 +1644,21 @@ class TestDownloadLogAndStreamControllerLogCopy:
         download.assert_called_once()
         assert download.call_args.kwargs['stream_to_console'] is False
 
+    @pytest.mark.parametrize('config_value,expected', [
+        (None, 'sky jobs logs --controller 42'),
+        (True, 'sky jobs logs --controller 42'),
+        (False, 'sky jobs logs 42'),
+    ])
+    def test_user_job_failure_reason_points_at_task_output(
+            self, config_value, expected):
+        # With the copy disabled the controller log holds no task output, so
+        # a failed user job must point at the task log instead.
+        with patch('sky.jobs.controller.skypilot_config.get_nested',
+                   side_effect=lambda keys, default_value=None, **_:
+                   (default_value if config_value is None else config_value)):
+            reason = controller_module._user_job_failure_reason(42)
+        assert reason == f'To see the details, run: {expected}'
+
 
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
