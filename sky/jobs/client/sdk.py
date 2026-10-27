@@ -660,6 +660,73 @@ def cancel(
     return server_common.get_request_id(response=response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(server_constants.MIN_JOBS_RESTART_API_VERSION)
+def restart(
+    job: Union[int, str],
+    name: Optional[str] = None,
+    pool: Optional[str] = None,
+    resources_override: Optional[Dict[str, Any]] = None,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    num_nodes: Optional[int] = None,
+) -> server_common.RequestId[Tuple[Optional[List[int]],
+                                   Optional['backends.ResourceHandle']]]:
+    """Launches a finished managed job again, as a new managed job.
+
+    Please refer to sky.cli.jobs_launch (--restart) for documentation.
+
+    Args:
+        job: ID or name of the finished managed job to restart. A name must
+            match exactly one job.
+        name: Name of the new job. Defaults to
+            ``<original-name>-rerun-<random suffix>``.
+        pool: Pool to submit to. Defaults to the original job's pool.
+        resources_override: Resource fields to override, e.g.
+            ``{'accelerators': 'H100:8'}``. Single-task jobs only.
+        env_overrides: Environment variables to set on every task.
+        secrets_overrides: Secrets to set on every task.
+        num_nodes: Number of nodes. Single-task jobs only.
+
+    Returns:
+        The request ID of the restart request.
+
+    Request Returns:
+        job_ids (Optional[List[int]]): Job IDs of the new managed job.
+        controller_handle (Optional[ResourceHandle]): ResourceHandle of the
+          controller.
+
+    Request Raises:
+        ValueError: the job does not exist, is ambiguous, or is not finished.
+        sky.exceptions.NotSupportedError: the job cannot be restarted.
+    """
+    if resources_override and resources_override.get('cloud') is not None:
+        # Cloud objects are not JSON; the server parses the name back.
+        resources_override = dict(resources_override)
+        resources_override['cloud'] = str(resources_override['cloud'])
+    if isinstance(job, int) or (isinstance(job, str) and job.isdigit()):
+        job_id, job_name = int(job), None
+    else:
+        job_id, job_name = None, job
+    body = payloads.JobsRestartBody(
+        job_id=job_id,
+        job_name=job_name,
+        name=name,
+        pool=pool,
+        resources_override=resources_override,
+        env_overrides=env_overrides,
+        secrets_overrides=secrets_overrides,
+        num_nodes=num_nodes,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/restart',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
 @typing.overload
 def tail_logs(
     name: Optional[str] = None,

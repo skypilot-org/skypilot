@@ -556,6 +556,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     start_at=job.get('start_at'),
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
+                    dag_yaml=job.get('dag_yaml'),
                     entrypoint=job.get('entrypoint'),
                     metadata=converted_metadata,
                     pool=job.get('pool'),

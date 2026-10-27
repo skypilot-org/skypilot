@@ -380,6 +380,81 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_restart(generic_cloud: str):
+    """`sky jobs launch --restart` runs a finished job again as a new job.
+
+    A failed job is restarted twice: as is, and with --env and --name
+    overrides. Each restart must be a new job that runs the stored spec (the
+    original's env value, or the override), while the original job stays as
+    it was.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    orig = f'{name}-orig'
+    override = f'{name}-ovr'
+    # Fails on purpose: restarting failed jobs is the main use case.
+    run = 'echo "restart-msg=$MSG"; exit 1'
+
+    def id_file(label):
+        return f'/tmp/{name}-{label}.id'
+
+    def job_id(label):
+        # Smoke runs print debug log lines to stdout too; keep the ID line.
+        return f'$(grep -E "^[0-9]+$" {id_file(label)} | tail -1)'
+
+    def submit(label, args):
+        return (f'sky jobs launch {args} -y -o id > {id_file(label)}; '
+                f'echo "{label} job: {job_id(label)}"; '
+                f'[ -n "{job_id(label)}" ]')
+
+    def row(label):
+        return f'sky jobs queue | grep -E "^{job_id(label)}[[:space:]]"'
+
+    def wait_failed(label):
+        return (f'for i in $(seq 1 60); do r=$({row(label)}); echo "$r"; '
+                'echo "$r" | grep -qw FAILED && exit 0; sleep 10; done; '
+                'echo "Timed out waiting for FAILED"; exit 1')
+
+    def logs_contain(label, text):
+        return (f's=$(sky jobs logs {job_id(label)} --no-follow); '
+                f'echo "$s"; echo "$s" | grep "{text}"')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_restart',
+        [
+            submit(
+                'orig', f'-n {orig} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --env MSG=first '
+                f'\'{run}\''),
+            wait_failed('orig'),
+            # Restart as is: a new job, named <name>-rerun-<suffix>, runs the
+            # stored spec, env included.
+            submit('rerun', f'--restart {job_id("orig")}'),
+            f'r=$({row("rerun")}); echo "$r"; '
+            f'echo "$r" | grep -E "[[:space:]]{orig}-rerun-[0-9a-f]{{6}}[[:space:]]"',
+            wait_failed('rerun'),
+            logs_contain('rerun', 'restart-msg=first'),
+            # Restart with overrides.
+            submit(
+                'ovr',
+                f'--restart {job_id("orig")} -n {override} --env MSG=second'),
+            f'r=$({row("ovr")}); echo "$r"; echo "$r" | grep -w "{override}"',
+            wait_failed('ovr'),
+            logs_contain('ovr', 'restart-msg=second'),
+            # The original job is untouched.
+            f'r=$({row("orig")}); echo "$r"; '
+            f'echo "$r" | grep -w "{orig}" | grep -w FAILED',
+        ],
+        f'sky jobs cancel -y -n {orig}; sky jobs cancel -y -n {override}; '
+        f'rm -f /tmp/{name}-*.id',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_pipeline_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible after a pipeline job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()

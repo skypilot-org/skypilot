@@ -62,6 +62,26 @@ async def launch(request: fastapi.Request,
     )
 
 
+@router.post('/restart')
+async def restart(request: fastapi.Request,
+                  jobs_restart_body: payloads.JobsRestartBody) -> None:
+    # restart re-submits the job's compiled DAG through core.launch, so it
+    # has the same scheduling needs as /launch: SHORT in consolidation mode
+    # (no controller cluster to spin up), LONG otherwise.
+    consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    schedule_type = (api_requests.ScheduleType.SHORT
+                     if consolidation_mode else api_requests.ScheduleType.LONG)
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_RESTART,
+        request_body=jobs_restart_body,
+        func=core.restart,
+        schedule_type=schedule_type,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
+    )
+
+
 # For backwards compatibility
 # TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')

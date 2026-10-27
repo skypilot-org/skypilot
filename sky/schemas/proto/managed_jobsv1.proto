@@ -173,6 +173,12 @@ message ManagedJobInfo {
   // A dynamic task's ordinal within its root's tree (unset for top-level
   // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
   optional int64 dynamic_task_index = 44;
+  // The compiled DAG YAML for the job (post file-mount translation, with the
+  // resolved git commit baked in). Only populated when explicitly requested
+  // via the `dag_yaml` field; used by the job re-run feature so the server can
+  // re-submit the exact same job. May contain sensitive resolved values, so it
+  // is never returned unless requested.
+  optional string dag_yaml = 45;
 }
 
 // A pair of internal and external IP addresses
