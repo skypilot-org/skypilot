@@ -5,7 +5,9 @@ import functools
 import gc
 import os
 import pathlib
+import pickle
 import queue as queue_lib
+import textwrap
 import threading
 import time
 from typing import List, Optional
@@ -21,6 +23,7 @@ from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
+from sky.server.auth import loopback
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -28,6 +31,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
 from sky.utils import context_utils
 from sky.utils import timeline
 from sky.utils.db import db_utils
@@ -368,14 +372,14 @@ async def test_result_that_cannot_be_stored_fails_the_request(
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
-    # TEST_VAR_A: Should see the overridden value (not main process value)
-    assert os.environ.get('TEST_VAR_A') == expected_env_a, (
-        f"Expected TEST_VAR_A={expected_env_a}, got {os.environ.get('TEST_VAR_A')}"
+    # SKYPILOT_TEST_VAR_A: Should see the overridden value (not main process value)
+    assert os.environ.get('SKYPILOT_TEST_VAR_A') == expected_env_a, (
+        f"Expected SKYPILOT_TEST_VAR_A={expected_env_a}, got {os.environ.get('SKYPILOT_TEST_VAR_A')}"
     )
 
-    # TEST_VAR_B: Should see the new value set by this request
-    assert os.environ.get('TEST_VAR_B') == expected_env_b, (
-        f"Expected TEST_VAR_B={expected_env_b}, got {os.environ.get('TEST_VAR_B')}"
+    # SKYPILOT_TEST_VAR_B: Should see the new value set by this request
+    assert os.environ.get('SKYPILOT_TEST_VAR_B') == expected_env_b, (
+        f"Expected SKYPILOT_TEST_VAR_B={expected_env_b}, got {os.environ.get('SKYPILOT_TEST_VAR_B')}"
     )
 
     # Assert config override works - should see the overridden value, not the base.
@@ -436,8 +440,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             initializer=_subprocess_initializer,
             initargs=(db_path, log_path_prefix, mock_skypilot_config))
 
-    # Set TEST_VAR_A in main process that workers will override
-    os.environ['TEST_VAR_A'] = 'init'
+    # Set SKYPILOT_TEST_VAR_A in main process that workers will override
+    os.environ['SKYPILOT_TEST_VAR_A'] = 'init'
 
     # Capture main process state before spawning any workers to verify no leakage.
     env_before = dict(os.environ)
@@ -451,8 +455,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         }
         request_body = TestIsolationBody(
             env_vars={
-                'TEST_VAR_A': env_a,  # Override env var from main process
-                'TEST_VAR_B': env_b,  # New env var
+                'SKYPILOT_TEST_VAR_A': env_a,  # Override env var from main process
+                'SKYPILOT_TEST_VAR_B': env_b,  # New env var
                 constants.USER_ID_ENV_VAR: f'user-{request_id}',
                 constants.USER_ENV_VAR: f'user-{request_id}',
             },
@@ -468,6 +472,10 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             expected_env_b=env_b,
             expected_labels=expected_labels)
 
+        # These requests carry arbitrary SKYPILOT_ env overrides, which the
+        # worker only applies for a loopback request; stamp loopback so the
+        # isolation of those overrides is what is tested.
+        loopback.set_request_from_loopback(True)
         request = await executor.prepare_request_async(
             request_id=request_id,
             request_name='test.isolation',
@@ -528,7 +536,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         # Shutdown the executor if we created one
         if proc_executor is not None:
             proc_executor.shutdown()
-        os.environ.pop('TEST_VAR_A', None)
+        os.environ.pop('SKYPILOT_TEST_VAR_A', None)
 
 
 FAKE_FD_START = 100000
@@ -1595,9 +1603,15 @@ def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
         assert os.environ['SKYPILOT_APISERVER_UUID'] == 'current-pod-uuid'
 
 
+@pytest.mark.parametrize('from_loopback, is_loopback', [(True, True),
+                                                        (None, True),
+                                                        (False, False)])
 def test_override_env_applied_for_client_request(stub_override_request_env_deps,
-                                                 monkeypatch):
-    """Regression guard: client requests must still have env_vars applied."""
+                                                 monkeypatch, from_loopback,
+                                                 is_loopback):
+    """A loopback request (including an unstamped body persisted before the
+    field existed) applies the client's SKYPILOT_ env vars; a remote request
+    does not apply server settings (here the pod memory limit)."""
     monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
 
     body = payloads.RequestBody(
@@ -1606,11 +1620,12 @@ def test_override_env_applied_for_client_request(stub_override_request_env_deps,
             constants.USER_ID_ENV_VAR: 'client-user-id',
             constants.USER_ENV_VAR: 'client-user',
         })
+    body.from_loopback = from_loopback
 
     with executor.override_request_env_and_config(
             body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
-        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
-                                                                    1024)
+        expected = 100 * 1024 * 1024 if is_loopback else 300 * 1024**3
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(expected)
 
 
 @pytest.mark.parametrize('server_value', [None, '8'])
@@ -2302,3 +2317,297 @@ def test_override_env_seeds_role_before_workspace_check(
         pass
 
     assert calls == [('seed', 'client-user-id'), ('workspace_check',)]
+
+
+def _sanitize(env_vars):
+    # These cases cover a loopback request on each kind of server.
+    return executor._sanitize_request_env_vars(env_vars, from_loopback=True)
+
+
+def test_sanitize_request_env_vars_reachable_server_drops_credentials():
+    """On a reachable/deployed server, credential and non-allowlisted vars go.
+
+    A client request must not be able to overlay KUBECONFIG (or any other
+    credential override, server-only var, or arbitrary env var) onto a server
+    that is reachable by other parties.
+    """
+    env_vars = {
+        # Legitimate task/user vars that must survive.
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'SKYPILOT_DEBUG': '1',
+        # Credential override: must be dropped on a reachable server.
+        'KUBECONFIG': '/tmp/attacker-kubeconfig.yaml',
+        # Server-only SKYPILOT_ vars: must be dropped even though SKYPILOT_.
+        constants.ENV_VAR_DB_CONNECTION_URI: 'postgresql://x',
+        timeline.TIMELINE_FILE_PATH_ENV_VAR: '/tmp/x',
+        f'{constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}DEPLOY_MODE': '1',
+        # Arbitrary process env: must be dropped.
+        'LD_PRELOAD': '/tmp/evil.so',
+        'PATH': '/tmp/evil/bin',
+    }
+    with mock.patch('sky.server.common.should_enforce_mount_containment',
+                    return_value=True):
+        sanitized = _sanitize(env_vars)
+
+    assert sanitized == {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'SKYPILOT_DEBUG': '1',
+    }
+
+
+def test_sanitize_request_env_vars_loopback_server_keeps_credentials():
+    """On a loopback single-user server, same-user credential overrides stay.
+
+    A loopback `sky api start` serves only the invoking user, so KUBECONFIG
+    and other credential overrides are same-user and allowed; server-only and
+    arbitrary vars are still dropped.
+    """
+    env_vars = {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'KUBECONFIG': '/home/user/.kube/config',
+        'AWS_PROFILE': 'dev',
+        # Still dropped regardless of server mode.
+        constants.ENV_VAR_DB_CONNECTION_URI: 'postgresql://x',
+        f'{constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}DEPLOY_MODE': '1',
+        'LD_PRELOAD': '/tmp/evil.so',
+    }
+    with mock.patch('sky.server.common.should_enforce_mount_containment',
+                    return_value=False):
+        sanitized = _sanitize(env_vars)
+
+    assert sanitized == {
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+        'KUBECONFIG': '/home/user/.kube/config',
+        'AWS_PROFILE': 'dev',
+    }
+
+
+# Server settings a client sends that a remote request must not apply.
+_SERVER_SETTING_ENV_VARS = {
+    'KUBECONFIG': '/tmp/uploaded-kubeconfig.yaml',
+    'AWS_PROFILE': 'other',
+    'SKYPILOT_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_GLOBAL_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_PROJECT_CONFIG': '/tmp/uploaded-config.yaml',
+    'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true',
+    'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER': 'true',
+    'SKYPILOT_POD_MEMORY_GB_LIMIT': '1',
+    'SKYPILOT_FUTURE_SETTING': '1',
+    constants.OVERRIDE_CONSOLIDATION_MODE: 'true',
+    'LD_PRELOAD': '/tmp/x.so',
+}
+# What a remote client may set: identity and this request's logging.
+_REMOTE_CLIENT_ENV_VARS = {
+    constants.USER_ID_ENV_VAR: 'client-user-id',
+    constants.USER_ENV_VAR: 'client-user',
+    constants.CLIENT_USER_HASH_ENV_VAR: 'client-hash',
+    'SKYPILOT_CLIENT_TYPE': 'cli',
+    usage_constants.USAGE_RUN_ID_ENV_VAR: 'run-1',
+    'SKYPILOT_IS_FROM_DASHBOARD': 'true',
+    'SKYPILOT_DISABLE_USAGE_COLLECTION': '1',
+    'SKYPILOT_MINIMIZE_LOGGING': '0',
+    'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1',
+    'SKYPILOT_DEBUG': '1',
+}
+
+
+def test_remote_filter_classifies_every_sender_var(monkeypatch):
+    """Non-circular: drive the real client sender (request_body_env_vars) under
+    a remote-server setting, then the real server filter. Every var the sender
+    emits is either kept (identity/logging) or dropped (infra/config), the
+    server keeps nothing outside the allowlist, and a dangerous var that the
+    sender does emit (SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS) is dropped. A new
+    sender var that leaked past the filter without being allowlisted fails the
+    last assertion."""
+    monkeypatch.setattr('sky.server.common.is_api_server_local', lambda: False)
+    monkeypatch.setattr('sky.server.common.basic_auth_enabled', True)
+    monkeypatch.setattr('sky.server.common.client_user_hash', 'client-hash')
+    # A realistic remote client environment: allowlisted identity/logging vars
+    # plus a widening var the client can set and the server must ignore.
+    monkeypatch.setenv('SKYPILOT_DEBUG', '1')
+    monkeypatch.setenv('SKYPILOT_MINIMIZE_LOGGING', '0')
+    monkeypatch.setenv('SKYPILOT_SUPPRESS_SENSITIVE_LOG', '1')
+    monkeypatch.setenv('SKYPILOT_DISABLE_USAGE_COLLECTION', '1')
+    monkeypatch.setenv('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS', 'true')
+
+    emitted = payloads.request_body_env_vars()
+    # The sender does forward the widening var (it is the server's job to drop
+    # it), so the filter is actually exercised on a dangerous input.
+    assert 'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS' in emitted
+
+    kept = executor._sanitize_request_env_vars(emitted, from_loopback=False)
+
+    # Identity survives so the remote user is still recognized.
+    assert kept.get(constants.USER_ID_ENV_VAR)
+    assert kept.get(constants.USER_ENV_VAR)
+    # The widening var is dropped.
+    assert 'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS' not in kept
+    # The server keeps nothing outside the allowlist, whatever the sender emits.
+    for key in kept:
+        assert key in executor._REMOTE_REQUEST_ENV_VARS, key
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_remote_request_applies_only_allowlisted_env(
+        stub_override_request_env_deps, monkeypatch, enforce_containment):
+    """Through the real entry point: a remote request (no loopback stamp)
+    applies only the allowlist, whatever the containment setting."""
+    for key in _SERVER_SETTING_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    body = payloads.RequestBody(env_vars={
+        **_SERVER_SETTING_ENV_VARS,
+        **_REMOTE_CLIENT_ENV_VARS
+    })
+    # A fresh body defaults to remote (fail closed): an unstamped future path
+    # must not be treated as loopback.
+    assert body.from_loopback is False
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        for key in _SERVER_SETTING_ENV_VARS:
+            assert key not in os.environ, key
+        for key, value in _REMOTE_CLIENT_ENV_VARS.items():
+            assert os.environ[key] == value, key
+
+
+@pytest.mark.parametrize('enforce_containment', [True, False])
+def test_loopback_request_keeps_skypilot_env(stub_override_request_env_deps,
+                                             monkeypatch, enforce_containment):
+    """A loopback request (local server, or a controller with the job's
+    config snapshot in SKYPILOT_CONFIG) keeps SKYPILOT_ vars; credential vars
+    only when containment is off; other process env never."""
+    for key in _SERVER_SETTING_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: enforce_containment)
+    body = payloads.RequestBody(env_vars={
+        **_SERVER_SETTING_ENV_VARS,
+        **_REMOTE_CLIENT_ENV_VARS
+    })
+    body.from_loopback = True
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_CONFIG'] == '/tmp/uploaded-config.yaml'
+        assert os.environ['SKYPILOT_FUTURE_SETTING'] == '1'
+        assert ('KUBECONFIG' in os.environ) is (not enforce_containment)
+        assert ('AWS_PROFILE' in os.environ) is (not enforce_containment)
+        assert 'LD_PRELOAD' not in os.environ
+        assert constants.OVERRIDE_CONSOLIDATION_MODE not in os.environ
+
+
+def test_stamp_overwrites_client_from_loopback():
+    """A client cannot claim loopback: the stamp comes from the dispatch
+    context, and outside a loopback request it is False."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'abcd1234',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                from_loopback=True)
+    executor.stamp_request_body(body, auth_user=None)
+    assert body.from_loopback is False
+
+    token = loopback._request_from_loopback.set(True)
+    try:
+        executor.stamp_request_body(body, auth_user=None)
+    finally:
+        loopback._request_from_loopback.reset(token)
+    assert body.from_loopback is True
+
+
+def test_to_kwargs_drops_from_loopback():
+    body = payloads.RequestBody(env_vars={}, from_loopback=True)
+    assert 'from_loopback' not in body.to_kwargs()
+
+
+def test_old_pickle_body_is_treated_as_loopback(stub_override_request_env_deps,
+                                                monkeypatch):
+    """A body persisted before `from_loopback` existed has no such attribute,
+    so it keeps its pre-upgrade behavior: SKYPILOT_CONFIG survives, and an
+    in-flight controller launch resumed across an upgrade does not lose its
+    config snapshot. (A fresh body defaults to False/remote; only a genuinely
+    old pickle is attribute-less.)"""
+    monkeypatch.delenv('SKYPILOT_CONFIG', raising=False)
+    monkeypatch.setattr('sky.server.common.should_enforce_mount_containment',
+                        lambda: True)
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+            'SKYPILOT_CONFIG': '/snapshot/config.yaml',
+        })
+    # Simulate an old pickle: the field is absent from __dict__, so a round
+    # trip restores a body without it and getattr falls back to None.
+    del body.__dict__['from_loopback']
+    body = pickle.loads(pickle.dumps(body))
+    assert getattr(body, 'from_loopback', None) is None
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_CONFIG'] == '/snapshot/config.yaml'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_config_override_infra_keys_gated_through_entry_point(
+        stub_override_request_env_deps, monkeypatch, tmp_path, from_loopback):
+    """Through the real entry point: a remote request cannot widen the three
+    infra keys the server allows, while a non-infra override still applies; a
+    loopback request layers both.
+
+    This drives the override_skypilot_config wiring in
+    override_request_env_and_config (the body's stamped from_loopback bit),
+    not override_skypilot_config directly. Reverting that wiring to the default
+    (from_loopback=True) must fail this test for the remote arm.
+    """
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'client-user-id',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                override_skypilot_config={
+                                    'kubernetes': {
+                                        'allowed_contexts': 'all',
+                                        'provision_timeout': 123,
+                                    },
+                                    'ssh': {
+                                        'allowed_node_pools': ['other-pool']
+                                    },
+                                    'slurm': {
+                                        'allowed_clusters': 'all'
+                                    },
+                                })
+    body.from_loopback = from_loopback
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        # A non-infra key always layers, loopback or not.
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])

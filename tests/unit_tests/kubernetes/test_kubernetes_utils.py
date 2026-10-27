@@ -883,6 +883,7 @@ def test_heterogenous_gpu_detection():
 
     with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='doesntexist'), \
+         mock.patch('sky.clouds.Kubernetes.existing_allowed_contexts', return_value=['doesntexist']), \
          mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
          mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \

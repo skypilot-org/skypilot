@@ -1035,9 +1035,21 @@ def _resolve_server_active_workspace(ref: str,
 @contextlib.contextmanager
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]],
-        override_config_path_serialized: Optional[str] = None
-) -> Iterator[None]:
-    """Overrides the user configurations."""
+        override_config_path_serialized: Optional[str] = None,
+        *,
+        from_loopback: bool = True) -> Iterator[None]:
+    """Overrides the user configurations.
+
+    Args:
+        from_loopback: Whether the overrides come from a loopback client. The
+            default (True) layers every key, which is correct for the common
+            case of composing the user's own config (client-side, in-process,
+            a local server, or a controller). A caller that applies a REMOTE
+            client's config to the server -- i.e. handling an untrusted request
+            -- MUST pass the request's own from_loopback, so that on a remote
+            request the REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS are ignored too.
+            Keyword-only, so this is a deliberate choice at every such site.
+    """
     # TODO: allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
@@ -1070,7 +1082,10 @@ def override_skypilot_config(
             override_config_path = []
 
     disallowed_diff_keys = []
-    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+    skipped_keys = list(constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    if not from_loopback:
+        skipped_keys += constants.REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS
+    for key in skipped_keys:
         if key == ('db',):
             # since db key is popped out of server config, the key is expected
             # to be different between client and server.
