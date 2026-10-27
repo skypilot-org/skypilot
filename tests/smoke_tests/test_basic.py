@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import copy
 import json
 import os
 import pathlib
@@ -1896,7 +1897,22 @@ def test_kubernetes_context_failover(unreachable_context):
                     sky.server.common.get_server_url()
             },
         )
-        smoke_tests_utils.run_one_test(test)
+        # A remote API server ignores allowed_contexts in a client's config,
+        # so set it on the server for the duration of the test.
+        original_server_config = None
+        if smoke_tests_utils.is_docker_remote_api_server():
+            original_server_config = smoke_tests_utils.get_api_server_config()
+            server_config = copy.deepcopy(original_server_config)
+            server_config.setdefault('kubernetes', {})['allowed_contexts'] = [
+                context, unreachable_context, '_nonexist_', 'kind-skypilot'
+            ]
+            smoke_tests_utils.update_api_server_config(server_config)
+        try:
+            smoke_tests_utils.run_one_test(test)
+        finally:
+            if original_server_config is not None:
+                smoke_tests_utils.update_api_server_config(
+                    original_server_config)
 
 
 @pytest.mark.kubernetes

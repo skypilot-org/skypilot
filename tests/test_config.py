@@ -2532,3 +2532,49 @@ def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
                 'account': 'task-account'
             }
         }}) == 'task-account'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
+                                                    from_loopback) -> None:
+    """A remote client cannot widen the infra the server allows; a loopback
+    client still layers these keys. Other overrides apply either way."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'allowed_contexts': 'all',
+                'provision_timeout': 123
+            },
+            'ssh': {
+                'allowed_node_pools': ['other-pool']
+            },
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+        },
+            from_loopback=from_loopback):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])

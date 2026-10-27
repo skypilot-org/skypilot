@@ -1243,6 +1243,8 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         workspace_access.set_request_endpoint(request.url.path, request.method)
+        loopback.set_request_from_loopback(
+            loopback.is_loopback_request(request))
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
         # to v0.11.0, the client will check the version in the body of
@@ -4422,6 +4424,9 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
+    # Record whether this server is reachable by other parties, so workers can
+    # decide which client-supplied env vars to honor (see executor).
+    common.init_mount_containment_enforced(cmd_args.deploy, cmd_args.host)
     # Pre-load plugin RBAC rules + viewer allowlist before initializing
     # the permission service. The permission service reads both during
     # _maybe_initialize_policies (blocklist seeded into Casbin; viewer

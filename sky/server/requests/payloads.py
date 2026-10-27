@@ -184,6 +184,16 @@ class RequestBody(BasePayload):
     # worker-side gate then requires 'write'. See
     # `sky.server.requests.workspace_access`.
     workspace_access: Optional[str] = None
+    # Whether the request came from loopback, i.e. the local API server or a
+    # controller calling its own server. Set server-side in
+    # `stamp_request_body`, like `workspace_access`; a client-sent value is
+    # overwritten. The default is False, so a body that is constructed but
+    # never stamped (a future code path) is treated as remote (fail closed). A
+    # body pickled before this field existed has no such attribute, so a reader
+    # using `getattr(body, 'from_loopback', None)` sees None, not this default,
+    # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
+    # and the override logic in `executor.py`.
+    from_loopback: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -219,6 +229,7 @@ class RequestBody(BasePayload):
         kwargs.pop('file_mounts_blob_id')
         kwargs.pop('client_api_version', None)
         kwargs.pop('workspace_access', None)
+        kwargs.pop('from_loopback', None)
         return kwargs
 
     @property

@@ -334,7 +334,7 @@ Sky Batch provides built-in output writers:
    * - :code:`ImageWriter(path, column="image")`
      - Saves PIL Images as individual PNG files to a directory.
 
-You can also define your own input and output formats. See :ref:`batch-custom-formats` for a full guide.
+Custom input and output formats are not currently supported.
 
 Column filtering
 ~~~~~~~~~~~~~~~~~
@@ -525,9 +525,3 @@ Sky Batch automatically handles failures:
     writer.cleanup(job_id="42")  # Remove temporary batch files
 
   The job ID is printed in the failure message, so you can copy-paste directly. You can omit the ``cleanup()`` call to keep the temporary files for debugging.
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-
-   custom-formats

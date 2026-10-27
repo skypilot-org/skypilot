@@ -18,6 +18,7 @@ from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+from sky.skylet import constants
 
 
 def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):
@@ -822,3 +823,79 @@ def test_redact_url_password_bad_port_is_returned_unchanged():
     """
     for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
         assert common.redact_url_password(url) == url
+
+
+def test_controller_always_uses_local_server(monkeypatch):
+    """A controller calls its own server over loopback even when an endpoint
+    is configured, so its requests keep loopback treatment."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       'http://remote.example.com:8080')
+    common.get_server_url.cache_clear()
+    try:
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()
+
+
+def test_controller_ignores_config_api_server_endpoint(monkeypatch):
+    """The controller loopback pin must also beat a server-side
+    api_server.endpoint in the config, not only the URL env var: get_server_url
+    falls back to that config key (common.py), and a non-loopback endpoint
+    there would otherwise stamp the controller's own requests as remote."""
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    real_get_nested = skypilot_config.get_nested
+
+    def fake_get_nested(keys, default_value=None, *args, **kwargs):
+        if tuple(keys) == ('api_server', 'endpoint'):
+            return 'http://remote.example.com:8080'
+        return real_get_nested(keys, default_value, *args, **kwargs)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', fake_get_nested)
+    common.get_server_url.cache_clear()
+    try:
+        # Without the controller marker, the config endpoint is honored.
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        # With it, the controller pins to its own loopback server.
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()
+
+
+@pytest.mark.parametrize('deploy,host,expected', [
+    (True, '127.0.0.1', True),
+    (False, '127.0.0.1', False),
+    (False, 'localhost', False),
+    (False, '::1', False),
+    (False, '0.0.0.0', True),
+    (False, '10.0.0.9', True),
+    (False, 'api.example.com', True),
+])
+def test_mount_containment_enforced(deploy, host, expected):
+    assert common.mount_containment_enforced(deploy, host) is expected
+
+
+def test_init_mount_containment_enforced_sets_flag(monkeypatch):
+    monkeypatch.delenv(constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT,
+                       raising=False)
+    common.init_mount_containment_enforced(deploy=False, host='127.0.0.1')
+    assert common.should_enforce_mount_containment() is False
+    common.set_mount_containment_enforced(True)
+    assert common.should_enforce_mount_containment() is True
+
+
+def test_init_mount_containment_enforced_keeps_explicit_value(monkeypatch):
+    """An operator's explicit value wins over the computed one."""
+    monkeypatch.setenv(constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT, '0')
+    common.init_mount_containment_enforced(deploy=True, host='0.0.0.0')
+    assert common.should_enforce_mount_containment() is False
+
+
+def test_should_enforce_mount_containment_defaults_closed(monkeypatch):
+    monkeypatch.delenv(constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT,
+                       raising=False)
+    assert common.should_enforce_mount_containment() is True

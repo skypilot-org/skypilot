@@ -15,9 +15,13 @@ from sky.utils import common_utils
 
 _events = []
 
+# Path the timeline is written to when the process exits. Server-side only:
+# the API server strips it from client request env vars.
+TIMELINE_FILE_PATH_ENV_VAR = 'SKYPILOT_TIMELINE_FILE_PATH'
+
 
 def _get_events_file_path():
-    return os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+    return os.environ.get(TIMELINE_FILE_PATH_ENV_VAR)
 
 
 class Event:

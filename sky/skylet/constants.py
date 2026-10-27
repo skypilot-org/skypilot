@@ -171,6 +171,17 @@ DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
 SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
 SKYPILOT_SERVER_ENV_VAR_PREFIX = 'SKYPILOT_SERVER_'
 
+# Server-side only: whether this API server is reachable by other parties
+# (started with --deploy, or bound to a non-loopback host). Set at server
+# startup and inherited by workers via os.environ; the executor uses it to
+# decide whether a loopback request may overlay credential env vars such as
+# KUBECONFIG. It uses the SKYPILOT_SERVER_ prefix, so the client never forwards
+# it and the server strips every SKYPILOT_SERVER_-prefixed key from request env
+# vars before overlaying them -- a client cannot forge it. See
+# sky.server.common.should_enforce_mount_containment.
+ENV_VAR_ENFORCE_MOUNT_CONTAINMENT = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENFORCE_MOUNT_CONTAINMENT')
+
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same managed task.
@@ -714,6 +725,15 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
     ('slurm', 'username_map'),
+]
+
+# Also skipped when the request did not come from loopback: which
+# infrastructure a request may use is set by the server, not by a remote client.
+# A loopback client (the local API server, or a controller) still layers them.
+REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('kubernetes', 'allowed_contexts'),
+    ('ssh', 'allowed_node_pools'),
+    ('slurm', 'allowed_clusters'),
 ]
 
 # Constants for Azure blob storage

@@ -580,3 +580,98 @@ class TestCountJsonlLinesFromCloud:
                 assert utils.count_jsonl_lines_from_cloud('s3://b/f.jsonl') == n
         finally:
             os.remove(src)
+
+
+class TestIoFormatsNoExec:
+    """Reconstructing I/O formats must never execute source from the dict.
+
+    The format dict comes from a client-submitted task and is reconstructed on
+    the shared jobs controller, so a `_class_source` string in it must never be
+    exec()'d. Only server-registered formats are accepted; an unknown format is
+    rejected with ValueError.
+    """
+
+    # If `_class_source` were exec()'d, this attribute would be set on the
+    # io_formats module. A benign sentinel: it proves (non-)execution without
+    # any side effect.
+    _CANARY = '_test_exec_canary_fired'
+    _PAYLOAD = ('import sky.batch.io_formats as _m\n'
+                'setattr(_m, "_test_exec_canary_fired", True)\n')
+
+    def _reset_canary(self):
+        from sky.batch import io_formats
+        if hasattr(io_formats, self._CANARY):
+            delattr(io_formats, self._CANARY)
+
+    def test_input_reader_known_format_roundtrips(self):
+        from sky.batch import io_formats
+        reader = io_formats.InputReader.from_dict({
+            'format': 'json',
+            'path': 's3://bucket/data.jsonl',
+        })
+        assert isinstance(reader, io_formats.JsonReader)
+        assert reader.path == 's3://bucket/data.jsonl'
+
+    def test_output_writer_known_format_roundtrips(self):
+        from sky.batch import io_formats
+        writer = io_formats.OutputWriter.from_dict({
+            'format': 'json',
+            'path': 's3://bucket/out.jsonl',
+        })
+        assert isinstance(writer, io_formats.JsonWriter)
+
+    def test_unknown_input_format_rejected_without_exec(self):
+        from sky.batch import io_formats
+        self._reset_canary()
+        with pytest.raises(ValueError, match='not a valid input reader'):
+            io_formats.InputReader.from_dict({
+                'format': 'not_a_real_format',
+                'path': 's3://bucket/data.jsonl',
+                '_class_source': self._PAYLOAD,
+            })
+        assert not hasattr(io_formats, self._CANARY)
+
+    def test_unknown_output_format_rejected_without_exec(self):
+        from sky.batch import io_formats
+        self._reset_canary()
+        with pytest.raises(ValueError, match='not a valid output writer'):
+            io_formats.OutputWriter.from_dict({
+                'format': 'not_a_real_format',
+                'path': 's3://bucket/out.jsonl',
+                '_class_source': self._PAYLOAD,
+            })
+        assert not hasattr(io_formats, self._CANARY)
+
+    def test_to_dict_does_not_emit_class_source(self):
+        """A custom reader defined outside io_formats serializes without its
+        source: there is no longer any consumer that would exec it."""
+        import dataclasses
+
+        from sky.batch import io_formats
+        from sky.utils import registry
+
+        name = 'test-no-class-source'
+        if name not in registry.INPUT_READER_REGISTRY:
+
+            @registry.INPUT_READER_REGISTRY.type_register(name=name)
+            @dataclasses.dataclass
+            class _LocalReader(io_formats.InputReader):
+
+                def __len__(self) -> int:
+                    return 0
+
+                def download_batch(self, start_idx, end_idx, cache_dir):
+                    return []
+
+        cls = registry.INPUT_READER_REGISTRY.from_str(name)
+        d = cls(path='s3://bucket/data.jsonl').to_dict()
+        assert d['format'] == name
+        assert '_class_source' not in d
+
+    def test_known_format_resolves_case_insensitively(self):
+        from sky.batch import io_formats
+        reader = io_formats.InputReader.from_dict({
+            'format': 'JSON',
+            'path': 's3://bucket/data.jsonl',
+        })
+        assert isinstance(reader, io_formats.JsonReader)

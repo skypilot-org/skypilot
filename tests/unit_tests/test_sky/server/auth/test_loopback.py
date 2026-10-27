@@ -118,3 +118,46 @@ class TestLoopbackDetection:
         request.headers = Headers({})
 
         assert not is_loopback_request(request)
+
+
+class TestMiddlewareStampsLoopback:
+    """APIVersionMiddleware must stamp from_loopback from the real peer, so the
+    worker can filter a remote client's env/config. Deleting the stamp would
+    make every request default to remote (False) and silently break the local
+    server and controllers."""
+
+    def _request(self, host, headers):
+        from starlette.datastructures import Headers as H
+        req = mock.Mock(spec=fastapi.Request)
+        req.client = mock.Mock()
+        req.client.host = host
+        req.headers = H(headers)
+        req.url = mock.Mock()
+        req.url.path = '/check'
+        req.method = 'POST'
+        return req
+
+    @pytest.mark.asyncio
+    async def test_on_request_stamps_from_the_peer(self, monkeypatch):
+        from sky.server import server as server_mod
+        from sky.server.auth import loopback
+
+        # Avoid the version-header handling; we only assert the loopback stamp.
+        monkeypatch.setattr(server_mod.versions,
+                            'check_compatibility_at_server', lambda h: None)
+        middleware = server_mod.APIVersionMiddleware(app=mock.Mock())
+        call_next = mock.AsyncMock(return_value=mock.Mock(headers={}))
+
+        async def on_request(request):
+            await middleware.dispatch(request, call_next)
+
+        await on_request(self._request('127.0.0.1', {}))
+        assert loopback.get_request_from_loopback() is True
+
+        # A loopback peer but with a forwarding header is treated as remote.
+        await on_request(
+            self._request('127.0.0.1', {'X-Forwarded-For': '1.2.3.4'}))
+        assert loopback.get_request_from_loopback() is False
+
+        await on_request(self._request('10.0.0.9', {}))
+        assert loopback.get_request_from_loopback() is False

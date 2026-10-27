@@ -1720,6 +1720,8 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+With a remote API server, both ``kubernetes.allowed_contexts`` and this environment variable
+are read from the server only; a client's config or environment value is ignored.
 
 .. _config-yaml-kubernetes-namespace:
 
@@ -2354,6 +2356,8 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
+
 .. _config-yaml-slurm:
 
 ``slurm``
@@ -2376,6 +2380,8 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
 
   slurm:
     allowed_clusters: all
+
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
 
 .. _config-yaml-slurm-submit-as-user:
 
