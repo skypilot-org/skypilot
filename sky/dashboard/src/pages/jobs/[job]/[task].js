@@ -429,6 +429,14 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
         </Link>
       )}
       {field('Status', <StatusBadge status={taskData.status} />)}
+      {/* Before Submitted so Submitted and Duration share a row at 2, 3 and
+          4 columns. */}
+      {field(
+        'Workspace',
+        <Link href="/workspaces">
+          {taskData.workspace_name || taskData.workspace || 'default'}
+        </Link>
+      )}
       {field(
         'Submitted',
         <span className="block min-w-0">
@@ -460,12 +468,6 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
             </span>
           )}
         </span>
-      )}
-      {field(
-        'Workspace',
-        <Link href="/workspaces">
-          {taskData.workspace_name || taskData.workspace || 'default'}
-        </Link>
       )}
       {field('Recoveries', taskData.recoveries || 0)}
       <div

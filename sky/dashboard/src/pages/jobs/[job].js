@@ -1692,11 +1692,16 @@ function JobDetailsContent({
   // Base column count must not be grid-cols-2: a stylesheet loaded later can
   // redefine it and override the breakpoint variants.
   // newRow starts a new row at 4 columns; narrower grids flow normally so
-  // short groups leave no gaps.
-  const field = (label, value, { wide = false, newRow = false } = {}) => (
+  // short groups leave no gaps. wideAt3 spans two columns in the 3-column
+  // layout only.
+  const field = (
+    label,
+    value,
+    { wide = false, newRow = false, wideAt3 = false } = {}
+  ) => (
     <div
       key={label}
-      className={`min-w-0 ${wide ? 'col-span-full' : ''} ${newRow ? 'min-[1400px]:col-start-1' : ''}`}
+      className={`min-w-0 ${wide ? 'col-span-full' : ''} ${newRow ? 'min-[1400px]:col-start-1' : ''} ${wideAt3 ? 'lg:max-[1399px]:col-span-2' : ''}`}
     >
       <div className="text-sm text-gray-500">{label}</div>
       <div className="text-base text-gray-900 mt-1 break-words">{value}</div>
@@ -1802,6 +1807,15 @@ function JobDetailsContent({
   };
   const hasLinks = combinedLinks && Object.keys(combinedLinks).length > 0;
   const pool = renderPoolLink(jobData.pool, jobData.pool_hash, poolsData);
+  const workspaceField = field(
+    'Workspace',
+    <Link href="/workspaces">
+      {jobData.workspace_name || jobData.workspace || 'default'}
+    </Link>
+  );
+  // Submitted and Duration share a row at 2, 3 and 4 columns. Job pages
+  // widen the Job cell at 3 columns; task pages have an extra Job cell, so
+  // Workspace goes before Submitted instead.
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-[1400px]:grid-cols-4 gap-x-6 gap-y-5 [&_a]:text-blue-600 [&_a]:no-underline [&_a:hover]:underline">
       {field(
@@ -1828,7 +1842,8 @@ function JobDetailsContent({
               JobGroup
             </span>
           )}
-        </span>
+        </span>,
+        { wideAt3: !taskContext }
       )}
       {taskContext &&
         field(
@@ -1863,6 +1878,7 @@ function JobDetailsContent({
           }
         />
       )}
+      {taskContext && workspaceField}
       {field(
         'Submitted',
         <span className="block min-w-0">
@@ -1895,12 +1911,7 @@ function JobDetailsContent({
           )}
         </span>
       )}
-      {field(
-        'Workspace',
-        <Link href="/workspaces">
-          {jobData.workspace_name || jobData.workspace || 'default'}
-        </Link>
-      )}
+      {!taskContext && workspaceField}
       {field('Recoveries', jobData.recoveries || 0)}
       {batchTotal != null && field('Batch Progress', batchBar())}
       <div
