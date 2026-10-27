@@ -712,7 +712,10 @@ class JobController:
                 managed_job_logs_dir,
                 job_ids=[str(job_id_on_pool_cluster)]
                 if job_id_on_pool_cluster is not None else None,
-                on_downloaded=_persist_local_log_file)
+                on_downloaded=_persist_local_log_file,
+                stream_to_console=skypilot_config.get_nested(
+                    ('jobs', 'controller',
+                     'stream_task_logs_to_controller_log'), True))
         if log_file is None:
             logger.warning(
                 f'No log file was downloaded for job {self._job_id}, '
