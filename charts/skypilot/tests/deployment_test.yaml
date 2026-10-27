@@ -3,6 +3,89 @@ suite: server_deployment_test
 templates:
   - templates/api-deployment.yaml
 tests:
+  - it: should declare and advertise the API metrics port in normal mode
+    set:
+      apiService.metrics.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKY_API_SERVER_METRICS_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKY_API_SERVER_METRICS_PORT
+            value: "9090"
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 9090
+            name: metrics
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "--metrics-port"
+
+  - it: should retain dedicated Pod annotations and use a custom metrics port
+    set:
+      apiService.metrics.enabled: true
+      apiService.metrics.port: 9190
+      prometheus.useDedicatedScrapeConfig: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["skypilot.co/scrape"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["skypilot.co/port"]
+          value: "9190"
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKY_API_SERVER_METRICS_PORT
+            value: "9190"
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 9190
+            name: metrics
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "--metrics-port"
+
+  - it: should preserve standard Pod annotations when explicitly requested
+    set:
+      apiService.metrics.enabled: true
+      prometheus.preservePodScrapeAnnotations: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "9090"
+
+  - it: should omit standard Pod annotations with bundled Prometheus
+    set:
+      apiService.metrics.enabled: true
+      prometheus.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+
+  - it: should preserve standard Pod annotations with bundled Prometheus when explicitly requested
+    set:
+      apiService.metrics.enabled: true
+      prometheus.enabled: true
+      prometheus.preservePodScrapeAnnotations: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+
   - it: should mount kubeconfig correctly when useKubeconfig is enabled
     set:
       kubernetesCredentials.useKubeconfig: true
