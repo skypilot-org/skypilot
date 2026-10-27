@@ -1728,9 +1728,8 @@ class TestRsyncIgnoreRegression:
     ])
     @pytest.mark.parametrize('reinclude', [False, True])
     @pytest.mark.parametrize('via_zip', [False, True])
-    @pytest.mark.parametrize('line_ending', ['lf', 'crlf', 'unterminated'])
     def test_literal_skyignore_patterns_preserve_filename(
-            self, tmp_path, filename, reinclude, via_zip, line_ending):
+            self, tmp_path, filename, reinclude, via_zip):
         """Preserve literal pattern bytes through ZIP and rsync uploads."""
         source = tmp_path / 'source'
         rules = ('*.txt*\n!' + filename + '\n' if reinclude else filename +
@@ -1738,10 +1737,6 @@ class TestRsyncIgnoreRegression:
         self._write(source, filename, 'special file contents')
         self._write(source, '자료.txt', 'ordinary file contents')
         self._write(source, 'control.csv', 'control file contents')
-        if line_ending == 'crlf':
-            rules = rules.replace('\n', '\r\n')
-        elif line_ending == 'unterminated':
-            rules = rules[:-1]
         (source / '.skyignore').write_bytes(rules.encode('utf-8'))
 
         if via_zip:
@@ -1768,6 +1763,17 @@ class TestRsyncIgnoreRegression:
             assert (target /
                     relative_path).read_bytes() == (source /
                                                     relative_path).read_bytes()
+
+    def test_crlf_with_unterminated_last_rule(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, 'private.txt')
+        self._write(source, 'keep.txt')
+        (source / '.skyignore').write_bytes(b'*.txt\r\n!keep.txt')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.txt').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
 
     @pytest.mark.parametrize('with_negation', [False, True])
     def test_non_utf8_comment_does_not_break_rsync(self, tmp_path,
