@@ -4285,18 +4285,19 @@ class TestJobCostUnits:
         full = controller_module.controller_utils.JOB_COST_UNITS
         load, claimed_ids, sleeps = await self._claim_until_capped(
             tmp_path,
-            costs=lambda _: 1,
+            costs=lambda _: full // 5,
             max_jobs_per_worker=200,
             max_total_running_jobs=4)
-        assert claimed_ids == list(range(1, 4 * full + 1))
+        assert claimed_ids == list(range(1, 4 * 5 + 1))
         assert sleeps and set(sleeps) == {60}
-        assert load == (4 * full, 4 * full)
+        assert load == (4 * 5, 4 * full)
 
     @pytest.mark.asyncio
     async def test_cheap_jobs_stop_at_max_jobs_per_worker(self, tmp_path):
+        full = controller_module.controller_utils.JOB_COST_UNITS
         _, claimed_ids, sleeps = await self._claim_until_capped(
             tmp_path,
-            costs=lambda _: 1,
+            costs=lambda _: full // 5,
             max_jobs_per_worker=3,
             max_total_running_jobs=1000)
         assert claimed_ids == [1, 2, 3]
@@ -4306,20 +4307,22 @@ class TestJobCostUnits:
     async def test_mixed_costs_overshoot_by_less_than_one_full_job(
             self, tmp_path):
         full = controller_module.controller_utils.JOB_COST_UNITS
-        # Cheap jobs fill all but one unit, then a full-cost job is next in
-        # line: it is claimed (claims stay in priority order) and the
-        # process stops with fewer than `full` units over its cap.
-        cap = 2 * full
+        # Cheap jobs fill all but one cheap job's worth of the cap, then a
+        # full-cost job is next in line: it is claimed (claims stay in
+        # priority order) and the process stops less than one full job over
+        # its cap.
+        cap_jobs = 2
+        n = cap_jobs * 5
         load, claimed_ids, sleeps = await self._claim_until_capped(
             tmp_path,
-            costs=lambda job_id: 1 if job_id < cap else full,
+            costs=lambda job_id: full // 5 if job_id < n else full,
             max_jobs_per_worker=200,
-            max_total_running_jobs=2)
-        assert claimed_ids == list(range(1, cap + 1))
+            max_total_running_jobs=cap_jobs)
+        assert claimed_ids == list(range(1, n + 1))
         assert sleeps and set(sleeps) == {60}
         jobs, units = load
-        assert jobs == cap
-        assert cap <= units < cap + full
+        assert jobs == n
+        assert cap_jobs * full <= units < (cap_jobs + 1) * full
 
     @pytest.mark.asyncio
     async def test_job_counts_in_full_until_its_cluster_is_up(self):
@@ -4442,3 +4445,94 @@ class TestJobCostUnits:
             await jc._update_cost_units('cluster')
         hook.assert_not_called()
         assert job_costs == {1: 5}
+
+
+class TestClaimedJobCostUnits:
+    """A job claimed with its cluster already up counts at that cluster's cost
+    from the claim on; any other job counts in full."""
+
+    @pytest.mark.asyncio
+    async def test_pool_job_counts_in_full(self):
+        manager = ControllerManager('test-uuid')
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_launched_task_name_async',
+                          new=AsyncMock()) as lookup:
+            assert await manager._claimed_cost_units(
+                1, 'pool') == controller_module.controller_utils.JOB_COST_UNITS
+        lookup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_runtime_counts_in_full(self):
+        manager = ControllerManager('test-uuid')
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=False), \
+             patch.object(managed_job_state, 'get_launched_task_name_async',
+                          new=AsyncMock()) as lookup:
+            assert await manager._claimed_cost_units(
+                1, None) == controller_module.controller_utils.JOB_COST_UNITS
+        lookup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_job_not_launched_counts_in_full(self):
+        manager = ControllerManager('test-uuid')
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_launched_task_name_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name') as get_handle:
+            assert await manager._claimed_cost_units(
+                1, None) == controller_module.controller_utils.JOB_COST_UNITS
+        get_handle.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_job_with_a_cluster_counts_at_its_cost(self):
+        full = controller_module.controller_utils.JOB_COST_UNITS
+        manager = ControllerManager('test-uuid')
+        runtime = controller_module.managed_job_runtime
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            'train', 7)
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_launched_task_name_async',
+                          new=AsyncMock(return_value='train')), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name',
+                          return_value='handle') as get_handle, \
+             patch.object(runtime, 'cost_units',
+                          return_value=full // 5) as hook:
+            assert await manager._claimed_cost_units(7, None) == full // 5
+        get_handle.assert_called_once_with(cluster_name)
+        hook.assert_called_once_with('handle')
+
+    @pytest.mark.asyncio
+    async def test_failed_lookup_counts_in_full(self):
+        manager = ControllerManager('test-uuid')
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(managed_job_state, 'get_launched_task_name_async',
+                          new=AsyncMock(side_effect=RuntimeError('db'))):
+            assert await manager._claimed_cost_units(
+                1, None) == controller_module.controller_utils.JOB_COST_UNITS
+
+    @pytest.mark.asyncio
+    async def test_start_job_counts_the_claimed_cost(self):
+        manager = ControllerManager('test-uuid')
+        never_runs = asyncio.Event()
+
+        async def fake_run_job_loop(job_id, log_file, pool):
+            del job_id, log_file, pool
+            await never_runs.wait()
+
+        with patch.object(manager, 'run_job_loop', new=fake_run_job_loop), \
+             patch.object(manager, '_claimed_cost_units',
+                          new=AsyncMock(return_value=7)), \
+             patch.object(jobs_constants, 'JOBS_CONTROLLER_LOGS_DIR',
+                          '/tmp/sky-test-job-cost-logs'):
+            await manager.start_job(3)
+            assert manager.job_costs == {3: 7}
+            for task in list(controller_module._background_tasks):
+                task.cancel()
+            await _yield_to_event_loop()
+            await _yield_to_event_loop()
+        assert manager.job_costs == {}

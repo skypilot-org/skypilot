@@ -230,6 +230,16 @@ async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     return task
 
 
+def _cluster_cost_units(cluster_name: str) -> int:
+    """The cost units of a job running on this cluster, or the full cost.
+
+    Reads the cluster's handle and asks the runtime that owns it. Blocking
+    (database reads), so async callers run it in a thread.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    return _job_cost_units(managed_job_runtime.cost_units(handle))
+
+
 def _job_cost_units(units: Optional[int]) -> int:
     """A runtime-reported job cost, or the full cost if it reported none.
 
@@ -909,8 +919,9 @@ class JobController:
     async def _update_cost_units(self, cluster_name: str) -> None:
         """Count this job at the cost its runtime reports for its cluster.
 
-        A job counts in full until its first launch brings its cluster up;
-        from then on it counts at the cost of its latest cluster. A lower cost
+        A job counts in full until its first launch brings its cluster up
+        (unless it already had one when this process claimed it); from then
+        on it counts at the cost of its latest cluster. A lower cost
         lets this process claim more jobs. A higher one, which only a relaunch
         onto another kind of cluster can cause, holds off new claims until the
         process is back under its cap. Pools and job groups keep the full
@@ -921,9 +932,7 @@ class JobController:
                 not managed_job_runtime.is_registered()):
             return
         try:
-            handle = await asyncio.to_thread(
-                global_user_state.get_handle_from_cluster_name, cluster_name)
-            units = _job_cost_units(managed_job_runtime.cost_units(handle))
+            units = await asyncio.to_thread(_cluster_cost_units, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             # Keep the current cost; it is a capacity estimate, not a reason
             # to fail the job.
@@ -4381,11 +4390,10 @@ class ControllerManager:
 
         logger.info(f'Starting job {job_id} with log_file={log_file}')
 
+        cost_units = await self._claimed_cost_units(job_id, pool)
         async with self._job_tasks_lock:
             self.starting.add(job_id)
-            # Counted at the full cost until a launch brings its cluster up
-            # (JobController._update_cost_units).
-            self.job_costs[job_id] = controller_utils.JOB_COST_UNITS
+            self.job_costs[job_id] = cost_units
         task = await create_background_task(
             self.run_job_loop(job_id, log_file, pool))
         # Release the cost however the job loop ends, including when it fails
@@ -4582,6 +4590,33 @@ class ControllerManager:
                              'cancelling it for its deadline.')
                 return False
             return True
+
+    async def _claimed_cost_units(self, job_id: int,
+                                  pool: Optional[str]) -> int:
+        """The cost units a job counts for from the moment it is claimed.
+
+        A job claimed again, for example after a controller restart, may
+        already have its cluster up. It counts at that cluster's cost at once,
+        rather than in full until it resumes, so this process keeps claiming
+        while its jobs come back. Any other job counts in full until a launch
+        brings its cluster up (JobController._update_cost_units). Pool jobs
+        always count in full.
+        """
+        full = controller_utils.JOB_COST_UNITS
+        if pool is not None or not managed_job_runtime.is_registered():
+            return full
+        try:
+            task_name = await managed_job_state.get_launched_task_name_async(
+                job_id)
+            if task_name is None:
+                return full
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task_name, job_id)
+            return await asyncio.to_thread(_cluster_cost_units, cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get the cost of claimed job {job_id}: '
+                           f'{common_utils.format_exception(e)}')
+            return full
 
     def _claimed_load(self) -> Tuple[int, int]:
         """The (jobs, cost units) this process holds against its job cap.
