@@ -927,13 +927,13 @@ class JobController:
     async def _update_cost_units(self, cluster_name: str) -> None:
         """Count this job at the cost its runtime reports for its cluster.
 
-        A job counts in full until its first launch brings its cluster up
-        (unless it already had one when this process claimed it); from then
-        on it counts at the cost of its latest cluster. A lower cost
-        lets this process claim more jobs. A higher one, which only a relaunch
-        onto another kind of cluster can cause, holds off new claims until the
-        process is back under its cap. Pools and job groups keep the full
-        cost: their clusters are shared or several.
+        A job counts in full while it launches, a pipeline's next task
+        launches, or a recovery relaunches it (_count_in_full); once the
+        launch brings its cluster up, or if it already had one when this
+        process claimed it, it counts at that cluster's cost. A lower cost
+        lets this process claim more jobs; a higher one holds off new claims
+        until the process is back under its cap. Pools and job groups keep
+        the full cost: their clusters are shared or several.
         """
         if (self._job_costs is None or self._pool is not None or
                 self._dag.is_job_group() or
@@ -2202,6 +2202,9 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
+            # A relaunch launches, or waits for resources, like any launching
+            # job: count the job in full until the new cluster reports its cost.
+            await self._count_in_full()
             recovered_time = await executor.recover()
             # The relaunch may have persisted runtime observations of its own.
             runtime_cursor_stale = True

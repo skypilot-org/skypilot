@@ -2271,6 +2271,7 @@ class TestTransientJobStatusRecoveryWindow:
         instance._job_id = 1
         instance._pool = None
         instance._update_cost_units = AsyncMock()
+        instance._count_in_full = AsyncMock()
         executor = MagicMock()
         observation = controller_module.managed_job_runtime.RuntimeObservation(
             runtime_id='allocation',
@@ -2350,6 +2351,7 @@ class TestTransientJobStatusRecoveryWindow:
         instance._job_id = 1
         instance._pool = None
         instance._update_cost_units = AsyncMock()
+        instance._count_in_full = AsyncMock()
         instance._update_live_log_links = AsyncMock(return_value=True)
         executor = MagicMock()
         with patch.object(controller_module.time, 'time',
@@ -2446,6 +2448,7 @@ class TestTransientJobStatusRecoveryWindow:
         mock_self._job_id = 1
         mock_self._pool = None
         mock_self._update_cost_units = AsyncMock()
+        mock_self._count_in_full = AsyncMock()
 
         executor = MagicMock()
         executor.recover = AsyncMock(side_effect=fake_recover)
@@ -2549,6 +2552,7 @@ class TestTransientJobStatusRecoveryWindow:
         mock_self._job_id = 1
         mock_self._pool = None
         mock_self._update_cost_units = AsyncMock()
+        mock_self._count_in_full = AsyncMock()
 
         executor = MagicMock()
         executor.recover = AsyncMock(side_effect=fake_recover)
@@ -2690,6 +2694,7 @@ class TestTransientJobStatusRecoveryWindow:
         mock_self._job_id = 1
         mock_self._pool = None
         mock_self._update_cost_units = AsyncMock()
+        mock_self._count_in_full = AsyncMock()
         # Reached only by the still-running multi-node case.
         mock_self._update_live_log_links = AsyncMock(return_value=True)
 
@@ -2758,6 +2763,7 @@ class TestRuntimeCursorReads:
         instance._job_id = 1
         instance._pool = None
         instance._update_cost_units = AsyncMock()
+        instance._count_in_full = AsyncMock()
         instance._update_live_log_links = AsyncMock(return_value=True)
         instance._cleanup_cluster = AsyncMock()
         return instance
@@ -4618,3 +4624,82 @@ class TestNewTaskCountsInFull:
         jc.starting_lock = asyncio.Lock()
         await jc._count_in_full()
         assert not job_costs
+
+
+class TestRecoveryCountsInFull:
+    """A recovery relaunch counts the job in full until the new cluster reports
+    its cost, like any launch."""
+
+    class _StopLoop(Exception):
+        pass
+
+    @pytest.mark.asyncio
+    async def test_recover_runs_at_full_cost(self, monkeypatch):
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            0)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+        # iter 1: transient failure, retry; iter 2: past the window, recover;
+        # iter 3: stop.
+        clock = {'t': 1000.0}
+        deltas = iter([0.0, 100.0])
+
+        async def fake_get_job_status(*args, **kwargs):
+            try:
+                clock['t'] += next(deltas)
+            except StopIteration:
+                raise self._StopLoop()
+            return None, 'Job status check timed out after 30s.'
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+        mock_self._update_cost_units = AsyncMock()
+        mock_self._count_in_full = AsyncMock()
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=clock['t'])
+        calls = MagicMock()
+        calls.attach_mock(mock_self._count_in_full, 'count_in_full')
+        calls.attach_mock(executor.recover, 'recover')
+        calls.attach_mock(mock_self._update_cost_units, 'update_cost_units')
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          return_value=(status_lib.ClusterStatus.UP, handle)), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            with pytest.raises(self._StopLoop):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=MagicMock(name='task'),
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=False)
+
+        names = [c[0] for c in calls.mock_calls]
+        assert names == ['count_in_full', 'recover', 'update_cost_units']
