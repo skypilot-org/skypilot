@@ -119,3 +119,49 @@ def test_stale_mapping_is_used_when_identity_is_unknown(catalog_dir,
 def test_default_identity_without_cache(catalog_dir, mock_fetch):
     assert aws_catalog._get_az_mappings('default', can_fetch=False) is None
     mock_fetch.assert_not_called()
+
+
+def test_partial_refetch_keeps_cached_zones(catalog_dir, mock_fetch):
+    # The cache has us-east-1, but its fetch fails transiently this time.
+    cached = pd.DataFrame({
+        'AvailabilityZoneName': ['ap-south-1a', 'us-east-1a'],
+        'AvailabilityZone': ['aps1-az1', 'use1-az1'],
+    })
+    (catalog_dir / 'aws').mkdir(parents=True)
+    cached.to_csv(catalog_dir / 'aws' / 'az_mappings-abc.csv', index=False)
+    meta_dir = catalog_dir / '.meta' / 'aws'
+    meta_dir.mkdir(parents=True)
+    (meta_dir / 'az_mappings-abc.csv.md5').write_text(
+        hashlib.md5(cached.to_csv(index=False).encode()).hexdigest())
+    df = aws_catalog._get_az_mappings('abc')
+    assert sorted(
+        df['AvailabilityZone']) == ['aps1-az1', 'aps2-az1', 'use1-az1']
+    assert not catalog_common.is_catalog_modified('aws/az_mappings-abc.csv')
+
+
+def test_refresh_done_by_another_process_is_reused(catalog_dir, mock_fetch):
+    _write_mapping(catalog_dir)
+
+    class _OtherProcessRefreshesWhileWaiting:
+        """Stands in for the file lock, released by a process that has
+        just refreshed the mapping."""
+
+        def __init__(self, *_, **__):
+            pass
+
+        def __enter__(self):
+            meta_dir = catalog_dir / '.meta' / 'aws'
+            content = _NEW_MAPPING.to_csv(index=False)
+            (catalog_dir / 'aws' / 'az_mappings-abc.csv').write_text(content)
+            (meta_dir / 'az_mappings-abc.csv.md5').write_text(
+                hashlib.md5(content.encode()).hexdigest())
+            (meta_dir / 'az_mappings-abc.csv.regions').write_text(
+                aws_catalog._supported_regions_str())
+
+        def __exit__(self, *_):
+            pass
+
+    with mock.patch('filelock.FileLock', _OtherProcessRefreshesWhileWaiting):
+        df = aws_catalog._get_az_mappings('abc')
+    pd.testing.assert_frame_equal(df, _NEW_MAPPING)
+    mock_fetch.assert_not_called()

@@ -10,6 +10,8 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+import filelock
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -136,40 +138,63 @@ def _get_az_mappings(aws_user_hash: str,
     az_mapping_md5_path = common.get_catalog_path(f'.meta/{filename}.md5')
     az_mapping_regions_path = common.get_catalog_path(
         f'.meta/{filename}.regions')
-    cached = os.path.exists(az_mapping_path)
-    if cached and (
+
+    def _use_cache() -> bool:
+        return os.path.exists(az_mapping_path) and (
             not can_fetch or common.is_catalog_modified(filename) or
-            _az_mappings_cover_supported_regions(az_mapping_regions_path)):
+            _az_mappings_cover_supported_regions(az_mapping_regions_path))
+
+    # Fast path: avoid lock contention.
+    if _use_cache():
         return pd.read_csv(az_mapping_path)
     if aws_user_hash == 'default':
         return None
-    # Fetch az mapping from AWS.
-    try:
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('AWS: Fetching availability '
-                                         'zones mapping')):
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
-    except Exception as e:  # pylint: disable=broad-except
-        if not cached:
-            raise
-        # A stale mapping still covers the regions it was fetched for, so
-        # prefer it over failing, e.g. when credentials are unavailable.
-        logger.debug('Failed to refresh availability zone mapping, using the '
-                     f'cached one: {common_utils.format_exception(e)}')
-        return pd.read_csv(az_mapping_path)
     # get_catalog_path() is now a pure path getter; create the
     # parent dirs explicitly before writing.
     os.makedirs(os.path.dirname(az_mapping_path), exist_ok=True)
     os.makedirs(os.path.dirname(az_mapping_md5_path), exist_ok=True)
-    az_mapping_csv = az_mappings.to_csv(index=False)
-    _write_atomically(az_mapping_path, az_mapping_csv)
-    # Write md5 of the az_mapping file to a file so we can check it for
-    # any changes when uploading to the controller
-    az_mapping_hash = hashlib.md5(az_mapping_csv.encode(),
-                                  usedforsecurity=False).hexdigest()
-    _write_atomically(az_mapping_md5_path, az_mapping_hash)
-    # Written last, so an interrupted refresh is retried by the next caller.
-    _write_atomically(az_mapping_regions_path, _supported_regions_str())
+    # Lock so that concurrent processes fetch once and never interleave the
+    # writes of the mapping and its md5.
+    with filelock.FileLock(common.get_catalog_path(f'.meta/{filename}.lock')):
+        # Double check after acquiring the lock.
+        if _use_cache():
+            return pd.read_csv(az_mapping_path)
+        cached_mappings = (pd.read_csv(az_mapping_path)
+                           if os.path.exists(az_mapping_path) else None)
+        # Fetch az mapping from AWS.
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('AWS: Fetching availability '
+                                             'zones mapping')):
+                az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        except Exception as e:  # pylint: disable=broad-except
+            if cached_mappings is None:
+                raise
+            # A stale mapping still covers the regions it was fetched for,
+            # so prefer it over failing, e.g. when credentials are
+            # unavailable.
+            logger.debug('Failed to refresh availability zone mapping, '
+                         'using the cached one: '
+                         f'{common_utils.format_exception(e)}')
+            return cached_mappings
+        if cached_mappings is not None:
+            # The fetch skips regions that fail, e.g. on a transient network
+            # error. Zone ID to name mappings are fixed per account, so keep
+            # the cached zones rather than dropping a region in use.
+            az_mappings = pd.concat([az_mappings,
+                                     cached_mappings]).drop_duplicates(
+                                         subset='AvailabilityZone',
+                                         keep='first').reset_index(drop=True)
+        az_mapping_csv = az_mappings.to_csv(index=False)
+        _write_atomically(az_mapping_path, az_mapping_csv)
+        # Write md5 of the az_mapping file to a file so we can check it for
+        # any changes when uploading to the controller
+        az_mapping_hash = hashlib.md5(az_mapping_csv.encode(),
+                                      usedforsecurity=False).hexdigest()
+        _write_atomically(az_mapping_md5_path, az_mapping_hash)
+        # Written last, so an interrupted refresh is retried by the next
+        # caller.
+        _write_atomically(az_mapping_regions_path, _supported_regions_str())
     return az_mappings
 
 
