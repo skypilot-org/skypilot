@@ -1398,7 +1398,8 @@ class PbsCodeGen(TaskCodeGen):
                     job_lib.scheduler.schedule_step()
                     setup_returncodes = run_on_nodes(
                         {self._setup_num_nodes!r}, {self._setup_cmd!r}, {self._setup_log_dir!r}, {self._setup_envs!r},
-                        is_setup=True)
+                        is_setup=True,
+                        gpu_ids_per_node=(gpu_ids_per_node if {num_gpus} > 0 else None))
                     if sum(setup_returncodes) != 0:
                         setup_returncode = next(rc for rc in setup_returncodes if rc != 0)
                         msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}}.'

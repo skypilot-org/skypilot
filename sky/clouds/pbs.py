@@ -592,7 +592,12 @@ class PBS(clouds.Cloud):
             if resources.cpus is None:
                 gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
             if resources.memory is not None:
-                gpu_task_memory = float(resources.memory.strip('+'))
+                memory = resources.memory.strip('+')
+                if memory.endswith('x'):
+                    # Memory given as a multiple of the CPU count.
+                    gpu_task_memory = float(memory[:-1]) * gpu_task_cpus
+                else:
+                    gpu_task_memory = float(memory)
             else:
                 gpu_task_memory = (gpu_task_cpus *
                                    self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)

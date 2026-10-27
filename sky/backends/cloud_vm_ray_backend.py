@@ -7185,7 +7185,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                task: task_lib.Task) -> Dict[str, float]:
         """Returns task demands for the handle's execution backend."""
         resources_dict = backend_utils.get_task_demands_dict(task)
-        if (not isinstance(handle.launched_resources.cloud, clouds.Slurm) or
+        # Slurm and PBS reserve CPUs per job themselves, so the demand must
+        # be the task's real CPU request.
+        if (not isinstance(handle.launched_resources.cloud,
+                           (clouds.Slurm, clouds.PBS)) or
                 task.is_controller_task()):
             return resources_dict
 

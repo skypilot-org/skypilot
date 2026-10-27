@@ -190,6 +190,19 @@ class TestFeasibleResources:
         assert feasible.resources_list[0].instance_type == '8CPU--32GB--A100:2'
         assert rwo.call_args.args[0] == '8CPU--32GB--A100:2'
 
+    def test_gpu_request_with_memory_multiplier(self):
+        with mock.patch.object(clouds.PBS, 'regions_with_offering',
+                               return_value=[clouds.Region('c1')]), \
+             mock.patch.object(pbs_utils, 'get_all_pbs_cluster_names',
+                               return_value=['c1']):
+            resources = resources_lib.Resources(cloud=clouds.PBS(),
+                                                accelerators={'A100': 1},
+                                                cpus='4',
+                                                memory='4x')
+            feasible = clouds.PBS()._get_feasible_launchable_resources(
+                resources)
+        assert feasible.resources_list[0].instance_type == '4CPU--16GB--A100:1'
+
     def test_cpu_request_uses_defaults(self):
         with mock.patch.object(clouds.PBS, 'regions_with_offering',
                                return_value=[clouds.Region('c1')]), \

@@ -655,7 +655,8 @@ if script or False:
         job_lib.scheduler.schedule_step()
         setup_returncodes = run_on_nodes(
             None, None, None, None,
-            is_setup=True)
+            is_setup=True,
+            gpu_ids_per_node=(gpu_ids_per_node if 1 > 0 else None))
         if sum(setup_returncodes) != 0:
             setup_returncode = next(rc for rc in setup_returncodes if rc != 0)
             msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode}.'
