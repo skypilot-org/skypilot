@@ -3203,8 +3203,13 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
     ret = []
     if row:
         ret = json.loads(row.value)
+    return _clouds_from_names(ret)
+
+
+def _clouds_from_names(names: List[str]) -> List['clouds.Cloud']:
+    """Turn stored cloud names into cloud objects, skipping removed clouds."""
     enabled_clouds: List['clouds.Cloud'] = []
-    for c in ret:
+    for c in names:
         try:
             cloud = registry.CLOUD_REGISTRY.from_str(c)
         except ValueError:
@@ -3216,6 +3221,38 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds
+
+
+@metrics_lib.time_me
+def get_cached_enabled_clouds_by_workspace(
+        cloud_capability: 'cloud.CloudCapability',
+        workspaces: List[str]) -> Dict[str, List['clouds.Cloud']]:
+    """Enabled clouds for many workspaces, in one query.
+
+    A missing row is an empty list. Order of ``workspaces`` is preserved
+    for the first occurrence of each name.
+    """
+    if not workspaces:
+        return {}
+    key_for: Dict[str, str] = {}
+    for workspace in workspaces:
+        key_for.setdefault(workspace,
+                           _get_enabled_clouds_key(cloud_capability, workspace))
+    # Chunked like the cluster lookups; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
+    keys = list(dict.fromkeys(key_for.values()))
+    by_key: Dict[str, List[str]] = {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        for offset in range(0, len(keys), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = keys[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            for row in session.query(config_table).filter(
+                    config_table.c.key.in_(batch)).all():
+                if row.value:
+                    by_key[row.key] = json.loads(row.value)
+    return {
+        workspace: _clouds_from_names(by_key.get(key, []))
+        for workspace, key in key_for.items()
+    }
 
 
 @metrics_lib.time_me
