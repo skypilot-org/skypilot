@@ -597,11 +597,23 @@ def _not_held_by_launch_limit(
     )
 
 
-def get_users_at_launch_limit(max_launching_jobs_per_user: int) -> Set[str]:
-    """Users whose waiting jobs the per-user launch limit holds back."""
+def get_held_job_ids(max_launching_jobs_per_user: int) -> Set[int]:
+    """Ids of the WAITING jobs the per-user launch limit holds back.
+
+    The scheduler's own rule (``_not_held_by_launch_limit``, as the claim in
+    ``get_waiting_job_async`` applies it), so the jobs queue reports a job as
+    held exactly when the claim skips it: a recovered job with a live task is
+    never held, whatever its user's count.
+    """
     with orm.Session(_db_manager.get_engine()) as session:
         rows = session.execute(
-            _users_at_launch_limit(max_launching_jobs_per_user)).fetchall()
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.WAITING.value,
+                    sqlalchemy.not_(
+                        _not_held_by_launch_limit(max_launching_jobs_per_user)),
+                ))).fetchall()
     return {row[0] for row in rows}
 
 
