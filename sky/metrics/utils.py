@@ -2371,13 +2371,14 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
 
 
 # Series federated from each context's Prometheus by /endpoints-metrics: the
-# serving engines' native metrics (vllm:* today; future engines append their
-# prefixes, e.g. sglang:*), plus the workload kube-state-metrics the
+# serving engines' native metrics (vllm:* and sglang:*; a new engine appends
+# its prefix), plus the workload kube-state-metrics the
 # Autoscaling dashboard plots — Deployment replica counts and the
 # autoscaler-managed HPA target threshold. These ride the endpoints route
 # (not /gpu-metrics) because they exist solely for endpoint observability.
 ENDPOINT_METRICS_MATCH_PATTERNS = [
     '{__name__=~"vllm:.*"}',
+    '{__name__=~"sglang:.*"}',
     '{__name__=~"litellm_.*"}',
     '{__name__=~"kube_deployment_.*|kube_horizontalpodautoscaler_spec_target_metric"}',  # pylint: disable=line-too-long
 ]
