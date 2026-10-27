@@ -1,4 +1,5 @@
 """Tests for the AWS availability zone mapping cache."""
+import hashlib
 from unittest import mock
 
 import pandas as pd
@@ -33,13 +34,18 @@ def mock_fetch():
         yield m
 
 
-def _write_mapping(catalog_dir, regions_marker=None):
+def _write_mapping(catalog_dir, regions_marker=None, edited=False):
+    """Writes a cached mapping as an older SkyPilot would have."""
     (catalog_dir / 'aws').mkdir(parents=True, exist_ok=True)
-    _OLD_MAPPING.to_csv(catalog_dir / 'aws' / 'az_mappings-abc.csv',
-                        index=False)
+    content = _OLD_MAPPING.to_csv(index=False)
+    meta_dir = catalog_dir / '.meta' / 'aws'
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    (meta_dir / 'az_mappings-abc.csv.md5').write_text(
+        hashlib.md5(content.encode()).hexdigest())
+    if edited:
+        content += 'ap-south-1z,aps1-az9\n'
+    (catalog_dir / 'aws' / 'az_mappings-abc.csv').write_text(content)
     if regions_marker is not None:
-        meta_dir = catalog_dir / '.meta' / 'aws'
-        meta_dir.mkdir(parents=True, exist_ok=True)
         (meta_dir / 'az_mappings-abc.csv.regions').write_text(regions_marker)
 
 
@@ -79,6 +85,14 @@ def test_stale_mapping_is_refetched(catalog_dir, mock_fetch, regions_marker):
     # The md5 must follow the new content, or the refreshed mapping would be
     # treated as manually modified and uploaded to controllers.
     assert not catalog_common.is_catalog_modified('aws/az_mappings-abc.csv')
+    assert not list(catalog_dir.rglob('*.tmp'))
+
+
+def test_edited_mapping_is_not_refreshed(catalog_dir, mock_fetch):
+    _write_mapping(catalog_dir, edited=True)
+    df = aws_catalog._get_az_mappings('abc')
+    assert 'aps1-az9' in df['AvailabilityZone'].tolist()
+    mock_fetch.assert_not_called()
 
 
 def test_stale_mapping_is_kept_when_refetch_fails(catalog_dir, mock_fetch):

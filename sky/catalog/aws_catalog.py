@@ -111,6 +111,14 @@ def _az_mappings_cover_supported_regions(regions_path: str) -> bool:
         return f.read() == _supported_regions_str()
 
 
+def _write_atomically(path: str, content: str) -> None:
+    # Readers in other processes must never see a truncated file.
+    tmp_path = f'{path}.{os.getpid()}.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    os.replace(tmp_path, path)
+
+
 def _get_az_mappings(aws_user_hash: str,
                      can_fetch: bool = True) -> Optional['pd.DataFrame']:
     """Returns the zone ID to name mapping for the AWS account.
@@ -119,6 +127,9 @@ def _get_az_mappings(aws_user_hash: str,
         aws_user_hash: Hash of the AWS user identity, or 'default'.
         can_fetch: Whether AWS can be queried, i.e. the user identity is known.
             If False, a cached mapping is used even if it is stale.
+
+    A cached mapping edited by hand is never refreshed, like other catalogs
+    in common.read_catalog.
     """
     filename = f'aws/az_mappings-{aws_user_hash}.csv'
     az_mapping_path = common.get_catalog_path(filename)
@@ -127,7 +138,7 @@ def _get_az_mappings(aws_user_hash: str,
         f'.meta/{filename}.regions')
     cached = os.path.exists(az_mapping_path)
     if cached and (
-            not can_fetch or
+            not can_fetch or common.is_catalog_modified(filename) or
             _az_mappings_cover_supported_regions(az_mapping_regions_path)):
         return pd.read_csv(az_mapping_path)
     if aws_user_hash == 'default':
@@ -150,16 +161,15 @@ def _get_az_mappings(aws_user_hash: str,
     # parent dirs explicitly before writing.
     os.makedirs(os.path.dirname(az_mapping_path), exist_ok=True)
     os.makedirs(os.path.dirname(az_mapping_md5_path), exist_ok=True)
-    az_mappings.to_csv(az_mapping_path, index=False)
+    az_mapping_csv = az_mappings.to_csv(index=False)
+    _write_atomically(az_mapping_path, az_mapping_csv)
     # Write md5 of the az_mapping file to a file so we can check it for
     # any changes when uploading to the controller
-    with open(az_mapping_path, 'r', encoding='utf-8') as f:
-        az_mapping_hash = hashlib.md5(f.read().encode(),
-                                      usedforsecurity=False).hexdigest()
-    with open(az_mapping_md5_path, 'w', encoding='utf-8') as f:
-        f.write(az_mapping_hash)
-    with open(az_mapping_regions_path, 'w', encoding='utf-8') as f:
-        f.write(_supported_regions_str())
+    az_mapping_hash = hashlib.md5(az_mapping_csv.encode(),
+                                  usedforsecurity=False).hexdigest()
+    _write_atomically(az_mapping_md5_path, az_mapping_hash)
+    # Written last, so an interrupted refresh is retried by the next caller.
+    _write_atomically(az_mapping_regions_path, _supported_regions_str())
     return az_mappings
 
 
