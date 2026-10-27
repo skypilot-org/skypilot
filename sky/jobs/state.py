@@ -508,6 +508,90 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
         ))
 
 
+def _users_at_launch_limit(
+        max_launching_jobs_per_user: int) -> sqlalchemy.Select:
+    """Users with at least this many claimed jobs that are not running yet.
+
+    Counted by task status rather than schedule state: a claimed job can be in
+    any of the claimed schedule states while it waits (LAUNCHING while it
+    launches, is in launch backoff or is parked waiting for resources; ALIVE
+    during an emergency retry's backoff), and a job group stays LAUNCHING
+    while it runs. So a claimed job counts while it has a task waiting to run
+    (PENDING, STARTING or RECOVERING) and none running. Pool jobs never launch
+    a cluster and are not counted.
+    """
+    launching_info = job_info_table.alias('launching_info')
+
+    def _has_task_in(statuses: List[ManagedJobStatus]):
+        return sqlalchemy.exists().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == launching_info.c.spot_job_id,
+                spot_table.c.status.in_([status.value for status in statuses]),
+            ))
+
+    return sqlalchemy.select(launching_info.c.user_hash).where(
+        sqlalchemy.and_(
+            launching_info.c.schedule_state.in_([
+                ManagedJobScheduleState.LAUNCHING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+                ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                ManagedJobScheduleState.ALIVE.value,
+            ]),
+            launching_info.c.pool.is_(None),
+            launching_info.c.user_hash.is_not(None),
+            _has_task_in([
+                ManagedJobStatus.PENDING,
+                ManagedJobStatus.STARTING,
+                ManagedJobStatus.RECOVERING,
+            ]),
+            ~_has_task_in(
+                [ManagedJobStatus.RUNNING, ManagedJobStatus.WINDING_DOWN]),
+        )).group_by(
+            launching_info.c.user_hash).having(sqlalchemy.func.count() >=  # pylint: disable=not-callable
+                                               max_launching_jobs_per_user)
+
+
+def _not_held_by_launch_limit(
+    max_launching_jobs_per_user: Optional[int]
+) -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row the per-user launch limit does not hold back.
+
+    Correlates to ``job_info_table`` in the enclosing query. Only a WAITING
+    non-pool job of a user at the limit is held back.
+    """
+    if max_launching_jobs_per_user is None:
+        return sqlalchemy.true()
+    return sqlalchemy.or_(
+        job_info_table.c.schedule_state !=
+        ManagedJobScheduleState.WAITING.value,
+        job_info_table.c.pool.is_not(None),
+        job_info_table.c.user_hash.is_(None),
+        job_info_table.c.user_hash.not_in(
+            _users_at_launch_limit(max_launching_jobs_per_user)),
+    )
+
+
+def get_users_at_launch_limit(max_launching_jobs_per_user: int) -> Set[str]:
+    """Users whose waiting jobs the per-user launch limit holds back."""
+    with orm.Session(_db_manager.get_engine()) as session:
+        rows = session.execute(
+            _users_at_launch_limit(max_launching_jobs_per_user)).fetchall()
+    return {row[0] for row in rows}
+
+
+def users_at_launch_limit_sql(max_launching_jobs_per_user: int,
+                              dialect: sqlalchemy.engine.Dialect) -> str:
+    """The users-at-the-limit subquery as SQL text, for raw-SQL readers.
+
+    Lets sky/jobs/stall.py apply the scheduler's own rule inside its query.
+    Compiled with literal values, which is safe because its only values are
+    the limit and status constants, never stored or user-provided text.
+    """
+    return str(
+        _users_at_launch_limit(int(max_launching_jobs_per_user)).compile(
+            dialect=dialect, compile_kwargs={'literal_binds': True}))
+
+
 # Subquery that aggregates batch_state into per-job progress counts.
 # Used by jobs-queue queries to supply batch_total_batches and
 # batch_completed_batches without denormalized columns on job_info.
@@ -2049,13 +2133,18 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
 
 
 def get_managed_jobs_highest_priority(
-        conn: Optional[sqlalchemy.engine.Connection] = None) -> int:
+        conn: Optional[sqlalchemy.engine.Connection] = None,
+        max_launching_jobs_per_user: Optional[int] = None) -> int:
     """Get the highest priority of the managed jobs.
 
     `conn` runs the query on a connection the caller already owns, which is how
     a caller with a statement budget keeps this inside it -- see
     sky/jobs/stall.py, where an unbounded query on the metrics thread is the
     thing the budget exists to prevent.
+
+    A job that the per-user launch limit holds back (see
+    get_waiting_job_async) does not contend for a controller, so it blocks
+    nobody.
     """
     query = sqlalchemy.select(
         sqlalchemy.func.max(job_info_table.c.priority)
@@ -2071,6 +2160,7 @@ def get_managed_jobs_highest_priority(
             # A job waiting on its dependencies does not contend for a
             # controller, so it blocks nobody.
             ~_unfinished_dependency_exists(),
+            _not_held_by_launch_limit(max_launching_jobs_per_user),
         ))
     with orm.Session(
             conn if conn is not None else _db_manager.get_engine()) as session:
@@ -3631,11 +3721,21 @@ def get_pool_worker_used_resources(
 
 @db_retries.retry_async
 async def get_waiting_job_async(
-        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
+    pid: int,
+    pid_started_at: float,
+    max_launching_jobs_per_user: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
     transitions it to LAUNCHING state to prevent race conditions.
+
+    With ``max_launching_jobs_per_user`` set, skips the non-pool jobs of a user
+    who already has that many claimed jobs that are not running yet, so one
+    user's jobs waiting for resources cannot take every controller slot. The
+    check is not atomic with the claim: concurrent claims by several
+    controller processes can each pass it, so a user can briefly exceed the
+    limit by up to the number of controller processes.
 
     Returns the job information if a job was successfully transitioned to
     LAUNCHING, or None if no suitable job was found.
@@ -3683,6 +3783,7 @@ async def get_waiting_job_async(
                 ),
                 # A job waits until every job it depends on is DONE.
                 ~_unfinished_dependency_exists(),
+                _not_held_by_launch_limit(max_launching_jobs_per_user),
             )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),

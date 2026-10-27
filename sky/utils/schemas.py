@@ -3311,10 +3311,17 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(extra_properties={
-                'status_check': jobs_status_check_schema,
-                **_extra_jobs_properties,
-            },),
+            'jobs': _get_controller_schema(
+                extra_properties={
+                    'status_check': jobs_status_check_schema,
+                    # Most claimed, not yet running jobs one user may hold; see
+                    # sky.jobs.state.get_waiting_job_async.
+                    'max_launching_jobs_per_user': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
+                    **_extra_jobs_properties,
+                },),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
