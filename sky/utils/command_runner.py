@@ -767,6 +767,7 @@ class CommandRunner:
                         stderr = f'rsync timed out after {timeout} seconds.'
                         break
                 time.sleep(sleep_time)
+
         direction = 'up' if up else 'down'
         timeout_hint = (f'rsync timed out after {timeout} seconds. '
                         if timed_out else '')
