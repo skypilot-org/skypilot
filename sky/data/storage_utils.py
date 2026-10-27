@@ -56,6 +56,8 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     try:
         with open(skyignore_path, 'r', encoding='utf-8') as f:
             for line in f:
+                # TODO(Hawon-Oh): strip() removes leading/trailing spaces from
+                # patterns, preventing exclusion of filenames with those spaces.
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue

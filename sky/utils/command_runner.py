@@ -1,4 +1,5 @@
 """Runner for commands to be executed on the cluster."""
+import contextlib
 import enum
 import fcntl
 import hashlib
@@ -15,8 +16,8 @@ import tempfile
 import termios
 import threading
 import time
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Tuple, Type, Union)
 import urllib.parse
 import uuid
 
@@ -78,11 +79,6 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 # TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
 # consistency between bucket upload and rsync.
-# NOTE(Hawon-Oh): _rsync() no longer uses these filters; it now relies on
-# storage_utils.get_excluded_files (which honors .skyignore negation '!') via
-# --exclude-from. These are only still used by
-# backend_utils.path_size_megabytes, so remove them once that caller is
-# migrated too.
 RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
@@ -100,6 +96,39 @@ _DEFAULT_CONNECT_TIMEOUT = 30
 # blip and retry it in an inner loop, which would multiply with the outer
 # `_auto_retry` and turn a wedged command into a much longer stall.
 TIMEOUT_RETURNCODE = 124
+
+
+@contextlib.contextmanager
+def _skyignore_rsync_filter(
+        skyignore_path: Optional[pathlib.Path]) -> Iterator[Optional[str]]:
+    """Translate root skyignore negations while leaving matching to rsync."""
+    if skyignore_path is None or not skyignore_path.is_file():
+        yield None
+        return
+    # Preserve filename bytes, including spaces and Unicode line separators.
+    # Only LF and CRLF delimit rules; rsync does not require UTF-8 input.
+    lines = skyignore_path.read_bytes().split(b'\n')
+    patterns = [line[:-1] if line.endswith(b'\r') else line for line in lines]
+    patterns = [line for line in patterns if line and not line.startswith(b'#')]
+    if not any(
+            pattern.startswith(b'!') and len(pattern) > 1
+            for pattern in patterns):
+        # Preserve the original dir-merge behavior when no negations are used.
+        yield None
+        return
+    rules = []
+    # Rsync uses the first matching rule; skyignore negations use the last.
+    for pattern in reversed(patterns):
+        if pattern.startswith(b'!'):
+            pattern = pattern[1:]
+            if pattern:
+                rules.append(b'+ ' + pattern)
+        else:
+            rules.append(b'- ' + pattern)
+    with tempfile.TemporaryDirectory(prefix='skyignore-') as filter_dir:
+        filter_path = pathlib.Path(filter_dir) / 'filter'
+        filter_path.write_bytes(b'\n'.join(rules) + b'\n')
+        yield f'--filter={shlex.quote("merge " + str(filter_path))}'
 
 
 def _timed_out_result(
@@ -599,11 +628,26 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
         rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
+        # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        # Set when uploading; the temp file is created in the `up` branch below,
-        # after the remote home-dir lookup, so a failure there cannot leak it.
-        exclude_file: Optional[str] = None
+        skyignore_path = resolved_source / constants.SKY_IGNORE_FILE
+        filter_index = len(rsync_command)
+        if skyignore_path.exists():
+            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+        else:
+            rsync_command.append(RSYNC_FILTER_GITIGNORE)
+            if up:
+                # Build --exclude-from argument.
+                if (resolved_source / GIT_EXCLUDE).exists():
+                    # Ensure file exists; otherwise, rsync will error out.
+                    #
+                    # We shlex.quote() because the path may contain spaces:
+                    #   'my dir/.git/info/exclude'
+                    # Without quoting rsync fails.
+                    rsync_command.append(
+                        RSYNC_EXCLUDE_OPTION.format(
+                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
@@ -638,25 +682,6 @@ class CommandRunner:
                         get_remote_home_dir=get_remote_home_dir,
                         deadline=deadline)
                     resolved_target = target.replace('~', remote_home_dir)
-            # --exclude-from: exclude files matched by .skyignore/.gitignore.
-            if resolved_source.is_dir():
-                # pylint: disable-next=import-outside-toplevel
-                from sky.data import storage_utils
-                excluded_files = storage_utils.get_excluded_files(
-                    str(resolved_source))
-                if excluded_files:
-                    fd, exclude_file = tempfile.mkstemp(prefix='skyignore-',
-                                                        suffix='.exclude')
-                    with os.fdopen(fd, 'w') as f:
-                        # Anchor each path to the rsync root with '/' so an
-                        # entry matches exactly that file/dir, not a same-named
-                        # path deeper in the tree.
-                        f.write('\n'.join('/' + p.replace(os.sep, '/')
-                                          for p in excluded_files))
-                    # We shlex.quote() the temp-file path because it may contain
-                    # spaces; without quoting rsync would fail to read it.
-                    rsync_command.append(
-                        RSYNC_EXCLUDE_OPTION.format(shlex.quote(exclude_file)))
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
@@ -683,13 +708,15 @@ class CommandRunner:
                 f'{maybe_dest_prefix}{resolved_source!r}',
                 f'{resolved_target!r}',
             ])
-        command = ' '.join(rsync_command)
-        logger.debug(f'Running rsync command: {command}')
-
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         timed_out = False
-        try:
+        with _skyignore_rsync_filter(
+                skyignore_path if up else None) as merge_filter:
+            if merge_filter is not None:
+                rsync_command.insert(filter_index, merge_filter)
+            command = ' '.join(rsync_command)
+            logger.debug(f'Running rsync command: {command}')
             while max_retry >= 0:
                 attempt_timeout: Optional[int] = None
                 if deadline is not None:
@@ -740,14 +767,6 @@ class CommandRunner:
                         stderr = f'rsync timed out after {timeout} seconds.'
                         break
                 time.sleep(sleep_time)
-        finally:
-            # Always remove the exclude temp file, even if a rsync attempt
-            # raised unexpectedly. On the normal and failure paths this runs
-            # before handle_returncode below, so the file is cleaned up even
-            # when rsync exits non-zero.
-            if exclude_file is not None:
-                os.unlink(exclude_file)
-
         direction = 'up' if up else 'down'
         timeout_hint = (f'rsync timed out after {timeout} seconds. '
                         if timed_out else '')
