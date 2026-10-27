@@ -878,6 +878,8 @@ class _DefaultServiceStatusRunner:
         pool: bool,
     ) -> List[Dict[str, Any]]:
         noun = 'pool' if pool else 'service'
+        if serve_utils.is_consolidation_mode(pool):
+            return serve_utils.get_service_status(service_names, pool=pool)
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         service_records: List[Dict[str, Any]] = []
