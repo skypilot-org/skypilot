@@ -273,8 +273,15 @@ def ssh_options_list(
     escape_percent_expand: bool = False,
     ssh_log_file: Optional[str] = None,
     disable_identities_only: bool = False,
+    ssh_control_path: Optional[str] = None,
 ) -> List[str]:
-    """Returns a list of sane options for 'ssh'."""
+    """Returns a list of sane options for 'ssh'.
+
+    ``ssh_control_path`` is a user-managed ControlPath (e.g. from a PBS
+    cluster's SSH config); when set it is used as is, even through a proxy,
+    so that a master connection the user opened by hand (for a
+    password-only login node) is reused.
+    """
     if connect_timeout is None:
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
@@ -332,6 +339,15 @@ def ssh_options_list(
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
+            'ControlMaster': 'auto',
+            'ControlPath': control_path,
+            'ControlPersist': '300s',
+        })
+    if ssh_control_path is not None:
+        control_path = ssh_control_path
+        if escape_percent_expand:
+            control_path = control_path.replace('%', '%%')
+        arg_dict.update({
             'ControlMaster': 'auto',
             'ControlPath': control_path,
             'ControlPersist': '300s',
@@ -1091,6 +1107,7 @@ class SSHCommandRunner(CommandRunner):
         port_forward_execute_remote_command: Optional[bool] = False,
         enable_interactive_auth: bool = False,
         disable_identities_only: bool = False,
+        ssh_control_path: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
 
@@ -1126,6 +1143,8 @@ class SSHCommandRunner(CommandRunner):
             disable_identities_only: If True, do not set IdentitiesOnly=yes.
                 This allows SSH to use keys from ssh-agent and default key
                 locations in addition to any explicitly specified key.
+            ssh_control_path: A user-managed ControlPath to reuse instead
+                of SkyPilot's own; see ssh_options_list.
         """
         super().__init__(node)
         ip, port = node
@@ -1140,6 +1159,7 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master or
             control_master_utils.should_disable_control_master())
         self.disable_identities_only = disable_identities_only
+        self.ssh_control_path = ssh_control_path
         # Ensure SSH key is available. For SkyPilot-managed keys, create from
         # database. For external keys (e.g., Slurm clusters), verify existence.
         if ssh_private_key is not None and _is_skypilot_managed_key(
@@ -1258,6 +1278,7 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master=self.disable_control_master,
             ssh_log_file=ssh_log_file,
             disable_identities_only=self.disable_identities_only,
+            ssh_control_path=self.ssh_control_path,
         ) + [f'{self.ssh_user}@{self.ip}']
 
     def _retry_with_interactive_auth(
@@ -1625,7 +1646,8 @@ class SSHCommandRunner(CommandRunner):
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
                 disable_control_master=self.disable_control_master,
-                disable_identities_only=self.disable_identities_only))
+                disable_identities_only=self.disable_identities_only,
+                ssh_control_path=self.ssh_control_path))
         rsh_option = f'ssh {ssh_options}'
         self._rsync(source,
                     target,
@@ -2545,3 +2567,98 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                  stream_logs=stream_logs,
                                  max_retry=max_retry,
                                  timeout=timeout)
+
+
+class PbsCommandRunner(SSHCommandRunner):
+    """Runner for the nodes of a PBS allocation.
+
+    The allocation's batch script runs a user-level sshd on every node (see
+    sky/provision/pbs/instance.py). This runner connects to that sshd with
+    SkyPilot's own key, tunnelling through the cluster's login node with a
+    ProxyCommand, and gives every command the cluster's shared home and the
+    node-local runtime directory.
+    """
+
+    # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+    # package installation while avoiding permission conflicts when
+    # multiple users share the same node. Otherwise it defaults to
+    # ~/.cache/uv on the shared filesystem.
+    _ENV_SETUP = 'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u)'
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        login_node_proxy_command: str,
+        **kwargs,
+    ):
+        """Initialize PbsCommandRunner.
+
+        Args:
+            node: (hostname, port) of the node's SkyPilot sshd, as the login
+              node resolves the hostname.
+            ssh_user: The login user; the sshd runs as that user.
+            ssh_private_key: Path to SkyPilot's private key.
+            sky_dir: The cluster's shared home directory on the PBS cluster.
+            skypilot_runtime_dir: The node-local SkyPilot runtime directory.
+            login_node_proxy_command: ssh ProxyCommand reaching the node
+              through the login node.
+            **kwargs: Forwarded to SSHCommandRunner.
+        """
+        super().__init__(node,
+                         ssh_user,
+                         ssh_private_key,
+                         ssh_proxy_command=login_node_proxy_command,
+                         **kwargs)
+        self.sky_dir = sky_dir
+        self.skypilot_runtime_dir = skypilot_runtime_dir
+
+    def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
+        del timeout  # unused
+        # Every command runs with HOME set to the cluster's shared home.
+        return self.sky_dir
+
+    def _wrap_command(self, cmd: Union[str, List[str]]) -> str:
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
+        return (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                f'{shlex.quote(self.skypilot_runtime_dir)} && '
+                f'{self._ENV_SETUP} && '
+                f'cd {shlex.quote(self.sky_dir)} && export HOME="$PWD" && '
+                f'{cmd}')
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(
+        self,
+        cmd: Union[str, List[str]],
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        return SSHCommandRunner.run(self, self._wrap_command(cmd), **kwargs)
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+        timeout: Optional[int] = None,
+    ) -> None:
+        # `~` in targets must resolve to the cluster's shared home, not the
+        # user's real home that the sshd session starts in.
+        SSHCommandRunner.rsync(self,
+                               source,
+                               target,
+                               up=up,
+                               log_path=log_path,
+                               stream_logs=stream_logs,
+                               max_retry=max_retry,
+                               get_remote_home_dir=lambda _=None: self.sky_dir,
+                               timeout=timeout)

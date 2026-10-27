@@ -1650,6 +1650,83 @@ _SLURM_QUOTA_SCHEMA = {
     },
 }
 
+# `qsub_options` maps qsub flags (without the dash) to values: a string or
+# number gives `#PBS -<flag> <value>`, `true` a bare `#PBS -<flag>`, a list
+# one line per element, `null`/`false` nothing. `walltime` is a shorthand
+# for `-l walltime=...`.
+_QSUB_OPTION_VALUE_SCHEMA = {
+    'oneOf': [
+        {
+            'type': 'string',
+            # Disallow newlines to prevent script injection in
+            # #PBS directives.
+            'pattern': r'^[^\n]*$'
+        },
+        {
+            'type': 'number'
+        },
+        {
+            'type': 'boolean'
+        },
+        {
+            'type': 'null'
+        },
+        {
+            'type': 'array',
+            'items': {
+                'type': 'string',
+                'pattern': r'^[^\n]*$'
+            },
+        },
+    ]
+}
+
+_QSUB_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': _QSUB_OPTION_VALUE_SCHEMA,
+}
+
+# Extra per-node resources appended to the qsub `select` chunk, e.g.
+# `{tmp_size: 400gb}`.
+_PBS_SELECT_RESOURCES_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [{
+            'type': 'string',
+            'pattern': r'^[^\n:=]*$',
+        }, {
+            'type': 'number'
+        }, {
+            'type': 'boolean'
+        }]
+    },
+}
+
+# The qsub `-l place=` value; `scatter` by default.
+_PBS_PLACE_SCHEMA = {
+    'type': 'string',
+    'pattern': r'^[^\n]+$',
+}
+
+# `quota.account` is submitted as `qsub -A` and `quota.project` as `qsub -P`.
+_PBS_QUOTA_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': True,
+    'properties': {
+        'account': {
+            'type': 'string',
+            'minLength': 1,
+        },
+        'project': {
+            'type': 'string',
+            'minLength': 1,
+        },
+    },
+}
+
 _GPU_PARTITION_MAP_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -2487,6 +2564,99 @@ def get_config_schema():
                 **_extra_slurm_properties,
             }
         },
+        'pbs': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_clusters': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
+                        'type': 'string',
+                        'pattern': '^all$'
+                    }]
+                },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
+                'pricing': _PRICING_SCHEMA,
+                'qsub_options': _QSUB_OPTIONS_SCHEMA,
+                'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
+                'place': _PBS_PLACE_SCHEMA,
+                'quota': _PBS_QUOTA_SCHEMA,
+                # The PBS resource counting GPUs (default: ngpus).
+                'gpu_resource': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                # The node resource naming the GPU model, if the site
+                # declares one.
+                'gpu_type_resource': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                'gpu_queue_map': _GPU_PARTITION_MAP_SCHEMA,
+                'cpu_queue': {
+                    'type': 'string',
+                },
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'workdir': {
+                                'type': 'string',
+                            },
+                            'tmpdir': {
+                                'type': 'string',
+                            },
+                            'pricing': _PRICING_SCHEMA,
+                            'qsub_options': _QSUB_OPTIONS_SCHEMA,
+                            'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
+                            'place': _PBS_PLACE_SCHEMA,
+                            'quota': _PBS_QUOTA_SCHEMA,
+                            'gpu_resource': {
+                                'type': 'string',
+                                'minLength': 1,
+                            },
+                            'gpu_type_resource': {
+                                'type': 'string',
+                                'minLength': 1,
+                            },
+                            'gpu_queue_map': _GPU_PARTITION_MAP_SCHEMA,
+                            'cpu_queue': {
+                                'type': 'string',
+                            },
+                            'queue_configs': {
+                                'type': 'object',
+                                'required': [],
+                                'properties': {},
+                                'additionalProperties': {
+                                    'type': 'object',
+                                    'required': [],
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'pricing': _PRICING_SCHEMA,
+                                        'qsub_options': _QSUB_OPTIONS_SCHEMA,
+                                        'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
+                                        'place': _PBS_PLACE_SCHEMA,
+                                        'quota': _PBS_QUOTA_SCHEMA,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -2774,10 +2944,12 @@ def get_config_schema():
     # gcp, kubernetes, ssh, nebius, slurm.
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names if cloud.lower() not in
-        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
+        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm', 'pbs']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     slurm_allowed_clusters_schema = cloud_configs['slurm']['properties'][
+        'allowed_clusters']
+    pbs_allowed_clusters_schema = cloud_configs['pbs']['properties'][
         'allowed_clusters']
     workspaces_schema = {
         'type': 'object',
@@ -3015,6 +3187,53 @@ def get_config_schema():
                                             'properties': {
                                                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                                 'quota': _SLURM_QUOTA_SCHEMA,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                'pbs': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                        'allowed_clusters': pbs_allowed_clusters_schema,
+                        'qsub_options': _QSUB_OPTIONS_SCHEMA,
+                        'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,
+                        'place': _PBS_PLACE_SCHEMA,
+                        'quota': _PBS_QUOTA_SCHEMA,
+                        'cluster_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'qsub_options': _QSUB_OPTIONS_SCHEMA,
+                                    'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
+                                    'place': _PBS_PLACE_SCHEMA,
+                                    'quota': _PBS_QUOTA_SCHEMA,
+                                    'queue_configs': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'properties': {},
+                                        'additionalProperties': {
+                                            'type': 'object',
+                                            'required': [],
+                                            'additionalProperties': False,
+                                            'properties': {
+                                                'qsub_options': _QSUB_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                                'select_resources': _PBS_SELECT_RESOURCES_SCHEMA,  # pylint: disable=line-too-long
+                                                'place': _PBS_PLACE_SCHEMA,
+                                                'quota': _PBS_QUOTA_SCHEMA,
                                             },
                                         },
                                     },

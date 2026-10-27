@@ -158,6 +158,7 @@ REJECTION_KIND_WEBSOCKET = 'websocket'
 WEBSOCKET_ROUTE_PATHS = frozenset((
     '/kubernetes-pod-ssh-proxy',
     '/slurm-job-ssh-proxy',
+    '/pbs-job-ssh-proxy',
     '/ssh-interactive-auth',
 ))
 OTHER_WEBSOCKET_PATH_LABEL = 'other'

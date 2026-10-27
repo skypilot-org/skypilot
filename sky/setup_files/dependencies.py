@@ -279,6 +279,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'shadeform': [],  # No dependencies needed for shadeform
     # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
     'slurm': [],
+    # PBS is driven through its CLI on the login node over SSH.
+    'pbs': [],
     'yotta': [],  # No dependencies needed for Yotta
     'verda': [],  # No dependencies needed for verda
 }

@@ -443,7 +443,7 @@ def get_cloud_config_value_from_dict(dict_config: Dict[str, Any],
     region_key = None
     if cloud in ('kubernetes', 'ssh'):
         region_key = 'context_configs'
-    elif cloud == 'slurm':
+    elif cloud in ('slurm', 'pbs'):
         region_key = 'cluster_configs'
     elif cloud in _REGION_CONFIG_CLOUDS:
         region_key = 'region_configs'

@@ -586,6 +586,7 @@ def test_the_attempt_series_are_published_before_any_handshake(monkeypatch):
         assert _label_sets(counter) == {
             (('path', '/kubernetes-pod-ssh-proxy'),),
             (('path', '/slurm-job-ssh-proxy'),),
+            (('path', '/pbs-job-ssh-proxy'),),
             (('path', '/ssh-interactive-auth'),),
             (('path', 'other'),),
         }, counter._name  # pylint: disable=protected-access
@@ -624,7 +625,7 @@ def test_publishing_the_attempt_series_is_idempotent(monkeypatch):
 
     assert len(
         _label_sets(metrics_utils.
-                    SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL)) == 4
+                    SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL)) == 5
     assert _sample(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL) == 0.0
 
@@ -808,7 +809,7 @@ def test_a_fault_publishing_one_series_does_not_lose_the_others(monkeypatch):
     """Pre-initialisation is guarded per series, not once around the loop.
 
     The `path` whose child fails is the one that goes missing; the other
-    three must still be published, or one unwritable moment at import costs
+    four must still be published, or one unwritable moment at import costs
     the whole mechanism.
     """
     counter = metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_ATTEMPTS_TOTAL
@@ -827,6 +828,7 @@ def test_a_fault_publishing_one_series_does_not_lose_the_others(monkeypatch):
 
     assert _label_sets(counter) == {
         (('path', '/kubernetes-pod-ssh-proxy'),),
+        (('path', '/pbs-job-ssh-proxy'),),
         (('path', '/ssh-interactive-auth'),),
         (('path', 'other'),),
     }
