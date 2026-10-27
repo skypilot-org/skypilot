@@ -46,8 +46,16 @@ if [[ -n "${E2E_SRC_SHARD:-}" ]]; then
   patches=(${mine[@]+"${mine[@]}"})
 fi
 
+# Whether a patch changes code that is built into a bundle: the OSS dashboard,
+# or a plugin's frontend in a suite that loads plugins. --numstat prints
+# "added<TAB>deleted<TAB>path"; match the path from its start, so a patch to,
+# say, tests/dashboard_e2e/ does not trigger a rebuild.
 touches_frontend() {
-  git -C "$REPO_ROOT" apply --numstat "$1" | grep -qE '(dashboard|frontend)/'
+  # Collect the paths first: under pipefail, grep -q exiting on the first
+  # match can make the writer fail with SIGPIPE.
+  local paths
+  paths="$(git -C "$REPO_ROOT" apply --numstat "$1" | cut -f3)"
+  grep -qE '^(sky/dashboard/|[^/]+/[^/]+/frontend/)' <<< "$paths"
 }
 
 # The patch in the working tree right now. Whatever ends the run (a failure,
@@ -77,7 +85,16 @@ for patch in ${patches[@]+"${patches[@]}"}; do
   id="src-$(basename "$patch" .patch)"
   export E2E_SRC_PATCH="$patch"
   echo "::group::$id"
-  git -C "$REPO_ROOT" apply --ignore-whitespace "$patch" || { echo "$id: patch does not apply"; status=1; continue; }
+  if ! git -C "$REPO_ROOT" apply --ignore-whitespace "$patch"; then
+    # The patch is a one-line regression written against the current code; a
+    # refactor of that code on master moves its context.
+    echo "$id: twist_patches/$(basename "$patch") does not apply to the" \
+         "current source. Re-create it on master: make the same one-line" \
+         "regression, then git diff -U1 <file> > twist_patches/$(basename "$patch")" \
+         "(see 'Twists' in tests/dashboard_e2e/README.md)." >&2
+    status=1
+    continue
+  fi
   applied="$patch"
   if touches_frontend "$patch"; then
     (cd "$REPO_ROOT" && eval "$BUILD")

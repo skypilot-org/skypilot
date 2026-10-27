@@ -308,8 +308,11 @@ def test_my_clusters_lists_only_my_clusters(make_user, cluster, open_as, uid,
     expect(row.locator('td').nth(5),
            f'{up} must show its resources').to_have_text(
                re.compile(r'^1x\(cpus=1, mem=2'))
+    # Seeded 10 min ago; on a slow runner the row can render after the minute
+    # rolls over.
     expect(row.locator('td').nth(6),
-           f'{up} must show when it started').to_have_text('10m ago')
+           f'{up} must show when it started').to_have_text(
+               re.compile(r'^1[01]m ago$'))
     expect(
         _row(page, stopped).locator('td').nth(0),
         f'{stopped} must be listed as STOPPED').to_have_text('STOPPED')

@@ -3,16 +3,28 @@ name: Dashboard E2E
 # Browser tests for the dashboard against one real API server seeded through
 # its DB. Nothing launches on a cloud. See tests/dashboard_e2e/README.md.
 
+# Only changes that can affect what the dashboard renders: the server and
+# dashboard code under sky/, the suite itself, and this workflow. Not run in
+# the merge queue (merge_group has no paths filter); the push to master runs
+# it after merge. If this check is made required, add merge_group back with a
+# job that passes when the filter skips the suite.
 on:
   push:
     branches:
       - master
       - 'releases/**'
+    paths:
+      - 'sky/**'
+      - 'tests/dashboard_e2e/**'
+      - '.github/workflows/dashboard-e2e.yml'
   pull_request:
     branches:
       - master
       - 'releases/**'
-  merge_group:
+    paths:
+      - 'sky/**'
+      - 'tests/dashboard_e2e/**'
+      - '.github/workflows/dashboard-e2e.yml'
 
 concurrency:
   group: dashboard-e2e-${{ github.ref }}
@@ -37,6 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      # One version for the pip pin and the browser cache key.
+      PLAYWRIGHT_VERSION: '1.64.0'
       # Traces and screenshots of failing tests, uploaded below.
       E2E_RESULTS_DIR: ${{ github.workspace }}/e2e-results
     steps:
@@ -53,13 +67,13 @@ jobs:
           path: |
             ~/apt-debs
             ~/.cache/ms-playwright
-          key: playwright-1.64.0-${{ runner.os }}-${{ runner.arch }}
+          key: playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
       - name: Install server and test dependencies
         run: |
           uv venv --seed ~/e2e-env
           source ~/e2e-env/bin/activate
           uv pip install -e ".[kubernetes]"
-          uv pip install pytest pytest-xdist pytest-playwright playwright==1.64.0
+          uv pip install pytest pytest-xdist pytest-playwright "playwright==$PLAYWRIGHT_VERSION"
           mkdir -p ~/apt-debs
           sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           python -m playwright install --with-deps chromium

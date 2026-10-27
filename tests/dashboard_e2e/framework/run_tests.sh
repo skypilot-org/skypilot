@@ -34,4 +34,5 @@ exclusive=$?
 # 5 = no tests collected: fine when -k selects only one phase.
 [[ $parallel -eq 5 ]] && parallel=0
 [[ $exclusive -eq 5 ]] && exclusive=0
-exit $(( parallel || exclusive ))
+# Keep pytest's exit code (e.g. 2 for a usage error, 4 for bad arguments).
+exit $(( parallel ? parallel : exclusive ))
