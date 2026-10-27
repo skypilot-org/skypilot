@@ -551,13 +551,38 @@ def _users_at_launch_limit(
                                                max_launching_jobs_per_user)
 
 
+def _has_live_task() -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row with a task launched and not yet finished.
+
+    Correlates to ``job_info_table`` in the enclosing query. A WAITING job
+    with such a task held a controller slot before a restart: recovery
+    (reset_jobs_for_recovery_batch) sets a live job back to WAITING and keeps
+    its tasks as they were, and a launch writes submitted_at once and keeps
+    it while the task is parked back in PENDING. A job that has never been
+    claimed has no submitted task. Matches CLAIMED_LIVE_PREDICATE, so it is
+    served by ix_spot_claimed_live and costs what is claimed now, not the
+    whole job history. Written as an uncorrelated IN, which the planner
+    hashes once, rather than a correlated EXISTS, whose per-row estimate is
+    large enough to trigger Postgres JIT on every call.
+    """
+    return job_info_table.c.spot_job_id.in_(
+        sqlalchemy.select(spot_table.c.spot_job_id).where(
+            sqlalchemy.and_(
+                spot_table.c.submitted_at.is_not(None),
+                spot_table.c.end_at.is_(None),
+            )))
+
+
 def _not_held_by_launch_limit(
     max_launching_jobs_per_user: Optional[int]
 ) -> sqlalchemy.sql.elements.ColumnElement:
     """True for a job_info row the per-user launch limit does not hold back.
 
     Correlates to ``job_info_table`` in the enclosing query. Only a WAITING
-    non-pool job of a user at the limit is held back.
+    non-pool job of a user at the limit is held back, and only if it has no
+    live task: a job that recovery set back to WAITING after a restart may be
+    running, and holding it would leave it with no controller until its user
+    drops below the limit.
     """
     if max_launching_jobs_per_user is None:
         return sqlalchemy.true()
@@ -568,6 +593,7 @@ def _not_held_by_launch_limit(
         job_info_table.c.user_hash.is_(None),
         job_info_table.c.user_hash.not_in(
             _users_at_launch_limit(max_launching_jobs_per_user)),
+        _has_live_task(),
     )
 
 

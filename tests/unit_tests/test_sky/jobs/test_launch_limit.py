@@ -47,7 +47,8 @@ def _add_job(engine,
              schedule_state: ManagedJobScheduleState,
              *task_statuses: ManagedJobStatus,
              priority: int = 500,
-             pool: Optional[str] = None) -> None:
+             pool: Optional[str] = None,
+             submitted_at: Optional[float] = None) -> None:
     with orm.Session(engine) as session:
         session.execute(
             state.sqlalchemy.insert(state.job_info_table).values(
@@ -63,7 +64,8 @@ def _add_job(engine,
                     spot_job_id=job_id,
                     task_id=task_id,
                     task_name=f'task-{task_id}',
-                    status=status.value))
+                    status=status.value,
+                    submitted_at=submitted_at))
         session.commit()
 
 
@@ -190,6 +192,45 @@ class TestClaim:
         _waiting(_db, 3, 'a', priority=1000)
 
         assert _claim(limit=1) == 3
+
+    def test_jobs_recovered_after_a_restart_are_not_held(self, _db):
+        # User a is at the limit and also has a running job.
+        _launching(_db, 1, 'a', ManagedJobStatus.STARTING, submitted_at=1.0)
+        _launching(_db, 2, 'a', ManagedJobStatus.STARTING, submitted_at=1.0)
+        _add_job(_db,
+                 3,
+                 'a',
+                 ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.RUNNING,
+                 submitted_at=1.0)
+        _waiting(_db, 4, 'a')
+
+        # A restart resets every live job to WAITING, as
+        # ha_recovery_for_consolidation_mode does.
+        assert state.reset_jobs_for_recovery_batch(
+            state.get_jobs_needing_recovery_check()) == [1, 2, 3]
+
+        # All three get a controller again, the running job included; only
+        # the job that was never claimed is held.
+        assert _claim(limit=2) == 1
+        assert _claim(limit=2) == 2
+        assert _claim(limit=2) == 3
+        assert _claim(limit=2) is None
+
+    def test_a_recovered_parked_job_is_not_held(self, _db):
+        # A parked launch puts its task back to PENDING and keeps
+        # submitted_at, which is how a recovered parked job is told apart from
+        # one that was never claimed.
+        _launching(_db, 1, 'a')
+        _add_job(_db,
+                 2,
+                 'a',
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING,
+                 submitted_at=1.0)
+        _waiting(_db, 3, 'b', priority=100)
+
+        assert _claim(limit=1) == 2
 
 
 class TestUsersAtLimit:
