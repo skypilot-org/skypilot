@@ -4536,3 +4536,85 @@ class TestClaimedJobCostUnits:
             await _yield_to_event_loop()
             await _yield_to_event_loop()
         assert manager.job_costs == {}
+
+
+class TestNewTaskCountsInFull:
+    """A pipeline's next task counts in full while it launches, not at the
+    cost of the previous task's cluster."""
+
+    def _fresh_task(self, monkeypatch, job_costs):
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._dag = MagicMock()
+        jc._dag.is_job_group.return_value = False
+        jc._pool = None
+        jc._job_costs = job_costs
+        jc._backend = MagicMock()
+        jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+        jc.starting = set()
+        jc.starting_lock = asyncio.Lock()
+        jc.starting_signal = MagicMock()
+        jc._monitor_one_task = AsyncMock(return_value=True)
+        task = MagicMock()
+        task.name = 'task1'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+        task.resources = None
+        costs_at_launch = []
+
+        async def launch():
+            costs_at_launch.append(dict(job_costs))
+            return 123.0
+
+        executor = MagicMock()
+        executor.cluster_name = None
+        executor.launch = AsyncMock(side_effect=launch)
+        executor.on_resume = AsyncMock()
+        executor.monitor_task = AsyncMock(return_value=None)
+        mjs = 'sky.jobs.controller.managed_job_state'
+        for name in ('set_restarting_async', 'set_starting_async',
+                     'set_started_async'):
+            monkeypatch.setattr(f'{mjs}.{name}', AsyncMock())
+        monkeypatch.setattr(
+            f'{mjs}.get_job_status_with_task_id_async',
+            AsyncMock(return_value=managed_job_state.ManagedJobStatus.PENDING))
+        monkeypatch.setattr(f'{mjs}.has_open_emergency_episode_async',
+                            AsyncMock(return_value=False))
+        monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id',
+                            lambda job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            lambda task, job_id: None)
+        monkeypatch.setattr('sky.jobs.controller._build_task_specs',
+                            lambda executor: {})
+        monkeypatch.setattr(
+            'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+            MagicMock(return_value=executor))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_utils.event_callback_func',
+            MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+            lambda *args, **kwargs: None)
+        return jc, task, costs_at_launch
+
+    @pytest.mark.asyncio
+    async def test_next_task_launches_at_full_cost(self, monkeypatch):
+        full = controller_module.controller_utils.JOB_COST_UNITS
+        # The previous task's cluster was cheap.
+        job_costs = {1: full // 5}
+        jc, task, costs_at_launch = self._fresh_task(monkeypatch, job_costs)
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=False):
+            assert await jc._run_one_task(1, task) is True
+        assert costs_at_launch == [{1: full}]
+
+    @pytest.mark.asyncio
+    async def test_released_job_is_not_re_added(self):
+        job_costs: Dict[int, int] = {}
+        jc = JobController.__new__(JobController)
+        jc._job_id = 1
+        jc._job_costs = job_costs
+        jc.starting_lock = asyncio.Lock()
+        await jc._count_in_full()
+        assert not job_costs

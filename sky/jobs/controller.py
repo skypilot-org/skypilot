@@ -916,6 +916,14 @@ class JobController:
             self._job_id)
         return cluster_name is None
 
+    async def _count_in_full(self) -> None:
+        """Count this job at the full cost until a launch reports another."""
+        if self._job_costs is None:
+            return
+        async with self.starting_lock:
+            if self._job_id in self._job_costs:
+                self._job_costs[self._job_id] = controller_utils.JOB_COST_UNITS
+
     async def _update_cost_units(self, cluster_name: str) -> None:
         """Count this job at the cost its runtime reports for its cluster.
 
@@ -1113,6 +1121,10 @@ class JobController:
         remote_job_submitted_at = time.time()
         if not is_resume:
             launch_start = time.time()
+            # A pipeline's next task has no cluster yet: until its launch
+            # brings one up, the job costs what any launching job costs, not
+            # what the previous task's cluster cost.
+            await self._count_in_full()
 
             # Run the launch in a separate thread to avoid blocking the event
             # loop. The scheduler functions used internally already have their
