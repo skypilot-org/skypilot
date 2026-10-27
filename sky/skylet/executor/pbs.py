@@ -181,7 +181,8 @@ def _become_process_group_leader() -> None:
 
 def _install_signal_handlers() -> None:
 
-    def _handler(signum, _frame):
+    def _handler(signum, frame):
+        del frame  # unused
         signal.signal(signum, signal.SIG_IGN)
         children = psutil.Process().children(recursive=True)
         for child in children:

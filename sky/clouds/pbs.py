@@ -38,28 +38,28 @@ class PBS(clouds.Cloud):
     _REPR = 'PBS'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP:
-            'Autostop is not supported on PBS.',
+            ('Autostop is not supported on PBS.'),
         clouds.CloudImplementationFeatures.STOP:
-            'Stopping is not supported on PBS.',
+            ('Stopping is not supported on PBS.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            'Spot instances are not supported on PBS.',
+            ('Spot instances are not supported on PBS.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Customized multiple network interfaces are not supported on '
             'PBS.',
         clouds.CloudImplementationFeatures.OPEN_PORTS:
-            'Opening ports is not supported on PBS.',
+            ('Opening ports is not supported on PBS.'),
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
-            'Running controllers is not well tested with PBS.',
+            ('Running controllers is not well tested with PBS.'),
         clouds.CloudImplementationFeatures.LOCAL_DISK:
             (f'Local disk is not supported on {_REPR}'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            'Docker images are not supported on PBS.',
+            ('Docker images are not supported on PBS.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
-            'Images are not supported on PBS.',
+            ('Images are not supported on PBS.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            'Disk tiers are not supported on PBS.',
+            ('Disk tiers are not supported on PBS.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            'Network tiers are not supported on PBS.',
+            ('Network tiers are not supported on PBS.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             'Storage mounting is not supported on this PBS cluster because '
             'FUSE is not enabled (/dev/fuse not found). Please ask your '
@@ -121,8 +121,8 @@ class PBS(clouds.Cloud):
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
-            if not any(
-                    f in unsupported for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+            checked = cls._DYNAMICALLY_CHECKED_FEATURES
+            if not any(f in unsupported for f in checked):
                 break
         return unsupported
 
@@ -275,17 +275,20 @@ class PBS(clouds.Cloud):
                         available = set(queues_to_check)
                         queues_to_check = [q for q in mapped if q in available]
                         if not queues_to_check:
+                            zone_msg = (f' for the requested queue {zone!r}'
+                                        if zone else '')
                             logger.warning(
                                 f'{colorama.Fore.YELLOW}gpu_queue_map maps '
                                 f'{pit.accelerator_type!r} to queue(s) '
                                 f'{mapped}, but none of them is available on '
-                                f'cluster {cluster!r}'
-                                f'{" for the requested queue " + repr(zone) if zone else ""}.'
+                                f'cluster {cluster!r}{zone_msg}.'
                                 f'{colorama.Style.RESET_ALL}')
                 else:
                     cpu_queue = None
                     if resources is not None:
-                        cpu_queue = config_utils.get_cloud_config_value_from_dict(
+                        get_override = (
+                            config_utils.get_cloud_config_value_from_dict)
+                        cpu_queue = get_override(
                             dict_config=resources.cluster_config_overrides,
                             cloud='pbs',
                             region=cluster,
@@ -506,11 +509,10 @@ class PBS(clouds.Cloud):
 
         client = pbs_utils.make_client_from_ssh_config(ssh_config_dict)
         sky_base_dir = pbs_utils.resolve_sky_base_dir(cluster, client)
-        tmpdir = skypilot_config.get_effective_region_config(
-            cloud='pbs',
-            region=cluster,
-            keys=('tmpdir',),
-            default_value=None)
+        tmpdir = skypilot_config.get_effective_region_config(cloud='pbs',
+                                                             region=cluster,
+                                                             keys=('tmpdir',),
+                                                             default_value=None)
 
         return {
             'instance_type': resources.instance_type,
@@ -533,8 +535,7 @@ class PBS(clouds.Cloud):
             'pbs_identities_only':
                 pbs_utils.get_identities_only(ssh_config_dict),
             'pbs_private_key': pbs_utils.get_identity_file(ssh_config_dict),
-            'pbs_control_path':
-                pbs_utils.get_ssh_control_path(ssh_config_dict),
+            'pbs_control_path': pbs_utils.get_ssh_control_path(ssh_config_dict),
             'pbs_tmpdir': tmpdir,
             'pbs_cluster_name_env_var': constants.SKY_CLUSTER_NAME_ENV_VAR_KEY,
             'qsub_options': qsub_options,
@@ -617,13 +618,12 @@ class PBS(clouds.Cloud):
         try:
             ssh_config = pbs_utils.get_pbs_ssh_config()
         except FileNotFoundError:
-            return (
-                False,
-                f'PBS configuration file {pbs_utils.DEFAULT_PBS_PATH} '
-                'does not exist.\n'
-                f'{cls._INDENT_PREFIX}For more info: '
-                'https://docs.skypilot.co/en/latest/getting-started/'
-                'installation.html#pbs-installation')
+            return (False,
+                    f'PBS configuration file {pbs_utils.DEFAULT_PBS_PATH} '
+                    'does not exist.\n'
+                    f'{cls._INDENT_PREFIX}For more info: '
+                    'https://docs.skypilot.co/en/latest/getting-started/'
+                    'installation.html#pbs-installation')
         except Exception as e:  # pylint: disable=broad-except
             return (False, 'Failed to load SSH configuration from '
                     f'{pbs_utils.DEFAULT_PBS_PATH}: '
@@ -648,8 +648,7 @@ class PBS(clouds.Cloud):
                     default_value=None)
                 remote_env = client.get_env()
                 if workdir is not None:
-                    check_path = pbs_utils.expand_path_vars(
-                        workdir, remote_env)
+                    check_path = pbs_utils.expand_path_vars(workdir, remote_env)
                 else:
                     check_path = remote_env.get('HOME', '~')
                 fs_type = client.check_dir_shared_fs(check_path)
@@ -693,9 +692,8 @@ class PBS(clouds.Cloud):
                     'is missing, please check your ~/.pbs/config '
                     'and try again.')
             except Exception as e:  # pylint: disable=broad-except
-                ctx2text[cluster] = (
-                    'disabled. Credential check failed: '
-                    f'{common_utils.format_exception(e)}')
+                ctx2text[cluster] = ('disabled. Credential check failed: '
+                                     f'{common_utils.format_exception(e)}')
         return success, ctx2text
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

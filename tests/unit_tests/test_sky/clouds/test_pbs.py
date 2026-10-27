@@ -14,6 +14,9 @@ from sky.adaptors import pbs as pbs_adaptor
 from sky.clouds import pbs as pbs_cloud
 from sky.provision.pbs import utils as pbs_utils
 from sky.skylet import constants
+from sky.utils import infra_utils
+from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import yaml_utils
 
@@ -46,8 +49,6 @@ class TestRegistration:
     def test_registered_with_aliases(self):
         assert isinstance(clouds.PBS(), clouds.Cloud)
         assert clouds.PBS.canonical_name() == 'pbs'
-        from sky.utils import (
-            registry)  # pylint: disable=import-outside-toplevel
         assert isinstance(registry.CLOUD_REGISTRY.from_str('pbspro'),
                           clouds.PBS)
         assert isinstance(registry.CLOUD_REGISTRY.from_str('openpbs'),
@@ -600,14 +601,10 @@ class TestSchema:
 class TestInfraDisplay:
 
     def test_queue_is_hidden_in_infra_string(self):
-        from sky.utils import (
-            infra_utils)  # pylint: disable=import-outside-toplevel
         info = infra_utils.InfraInfo('pbs', 'mycluster', 'gpuq')
         assert info.formatted_str() == 'pbs (mycluster)'
 
     def test_optimizer_hides_instance_type(self):
-        from sky.utils import (
-            resources_utils)  # pylint: disable=import-outside-toplevel
         resources = resources_lib.Resources(cloud=clouds.PBS(),
                                             instance_type='4CPU--16GB',
                                             region='c1')

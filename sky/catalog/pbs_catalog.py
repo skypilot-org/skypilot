@@ -117,8 +117,7 @@ def list_accelerators_realtime(
         if quantity_filter and node_total_gpus < quantity_filter:
             continue
         queue = node_info['queue'] or None
-        pricing = _get_pricing(region=node_info['pbs_cluster_name'],
-                               zone=queue)
+        pricing = _get_pricing(region=node_info['pbs_cluster_name'], zone=queue)
         per_accel = common.get_hourly_cost_from_pricing(
             pricing,
             cpus=0,
@@ -163,8 +162,8 @@ def _get_pricing(region: Optional[str], zone: Optional[str] = None) -> Dict:
     if region is not None:
         paths.append(('pbs', 'cluster_configs', region, 'pricing'))
     if region is not None and zone is not None:
-        paths.append(
-            ('pbs', 'cluster_configs', region, 'queue_configs', zone, 'pricing'))
+        paths.append(('pbs', 'cluster_configs', region, 'queue_configs', zone,
+                      'pricing'))
     return common.resolve_pricing_config(*paths)
 
 

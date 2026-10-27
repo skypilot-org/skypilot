@@ -17,7 +17,8 @@ def _runner():
 
 def test_run_wraps_command_with_cluster_environment():
     runner = _runner()
-    with mock.patch.object(command_runner.SSHCommandRunner, 'run',
+    with mock.patch.object(command_runner.SSHCommandRunner,
+                           'run',
                            return_value=0) as base_run:
         runner.run(['echo', 'hi'], stream_logs=False)
     wrapped = base_run.call_args.args[1]

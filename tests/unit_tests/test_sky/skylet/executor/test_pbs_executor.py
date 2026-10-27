@@ -89,9 +89,8 @@ class TestExecutorMain:
         log_dir = tmp_path / 'logs'
         cmd = [
             sys.executable, '-m', 'sky.skylet.executor.pbs', '--rank=0',
-            '--num-nodes=1', '--node-ips=10.0.0.1',
-            f'--log-dir={log_dir}', f'--script={script}',
-            f'--pid-file={tmp_path / "rank0.pid"}'
+            '--num-nodes=1', '--node-ips=10.0.0.1', f'--log-dir={log_dir}',
+            f'--script={script}', f'--pid-file={tmp_path / "rank0.pid"}'
         ] + extra_args
         env = dict(os.environ)
         env['SKY_RUNTIME_DIR'] = str(tmp_path)
@@ -103,8 +102,8 @@ class TestExecutorMain:
 
     def test_runs_script_with_env(self, tmp_path):
         result, log_dir = self._run(
-            tmp_path, ['--task-name=mytask',
-                       '--env-vars=' + json.dumps({'FOO': 'bar'})],
+            tmp_path,
+            ['--task-name=mytask', '--env-vars=' + json.dumps({'FOO': 'bar'})],
             'echo "foo=$FOO rank=$SKYPILOT_NODE_RANK nodes=$SKYPILOT_NUM_NODES '
             'ips=$SKYPILOT_NODE_IPS"; exit 3')
         assert result.returncode == 3, result.stderr
@@ -116,7 +115,8 @@ class TestExecutorMain:
     def test_setup_log_name_and_gpu_ids(self, tmp_path):
         result, log_dir = self._run(
             tmp_path, ['--is-setup', '--gpu-ids=2,3'],
-            'echo "cuda=$CUDA_VISIBLE_DEVICES rank=${SKYPILOT_NODE_RANK:-unset}"')
+            'echo "cuda=$CUDA_VISIBLE_DEVICES rank=${SKYPILOT_NODE_RANK:-unset}"'
+        )
         assert result.returncode == 0, result.stderr
         assert 'cuda=2,3 rank=unset' in result.stdout
         assert (log_dir / 'setup-head.log').exists()
@@ -128,7 +128,9 @@ class TestExecutorMain:
             '--num-nodes=2', '--node-ips=10.0.0.1,10.0.0.2',
             f'--log-dir={log_dir}', '--script=echo hi'
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True,
+        result = subprocess.run(cmd,
+                                capture_output=True,
+                                text=True,
                                 check=False)
         assert result.returncode == 0, result.stderr
         assert '(worker1, rank=1, pid=' in result.stdout
@@ -145,8 +147,10 @@ class TestExecutorMain:
             f'--script=echo $$ > {marker}; sleep 300',
             f'--pid-file={tmp_path / "rank0.pid"}'
         ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.Popen(cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True)
         deadline = time.time() + 20
         while not marker.exists() and time.time() < deadline:
             time.sleep(0.1)

@@ -145,7 +145,7 @@ class TestGetViewerAllowlist:
         with mock.patch('sky.skypilot_config.get_nested', return_value={}):
             allowlist = rbac.get_viewer_allowlist()
         for path in ('/kubernetes-pod-ssh-proxy', '/slurm-job-ssh-proxy',
-                     '/ssh-interactive-auth'):
+                     '/pbs-job-ssh-proxy', '/ssh-interactive-auth'):
             assert {'path': path, 'method': 'GET'} not in allowlist
 
     def test_operator_overrides_are_additive(self):

@@ -462,6 +462,7 @@ def test_importing_the_middleware_module_publishes_the_handshake_series(
     paths = {
         '/kubernetes-pod-ssh-proxy',
         '/slurm-job-ssh-proxy',
+        '/pbs-job-ssh-proxy',
         '/ssh-interactive-auth',
         'other',
     } if expect_published else set()
