@@ -989,7 +989,8 @@ SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
 
 SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
     'sky_managed_jobs_controller_running_count',
-    'Number of running job tasks on this controller process',
+    'Number of running job tasks on this controller process, including '
+    'jobs claimed but not started yet',
     ['pid'],
     multiprocess_mode='liveall',
 )
@@ -997,6 +998,22 @@ SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
 SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS = prom.Gauge(
     'sky_managed_jobs_controller_max_jobs',
     'Computed max jobs for this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_cost_units',
+    'Cost units of the jobs held by this controller process; a job costs '
+    'JOB_COST_UNITS unless its runtime reports less',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_max_cost_units',
+    'Cost units this controller process may hold before it stops claiming '
+    'jobs',
     ['pid'],
     multiprocess_mode='liveall',
 )

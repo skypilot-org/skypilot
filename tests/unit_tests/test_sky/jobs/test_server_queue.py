@@ -1001,7 +1001,9 @@ class TestDumpManagedJobQueue:
                                                          limit=None)
             return status_counts
 
-        def fake_get_managed_jobs_highest_priority():
+        def fake_get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=None):
+            del max_launching_jobs_per_user
             if not jobs:
                 return skylet_constants.MIN_PRIORITY
             return max(

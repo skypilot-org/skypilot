@@ -45,6 +45,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`status_check <config-yaml-jobs-status-check>`:
       min_elapsed_seconds: 60
       min_retries: 5
+    :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -539,6 +540,28 @@ Example:
     status_check:
       min_elapsed_seconds: 600
       min_retries: 10
+
+.. _config-yaml-jobs-max-launching-jobs-per-user:
+
+``jobs.max_launching_jobs_per_user``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most managed jobs a single user can have started but not yet running (optional).
+
+The jobs controller only works on a limited number of jobs at a time (see :ref:`jobs-controller-sizing`), and it starts waiting jobs in priority order, then in submission order. A job keeps its place on the controller while it waits for resources, for example while its cluster's pods wait for quota or capacity. Without this limit, one user who submits many jobs that cannot run yet can fill every place, and everyone else's jobs wait even when there is capacity for them.
+
+With this limit set, once a user has this many jobs that are starting, waiting for resources or recovering, the controller starts other users' jobs first. That user's next job starts as soon as one of theirs begins running, finishes or is cancelled. Submitting is not limited: further jobs stay ``PENDING``. Jobs in a :ref:`pool <pool>` are neither counted nor held back.
+
+Several controller processes can start jobs at the same moment, so a user can briefly exceed the limit by up to the number of controller processes.
+
+Default: unset (no limit). Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    max_launching_jobs_per_user: 200
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
@@ -1841,6 +1864,8 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+With a remote API server, both ``kubernetes.allowed_contexts`` and this environment variable
+are read from the server only; a client's config or environment value is ignored.
 
 .. _config-yaml-kubernetes-namespace:
 
@@ -2478,6 +2503,8 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
+
 .. _config-yaml-slurm:
 
 ``slurm``
@@ -2500,6 +2527,8 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
 
   slurm:
     allowed_clusters: all
+
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
 
 .. _config-yaml-slurm-submit-as-user:
 

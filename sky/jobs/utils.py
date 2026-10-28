@@ -331,6 +331,16 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
         signal_file.unlink()
 
 
+def get_max_launching_jobs_per_user() -> Optional[int]:
+    """The most claimed, not yet running jobs a user may hold, or None.
+
+    Read from ``jobs.max_launching_jobs_per_user``. Unset (the default) means
+    no limit. See managed_job_state.get_waiting_job_async.
+    """
+    return skypilot_config.get_nested(('jobs', 'max_launching_jobs_per_user'),
+                                      None)
+
+
 # Whether to use consolidation mode or not. When this is enabled, the managed
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
@@ -3388,6 +3398,10 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
     if 'details' in new_fields:
         if 'schedule_state' not in new_fields:
             new_fields.append('schedule_state')
+        # Needed to tell whether the per-user launch limit holds a WAITING
+        # job back.
+        if 'user_hash' not in new_fields:
+            new_fields.append('user_hash')
         if 'priority' not in new_fields:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
@@ -3515,6 +3529,7 @@ def _format_job_details(
         *,
         job: Dict[str, Any],
         highest_blocking_priority: int,
+        launch_limit: Optional[int] = None,
         recovery_reason: Optional[str] = None,
         pending_reason: Optional[str] = None,
         cancel_reason: Optional[str] = None,
@@ -3522,7 +3537,10 @@ def _format_job_details(
         unfinished_dependencies: Optional[List[int]] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
     who requested a cancellation / what a launch is waiting on / which jobs it
-    depends on are still running."""
+    depends on are still running.
+
+    ``launch_limit`` is set when the per-user launch limit holds the job back
+    (see managed_job_state.get_held_job_ids)."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3544,6 +3562,10 @@ def _format_job_details(
                  if len(unfinished_dependencies) == 1 else 'Dependencies')
         state_details = (
             f'{label}: {", ".join(str(d) for d in unfinished_dependencies)}')
+    elif (job['schedule_state'] == 'WAITING' and launch_limit is not None and
+          job.get('pool') is None):
+        state_details = (f'Waiting: user already has {launch_limit} jobs '
+                         'launching or waiting for resources')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
@@ -3806,12 +3828,18 @@ def get_managed_job_queue(
             global_user_state.get_cluster_name_to_handle_map(is_managed=True))
 
     highest_blocking_priority = constants.MIN_PRIORITY
+    max_launching_jobs_per_user = get_max_launching_jobs_per_user()
+    held_job_ids: Set[int] = set()
     if not fields or 'details' in fields:
         # Figure out what the highest priority blocking job is. We need to know
         # in order to determine if other jobs are blocked by a higher priority
         # job, or just by the limited controller resources.
         highest_blocking_priority = (
-            managed_job_state.get_managed_jobs_highest_priority())
+            managed_job_state.get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=max_launching_jobs_per_user))
+        if max_launching_jobs_per_user is not None:
+            held_job_ids = managed_job_state.get_held_job_ids(
+                max_launching_jobs_per_user)
 
     jobs_with_handle = []
     for job in jobs:
@@ -3953,6 +3981,8 @@ def get_managed_job_queue(
             _format_job_details(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
+                launch_limit=(max_launching_jobs_per_user
+                              if job['job_id'] in held_job_ids else None),
                 recovery_reason=recovery_reasons.get(job['job_id']),
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),

@@ -706,7 +706,7 @@ async def test_endpoint_workspaces_config(monitor, mock_request,
 
 
 @pytest.mark.asyncio
-async def test_endpoint_ssh_node_pools_list(monitor):
+async def test_endpoint_ssh_node_pools_list(monitor, mock_request):
     """Test /ssh_node_pools endpoint for blocking operations."""
     print("\n🔍 Testing: /ssh_node_pools")
 
@@ -716,7 +716,8 @@ async def test_endpoint_ssh_node_pools_list(monitor):
         # Whatever, we think get_all_pools might be blocking.
         with mock.patch('sky.ssh_node_pools.core.get_all_pools',
                         side_effect=create_blocking_mock({}, delay=0.01)):
-            await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools)
+            await _run_endpoint_func(ssh_pools_server.get_ssh_node_pools,
+                                     mock_request)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=20)
     assert not result[

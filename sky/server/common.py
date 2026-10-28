@@ -496,6 +496,11 @@ def get_server_url(host: Optional[str] = None) -> str:
         endpoint = (f'http://{_host_to_url_host(host)}:'
                     f'{get_local_api_server_port()}')
 
+    # A jobs/serve controller always calls the API server on its own host, so
+    # its requests reach the server from loopback, never a configured remote
+    # endpoint.
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return endpoint.rstrip('/')
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))

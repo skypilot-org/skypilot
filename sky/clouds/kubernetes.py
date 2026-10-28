@@ -1118,7 +1118,7 @@ class Kubernetes(clouds.Cloud):
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
-            k8s_resource_key, acc_count, acc_type)
+            k8s_resource_key, acc_count, acc_type, k8s_acc_label_values)
         oci_roce_enabled = (
             network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
         # The NCCL profile picked below depends on it: a pod holding SR-IOV
@@ -2090,6 +2090,7 @@ class Kubernetes(clouds.Cloud):
         k8s_resource_key: Optional[str] = None,
         acc_count: Optional[int] = None,
         acc_type: Optional[str] = None,
+        k8s_acc_label_values: Optional[List[str]] = None,
     ) -> Tuple[KubernetesHighPerformanceNetworkType, Optional[Dict[str, Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
@@ -2103,6 +2104,10 @@ class Kubernetes(clouds.Cloud):
             acc_type: The accelerator type requested (e.g. 'H100'). Used to
                 derive the EFA interface count on AWS scale-from-zero clusters
                 where no GPU+EFA node is running to scan.
+            k8s_acc_label_values: The accelerator label values the pod's
+                required node affinity pins to. A warm node whose label value
+                is not one of them can never host the pod, so it is not used
+                to size EFA.
 
         Returns:
             A tuple of (network_type, metadata).
@@ -2164,6 +2169,15 @@ class Kubernetes(clouds.Cloud):
                                     int(node.status.
                                         allocatable[k8s_resource_key]) <
                                     acc_count):
+                                continue
+                            # Same node set the pod's affinity pins to: the
+                            # label key alone doesn't mean the node runs the
+                            # requested accelerator, so an L4:8 request with a
+                            # warm p5 would otherwise derive 32 EFA interfaces
+                            # for a pod that can never land there.
+                            if (k8s_acc_label_values is not None and
+                                    node.metadata.labels[k8s_acc_label_key]
+                                    not in k8s_acc_label_values):
                                 continue
                             # Calculate EFA count proportionally
                             if AWS_EFA_RESOURCE_KEY in node.status.allocatable:
