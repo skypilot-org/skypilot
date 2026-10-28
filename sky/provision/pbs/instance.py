@@ -798,6 +798,14 @@ def _create_virtual_instance(
             endpoints = _wait_for_job_ready(login_node_runner, client, job_id,
                                             sky_cluster_home_dir, num_nodes,
                                             pbs_log)
+            # PBS reruns a job elsewhere when it fails to start on a node, so
+            # the nodes seen when the job first ran may be stale by now.
+            current_job = client.get_job(job_id)
+            if current_job is None or not current_job.exec_hosts:
+                raise RuntimeError(
+                    f'PBS job {job_id} lost its nodes before they were ready. '
+                    f'See the job log for details: {pbs_log}')
+            job = current_job
             cluster_info = _cluster_info_from_job(provider_config,
                                                   cluster_name_on_cloud, job,
                                                   endpoints)

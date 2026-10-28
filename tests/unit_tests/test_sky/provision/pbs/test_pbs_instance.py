@@ -518,6 +518,44 @@ class TestCreateVirtualInstance:
         # Every node's sshd was reached before provisioning returned.
         assert node_runner.run.call_count == 2
 
+    def test_uses_nodes_of_rerun_job(self):
+        # The job first runs on node9, fails to start there and is rerun on
+        # node1 and node2, where the node agents come up.
+        client = mock.MagicMock()
+        client.query_jobs.return_value = []
+        client.submit_job.return_value = '77.pbs'
+        jobs = iter([_job(hosts=('node9', 'node2'))])
+        client.get_job.side_effect = lambda _: next(jobs, _job())
+        client.get_job_state.return_value = 'R'
+        login_runner = mock.MagicMock()
+        login_runner.run.return_value = (
+            0, 'rank0.port node1 23456 /tmp/x\nrank1.port node2 23457 /tmp/x\n',
+            '')
+        node_runner = mock.MagicMock()
+        node_runner.run.return_value = (0, '', '')
+        with mock.patch.object(instance, '_make_pbs_client',
+                               return_value=client), \
+             mock.patch.object(instance, '_make_login_node_runner',
+                               return_value=login_runner), \
+             mock.patch.object(instance, 'get_command_runners',
+                               return_value=[node_runner, node_runner]
+                              ) as get_runners, \
+             mock.patch.object(instance.pbs_utils, 'get_queue_info',
+                               return_value=_QUEUE), \
+             mock.patch.object(instance.global_user_state,
+                               'add_cluster_event'), \
+             mock.patch.object(instance.time, 'sleep'):
+            record = instance.run_instances('mycluster', 'test-cluster',
+                                            _CLUSTER, self._config())
+        cluster_info = get_runners.call_args.args[0]
+        assert sorted(inst.internal_ip
+                      for insts in cluster_info.instances.values()
+                      for inst in insts) == ['node1', 'node2']
+        assert record.head_instance_id == 'job77.pbs-node1'
+        assert record.created_instance_ids == [
+            'job77.pbs-node1', 'job77.pbs-node2'
+        ]
+
     def test_reuses_existing_job(self):
         client = mock.MagicMock()
         client.query_jobs.return_value = ['77.pbs']
