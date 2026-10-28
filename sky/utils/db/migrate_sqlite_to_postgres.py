@@ -156,7 +156,9 @@ def remove_seeded_ssh_keys(connection: Any, placeholder: str,
 
     Raises:
         ValueError: If a seeded key is missing from or differs in the SQLite
-            state, so deleting it would lose the key.
+            state, so the copy would lose the key. The seeded keys are deleted
+            first, as they are still on disk, so the target can be migrated
+            again once the keys are reconciled.
     """
     cursor = connection.cursor()
     cursor.execute('SELECT user_hash, ssh_public_key, ssh_private_key '
@@ -164,16 +166,16 @@ def remove_seeded_ssh_keys(connection: Any, placeholder: str,
     seeded = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
     if not seeded:
         return []
-    differing = sorted(user_hash for user_hash, key in seeded.items()
-                       if expected.get(user_hash) != key)
-    if differing:
-        raise ValueError('The SSH keys under ~/.sky/clients differ from the '
-                         f'SQLite state for users {differing}.')
     user_hashes = sorted(seeded)
     cursor.execute(
         f'DELETE FROM ssh_key WHERE user_hash IN '
         f'({", ".join([placeholder] * len(user_hashes))})', user_hashes)
     connection.commit()
+    differing = sorted(user_hash for user_hash, key in seeded.items()
+                       if expected.get(user_hash) != key)
+    if differing:
+        raise ValueError('The SSH keys under ~/.sky/clients differ from the '
+                         f'SQLite state for users {differing}.')
     return user_hashes
 
 

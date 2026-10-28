@@ -126,14 +126,14 @@ def test_remove_seeded_ssh_keys_aborts_on_key_missing_from_source(
         seeded_ssh_keys):
     with pytest.raises(ValueError, match='differ from the SQLite state'):
         migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', {})
-    assert _ssh_key_count(seeded_ssh_keys) == 1
+    assert _ssh_key_count(seeded_ssh_keys) == 0
 
 
 def test_remove_seeded_ssh_keys_aborts_on_changed_key(seeded_ssh_keys):
     with pytest.raises(ValueError, match='differ from the SQLite state'):
         migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?',
                                        {'abc123': ('ssh-ed25519 BBBB', 'X')})
-    assert _ssh_key_count(seeded_ssh_keys) == 1
+    assert _ssh_key_count(seeded_ssh_keys) == 0
 
 
 @pytest.mark.parametrize('dialect', ['sqlite', 'mysql'])
@@ -446,3 +446,25 @@ def test_failed_copy_with_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
     assert _sql('SELECT count(*) FROM ssh_key') == [(0,)]
     migrate.migrate(root, _CONFIG, _PG_URL)
     assert _sql('SELECT count(*) FROM ssh_key') == [(1,)]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_differing_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
+    root, init = pg_source_with_ssh_key
+    seed_matching_keys = init.side_effect
+
+    def seed_stale_key():
+        _sql('INSERT INTO ssh_key VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
+             'abc123', 'ssh-ed25519 STALE', 'STALE')
+        return []
+
+    init.side_effect = seed_stale_key
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(0,)]
+    assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    # Once the key on disk matches the SQLite state, the same target works.
+    init.side_effect = seed_matching_keys
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['rows']['ssh_key'] == 1
