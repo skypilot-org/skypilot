@@ -159,6 +159,22 @@ class TestGetRolePermissions:
         for entry in rbac._DEFAULT_USER_BLOCKLIST:  # pylint: disable=protected-access
             assert entry in blocklist
 
+    def test_config_blocklist_method_uppercased(self):
+        # Requests are matched on the uppercase method.
+        permissions = self._permissions({
+            'user': {
+                'permissions': {
+                    'blocklist': [{
+                        'path': '/foo',
+                        'method': 'post'
+                    }]
+                }
+            }
+        })
+        blocklist = permissions['user']['permissions']['blocklist']
+        assert {'path': '/foo', 'method': 'POST'} in blocklist
+        assert {'path': '/foo', 'method': 'post'} not in blocklist
+
     def test_default_entry_in_custom_list_not_duplicated(self):
         entry = rbac._DEFAULT_USER_BLOCKLIST[0]  # pylint: disable=protected-access
         permissions = self._permissions(

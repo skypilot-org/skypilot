@@ -623,6 +623,11 @@ def get_role_permissions(
     """
     supported_roles = get_supported_roles()
     config_permissions = _get_config_roles()
+    # Requests are matched on the uppercase method, so a `post` entry from the
+    # config would never block anything.
+    for role_cfg in config_permissions.values():
+        for rule in role_cfg.get('permissions', {}).get('blocklist') or []:
+            rule['method'] = rule['method'].upper()
 
     # Built-in rules are merged into the configured role like plugin rules, so
     # a custom `rbac.roles.user` adds to the defaults instead of replacing them.

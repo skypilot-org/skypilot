@@ -622,35 +622,6 @@ Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
 set to ``admin`` to ease first-time setup.
 
-Customizing the user role
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``user`` role is blocked from a built-in set of admin-only endpoints, such as
-creating, updating, or deleting workspaces and users, debug dumps, and SSH Node
-Pool changes. You can block more endpoints for the ``user`` role in the API
-server config:
-
-.. code-block:: yaml
-
-  rbac:
-    roles:
-      user:
-        permissions:
-          blocklist:
-            - path: /cost_report
-              method: POST
-
-Entries in ``blocklist`` are **added** to the built-in set; they cannot remove a
-built-in entry. To let someone call an admin-only endpoint, give them the
-``admin`` role. ``path`` uses Casbin ``keyMatch2`` syntax (e.g.,
-``/ssh_node_pools/:pool_name``).
-
-By default, ``GET /workspaces/config`` is also blocked for the ``user`` role,
-because the config can contain secrets. Set ``rbac.restrict_config_to_admins:
-false`` to allow it.
-
-Restart the API server after changing ``rbac.roles``.
-
 User management
 ~~~~~~~~~~~~~~~
 
