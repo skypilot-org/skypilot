@@ -846,8 +846,7 @@ def _install_idle_in_transaction_timeout(engine: Any) -> None:
 def get_engine(db_name: Optional[str],
                async_engine: Literal[False] = False,
                direct: bool = False,
-               no_pool: bool = False,
-               lock_pool: bool = False) -> sqlalchemy.engine.Engine:
+               no_pool: bool = False) -> sqlalchemy.engine.Engine:
     ...
 
 
@@ -855,8 +854,7 @@ def get_engine(db_name: Optional[str],
 def get_engine(db_name: Optional[str],
                async_engine: Literal[True],
                direct: bool = False,
-               no_pool: bool = False,
-               lock_pool: bool = False) -> sqlalchemy_async.AsyncEngine:
+               no_pool: bool = False) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
@@ -865,7 +863,6 @@ def get_engine(
     async_engine: bool = False,
     direct: bool = False,
     no_pool: bool = False,
-    lock_pool: bool = False,
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
     """Get the engine for the given database name.
 
@@ -890,10 +887,6 @@ def get_engine(
         phase is bounded by ``connect_timeout``, since unlike a pooled
         checkout it is part of every call. No effect on SQLite (a file open
         is effectively unpooled already).
-        lock_pool: When True, keep advisory-lock connections in a separate
-        bounded pool so locks cannot starve state queries or create unbounded
-        direct PostgreSQL sessions. With a configured pooler or pool size 0,
-        the direct connection remains unpooled.
     """
     conn_string = _resolve_conn_string(direct)
     if conn_string:
@@ -903,8 +896,6 @@ def get_engine(
         cache_key = f'async:{conn_string}' if async_engine else conn_string
         if no_pool and not async_engine:
             cache_key = f'nopool:{conn_string}'
-        elif lock_pool and not async_engine:
-            cache_key = f'lockpool:{conn_string}'
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
@@ -917,8 +908,7 @@ def get_engine(
                 # engine always carries one role: when `direct` resolves to
                 # the same connection string as the pooled path (no pooler
                 # configured) it IS the same engine, and is labelled as such.
-                role = (sql_metrics.DB_STATE_DIRECT
-                        if lock_pool else sql_metrics.DB_STATE)
+                role = sql_metrics.DB_STATE
                 if no_pool and not async_engine:
                     role = sql_metrics.DB_STATE_NOPOOL
                     # Isolated per-operation engine: never shares (or starves
@@ -971,7 +961,6 @@ def get_engine(
                             pool_size=pool_size,
                             max_overflow=get_db_connection_pool_max_overflow(
                                 pool_size),
-                            pool_timeout=0 if lock_pool else 30,
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
@@ -997,3 +986,8 @@ def get_engine(
                                 f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
     return engine
+
+
+def get_lock_engine() -> sqlalchemy.engine.Engine:
+    """Return the direct, unpooled engine used by advisory locks."""
+    return get_engine(None, direct=True, no_pool=True)

@@ -210,6 +210,8 @@ class TestPostgresLock:
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
         monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
+        monkeypatch.setattr(locks, '_lock_connection_gate', None)
+        monkeypatch.setattr(locks, '_lock_connection_gate_capacity', None)
         engines = []
         drivers = []
 
@@ -248,17 +250,15 @@ class TestPostgresLock:
                 if not state_pool_busy:
                     held.append(state_engine.raw_connection())
                     assert state_engine.pool.checkedout() == 1
-                    with pytest.raises(locks.LockTimeout):
+                    with pytest.raises(locks.LockConnectionPoolFull):
                         locks.PostgresLock('pool_isolation_over_budget'
                                           ).acquire(blocking=False)
-                    with pytest.raises(locks.LockTimeout):
+                    with pytest.raises(locks.LockConnectionPoolFull):
                         locks.PostgresLock('pool_isolation_timed',
                                            timeout=0.02,
                                            poll_interval=0.005).acquire()
-                    assert engines[1].pool._timeout == 0
                     locks.PostgresLock('pool_isolation_force').force_unlock()
-                    assert len(engines) == 3
-                    assert isinstance(engines[2].pool, sqlalchemy.NullPool)
+                    assert len(engines) == 2
             finally:
                 for lock in acquired:
                     lock.release()
@@ -299,14 +299,12 @@ class TestPostgresLock:
 
         with mock.patch('sqlalchemy.create_engine', side_effect=make_engine):
             state_engine = db_utils.get_engine(None)
-            lock_engine = db_utils.get_engine(None, direct=True, lock_pool=True)
+            lock_engine = db_utils.get_lock_engine()
         assert state_engine is not lock_engine
         assert created[0][0] == ('postgresql+psycopg2://test@pool/db'
                                  if pooler else 'postgresql+psycopg2://test/db')
         assert created[1][0] == 'postgresql+psycopg2://test/db'
-        expected_pool = (sqlalchemy.NullPool if pooler or pool_size == 0 else
-                         sqlalchemy.pool.QueuePool)
-        assert created[1][1] is expected_pool
+        assert created[1][1] is sqlalchemy.NullPool
         for _, _, engine in created:
             engine.pool.dispose()
 
