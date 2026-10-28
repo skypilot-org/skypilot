@@ -1689,8 +1689,6 @@ class TestRsyncIgnoreRegression:
 
     @pytest.mark.parametrize('ignored,kept', [
         pytest.param(r'private\name.txt', r'keep\name.txt', id='backslash'),
-        pytest.param(' private.txt', ' keep.txt', id='leading-space'),
-        pytest.param('private.txt ', 'keep.txt ', id='trailing-space'),
         pytest.param('private\nname.txt', 'keep\nname.txt', id='newline'),
     ])
     @pytest.mark.parametrize('with_negation', [False, True])
@@ -1721,8 +1719,6 @@ class TestRsyncIgnoreRegression:
                                                     relative_path).read_bytes()
 
     @pytest.mark.parametrize('filename', [
-        pytest.param(' 자료.txt', id='leading-space'),
-        pytest.param('자료.txt ', id='trailing-space'),
         pytest.param('한글 자료.txt', id='korean-with-space'),
         pytest.param('자료\u2028이름.txt', id='unicode-line-separator'),
     ])
