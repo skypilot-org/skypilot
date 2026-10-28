@@ -464,6 +464,7 @@ class TestExternalProxyConfig:
         assert proxy_config.header_name == 'X-Auth-Request-Email'
         assert proxy_config.header_format == 'plaintext'
         assert proxy_config.jwt_identity_claim == 'sub'
+        assert proxy_config.groups_header_name is None
 
     def test_custom_values(self):
         """Test custom configuration values."""
@@ -497,6 +498,7 @@ auth:
   external_proxy:
     enabled: true
     header_name: x-custom
+    groups_header_name: X-Auth-Request-Groups
 """
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
                                          delete=False) as f:
@@ -512,6 +514,9 @@ auth:
                 ('auth', 'external_proxy', 'enabled'), False) is True
             assert server_config.get_nested(
                 ('auth', 'external_proxy', 'header_name'), None) == 'x-custom'
+            assert server_config.get_nested(
+                ('auth', 'external_proxy', 'groups_header_name'),
+                None) == 'X-Auth-Request-Groups'
         finally:
             os.unlink(temp_path)
 
@@ -548,6 +553,7 @@ class TestLoadExternalProxyConfig:
                     'header_name': 'x-amzn-oidc-data',
                     'header_format': 'jwt',
                     'jwt_identity_claim': 'email',
+                    'groups_header_name': 'x-auth-request-groups',
                 }
             }
         })
@@ -565,6 +571,7 @@ class TestLoadExternalProxyConfig:
         assert proxy_config.header_name == 'x-amzn-oidc-data'
         assert proxy_config.header_format == 'jwt'
         assert proxy_config.jwt_identity_claim == 'email'
+        assert proxy_config.groups_header_name == 'x-auth-request-groups'
 
     def test_load_from_server_yaml_disabled(self):
         """Test loading disabled configuration from server.yaml."""
@@ -950,6 +957,30 @@ class TestExtractUserFromHeader:
         assert user is not None
         assert user.name == 'user@example.com'
         assert user.id is not None
+
+    def test_extract_groups_only_from_configured_header(self):
+        """Groups are only trusted when the proxy config names their header."""
+        from sky.server.server import _extract_user_from_header
+
+        request = mock.MagicMock()
+        request.headers = {
+            'X-Auth-Request-Email': 'user@example.com',
+            'X-Auth-Request-Groups': 'vision, mlops',
+        }
+        proxy_config = config.ExternalProxyConfig(
+            enabled=True,
+            header_name='X-Auth-Request-Email',
+            header_format='plaintext',
+        )
+
+        user = _extract_user_from_header(request, proxy_config)
+        assert user is not None
+        assert user.groups is None
+
+        proxy_config.groups_header_name = 'X-Auth-Request-Groups'
+        user = _extract_user_from_header(request, proxy_config)
+        assert user is not None
+        assert user.groups == ['vision', 'mlops']
 
     def test_extract_from_jwt_header(self):
         """Test extracting user from JWT header."""

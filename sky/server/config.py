@@ -368,6 +368,9 @@ def _get_server_config_schema() -> dict:
             'jwt_identity_claim': {
                 'type': 'string',
             },
+            'groups_header_name': {
+                'type': 'string',
+            },
         },
     }
 
@@ -404,6 +407,7 @@ class ExternalProxyConfig:
     header_name: str = _DEFAULT_HEADER_NAME
     header_format: Literal['plaintext', 'jwt'] = 'plaintext'
     jwt_identity_claim: str = _DEFAULT_IDENTITY_CLAIM
+    groups_header_name: Optional[str] = None
 
 
 def load_server_config() -> config_utils.Config:
@@ -463,6 +467,8 @@ def load_external_proxy_config() -> ExternalProxyConfig:
     jwt_identity_claim = server_config.get_nested(
         ('auth', 'external_proxy', 'jwt_identity_claim'),
         _DEFAULT_IDENTITY_CLAIM)
+    groups_header_name = server_config.get_nested(
+        ('auth', 'external_proxy', 'groups_header_name'), None)
 
     # Check for legacy env var
     legacy_header = os.getenv(constants.ENV_VAR_SERVER_AUTH_USER_HEADER)
@@ -485,4 +491,5 @@ def load_external_proxy_config() -> ExternalProxyConfig:
         header_name=header_name,
         header_format=header_format,
         jwt_identity_claim=jwt_identity_claim,
+        groups_header_name=groups_header_name,
     )

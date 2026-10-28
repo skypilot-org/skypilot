@@ -351,6 +351,9 @@ auth:
     # JWT claim to extract identity from (only used when headerFormat is 'jwt').
     # @schema type: [string]
     jwtIdentityClaim: 'sub'
+    # Header name containing trusted groups from the external proxy.
+    # @schema type: [string, null]
+    groupsHeaderName: null
 
 storage:
   # Enable/disable persistent storage

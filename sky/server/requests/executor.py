@@ -704,6 +704,7 @@ _REQUEST_ENV_VARS_DENYLIST = frozenset({
 _REMOTE_REQUEST_ENV_VARS = frozenset({
     constants.USER_ID_ENV_VAR,
     constants.USER_ENV_VAR,
+    constants.USER_GROUPS_ENV_VAR,
     constants.CLIENT_USER_HASH_ENV_VAR,
     'SKYPILOT_CLIENT_TYPE',
     usage_constants.USAGE_RUN_ID_ENV_VAR,

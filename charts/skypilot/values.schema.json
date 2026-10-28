@@ -284,6 +284,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "groupsHeaderName": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "headerFormat": {
                             "type": "string"
                         },

@@ -104,6 +104,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`headerName <helm-values-auth-externalProxy-headerName>`: 'X-Auth-Request-Email'
       :ref:`headerFormat <helm-values-auth-externalProxy-headerFormat>`: 'plaintext'
       :ref:`jwtIdentityClaim <helm-values-auth-externalProxy-jwtIdentityClaim>`: 'sub'
+      :ref:`groupsHeaderName <helm-values-auth-externalProxy-groupsHeaderName>`: null
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -1287,6 +1288,22 @@ Default: ``'sub'``
     externalProxy:
       headerFormat: 'jwt'
       jwtIdentityClaim: 'email'
+
+.. _helm-values-auth-externalProxy-groupsHeaderName:
+
+``auth.externalProxy.groupsHeaderName``
+'''''''''''''''''''''''''''''''''''''''
+
+The header containing groups asserted by a trusted external proxy. Leave unset
+when the proxy does not overwrite a groups header.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      groupsHeaderName: 'X-Auth-Request-Groups'
 
 
 .. _helm-values-storage:
