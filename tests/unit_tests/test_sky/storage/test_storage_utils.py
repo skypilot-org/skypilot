@@ -131,9 +131,11 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     # Validate results
     expected_excluded_files = [
         'remove.py', 'remove_dir', 'remove.sh', 'dir/remove.sh', 'dir/remove.b',
-        'remove.a', 'dir/remove.a', 'remove_dir_pattern',
-        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
+        'remove.a', 'dir/remove.a', 'remove_dir_pattern/remove.txt',
+        'remove_dir_pattern/remove.a'
     ]
+    # '/**' excludes contents, leaving the directory available for traversal.
+    assert 'remove_dir_pattern' not in excluded_files
     for file_path in expected_excluded_files:
         assert file_path in excluded_files
     assert len(excluded_files) == len(expected_excluded_files)
@@ -260,6 +262,8 @@ def test_zip_files_and_folders(ignore_dir_name, request):
             expected_zipped_files.append(constants.GIT_IGNORE_FILE)
         else:
             expected_zipped_files.append(constants.SKY_IGNORE_FILE)
+            # Contents are excluded by '/**', but the directory is retained.
+            expected_zipped_files.append('remove_dir_pattern/')
 
         expected_zipped_file_paths = []
         for filename in expected_zipped_files:

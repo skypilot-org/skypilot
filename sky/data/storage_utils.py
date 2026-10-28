@@ -41,6 +41,11 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                         line = line[1:]
                         if not line:
                             continue
+                    # A trailing '/**' matches directory contents, not the
+                    # directory itself. Glob's bare '**' also returns its
+                    # parent, which would prevent ZIP traversal on reinclusion.
+                    if line.endswith('/**'):
+                        line += '/*'
                     # Make parsing consistent with rsync.
                     # Rsync uses '/' as current directory.
                     if line.startswith('/'):

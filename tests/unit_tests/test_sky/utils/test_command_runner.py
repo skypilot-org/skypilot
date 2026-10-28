@@ -1835,6 +1835,42 @@ class TestRsyncIgnoreRegression:
         assert (target / 'data/keep.json').exists() == keep
         assert (target / 'data/other.json').exists() == other
 
+    @pytest.mark.parametrize('rules,expected', [
+        ('data/**\n!data/keep.json\n', {'data/keep.json'}),
+        ('data/\n!data/keep.json\n', set()),
+        ('data/**\n!data/keep.json\ndata/keep.json\n', set()),
+        ('data/**\n!data/sub/keep.json\n', set()),
+        ('data/**\n!data/**\n',
+         {'data/keep.json', 'data/private.json', 'data/sub/keep.json'}),
+        ('data/\n!data/**\n', set()),
+    ])
+    @pytest.mark.parametrize('via_zip', [False, True])
+    def test_recursive_directory_reinclusion(self, tmp_path, rules, expected,
+                                             via_zip):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        for filename in ('data/keep.json', 'data/private.json',
+                         'data/sub/keep.json'):
+            self._write(source, filename)
+
+        if via_zip:
+            archive = tmp_path / 'upload.zip'
+            storage_utils.zip_files_and_folders([str(source)],
+                                                archive,
+                                                relative_to_items=True)
+            with zipfile.ZipFile(archive) as zipf:
+                zipf.extractall(tmp_path / 'server')
+            source = tmp_path / 'server' / source.name
+
+        target = self._sync(source, tmp_path / 'target')
+
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*.json')
+            if path.is_file()
+        }
+        assert actual == expected
+
     def test_root_rules_take_precedence_over_nested_rules(self, tmp_path):
         source = tmp_path / 'source'
         self._write(source, '.skyignore', '*.txt\n!svc/keep.txt\n')
