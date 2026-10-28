@@ -235,6 +235,55 @@ def test_concurrency_group_marker():
         test_file.unlink(missing_ok=True)
 
 
+def test_serve_flag_reaches_collection():
+    """`--serve` selects the serve tests and nothing else.
+
+    `--serve` is a conftest flag the generator's own parser does not define,
+    so it has to pass through to `pytest --collect-only`. The parser used to
+    accept abbreviated long options, and `--serve` is an unambiguous prefix of
+    its `--serve-consolidation`: it was consumed as that flag, never reached
+    the collection, and every test was scheduled with `--serve-consolidation`
+    appended.
+    """
+    test_file = pathlib.Path('tests/smoke_tests/test_serve_flag_tmp.py')
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.serve\n'
+                         'def test_serve_flag_serve():\n'
+                         '    pass\n'
+                         '\n'
+                         '\n'
+                         'def test_serve_flag_other():\n'
+                         '    pass\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = (f"{pathlib.Path.cwd()}/tests:"
+                             f"{env.get('PYTHONPATH', '')}")
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        for args, consolidation in [
+            ('--kubernetes --serve', False),
+            ('--kubernetes --serve --serve-consolidation', True)
+        ]:
+            pipeline_path.unlink(missing_ok=True)
+            subprocess.run([
+                'python', '.buildkite/generate_pipeline.py', '--args', args,
+                '--file_pattern', 'test_serve_flag_tmp'
+            ],
+                           env=env,
+                           check=True)
+            steps = _extract_steps_from_pipeline(pipeline_path)
+            labels = [s['label'] for s in steps]
+            assert labels == ['test_serve_flag_serve on kubernetes'], \
+                f'{args!r}: expected only the serve test, got {labels}'
+            command = steps[0]['command']
+            assert ('--serve-consolidation' in command) == consolidation, \
+                f'{args!r}: unexpected command {command}'
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
 def _k_selected(args):
     """Return the test names the generator selects for `args`."""
     env = dict(os.environ)
