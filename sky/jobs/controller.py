@@ -208,6 +208,7 @@ _DEADLINE_CANCELS_PER_CHECK = controller_utils.LAUNCHES_PER_WORKER
 _STORAGE_TEARDOWN_ATTEMPTS = 4
 _STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
 
+
 async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     """Create a background task and add it to the set of background tasks.
 
@@ -4439,6 +4440,7 @@ class ControllerManager:
             _background_tasks.add(task)
             # TODO(cooperc): Discard needs a lock?
             task.add_done_callback(_background_tasks.discard)
+        task.add_done_callback(lambda _: self.job_costs.pop(job_id, None))
         ready_waiter = asyncio.create_task(cancellation_ready.wait())
         try:
             await asyncio.wait((task, ready_waiter),
@@ -4508,8 +4510,6 @@ class ControllerManager:
                 self._starting_signal.notify()
             else:
                 self.job_tasks[job_id] = task
-        task.add_done_callback(lambda _: self.job_costs.pop(job_id, None))
-
         logger.info(f'Job {job_id} started successfully')
 
     async def cancel_job(self):

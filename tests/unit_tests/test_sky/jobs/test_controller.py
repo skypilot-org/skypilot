@@ -4744,6 +4744,7 @@ class TestRunJobLoopTransientDbErrors:
                     managed_job_state.ManagedJobScheduleState.LAUNCHING,
             }])
         assert 1 not in manager.job_tasks
+        assert 1 not in manager.job_costs
 
     @pytest.mark.asyncio
     async def test_completed_initialization_task_is_not_registered(
@@ -5159,15 +5160,25 @@ class TestJobCostUnits:
             claimed_ids.append(len(claimed_ids) + 1)
             return {'job_id': claimed_ids[-1], 'pool': None}
 
-        async def fake_run_job_loop(job_id, log_file, pool):
+        async def fake_run_job_loop(job_id,
+                                    log_file,
+                                    pool,
+                                    cancellation_ready=None):
             del log_file, pool
+            if cancellation_ready is not None:
+                cancellation_ready.set()
             job_task = asyncio.get_running_loop().create_future()
             async with manager._job_tasks_lock:
                 manager.job_costs[job_id] = costs(job_id)
                 manager.job_tasks[job_id] = job_task
             await job_task
 
+        real_sleep = asyncio.sleep
+
         async def fake_sleep(seconds):
+            if seconds == 0:
+                await real_sleep(0)
+                return
             sleeps.append(seconds)
             if claims_at_sleep and claims_at_sleep[-1] == len(claimed_ids):
                 load_at_stop.append(manager._claimed_load())
@@ -5273,8 +5284,13 @@ class TestJobCostUnits:
         manager = ControllerManager('test-uuid')
         never_runs = asyncio.Event()
 
-        async def fake_run_job_loop(job_id, log_file, pool):
+        async def fake_run_job_loop(job_id,
+                                    log_file,
+                                    pool,
+                                    cancellation_ready=None):
             del job_id, log_file, pool
+            if cancellation_ready is not None:
+                cancellation_ready.set()
             await never_runs.wait()
 
         with patch.object(manager, 'run_job_loop', new=fake_run_job_loop), \
@@ -5464,8 +5480,13 @@ class TestClaimedJobCostUnits:
         manager = ControllerManager('test-uuid')
         never_runs = asyncio.Event()
 
-        async def fake_run_job_loop(job_id, log_file, pool):
+        async def fake_run_job_loop(job_id,
+                                    log_file,
+                                    pool,
+                                    cancellation_ready=None):
             del job_id, log_file, pool
+            if cancellation_ready is not None:
+                cancellation_ready.set()
             await never_runs.wait()
 
         with patch.object(manager, 'run_job_loop', new=fake_run_job_loop), \
