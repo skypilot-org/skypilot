@@ -1,57 +1,68 @@
 """Persistent KV cache, backed by a sqlite or postgres database."""
+from __future__ import annotations
+
 import time
 from typing import Dict, Optional
-
-import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
 
 from sky import sky_logging
 from sky.metrics import utils as metrics_lib
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
 
-Base = declarative.declarative_base()
+if sqlalchemy_deps.sqlalchemy_available():
+    import sqlalchemy
+    from sqlalchemy import exc as sqlalchemy_exc
+    from sqlalchemy import orm
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.ext import declarative
 
-kv_cache_table = sqlalchemy.Table(
-    'kv_cache',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-    sqlalchemy.Column('expires_at', sqlalchemy.Float),
-)
+    Base = declarative.declarative_base()
 
+    kv_cache_table = sqlalchemy.Table(
+        'kv_cache',
+        Base.metadata,
+        sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+        sqlalchemy.Column('value', sqlalchemy.Text),
+        sqlalchemy.Column('expires_at', sqlalchemy.Float),
+    )
 
-def create_table(engine: sqlalchemy.engine.Engine):
-    # Enable WAL mode to avoid locking issues.
-    # See: issue #1441 and PR #1509
-    # https://github.com/microsoft/WSL/issues/2395
-    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
-    #  This may cause the database locked problem from WSL issue #1441.
-    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
-            not common_utils.is_wsl()):
-        try:
-            with orm.Session(engine) as session:
-                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
-                session.commit()
-        except sqlalchemy_exc.OperationalError as e:
-            if 'database is locked' not in str(e):
-                raise
-            # If the database is locked, it is OK to continue, as the WAL mode
-            # is not critical and is likely to be enabled by other processes.
+    def create_table(engine: sqlalchemy.engine.Engine):
+        # Enable WAL mode to avoid locking issues.
+        # See: issue #1441 and PR #1509
+        # https://github.com/microsoft/WSL/issues/2395
+        # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+        #  This may cause the database locked problem from WSL issue #1441.
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
+                not common_utils.is_wsl()):
+            try:
+                with orm.Session(engine) as session:
+                    session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                    session.commit()
+            except sqlalchemy_exc.OperationalError as e:
+                if 'database is locked' not in str(e):
+                    raise
+                # If the database is locked, it is OK to continue, as the WAL mode
+                # is not critical and is likely to be enabled by other processes.
 
-    migration_utils.safe_alembic_upgrade(engine,
-                                         migration_utils.KV_CACHE_DB_NAME,
-                                         migration_utils.KV_CACHE_VERSION)
+        migration_utils.safe_alembic_upgrade(engine,
+                                             migration_utils.KV_CACHE_DB_NAME,
+                                             migration_utils.KV_CACHE_VERSION)
 
-
-_db_manager = db_utils.DatabaseManager('kv_cache', create_table)
+    _db_manager = db_utils.DatabaseManager('kv_cache', create_table)
+else:
+    sqlalchemy = None  # type: ignore
+    sqlalchemy_exc = None  # type: ignore
+    orm = None  # type: ignore
+    postgresql = None  # type: ignore
+    sqlite = None  # type: ignore
+    Base = None  # type: ignore
+    kv_cache_table = None  # type: ignore
+    _db_manager = None  # type: ignore
 
 
 @metrics_lib.time_me

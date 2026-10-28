@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Leader election for singleton background work.
 
 This module abstracts leader election behind :class:`LeaderElector` and offers
@@ -23,7 +24,10 @@ import socket
 from typing import Optional
 import uuid
 
-import sqlalchemy
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport("sqlalchemy", import_error_message=_SA_MSG)
 
 from sky import global_user_state
 from sky.utils import locks

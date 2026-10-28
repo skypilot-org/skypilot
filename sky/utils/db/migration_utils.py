@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Constants for the database schemas."""
 
 import contextlib
@@ -6,14 +7,27 @@ import os
 import threading
 from typing import Optional
 
-from alembic import command as alembic_command
-from alembic.config import Config
-from alembic.runtime import migration
 import filelock
-import sqlalchemy
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.utils.db import sqlalchemy_deps
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+alembic_command = adaptors_common.LazyImport('alembic.command',
+                                             import_error_message=_SA_MSG)
+# alembic.config.Config is a class - LazyImport module then Config attr
+_alembic_config = adaptors_common.LazyImport('alembic.config',
+                                             import_error_message=_SA_MSG)
+migration = adaptors_common.LazyImport('alembic.runtime.migration',
+                                       import_error_message=_SA_MSG)
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                        import_error_message=_SA_MSG)
+
+
+def _alembic_config_cls():
+    return _alembic_config.Config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -84,7 +98,7 @@ def get_alembic_config(engine: sqlalchemy.engine.Engine,
         alembic_ini_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             'setup_files', 'alembic.ini')
-    alembic_cfg = Config(alembic_ini_path, ini_section=section)
+    alembic_cfg = _alembic_config.Config(alembic_ini_path, ini_section=section)
 
     # Override the database URL to match SkyPilot's current connection
     # Use render_as_string to get the full URL with password

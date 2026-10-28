@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at _GLOBAL_CONFIG_PATH
@@ -59,12 +60,6 @@ import threading
 import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -75,16 +70,25 @@ from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
 
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.engine import Engine
+
     from sky import models
+    from sky.utils.db import db_utils
+    from sky.utils.db import migration_utils
 else:
     yaml = adaptors_common.LazyImport('yaml')
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
 
 logger = sky_logging.init_logger(__name__)
 
@@ -123,14 +127,42 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-Base = declarative.declarative_base()
+# Populated by _ensure_config_db_schema() when SQLAlchemy is installed.
+Base = None
+config_yaml_table = None
+_db_manager = None
 
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
+
+def _ensure_config_db_schema():
+    """Load SQLAlchemy schema for server-side config DB storage."""
+    global Base, config_yaml_table, _db_manager
+    if _db_manager is not None:
+        return
+    sqlalchemy_deps.require_sqlalchemy()
+    import sqlalchemy
+    from sqlalchemy.ext import declarative
+
+    from sky.utils.db import db_utils
+    from sky.utils.db import migration_utils
+
+    Base = declarative.declarative_base()
+    config_yaml_table = sqlalchemy.Table(
+        'config_yaml',
+        Base.metadata,
+        sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+        sqlalchemy.Column('value', sqlalchemy.Text),
+    )
+
+    def _create_table(engine):
+        """Initialize the config database with migrations."""
+        migration_utils.safe_alembic_upgrade(
+            engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
+            migration_utils.SKYPILOT_CONFIG_VERSION)
+
+    # We only store config in the DB when using Postgres,
+    # so no need to pass in db_name here.
+    _db_manager = db_utils.DatabaseManager(db_name='config',
+                                           create_table_fn=_create_table)
 
 
 class ConfigContext:
@@ -910,19 +942,6 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _set_loaded_config_path(config_path)
 
 
-def _create_table(engine: sqlalchemy.engine.Engine):
-    """Initialize the config database with migrations."""
-    migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-        migration_utils.SKYPILOT_CONFIG_VERSION)
-
-
-# We only store config in the DB when using Postgres,
-# so no need to pass in db_name here.
-_db_manager = db_utils.DatabaseManager(db_name='config',
-                                       create_table_fn=_create_table)
-
-
 def _reload_config_as_server() -> None:
     # Build the new config fully, then swap it in with a single
     # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
@@ -943,6 +962,8 @@ def _reload_config_as_server() -> None:
         logger.debug('retrieving config from database')
 
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
+            from sqlalchemy import orm
+            _ensure_config_db_schema()
             with orm.Session(_db_manager.get_engine()) as session:
                 row = session.query(config_yaml_table).filter_by(
                     key=key).first()
@@ -1735,6 +1756,13 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if existing_db_url:
 
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+                from sqlalchemy import orm
+                from sqlalchemy.dialects import postgresql
+                from sqlalchemy.dialects import sqlite
+
+                from sky.utils.db import db_utils
+
+                _ensure_config_db_schema()
                 engine = _db_manager.get_engine()
                 # Persisting, not logging: this value is read back as the
                 # server config, so it must be the real one. Do not route it

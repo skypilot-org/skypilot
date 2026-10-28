@@ -1,5 +1,7 @@
+from __future__ import annotations
 """Utils for sky databases."""
 import asyncio
+import functools
 import contextlib
 import enum
 import math
@@ -11,19 +13,25 @@ import typing
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 import urllib.parse
 
-import aiosqlite
-import aiosqlite.context
-import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy.ext import asyncio as sqlalchemy_async
-
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+aiosqlite = adaptors_common.LazyImport('aiosqlite', import_error_message=_SA_MSG)
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy', import_error_message=_SA_MSG)
+sqlalchemy_exc = adaptors_common.LazyImport('sqlalchemy.exc',
+                                            import_error_message=_SA_MSG)
+sqlalchemy_async = adaptors_common.LazyImport('sqlalchemy.ext.asyncio',
+                                              import_error_message=_SA_MSG)
+
 if typing.TYPE_CHECKING:
+    import aiosqlite.context
     from sqlalchemy.orm import Session
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
@@ -306,6 +314,19 @@ def fault_point():
     pass
 
 
+def _aiosqlite_contextmanager(fn: Callable):
+    """Apply aiosqlite.context.contextmanager lazily (server dep)."""
+    decorated: list = []
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not decorated:
+            decorated.append(aiosqlite.context.contextmanager(fn))
+        return decorated[0](*args, **kwargs)
+
+    return wrapper
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -371,7 +392,7 @@ class SQLiteConn(threading.local):
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
 
-    @aiosqlite.context.contextmanager
+    @_aiosqlite_contextmanager
     async def execute_fetchall_async(self,
                                      sql: str,
                                      parameters: Optional[Iterable[Any]] = None

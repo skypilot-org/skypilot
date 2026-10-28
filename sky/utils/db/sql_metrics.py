@@ -1,3 +1,4 @@
+from __future__ import annotations
 """SQLAlchemy instrumentation feeding the families in ``sky.metrics.db``.
 
 ``install(engine, db)`` attaches everything to one engine. Call it once
@@ -39,11 +40,15 @@ import time
 from typing import Any, Optional, Tuple
 import weakref
 
-import sqlalchemy
-from sqlalchemy import event
-from sqlalchemy.sql import compiler as sql_compiler
-
+from sky.adaptors import common as adaptors_common
 from sky.metrics import db as db_metrics
+from sky.utils.db import sqlalchemy_deps
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy', import_error_message=_SA_MSG)
+event = adaptors_common.LazyImport('sqlalchemy.event', import_error_message=_SA_MSG)
+sql_compiler = adaptors_common.LazyImport('sqlalchemy.sql.compiler',
+                                          import_error_message=_SA_MSG)
 
 logger = logging.getLogger(__name__)
 

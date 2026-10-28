@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Managed-job tasks that stopped making progress before they ever ran.
 
 Two phases, each a positive statement about SkyPilot's own scheduler rather
@@ -38,7 +39,10 @@ import os
 import time
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
-import sqlalchemy
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport("sqlalchemy", import_error_message=_SA_MSG)
 
 from sky import global_user_state
 from sky import sky_logging
