@@ -4457,7 +4457,7 @@ class TestRunJobLoopTransientDbErrors:
                 await asyncio.sleep(0)
 
         await asyncio.wait_for(start_dispatched(), timeout=1)
-        start_job.assert_awaited_once_with(1, None)
+        assert start_job.await_args.args[:2] == (1, None)
         assert signal_path.exists()
 
     @pytest.mark.asyncio
@@ -4468,13 +4468,16 @@ class TestRunJobLoopTransientDbErrors:
         first_finished = asyncio.Event()
         release_first = asyncio.Event()
 
-        async def start_job(job_id, pool):
+        async def start_job(job_id, pool, reservation_ready):
             del pool
             if job_id == 1:
+                manager.starting.add(job_id)
+                reservation_ready.set()
                 first_started.set()
                 await release_first.wait()
                 first_finished.set()
             else:
+                reservation_ready.set()
                 second_started.set()
 
         monkeypatch.setattr(manager, 'start_job', start_job)
@@ -4509,9 +4512,10 @@ class TestRunJobLoopTransientDbErrors:
         finished = asyncio.Event()
         release = asyncio.Event()
 
-        async def start_job(job_id, pool):
+        async def start_job(job_id, pool, reservation_ready):
             del pool
             manager.starting.add(job_id)
+            reservation_ready.set()
             started.set()
             await release.wait()
             finished.set()
@@ -4541,6 +4545,56 @@ class TestRunJobLoopTransientDbErrors:
             with pytest.raises(asyncio.CancelledError):
                 await monitor
             await asyncio.wait_for(finished.wait(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_waits_for_claim_reservation(
+            self, manager, monkeypatch, tmp_path):
+        manager.starting.clear()
+        cost_lookup_started = asyncio.Event()
+        allow_cost_lookup = asyncio.Event()
+        lifecycle_started = asyncio.Event()
+        lifecycle_blocker = asyncio.Event()
+
+        async def claimed_cost(job_id, pool):
+            del job_id, pool
+            cost_lookup_started.set()
+            await allow_cost_lookup.wait()
+            return controller_module.controller_utils.JOB_COST_UNITS
+
+        async def run_job_loop(job_id, log_file, pool, cancellation_ready):
+            del job_id, log_file, pool
+            cancellation_ready.set()
+            lifecycle_started.set()
+            await lifecycle_blocker.wait()
+
+        monkeypatch.setattr(manager, '_claimed_cost_units', claimed_cost)
+        monkeypatch.setattr(manager, 'run_job_loop', run_job_loop)
+        monkeypatch.setattr(controller_module.controller_utils,
+                            'LAUNCHES_PER_WORKER', 1)
+        monkeypatch.setattr(jobs_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        get_waiting = AsyncMock(side_effect=[{
+            'job_id': 1,
+            'pool': None
+        }, {
+            'job_id': 2,
+            'pool': None
+        }])
+        monkeypatch.setattr(managed_job_state, 'get_waiting_job_async',
+                            get_waiting)
+
+        monitor = asyncio.create_task(manager.monitor_loop())
+        try:
+            await asyncio.wait_for(cost_lookup_started.wait(), timeout=1)
+            await asyncio.sleep(0)
+            assert get_waiting.await_count == 1
+            allow_cost_lookup.set()
+            await asyncio.wait_for(lifecycle_started.wait(), timeout=1)
+        finally:
+            lifecycle_blocker.set()
+            monitor.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await monitor
 
     @pytest.mark.asyncio
     async def test_pending_cancel_retries_transient_db_error(

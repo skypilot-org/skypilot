@@ -4412,6 +4412,7 @@ class ControllerManager:
         self,
         job_id: int,
         pool: Optional[str] = None,
+        reservation_ready: Optional[asyncio.Event] = None,
     ):
         """Start a new job.
 
@@ -4433,6 +4434,8 @@ class ControllerManager:
                 return
             self.starting.add(job_id)
             self.job_costs[job_id] = cost_units
+            if reservation_ready is not None:
+                reservation_ready.set()
             cancellation_ready = asyncio.Event()
             task = asyncio.create_task(
                 self.run_job_loop(job_id, log_file, pool, cancellation_ready))
@@ -4669,7 +4672,7 @@ class ControllerManager:
             return False
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
-            if task is None or task.done():
+            if task is None or task.done() or job_id in self._stopping_jobs:
                 return False
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
@@ -4685,6 +4688,7 @@ class ControllerManager:
                     return False
                 # A deadline is a hard limit: not graceful.
                 self._cancel_info[job_id] = (False, None)
+            self._stopping_jobs.add(job_id)
             task.cancel()
             self._deadline_cancelled.add(job_id)
             return True
@@ -4693,7 +4697,7 @@ class ControllerManager:
         """Whether the job runs here and no cancel is applied or pending."""
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
-            if task is None or task.done():
+            if task is None or task.done() or job_id in self._stopping_jobs:
                 return False
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
@@ -4844,9 +4848,22 @@ class ControllerManager:
                         await callback('CANCELLED')
                         continue
 
-            await create_background_task(self.start_job(job_id, pool))
-            # Let start_job reserve its launch slot before claiming another.
-            await asyncio.sleep(0)
+            reservation_ready = asyncio.Event()
+            start_task = await create_background_task(
+                self.start_job(job_id, pool, reservation_ready))
+            reservation_waiter = asyncio.create_task(reservation_ready.wait())
+            try:
+                await asyncio.wait((start_task, reservation_waiter),
+                                   return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                if not reservation_waiter.done():
+                    reservation_waiter.cancel()
+                    try:
+                        await reservation_waiter
+                    except asyncio.CancelledError:
+                        pass
+            if start_task.done():
+                await start_task
 
 
 async def main(controller_uuid: str):
