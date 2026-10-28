@@ -3861,6 +3861,41 @@ async def get_latest_task_id_status_async(
 
 
 @db_retries.retry_async
+async def get_launched_task_name_async(job_id: int) -> Optional[str]:
+    """The name of the job's current task, if that task may have a cluster.
+
+    The current task is the first one that is not terminal (else the last
+    one). Returns None for a job group, whose tasks run on several clusters,
+    and when the current task has not been submitted to a cluster yet.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.status,
+                spot_table.c.task_name,
+                spot_table.c.submitted_at,
+                job_info_table.c.execution,
+            ).select_from(
+                spot_table.join(
+                    job_info_table, spot_table.c.spot_job_id ==
+                    job_info_table.c.spot_job_id)).where(
+                        spot_table.c.spot_job_id == job_id).order_by(
+                            spot_table.c.task_id.asc()))
+        rows = result.fetchall()
+    if not rows or rows[0][4] == DagExecution.PARALLEL.value:
+        return None
+    task_id, _ = get_latest_task_id_from_statuses([
+        (row[0], ManagedJobStatus(row[1])) for row in rows
+    ])
+    row = next(row for row in rows if row[0] == task_id)
+    if row[3] is None:
+        return None
+    return row[2]
+
+
+@db_retries.retry_async
 async def get_all_task_ids_statuses_async(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     """Returns all (task_id, status) pairs for a job (async version)."""
