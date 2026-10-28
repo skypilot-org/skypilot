@@ -210,6 +210,12 @@ class Runcrate(clouds.Cloud):
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            # The live offer is picked at launch, so the provisioner checks
+            # its price and disk against these again.
+            'max_hourly_cost': resources.max_hourly_cost,
+            'disk_size':
+                (resources.disk_size if resources.disk_size_specified else None
+                ),
         }
 
     def _get_feasible_launchable_resources(

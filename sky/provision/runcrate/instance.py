@@ -99,11 +99,19 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     if to_start_count > 0:
         instance_type = config.node_config['InstanceType']
-        offer = utils.find_offer(instance_type, region)
+        max_hourly_cost = config.node_config.get('MaxHourlyCost')
+        disk_size = config.node_config.get('DiskSize')
+        offer = utils.find_offer(instance_type, region, max_hourly_cost,
+                                 disk_size)
         if offer is None:
+            limits = ''
+            if max_hourly_cost is not None:
+                limits += f' at or under ${max_hourly_cost}/h'
+            if disk_size is not None:
+                limits += f' with at least {disk_size} GB of disk'
             raise utils.RuncrateError(
-                f'No {instance_type} is available in {region} on Runcrate '
-                'right now.')
+                f'No {instance_type}{limits} is available in {region} on '
+                'Runcrate right now.')
         ssh_key_id = config.authentication_config['ssh_key_id']
         for _ in range(to_start_count):
             node_type = _HEAD if head_instance_id is None else _WORKER

@@ -196,12 +196,22 @@ def list_offers(gpu_type: Optional[str] = None) -> List[Dict[str, Any]]:
     return [offer for offer in offers if is_supported_offer(offer)]
 
 
-def find_offer(instance_type: str, region: str) -> Optional[Dict[str, Any]]:
-    """The cheapest live offer of an instance type in a region."""
+def find_offer(instance_type: str,
+               region: str,
+               max_hourly_cost: Optional[float] = None,
+               min_disk_gb: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """The cheapest live offer of an instance type in a region.
+
+    Offer prices and disks can change after the catalog is fetched, so the
+    user's cost cap and requested disk size are checked again here: an offer
+    over the cap or with a smaller disk is never picked.
+    """
     matches = [
         offer for offer in list_offers()
         if instance_type_name(offer) == instance_type and
-        region_name(offer['region']) == region
+        region_name(offer['region']) == region and
+        (max_hourly_cost is None or offer['hourly_rate'] <= max_hourly_cost) and
+        (min_disk_gb is None or offer.get('storage_gb', 0) >= min_disk_gb)
     ]
     if not matches:
         return None

@@ -90,6 +90,26 @@ class TestOffers:
                                 'us-midwest')['id'] == 'cheap'
         assert utils.find_offer('1x_A6000_6c_48g', 'wichita-usa-1') is None
 
+    def test_find_offer_keeps_to_cost_cap_and_disk_size(self, monkeypatch):
+        offers = [
+            _offer(id='cheap-small-disk', storage_gb=100, hourly_rate=0.5),
+            _offer(id='mid', storage_gb=500, hourly_rate=0.66),
+            _offer(id='dear', storage_gb=1000, hourly_rate=0.9),
+        ]
+        monkeypatch.setattr(utils, '_request', lambda *a, **k: offers)
+        find = utils.find_offer
+        assert find('1x_A6000_6c_48g', 'us-midwest')['id'] == 'cheap-small-disk'
+        assert find('1x_A6000_6c_48g', 'us-midwest',
+                    min_disk_gb=200)['id'] == 'mid'
+        assert find('1x_A6000_6c_48g', 'us-midwest',
+                    min_disk_gb=800)['id'] == 'dear'
+        assert find('1x_A6000_6c_48g',
+                    'us-midwest',
+                    max_hourly_cost=0.8,
+                    min_disk_gb=800) is None
+        assert find('1x_A6000_6c_48g', 'us-midwest',
+                    max_hourly_cost=0.4) is None
+
 
 class TestCatalogFetcher:
 
@@ -225,6 +245,35 @@ class TestProvisioner:
             instance.run_instances('us-midwest', 'c', 'c-1234',
                                    _provision_config())
         create.assert_not_called()
+
+    def test_cost_cap_and_disk_size_reach_the_offer_choice(self, monkeypatch):
+        monkeypatch.setattr(utils, 'list_instances', lambda _: [])
+        find = mock.Mock(return_value=None)
+        monkeypatch.setattr(utils, 'find_offer', find)
+        config = _provision_config()
+        config.node_config.update({'MaxHourlyCost': 0.4, 'DiskSize': 500})
+        with pytest.raises(utils.RuncrateError, match='under \\$0.4/h'):
+            instance.run_instances('us-midwest', 'c', 'c-1234', config)
+        find.assert_called_once_with('1x_A6000_6c_48g', 'us-midwest', 0.4, 500)
+
+    @pytest.mark.parametrize('specified,expected', [(False, None), (True, 500)])
+    def test_deploy_variables_carry_only_a_requested_disk_size(
+            self, specified, expected):
+        cloud = runcrate.Runcrate()
+        # unsafe: Mock refuses attributes named assert_*.
+        resources = mock.Mock(unsafe=True,
+                              instance_type='1x_A6000_6c_48g',
+                              max_hourly_cost=0.4,
+                              disk_size=500,
+                              disk_size_specified=specified)
+        resources.assert_launchable.return_value = resources
+        with mock.patch.object(cloud,
+                               'get_accelerators_from_instance_type',
+                               return_value={'A6000': 1}):
+            variables = cloud.make_deploy_resources_variables(
+                resources, None, clouds.Region('us-midwest'), None, 1)
+        assert variables['max_hourly_cost'] == 0.4
+        assert variables['disk_size'] == expected
 
     def test_failed_launch_is_terminated_and_raised(self, monkeypatch):
         monkeypatch.setattr(utils, 'list_instances', lambda _: [])
