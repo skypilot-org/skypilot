@@ -174,6 +174,7 @@ Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 Yotta = clouds.Yotta
 Verda = clouds.Verda
+IONet = clouds.IONet
 
 __all__ = [
     '__version__',
@@ -201,6 +202,7 @@ __all__ = [
     'Shadeform',
     'Seeweb',
     'Yotta',
+    'IONet',
     'Optimizer',
     'OptimizeTarget',
     'backends',
