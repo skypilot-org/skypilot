@@ -95,7 +95,7 @@ The migration:
 * refuses a target database that already holds SkyPilot data, so start from a new, empty database;
 * only reads the SQLite files, so rolling back is pointing the API server back at them;
 * creates the schema with the same SkyPilot version as the API server, so run it with the API server's image;
-* copies all tables in a single transaction and checks the row counts, so a failed run leaves the target empty;
+* creates the schema first, then copies all tables in a single transaction and checks the row counts, so a failed run leaves the schema without any data and can be run again;
 * stores the API server config (``~/.sky/config.yaml``, which the API server initialized from :ref:`apiService.config <helm-values-apiService-config>`) in the database, where an API server backed by PostgreSQL reads it from.
 
 What to expect:
@@ -212,7 +212,7 @@ Run the migration:
     kubectl exec -n $NAMESPACE skypilot-db-migration -- \
       python -m sky.utils.db.migrate_sqlite_to_postgres
 
-It prints the number of rows copied per table. To migrate a config other than ``~/.sky/config.yaml``, pass ``--config <path>``. If it fails, the database is left empty and the API server can be started again on SQLite (see :ref:`rollback <api-server-migrate-sqlite-to-postgres-rollback>`).
+It prints the number of rows copied per table. To migrate a config other than ``~/.sky/config.yaml``, pass ``--config <path>``. If it fails, the database is left without any data, so you can fix the cause and run it again, or start the API server again on SQLite (see :ref:`rollback <api-server-migrate-sqlite-to-postgres-rollback>`).
 
 An API server backed by PostgreSQL reads its config from the database and does not start if ``~/.sky/config.yaml`` on its volume still holds the old config. Move the file aside, keeping it for a rollback, and delete the pod:
 

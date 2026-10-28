@@ -16,7 +16,8 @@ back at them. Steps:
 1. Refuse a target database that already holds SkyPilot data.
 2. Take consistent copies of the SQLite databases with the SQLite backup API.
 3. Create the schema in PostgreSQL with SkyPilot's own migrations, and remove
-   the default recipes that this seeds into the empty database.
+   the rows this seeds into the empty database: the default recipes, and the
+   SSH keys found under ``~/.sky/clients`` (the SQLite state holds them too).
 4. Copy every table in one transaction, check row counts and the largest value
    of each sequence-backed column, and move the sequences past those values.
 5. Store the API server config (``--config``) in the database, where the API
@@ -30,7 +31,7 @@ import shutil
 import sqlite3
 import tempfile
 import typing
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 import urllib.parse
 
 import psycopg2
@@ -121,6 +122,59 @@ def remove_default_recipes(connection: Any, placeholder: str,
         f'({", ".join([placeholder] * len(names))})', names)
     connection.commit()
     return names
+
+
+def source_ssh_keys(sky_dir: pathlib.Path) -> Dict[str, Tuple[Any, Any]]:
+    """Returns the SSH keys in the SQLite state, keyed by user hash."""
+    with contextlib.closing(_readonly(sky_dir / 'state.db')) as source:
+        if source.execute('SELECT 1 FROM sqlite_master WHERE type = \'table\' '
+                          'AND name = \'ssh_key\'').fetchone() is None:
+            return {}
+        return {
+            user_hash: (public_key, private_key)
+            for user_hash, public_key, private_key in source.execute(
+                'SELECT user_hash, ssh_public_key, ssh_private_key '
+                'FROM ssh_key')
+        }
+
+
+def remove_seeded_ssh_keys(connection: Any, placeholder: str,
+                           expected: Dict[str, Tuple[Any, Any]]) -> List[str]:
+    """Deletes the seeded SSH keys, which the copy brings over again.
+
+    The schema migration that adds the ssh_key table also inserts the keys it
+    finds under ~/.sky/clients, outside the copy transaction.
+
+    Args:
+        connection: A DB-API connection to the target database.
+        placeholder: The paramstyle placeholder of the connection's driver.
+        expected: The SSH keys in the SQLite state, as returned by
+            source_ssh_keys().
+
+    Returns:
+        The user hashes of the deleted keys.
+
+    Raises:
+        ValueError: If a seeded key is missing from or differs in the SQLite
+            state, so deleting it would lose the key.
+    """
+    cursor = connection.cursor()
+    cursor.execute('SELECT user_hash, ssh_public_key, ssh_private_key '
+                   'FROM ssh_key')
+    seeded = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+    if not seeded:
+        return []
+    differing = sorted(user_hash for user_hash, key in seeded.items()
+                       if expected.get(user_hash) != key)
+    if differing:
+        raise ValueError('The SSH keys under ~/.sky/clients differ from the '
+                         f'SQLite state for users {differing}.')
+    user_hashes = sorted(seeded)
+    cursor.execute(
+        f'DELETE FROM ssh_key WHERE user_hash IN '
+        f'({", ".join([placeholder] * len(user_hashes))})', user_hashes)
+    connection.commit()
+    return user_hashes
 
 
 def require_postgres(engine: 'sqlalchemy.engine.Engine') -> None:
@@ -326,10 +380,22 @@ def migrate(sky_dir: pathlib.Path, config: Dict[str, Any],
     try:
         freeze(sky_dir, frozen_dir)
         removed = init_target()
+        with contextlib.closing(psycopg2.connect(dsn)) as target:
+            with target.cursor() as cursor:
+                cursor.execute('SELECT to_regclass(\'ssh_key\') IS NOT NULL')
+                has_ssh_keys = cursor.fetchone()[0]
+            removed_keys: List[str] = []
+            if has_ssh_keys:
+                removed_keys = remove_seeded_ssh_keys(
+                    target, '%s', source_ssh_keys(frozen_dir))
         rows = copy_tables(frozen_dir, dsn, config)
     finally:
         shutil.rmtree(frozen_dir)
-    return {'removed_default_recipes': removed, 'rows': rows}
+    return {
+        'removed_default_recipes': removed,
+        'removed_seeded_ssh_keys': removed_keys,
+        'rows': rows
+    }
 
 
 def main() -> None:
@@ -366,6 +432,8 @@ def main() -> None:
         print(f'{table}: {count} rows')
     print(f'Removed default recipes before the copy: '
           f'{", ".join(result["removed_default_recipes"]) or "none"}')
+    print(f'Removed seeded SSH keys before the copy: '
+          f'{len(result["removed_seeded_ssh_keys"])}')
     print('Migration complete.')
 
 

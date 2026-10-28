@@ -76,6 +76,66 @@ def test_remove_default_recipes_aborts_on_missing_row(recipes):
         migrate.remove_default_recipes(connection, '?', expected)
 
 
+_SSH_KEY_DDL = ('CREATE TABLE ssh_key (user_hash TEXT PRIMARY KEY, '
+                'ssh_public_key TEXT, ssh_private_key TEXT)')
+_SSH_KEYS = {'abc123': ('ssh-ed25519 AAAA', 'PRIVATE')}
+
+
+@pytest.fixture()
+def seeded_ssh_keys(tmp_path):
+    """An ssh_key table holding the keys found under ~/.sky/clients."""
+    connection = sqlite3.connect(tmp_path / 'target.db')
+    connection.execute(_SSH_KEY_DDL)
+    connection.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+    connection.commit()
+    yield connection
+    connection.close()
+
+
+def _ssh_key_count(connection):
+    return connection.execute('SELECT count(*) FROM ssh_key').fetchone()[0]
+
+
+def test_source_ssh_keys(tmp_path):
+    with contextlib.closing(sqlite3.connect(tmp_path / 'state.db')) as source:
+        source.execute(_SSH_KEY_DDL)
+        source.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+        source.commit()
+    assert migrate.source_ssh_keys(tmp_path) == _SSH_KEYS
+
+
+def test_source_ssh_keys_without_table(tmp_path):
+    sqlite3.connect(tmp_path / 'state.db').close()
+    assert migrate.source_ssh_keys(tmp_path) == {}
+
+
+def test_remove_seeded_ssh_keys(seeded_ssh_keys):
+    removed = migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS)
+    assert removed == ['abc123']
+    assert _ssh_key_count(seeded_ssh_keys) == 0
+
+
+def test_remove_seeded_ssh_keys_after_failed_copy(seeded_ssh_keys):
+    migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS)
+    assert migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS) == []
+
+
+def test_remove_seeded_ssh_keys_aborts_on_key_missing_from_source(
+        seeded_ssh_keys):
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', {})
+    assert _ssh_key_count(seeded_ssh_keys) == 1
+
+
+def test_remove_seeded_ssh_keys_aborts_on_changed_key(seeded_ssh_keys):
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?',
+                                       {'abc123': ('ssh-ed25519 BBBB', 'X')})
+    assert _ssh_key_count(seeded_ssh_keys) == 1
+
+
 @pytest.mark.parametrize('dialect', ['sqlite', 'mysql'])
 def test_require_postgres_rejects_other_dialects(dialect):
     engine = mock.Mock()
@@ -336,3 +396,53 @@ def test_missing_target_table_fails(pg_source):
     _sql('DROP TABLE kv_cache')
     with pytest.raises(ValueError, match='does not exist in PostgreSQL'):
         migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pytest.fixture()
+def pg_source_with_ssh_key(pg_source):
+    """A source with an SSH key that schema init also seeds into the target.
+
+    The global_user_state migration that adds ssh_key copies the keys under
+    ~/.sky/clients into the new table, so on a server whose users have
+    launched clusters the target already holds the key before the copy.
+    """
+    root, init = pg_source
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.execute(_SSH_KEY_DDL)
+        source.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+        source.commit()
+    _sql(_SSH_KEY_DDL)
+
+    def seed_ssh_keys():
+        for user_hash, (public_key, private_key) in _SSH_KEYS.items():
+            _sql(
+                'INSERT INTO ssh_key VALUES (%s, %s, %s) '
+                'ON CONFLICT DO NOTHING', user_hash, public_key, private_key)
+        return []
+
+    init.side_effect = seed_ssh_keys
+    yield root, init
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_with_ssh_key_seeded_by_schema_init(pg_source_with_ssh_key):
+    root, _ = pg_source_with_ssh_key
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['removed_seeded_ssh_keys'] == ['abc123']
+    assert result['rows']['ssh_key'] == 1
+    assert _sql('SELECT user_hash, ssh_public_key, ssh_private_key '
+                'FROM ssh_key') == [('abc123', *_SSH_KEYS['abc123'])]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_failed_copy_with_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
+    root, _ = pg_source_with_ssh_key
+    with mock.patch.object(migrate, '_convert', side_effect=ValueError('boom')):
+        with pytest.raises(ValueError, match='boom'):
+            migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(0,)]
+    migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(1,)]
