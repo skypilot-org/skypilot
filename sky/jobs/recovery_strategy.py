@@ -137,6 +137,12 @@ _LIVE_REQUEST_STATUS_VALUES = frozenset(
 # Name of the inner sky.launch requests in the API server's request table.
 _LAUNCH_REQUEST_NAME = (server_constants.REQUEST_NAME_PREFIX +
                         request_names.RequestName.CLUSTER_LAUNCH.value)
+# Tries at looking up the live launch requests for a cluster before a launch
+# attempt gives up on this round (see _find_live_launch_request). The lookup
+# runs right when the API server may be restarting or overloaded, so a single
+# failure is common and says little.
+_LIVE_LAUNCH_LOOKUP_ATTEMPTS = 4
+_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS = 5
 
 # The blocking sync-SDK log stream of each inner launch request runs in a
 # worker thread. Deliberately NOT asyncio.to_thread's default executor: a
@@ -157,6 +163,7 @@ _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 _KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
 _KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
 _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
+_KIND_LAUNCH_LOOKUP_FAILED = 'launch_lookup_failed'
 
 # Why _wait_until_job_starts_on_cluster gave up. Without these the whole
 # family is one opaque bucket: the loop swallows three different exceptions
@@ -245,6 +252,15 @@ class _LaunchRequestParked(Exception):
         super().__init__(status_msg or 'Launch request is waiting to resume.')
         self.request_id = request_id
         self.status_msg = status_msg
+
+
+class _LaunchLookupFailed(Exception):
+    """Could not find out whether a launch request is live for the cluster.
+
+    Not knowing is not the same as "none is live": launching now could put a
+    second launch beside a live one, and tearing the cluster down would cancel
+    it. The launch attempt backs off and looks again instead.
+    """
 
 
 class StrategyExecutor:
@@ -522,15 +538,18 @@ class StrategyExecutor:
         # Checked here too, so that a task with nothing to re-attach to does
         # not wait for a launch slot just to find that out.
         try:
-            live_request = await self._find_live_launch_request()
+            if await self._find_live_launch_request() is None:
+                return None
         except Exception as e:  # pylint: disable=broad-except
+            # Not knowing is not "none is live": the launch loop below keeps
+            # looking, backing off, until a lookup succeeds.
             logger.warning('Failed to look up a live launch request for '
                            f'cluster {self.cluster_name}: '
                            f'{common_utils.format_exception(e)}')
-            return None
-        if live_request is None:
-            return None
-        return await self._launch(max_retry=1,
+        # max_retry=None: with reattach_only, the loop ends once no launch
+        # request is live (a failed attempt with none left live tears the
+        # cluster down first), so each retry adopts another live one.
+        return await self._launch(max_retry=None,
                                   raise_on_failure=False,
                                   recovery=recovery,
                                   reattach_only=True)
@@ -819,33 +838,15 @@ class StrategyExecutor:
             return None
         return request_payloads[0]
 
-    async def _find_live_launch_request(self) -> Optional[Any]:
-        """Find a live launch request for this task's cluster, if any.
+    async def _list_live_launch_requests(self) -> List[Any]:
+        """List the live launch requests for this task's cluster, oldest first.
 
-        A launch request outlives the controller process that submitted it:
-        if the controller restarts while the request is parked (WAITING) or
-        still running, the request carries on on the API server, but its id
-        was only held in the old process's memory. Looking it up by cluster
-        name lets the new controller re-attach to it instead of submitting a
-        second launch beside it. Cluster names are unique per managed job
-        task, so a live launch request for the cluster belongs to this task.
-
-        Looking the request up, rather than persisting its id, leaves no
-        window between sdk.launch returning and the id being written.
-
-        If several launch requests are live (e.g. left by an older controller
-        that launched again), one is kept and the others are cancelled,
-        best-effort, so that only one of them can run the task on the
-        cluster. A running request is kept if there is one: it is the one
-        making progress, and cancelling it would interrupt it mid-launch.
-        Otherwise the oldest, i.e. the original, is kept. The requests left
-        to cancel are then queued or parked ones, which cancelling only
-        marks as cancelled: no process is killed and the cluster is not
-        touched.
+        Cluster names are unique per managed job task, so a live launch
+        request for the cluster belongs to this task.
 
         Returns:
-            The payload (request_id, status, status_msg) of the live launch
-            request, or None if there is none.
+            The payloads (request_id, status, status_msg, created_at) of the
+            PENDING, WAITING or RUNNING launch requests for the cluster.
 
         Raises:
             Exception: If the API server could not be reached.
@@ -868,24 +869,142 @@ class StrategyExecutor:
                     payload.cluster_name == self.cluster_name and
                     payload.status in _LIVE_REQUEST_STATUS_VALUES)
 
-        def keep_order(payload: Any) -> Tuple[bool, float, str]:
-            return (payload.status != requests_lib.RequestStatus.RUNNING.value,
-                    payload.created_at, payload.request_id)
+        return sorted(filter(is_live_launch, request_payloads),
+                      key=lambda p: (p.created_at, p.request_id))
 
-        live_requests = sorted(filter(is_live_launch, request_payloads),
-                               key=keep_order)
+    async def _cancel_duplicate_launch_requests(
+            self, kept: Any, live_requests: List[Any]) -> None:
+        """Cancel the cluster's other live launch requests, best-effort.
+
+        Only one launch request may run the task on the cluster; any other
+        would run it again. The others are cancelled only while the kept
+        request is parked or queued: such a request is run again if the API
+        server process holding it goes away. A RUNNING request, by contrast,
+        may be a leftover of an API server process that just died, which the
+        server fails a little later; while the kept request is RUNNING, the
+        others stay as its fallback. RUNNING duplicates are skipped for the
+        same reason, and because right after an API server restart they are
+        mostly parked requests being run again, which park again shortly.
+
+        Callers check again on their next poll, which also retries a cancel
+        that failed (e.g. timed out while the API server is overloaded).
+        """
+        if kept.status == requests_lib.RequestStatus.RUNNING.value:
+            return
+        for live_request in live_requests:
+            if (live_request.request_id == kept.request_id or
+                    live_request.status
+                    == requests_lib.RequestStatus.RUNNING.value):
+                continue
+            logger.info(f'Cancelling launch request {live_request.request_id}'
+                        f': launch request {kept.request_id} is also live for '
+                        f'cluster {self.cluster_name}.')
+            await self._cancel_launch_request(live_request.request_id)
+
+    async def _find_live_launch_request(self) -> Optional[Any]:
+        """Find a live launch request for this task's cluster, if any.
+
+        A launch request outlives the controller process that submitted it:
+        if the controller restarts while the request is parked (WAITING) or
+        still running, the request carries on on the API server, but its id
+        was only held in the old process's memory. Looking it up by cluster
+        name lets the new controller re-attach to it instead of submitting a
+        second launch beside it.
+
+        Looking the request up, rather than persisting its id, leaves no
+        window between sdk.launch returning and the id being written.
+
+        If several launch requests are live (e.g. left by an older controller
+        that launched again), the oldest, i.e. the original, is kept: it is
+        the one that has waited longest for resources. Its status is not a
+        better guide: right after an API server restart, the requests that
+        were parked are run again and show RUNNING for a moment, and a
+        RUNNING request may also be a leftover of a server process that died,
+        which the server fails a little later. The others are cancelled as
+        described in _cancel_duplicate_launch_requests.
+
+        The lookup is retried a few times: it runs when the API server may be
+        restarting or overloaded.
+
+        Returns:
+            The payload (request_id, status, status_msg) of the live launch
+            request, or None if there is none.
+
+        Raises:
+            Exception: If the API server could not be reached.
+        """
+        backoff = common_utils.Backoff(
+            _LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS)
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                live_requests = await self._list_live_launch_requests()
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                if attempt >= _LIVE_LAUNCH_LOOKUP_ATTEMPTS:
+                    raise
+                logger.info('Failed to look up the live launch requests for '
+                            f'cluster {self.cluster_name}; retrying: '
+                            f'{common_utils.format_exception(e)}')
+                await asyncio.sleep(backoff.current_backoff())
         if not live_requests:
             return None
-        live_request, *duplicate_requests = live_requests
-        for duplicate_request in duplicate_requests:
-            logger.info('Cancelling launch request '
-                        f'{duplicate_request.request_id}: launch request '
-                        f'{live_request.request_id} is also live for cluster '
-                        f'{self.cluster_name}.')
-            await self._cancel_launch_request(duplicate_request.request_id)
-        logger.info(f'Found live launch request {live_request.request_id} '
-                    f'({live_request.status}) for cluster {self.cluster_name}.')
-        return live_request
+        kept = live_requests[0]
+        logger.info(f'Found live launch request {kept.request_id} '
+                    f'({kept.status}) for cluster {self.cluster_name}.')
+        await self._cancel_duplicate_launch_requests(kept, live_requests)
+        return kept
+
+    async def _other_launch_is_live(self) -> bool:
+        """Whether a launch request is still live for this task's cluster.
+
+        Asked after a launch attempt failed: a live launch request then owns
+        the cluster (e.g. a duplicate kept as the fallback of a RUNNING
+        request that turned out to be a leftover of a dead server process),
+        and the next attempt adopts it instead of tearing the cluster down.
+        If the lookup fails, the answer is False, i.e. the cluster is torn
+        down as it would be without this check.
+        """
+        if self.pool is not None:
+            return False
+        try:
+            live_requests = await self._list_live_launch_requests()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.info('Failed to look up the live launch requests for '
+                        f'cluster {self.cluster_name}: '
+                        f'{common_utils.format_exception(e)}')
+            return False
+        if not live_requests:
+            return False
+        logger.info(f'Launch request {live_requests[0].request_id} is still '
+                    f'live for cluster {self.cluster_name}; not tearing the '
+                    'cluster down.')
+        return True
+
+    async def _cancel_remaining_launch_requests(
+            self, launched_request_id: str) -> None:
+        """Cancel live launch requests left for the cluster after a launch.
+
+        Once a launch request has launched the cluster and run the task, any
+        other live launch request for the cluster would run the task again.
+        These are duplicates that were RUNNING, or whose cancel failed, while
+        this job waited. Best-effort.
+        """
+        try:
+            live_requests = await self._list_live_launch_requests()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to look up the live launch requests for '
+                           f'cluster {self.cluster_name}: '
+                           f'{common_utils.format_exception(e)}')
+            return
+        for live_request in live_requests:
+            if live_request.request_id == launched_request_id:
+                continue
+            logger.info(f'Cancelling launch request {live_request.request_id}'
+                        f': launch request {launched_request_id} already '
+                        f'launched cluster {self.cluster_name}.')
+            await self._cancel_launch_request(live_request.request_id)
 
     def _start_stream_task(self, request_id: str) -> 'asyncio.Future':
         """Start awaiting the inner launch request in a worker thread.
@@ -975,6 +1094,11 @@ class StrategyExecutor:
         determines when this job should re-acquire a launch slot and
         re-attach to the request.
 
+        Each poll lists the cluster's live launch requests, so it also
+        cancels any other launch request for the cluster (see
+        _cancel_duplicate_launch_requests), and retries a cancel that failed
+        on an earlier poll.
+
         Cancellation is handled by the caller (_launch), which cancels the
         outstanding parked request on asyncio.CancelledError.
 
@@ -1003,7 +1127,14 @@ class StrategyExecutor:
         while True:
             await asyncio.sleep(poll_backoff.current_backoff())
             try:
-                request_payload = await self._get_request_payload(request_id)
+                live_requests = await self._list_live_launch_requests()
+                request_payload = next(
+                    (p for p in live_requests if p.request_id == request_id),
+                    None)
+                if request_payload is None:
+                    # No longer live: finished, or unknown to the server.
+                    request_payload = await self._get_request_payload(request_id
+                                                                     )
             except Exception as e:  # pylint: disable=broad-except
                 consecutive_errors += 1
                 if consecutive_errors >= _PARKED_POLL_MAX_CONSECUTIVE_ERRORS:
@@ -1033,6 +1164,8 @@ class StrategyExecutor:
             if (request_payload.status !=
                     requests_lib.RequestStatus.WAITING.value):
                 return request_id
+            await self._cancel_duplicate_launch_requests(
+                request_payload, live_requests)
         # The request is genuinely gone (the persistently-unreachable case
         # above raises instead of reaching here). Best-effort cancel the old
         # request so that it cannot resume concurrently with the fresh
@@ -1053,7 +1186,10 @@ class StrategyExecutor:
 
         Before submitting a new launch request, each attempt looks for a live
         launch request for the cluster (see _find_live_launch_request) and
-        re-attaches to it instead.
+        re-attaches to it instead. If the lookup fails, the attempt backs off
+        without launching or tearing the cluster down. A failed attempt does
+        not tear the cluster down while another launch request for it is
+        live; the next attempt adopts that one.
 
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
@@ -1108,6 +1244,9 @@ class StrategyExecutor:
         parked_request_id: Optional[str] = None
         parked_stream_task: Optional['asyncio.Future'] = None
         parked_reason: Optional[str] = None
+        # Whether this call adopted a launch request it did not submit; once
+        # one launches the cluster, others still live are cancelled.
+        adopted_live_request = False
         while True:
             retry_cnt += 1
             # Why this attempt failed, for the backoff event below. Reset every
@@ -1213,8 +1352,14 @@ class StrategyExecutor:
                                 # controller process (e.g. parked when it
                                 # restarted) still owns the cluster: adopt it
                                 # rather than launch a second time beside it.
-                                live_request = (
-                                    await self._find_live_launch_request())
+                                try:
+                                    live_request = (
+                                        await self._find_live_launch_request())
+                                except Exception as e:
+                                    raise _LaunchLookupFailed(
+                                        common_utils.format_exception(e)) from e
+                                if live_request is not None:
+                                    adopted_live_request = True
                                 if live_request is None:
                                     if reattach_only:
                                         return None
@@ -1370,6 +1515,10 @@ class StrategyExecutor:
                                         _consume_task_exception)
                                 raise
                             logger.info('Managed job cluster launched.')
+                            if adopted_live_request:
+                                assert request_id is not None
+                                await self._cancel_remaining_launch_requests(
+                                    request_id)
                         else:
                             # Get task resources from DAG for resource-aware
                             # scheduling.
@@ -1422,6 +1571,17 @@ class StrategyExecutor:
                         # teardown/backoff path below: the parked launch keeps
                         # its partially provisioned resources.
                         raise
+                    except _LaunchLookupFailed as e:
+                        # Neither launch nor tear down without knowing whether
+                        # a launch request is live: back off like a failed
+                        # attempt, releasing the launch slot, but skip the
+                        # teardown and the max_retry check, and look again on
+                        # the next attempt.
+                        logger.warning(
+                            'Failed to look up the live launch requests for '
+                            f'cluster {self.cluster_name}; retrying later: {e}')
+                        retry_code = _KIND_LAUNCH_LOOKUP_FAILED
+                        raise exceptions.NoClusterLaunchedError() from e
                     except exceptions.PoolDoesNotExistError as e:
                         # The pool was deleted while this job is still bound
                         # to it. Launching can never succeed, so propagate
@@ -1565,8 +1725,11 @@ class StrategyExecutor:
                             'job submission.')
 
                     # If we get here, the launch did not succeed. Tear down the
-                    # cluster and retry.
-                    await asyncio.to_thread(self._cleanup_cluster)
+                    # cluster and retry, unless another launch request for the
+                    # cluster is still live: it owns the cluster, and the next
+                    # attempt adopts it.
+                    if not await self._other_launch_is_live():
+                        await asyncio.to_thread(self._cleanup_cluster)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
