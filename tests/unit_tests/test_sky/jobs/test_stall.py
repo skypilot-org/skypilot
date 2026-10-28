@@ -95,6 +95,7 @@ def _add_job(engine,
              pool: Optional[str] = None,
              is_batch: Optional[bool] = None,
              schedule_state: Optional[str] = None,
+             user_hash: Optional[str] = None,
              with_info: bool = True):
     with orm.Session(engine) as session:
         session.execute(managed_job_state.spot_table.insert().values(
@@ -114,6 +115,7 @@ def _add_job(engine,
                 'priority': priority,
                 'pool': pool,
                 'is_batch': is_batch,
+                'user_hash': user_hash,
             }
             if schedule_state is not None:
                 values['schedule_state'] = schedule_state
@@ -160,6 +162,35 @@ def test_an_old_unclaimed_task_is_reported_and_a_fresh_one_is_not(engine):
     _never_claimed(engine, 2, age=_RECENT)
 
     assert _ids(stall.scan_never_claimed()) == {1}
+
+
+def test_a_task_held_by_the_per_user_launch_limit_is_not_stalled(
+        engine, monkeypatch):
+    monkeypatch.setattr(stall.managed_job_utils,
+                        'get_max_launching_jobs_per_user', lambda: 1)
+    # User a already has one claimed job that is not running.
+    _claimed(engine, 1, age=_RECENT, user_hash='a', schedule_state='LAUNCHING')
+    _never_claimed(engine, 2, age=_OLD, user_hash='a', schedule_state='WAITING')
+    _never_claimed(engine, 3, age=_OLD, user_hash='b', schedule_state='WAITING')
+
+    # a's job is queued behind a's own jobs; b's has no such excuse.
+    assert _ids(stall.scan_never_claimed()) == {3}
+
+
+def test_held_tasks_do_not_fill_the_candidate_window(engine, monkeypatch):
+    monkeypatch.setattr(stall.managed_job_utils,
+                        'get_max_launching_jobs_per_user', lambda: 1)
+    _claimed(engine, 1, age=_RECENT, user_hash='a', schedule_state='LAUNCHING')
+    # Older than b's task, so it would take the only candidate slot if the
+    # limit were applied after the LIMIT.
+    _never_claimed(engine,
+                   2,
+                   age=_OLD * 2,
+                   user_hash='a',
+                   schedule_state='WAITING')
+    _never_claimed(engine, 3, age=_OLD, user_hash='b', schedule_state='WAITING')
+
+    assert _ids(stall.scan_never_claimed(candidate_limit=1)) == {3}
 
 
 def test_a_task_whose_sibling_is_progressing_is_not_stalled(engine):
@@ -746,7 +777,8 @@ def test_the_priority_lookup_runs_on_the_scans_own_connection(
     """
     seen = []
 
-    def fake_highest(conn=None):
+    def fake_highest(conn=None, max_launching_jobs_per_user=None):
+        del max_launching_jobs_per_user
         seen.append(conn)
         return 0
 

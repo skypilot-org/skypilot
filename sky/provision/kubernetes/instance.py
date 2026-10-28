@@ -1308,12 +1308,10 @@ def _wait_for_pods_to_schedule(namespace,
                     nop_if_duplicate=True,
                 )
             last_gated_pod_names = gated_pod_names
-            # Keep refreshing the spinner while gated. The message set above
-            # is written once, on entering the gated state; the admission
-            # wait that follows can last hours, and it is exactly the phase
-            # where live feedback (e.g. the workload's position in the
-            # queue) is most useful. Skipping the per-poll update would
-            # freeze the spinner on that static message for the whole wait.
+            # Keep calling the per-poll spinner update while gated, as the
+            # ungated loop below does. The message set above is written
+            # once, on entering the gated state, and the wait that follows
+            # can last hours.
             _update_spinner_message(iteration=iteration,
                                     pods=pods,
                                     context=context,
@@ -3461,8 +3459,8 @@ def _check_nodes_health(
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Tries the NodeInfoSource plugin first (fast, cached), then falls back
-    to direct Kubernetes API calls.
+    Tries a registered NodeInfoSource first, then falls back to direct
+    Kubernetes API calls.
 
     Args:
         context: Kubernetes context name.
@@ -3477,9 +3475,9 @@ def _check_nodes_health(
 
     issues: Dict[str, str] = {}
 
-    # Try NodeInfoSource plugin first (node-info-service sidecar).
-    # get() safely returns None when no provider is registered.
-    # Note: if a node is in node_names but not in the cache, it's silently
+    # Try NodeInfoSource first; get() safely returns None when no provider
+    # is registered.
+    # Note: if a node is in node_names but not in the result, it's silently
     # skipped (we don't fall back to the k8s API for missing entries). This
     # is acceptable since this is diagnostic-only and doesn't affect the
     # cluster status transition.
@@ -3593,8 +3591,8 @@ def get_missing_node_reason(node_names: List[str],
     it returns the same answer on every status refresh, with no dependence on
     what a previous call already consumed.
 
-    Note this deliberately does not use the NodeInfoSource cache that
-    ``_check_nodes_health`` prefers: a node absent from that cache is
+    Note this deliberately does not use the NodeInfoSource that
+    ``_check_nodes_health`` prefers: a node absent from its result is
     indistinguishable from a healthy one, and a deleted node is exactly the
     case this needs to report.
 
@@ -4713,9 +4711,8 @@ def query_instances(
     # Mapping from pod phase to skypilot status. These are the only valid pod
     # phases.
     # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
-    # ``status_map_overrides`` lets callers (e.g. plugin provisioners whose
-    # pods don't follow the ray-cluster lifecycle) selectively remap a
-    # subset of phases without duplicating this whole function.
+    # ``status_map_overrides`` lets callers selectively remap a subset of
+    # phases without duplicating this whole function.
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,

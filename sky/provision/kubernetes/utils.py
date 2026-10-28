@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
@@ -560,6 +561,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
+    elif accelerator == 'H100-MEGA':
+        # H100-MEGA is named as H100-MEGA-80GB in GKE.
+        accelerator = 'H100-MEGA-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB',
                        'B200'):
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
@@ -743,10 +747,12 @@ class GKELabelFormatter(GPULabelFormatter):
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
             if acc == 'H100-80GB':
-                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
-                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
-                # to distinguish between a3-high and a3-mega instances
+                # H100 can be either H100-80GB (a3-high) or H100-MEGA-80GB
+                # (a3-mega) in GKE. Map both to their catalog names, which
+                # keep the two instance families distinct.
                 return 'H100'
+            elif acc == 'H100-MEGA-80GB':
+                return 'H100-MEGA'
             elif acc == 'H200-141GB':
                 return 'H200'
             return acc
@@ -2994,10 +3000,80 @@ def get_node_affinity(
     return node_affinity or None
 
 
+def get_node_selector(
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Optional[Dict[str, str]]:
+    """Builds the pod ``nodeSelector``.
+
+    Three independent entries, any of which may be absent:
+
+    * An accelerator topology label, pinning the pod to nodes of the requested
+      slice shape (e.g. ``cloud.google.com/gke-tpu-topology: 2x2``).
+    * The spot label, pinning the pod to preemptible nodes. The pod also
+      tolerates the matching taint; see get_spot_toleration().
+    * ``cloud.google.com/gke-flex-start``, selecting GKE nodes provisioned
+      through flex-start.
+
+    Args:
+        topology_label_key: Node label key of the accelerator slice topology,
+            or None.
+        topology_label_value: Requested value for ``topology_label_key``, or
+            None.
+        spot_label_key: Node label key of preemptible nodes, or None.
+        spot_label_value: Value ``spot_label_key`` carries on preemptible
+            nodes, or None.
+        enable_flex_start: Whether the pod schedules onto flex-start nodes.
+
+    Returns:
+        A ``nodeSelector`` dict, or None when no entry applies.
+    """
+    node_selector: Dict[str, str] = {}
+    if topology_label_key is not None and topology_label_value is not None:
+        node_selector[topology_label_key] = topology_label_value
+    if spot_label_key is not None and spot_label_value is not None:
+        node_selector[spot_label_key] = spot_label_value
+    if enable_flex_start:
+        node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    return node_selector or None
+
+
+def get_spot_toleration(
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+) -> Optional[Dict[str, str]]:
+    """Builds the toleration for the taint preemptible nodes carry.
+
+    Args:
+        spot_label_key: See get_node_selector().
+        spot_label_value: See get_node_selector().
+
+    Returns:
+        A toleration dict, or None when the cluster has no spot label.
+    """
+    if spot_label_key is None or spot_label_value is None:
+        return None
+    return {
+        'key': spot_label_key,
+        'operator': 'Equal',
+        'value': spot_label_value,
+        'effect': 'NoSchedule',
+    }
+
+
 def get_pod_fields(
+    *,
     acc_label_key: Optional[str],
     acc_label_values: Optional[List[str]],
     avoid_label_keys: Optional[List[str]],
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3008,16 +3084,29 @@ def get_pod_fields(
         acc_label_key: See get_node_affinity().
         acc_label_values: See get_node_affinity().
         avoid_label_keys: See get_node_affinity().
+        topology_label_key: See get_node_selector().
+        topology_label_value: See get_node_selector().
+        spot_label_key: See get_node_selector() and get_spot_toleration().
+        spot_label_value: See get_node_selector() and get_spot_toleration().
+        enable_flex_start: See get_node_selector().
 
     Returns:
         A partial pod manifest, empty when no field applies.
     """
-    pod_fields: Dict[str, Any] = {}
+    spec: Dict[str, Any] = {}
+    node_selector = get_node_selector(topology_label_key, topology_label_value,
+                                      spot_label_key, spot_label_value,
+                                      enable_flex_start)
+    if node_selector is not None:
+        spec['nodeSelector'] = node_selector
     node_affinity = get_node_affinity(acc_label_key, acc_label_values,
                                       avoid_label_keys)
     if node_affinity is not None:
-        pod_fields['spec'] = {'affinity': {'nodeAffinity': node_affinity}}
-    return pod_fields
+        spec['affinity'] = {'nodeAffinity': node_affinity}
+    spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
+    if spot_toleration is not None:
+        spec['tolerations'] = [spot_toleration]
+    return {'spec': spec} if spec else {}
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
@@ -3749,6 +3838,74 @@ def get_all_kube_context_names() -> List[str]:
     return context_names
 
 
+# kube-system exists in every cluster and is never recreated, so its UID
+# identifies the cluster a context points at, whatever the credentials or the
+# route (direct, proxy, tunnel) used to reach it.
+CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+_CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
+_CLUSTER_UID_CACHE_TTL_SECONDS = 300
+_CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
+# context -> (kubeconfig fingerprint, uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
+                                              float]] = {}
+_cluster_uid_cache_lock = threading.Lock()
+
+
+def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
+    fingerprint: List[Tuple[Any, ...]] = []
+    for path in get_kubeconfig_paths():
+        if not path:
+            continue
+        try:
+            st = os.stat(path)
+            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            fingerprint.append((path, None))
+    return tuple(fingerprint)
+
+
+def read_cluster_uid(core, timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
+                                    _request_timeout=timeout)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def get_cluster_uid(context: Optional[str],
+                    use_cache: bool = True) -> Optional[str]:
+    """Returns the UID of the cluster `context` points at.
+
+    Returns None when kube-system cannot be read (e.g. no RBAC grant, the
+    cluster is unreachable). Results are cached per process until a file on
+    KUBECONFIG changes, since a rewritten kubeconfig may point `context` at
+    another cluster.
+    """
+    now = time.monotonic()
+    fingerprint = _kubeconfig_fingerprint()
+    if use_cache:
+        with _cluster_uid_cache_lock:
+            cached = _cluster_uid_cache.get(context)
+        if (cached is not None and cached[0] == fingerprint and
+                now < cached[2]):
+            return cached[1]
+    uid: Optional[str] = None
+    try:
+        # The in-cluster name, unlike None, never falls back to kubeconfig.
+        uid = read_cluster_uid(kubernetes.core_api(context),
+                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
+                     f'namespace UID of context {context!r}: {e}')
+    ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
+           if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
+    with _cluster_uid_cache_lock:
+        _cluster_uid_cache[context] = (fingerprint, uid, time.monotonic() + ttl)
+    return uid
+
+
 @annotations.lru_cache(scope='request')
 def get_kube_config_context_namespace(
         context_name: Optional[str] = None) -> str:
@@ -4417,6 +4574,26 @@ def resolve_effective_pod_config(
     return kubernetes_config
 
 
+def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
+    """The settings in a ``pod_config`` spec that hand the pod an API identity.
+
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
+    whether NONE can apply share this one list.
+    """
+    conflicts = [
+        f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                             'serviceAccount') if key in spec
+    ]
+    if spec.get('automountServiceAccountToken') is True:
+        conflicts.append('pod_config.spec.automountServiceAccountToken')
+    for volume in spec.get('volumes') or []:
+        sources = (volume.get('projected') or {}).get('sources') or []
+        if any('serviceAccountToken' in src for src in sources):
+            conflicts.append(f'pod_config.spec.volumes[{volume.get("name")}]'
+                             ' (projected serviceAccountToken)')
+    return conflicts
+
+
 def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
                        pod_fields: Dict[str, Any]) -> Dict[str, Any]:
     """Adds the pod fields from get_pod_fields() to the rendered pod.
@@ -4868,10 +5045,9 @@ def _get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    # Try external node info source first (e.g., node-info-service cache).
-    # This allows plugins to provide cached node info for faster queries.
+    # Try the external node info source first, if one is registered.
     if plugin_extensions.NodeInfoSource.is_registered():
-        # Resolve context before calling the provider so it can be cached
+        # Resolve context before calling the provider.
         resolved_context = (context if context is not None else
                             get_current_kube_config_context_name())
         if resolved_context is not None:
@@ -5393,7 +5569,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Try external pod info source first (e.g., node-info-service cache).
+    # Try the external pod info source first, if one is registered.
     if plugin_extensions.PodInfoSource.is_registered():
         if context is not None:
             result = plugin_extensions.PodInfoSource.get(context)

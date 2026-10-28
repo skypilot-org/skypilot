@@ -424,7 +424,7 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
 )
 
 # The leg the heartbeat above cannot see: API server -> (k8s API server ->
-# kubelet -> pod sshd, or a plugin's direct in-cluster connection) -> shell
+# kubelet -> pod sshd, or a route a hook supplies) -> shell
 # echo -> back. Measured by pairing a small write to the backend with the next
 # read from it, so it costs two clock reads on a path that already inspects
 # every frame -- no injected bytes, no added latency, and no client support
@@ -498,7 +498,7 @@ SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
     ['path'],
 )
 
-# Fleet-wide free-executor counts, so 'livesum'. The default ('all') emits
+# Server-wide free-executor counts, so 'livesum'. The default ('all') emits
 # one series per pid and never drops dead ones, so the count kept including
 # workers that had exited.
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
@@ -515,8 +515,8 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
 
 # Active threads in on-demand thread executors. Each process has its own
 # executor with a per-process max_workers limit, so per-pid series are kept:
-# exhaustion is a per-process condition and a fleet-wide sum can exceed the
-# limit while no single executor is full. Compare against
+# exhaustion is a per-process condition and a sum across processes can exceed
+# the limit while no single executor is full. Compare against
 # sky_apiserver_threads_max with the same labels.
 #
 # multiprocess_mode must be 'liveall': for the aggregating modes (livesum
@@ -579,10 +579,9 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
 # `site` is the name of the function that was called. Bounded, not
 # attacker-influenced: every call site passes a module-level function or a
 # bound method, so the values are fixed at build time. It is not only the
-# eight OSS names, though -- `call_with_deadline` is also called from the
-# enterprise plugin's session and RBAC middlewares and its volume gate, which
-# contribute their own, so a hosted deployment has more. A callable with no
-# `__name__` (a partial) records `unknown` rather than widening the label.
+# eight OSS names, though -- `call_with_deadline` may also be called from
+# plugin code, which contributes its own. A callable with no `__name__` (a
+# partial) records `unknown` rather than widening the label.
 #
 # Two things are deliberately NOT counted here. Executor exhaustion, which
 # already has `sky_apiserver_threads_exhausted_total`; and whatever response
@@ -701,10 +700,6 @@ SKY_LAUNCH_PHASE_ANOMALIES_TOTAL = prom.Counter(
 # separately from the phase histogram because the queue dimension is only
 # meaningful for this one phase, and folding it in would multiply every other
 # phase's buckets by the number of queues for no added answer.
-#
-# Kueue publishes its own kueue_admission_wait_time_seconds per ClusterQueue.
-# This is the same wait seen from SkyPilot's side, attributed to a workspace
-# and a launch; where the two disagree, the difference is our detection lag.
 SKY_LAUNCH_QUEUE_WAIT_SECONDS = prom.Histogram(
     'sky_launch_queue_wait_seconds',
     'Time a launch waited for admission, by scheduler queue',
@@ -994,7 +989,8 @@ SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
 
 SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
     'sky_managed_jobs_controller_running_count',
-    'Number of running job tasks on this controller process',
+    'Number of running job tasks on this controller process, including '
+    'jobs claimed but not started yet',
     ['pid'],
     multiprocess_mode='liveall',
 )
@@ -1002,6 +998,22 @@ SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
 SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS = prom.Gauge(
     'sky_managed_jobs_controller_max_jobs',
     'Computed max jobs for this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_cost_units',
+    'Cost units of the jobs held by this controller process; a job costs '
+    'JOB_COST_UNITS unless its runtime reports less',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS = prom.Gauge(
+    'sky_managed_jobs_controller_max_cost_units',
+    'Cost units this controller process may hold before it stops claiming '
+    'jobs',
     ['pid'],
     multiprocess_mode='liveall',
 )
@@ -1336,12 +1348,12 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
 
 def _read_cluster_identity_uid(core) -> Optional[str]:
     """Reads the kube-system namespace UID through the given CoreV1Api."""
-    namespace = core.read_namespace(
-        _CLUSTER_IDENTITY_NAMESPACE,
-        _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
-    if namespace is None or namespace.metadata is None:
-        return None
-    return namespace.metadata.uid
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    return kubernetes_utils.read_cluster_uid(core,
+                                             _NAMESPACE_PROBE_TIMEOUT_SECONDS)
 
 
 def _get_in_cluster_identity_uid() -> Optional[str]:
@@ -1665,7 +1677,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
     env = os.environ.copy()
     # Use SkyPilot's kubeconfig discovery which respects KUBECONFIG env var
-    # (set by credential manager plugin) and falls back to ~/.kube/config.
+    # and falls back to ~/.kube/config.
     # Always set explicitly so subprocess gets the resolved paths even if
     # env var was modified after os.environ was last copied.
     # Import lazily to avoid circular import (metrics -> provision -> clouds
@@ -2091,8 +2103,8 @@ SLURM_GPU_METRICS_MATCH_PATTERNS = [
     'node_cpu_seconds_total{mode="idle"}',
 ]
 
-# Context-string prefix under which Slurm series are stamped; matches the
-# GPU Manager's Slurm context vocabulary ('slurm/<cluster>').
+# Context-string prefix under which Slurm series are stamped
+# ('slurm/<cluster>').
 SLURM_CONTEXT_PREFIX = 'slurm/'
 
 # Headroom, in seconds, that curl's own limit leaves inside a Slurm cluster's
@@ -2300,7 +2312,7 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     each through the login node that can reach it. Series are stamped with
     ``cluster="slurm/<name>"`` regardless of which login node fetched
     them, mirroring the Kubernetes federation path, so every downstream
-    consumer (central Prometheus, Grafana dashboards, GPU Manager queries)
+    consumer (central Prometheus, Grafana dashboards, other queries)
     treats the Slurm cluster like any other context.
 
     Timeouts mirror the Kubernetes path's single per-context budget: the

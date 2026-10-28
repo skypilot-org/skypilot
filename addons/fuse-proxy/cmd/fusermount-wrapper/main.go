@@ -62,11 +62,18 @@ func mount() {
 		log.Fatalf("Failed to connect to fusermount server at %s: %v", socketPath, err)
 	}
 	defer c.Close()
-	fusermountArgs := []string{*mountPoint}
+	// Args is kept for servers that only parse the command line.
+	legacyArgs := []string{*mountPoint}
 	if *mountOptions != "" {
-		fusermountArgs = append(fusermountArgs, "-o", *mountOptions)
+		legacyArgs = append(legacyArgs, "-o", *mountOptions)
 	}
-	fd, err := c.Fusermount(fusermountArgs)
+	req := &common.Request{
+		Args:       legacyArgs,
+		Op:         common.OpMount,
+		Mountpoint: *mountPoint,
+		Options:    common.SplitOptions(*mountOptions),
+	}
+	fd, err := c.Fusermount(req)
 	if err != nil {
 		log.Fatalf("An error occurred when calling fusermount server: %v", err)
 	}

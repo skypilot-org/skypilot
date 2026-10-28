@@ -8,6 +8,7 @@ import shlex
 import textwrap
 import threading
 import time
+from typing import Optional
 from unittest import mock
 
 import filelock
@@ -1023,7 +1024,7 @@ class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
     Priority: external failures (plugin-reported), then a user-job failure
-    reason (non-zero exit on a healthy cluster, SKY-6411), then the last
+    reason (non-zero exit on a healthy cluster), then the last
     cluster event, then the generic preemption fallback.
     """
 
@@ -1146,19 +1147,31 @@ class TestCancelEventsOnlyOnTransition:
         mock_add_event.assert_not_awaited()
 
 
-# Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
-# stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
+# Fixed epoch timestamps (seconds) for the time-range fixture, stored as
+# sqlalchemy.Float columns like time.time().
 _T100 = 100.0
 _T200 = 200.0
 _T300 = 300.0
+# How long after submission the seeded jobs began launching. Larger than the
+# spread of the submission times, so a window that matched on the launch time
+# (submitted_at) instead of the submission time (created_at) would fail.
+_LAUNCH_DELAY = 1000.0
 # Bounds far in the past (_T*, ~1970) and future (~year 2286) relative to the
-# current time, used to exercise NULL submitted_at (pending) handling.
+# current time, used for jobs submitted just now.
 _FAR_FUTURE = 9_999_999_999.0
+
+
+def _set_created_at(engine, job_id: int, created_at: Optional[float]) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.update(state.spot_table).where(
+                state.spot_table.c.spot_job_id == job_id).values(
+                    created_at=created_at))
 
 
 @pytest.fixture
 def _seed_timed_jobs(_mock_managed_jobs_db_conn):
-    """Seed three RUNNING jobs with explicit, distinct submitted_at times."""
+    """Seed three RUNNING jobs with explicit, distinct submission times."""
 
     async def mock_callback(status: str):
         pass
@@ -1181,13 +1194,14 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
                               task_name='task0',
                               resources_str='{}',
                               metadata='{}')
+            _set_created_at(_mock_managed_jobs_db_conn, job_id, submit_time)
             state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
                                         f'/tmp/user-{key}.yaml',
                                         f'/tmp/env-{key}', None, 100)
-            # submitted_at is written here from the explicit submit_time.
-            await state.set_starting_async(job_id, 0, f'run-{key}', submit_time,
+            launch_time = submit_time + _LAUNCH_DELAY
+            await state.set_starting_async(job_id, 0, f'run-{key}', launch_time,
                                            '{}', {}, mock_callback)
-            await state.set_started_async(job_id, 0, submit_time, mock_callback)
+            await state.set_started_async(job_id, 0, launch_time, mock_callback)
             ids[key] = job_id
         return ids
 
@@ -1200,7 +1214,7 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_pending_job(_mock_managed_jobs_db_conn):
-    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    """Seed one job left in PENDING: submitted now, never launched."""
     job_id = state.set_job_info_without_job_id(name='job-pending',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -1216,9 +1230,9 @@ def _seed_pending_job(_mock_managed_jobs_db_conn):
 
 
 @pytest.fixture
-def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
-    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
-    (it never reached STARTING)."""
+def _seed_cancelled_while_pending(_mock_managed_jobs_db_conn):
+    """Seed a job cancelled while PENDING: terminal, submitted now, and never
+    launched (NULL submitted_at)."""
     job_id = state.set_job_info_without_job_id(name='job-cancelled',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -1236,40 +1250,99 @@ def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
     return job_id
 
 
-class TestSubmittedAtRangeFilter:
-    """Time-range filter on submitted_at via get_managed_jobs_with_filters."""
+@pytest.fixture
+def _seed_job_without_submission_time(_mock_managed_jobs_db_conn):
+    """Seed a PENDING job with neither created_at nor submitted_at, as written
+    before the created_at column existed."""
+    job_id = state.set_job_info_without_job_id(name='job-old',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    _set_created_at(_mock_managed_jobs_db_conn, job_id, None)
+    return job_id
 
-    def _submitted_ats(self, jobs):
-        return sorted(job['submitted_at'] for job in jobs)
+
+async def _noop_callback(status: str) -> None:
+    del status
+
+
+async def _seed_job(engine,
+                    name: str,
+                    created_at: Optional[float],
+                    launch_time: Optional[float],
+                    num_tasks: int = 1,
+                    execution: Optional[str] = None) -> int:
+    """Seed a job whose tasks were all submitted at created_at, with task 0
+    launched at launch_time (left PENDING when None)."""
+    job_id = state.set_job_info_without_job_id(name=name,
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1',
+                                               execution=execution)
+    for task_id in range(num_tasks):
+        state.set_pending(job_id,
+                          task_id=task_id,
+                          task_name=f'task{task_id}',
+                          resources_str='{}',
+                          metadata='{}')
+    _set_created_at(engine, job_id, created_at)
+    state.scheduler_set_waiting([job_id], f'/tmp/dag-{name}.yaml',
+                                f'/tmp/user-{name}.yaml', f'/tmp/env-{name}',
+                                None, 100)
+    if launch_time is not None:
+        await _launch_task(job_id, 0, launch_time)
+    return job_id
+
+
+async def _launch_task(job_id: int, task_id: int, launch_time: float) -> None:
+    await state.set_starting_async(job_id, task_id, f'run-{job_id}-{task_id}',
+                                   launch_time, '{}', {}, _noop_callback)
+
+
+class TestSubmittedAtRangeFilter:
+    """Time-range filter on the submission time (created_at) via
+    get_managed_jobs_with_filters."""
+
+    def _submission_times(self, jobs):
+        return sorted(job['created_at'] for job in jobs)
 
     def test_submitted_after_excludes_earlier(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T200)
         # Inclusive lower bound: mid (_T200) and late (_T300) match.
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T200, _T300]
+        assert self._submission_times(jobs) == [_T200, _T300]
 
     def test_submitted_after_boundary_is_inclusive(self, _seed_timed_jobs):
         # A row exactly at submitted_after is included (>=).
         jobs, _ = state.get_managed_jobs_with_filters(submitted_after=_T300)
-        assert self._submitted_ats(jobs) == [_T300]
+        assert self._submission_times(jobs) == [_T300]
 
     def test_submitted_before_excludes_later(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_before=_T200)
         # Inclusive upper bound: early (_T100) and mid (_T200) match.
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T100, _T200]
+        assert self._submission_times(jobs) == [_T100, _T200]
 
     def test_submitted_before_boundary_is_inclusive(self, _seed_timed_jobs):
         jobs, _ = state.get_managed_jobs_with_filters(submitted_before=_T100)
-        assert self._submitted_ats(jobs) == [_T100]
+        assert self._submission_times(jobs) == [_T100]
 
     def test_window_combines_after_and_before(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_after=_T200, submitted_before=_T200)
         # Only the row exactly at _T200 falls inside [_T200, _T200].
         assert total == 1
-        assert self._submitted_ats(jobs) == [_T200]
+        assert self._submission_times(jobs) == [_T200]
 
     def test_empty_window_returns_nothing(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
@@ -1280,7 +1353,7 @@ class TestSubmittedAtRangeFilter:
     def test_no_window_returns_all(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters()
         assert total == 3
-        assert self._submitted_ats(jobs) == [_T100, _T200, _T300]
+        assert self._submission_times(jobs) == [_T100, _T200, _T300]
 
     def test_window_with_other_filters(self, _seed_timed_jobs):
         # Combine the window with an accessible_workspaces filter: only the
@@ -1288,15 +1361,15 @@ class TestSubmittedAtRangeFilter:
         jobs, total = state.get_managed_jobs_with_filters(
             accessible_workspaces=['ws1'], submitted_before=_T200)
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T100, _T200]
+        assert self._submission_times(jobs) == [_T100, _T200]
 
     def test_status_count_respects_window(self, _seed_timed_jobs):
         # All three jobs are RUNNING; the window must cut the status counts.
         counts = state.get_status_count_with_filters(submitted_after=_T200)
         assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
 
-    # A pending job (NULL submitted_at) is treated as submitted "now", so the
-    # window keeps or drops it the same way it would a job submitted right now.
+    # A pending job has not begun launching (NULL submitted_at), and the window
+    # matches it by when it was submitted: the current time, for this fixture.
     def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
         assert total == 1
@@ -1320,28 +1393,146 @@ class TestSubmittedAtRangeFilter:
         assert jobs == []
         assert total == 0
 
-    # A terminal job that never got a submitted_at (cancelled/failed before
-    # STARTING) has no submission time, so it is excluded from any window —
-    # it must not be treated as submitted "now" like a still-pending job.
-    def test_terminal_no_submit_present_without_filter(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters()
+    # A job cancelled while PENDING never launched, but it was submitted, so
+    # the window matches it by its submission time like any other job.
+    def test_cancelled_while_pending_kept_by_past_lower_bound(
+            self, _seed_cancelled_while_pending):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
         assert total == 1
         assert jobs[0]['submitted_at'] is None
         assert jobs[0]['status'].is_terminal()
 
-    def test_terminal_no_submit_excluded_from_lower_bound(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+    def test_cancelled_while_pending_dropped_by_past_upper_bound(
+            self, _seed_cancelled_while_pending):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T300)
         assert jobs == []
         assert total == 0
 
-    def test_terminal_no_submit_excluded_from_future_upper_bound(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters(
-            submitted_before=_FAR_FUTURE)
-        assert jobs == []
-        assert total == 0
+    def test_no_submission_time_present_without_filter(
+            self, _seed_job_without_submission_time):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['created_at'] is None
+        assert jobs[0]['submitted_at'] is None
+
+    def test_no_submission_time_excluded_from_any_window(
+            self, _seed_job_without_submission_time):
+        for window in ({
+                'submitted_after': _T100
+        }, {
+                'submitted_before': _FAR_FUTURE
+        }):
+            jobs, total = state.get_managed_jobs_with_filters(**window)
+            assert jobs == [], window
+            assert total == 0, window
+
+
+class TestSubmissionTimeSortAndQueue:
+    """The queue sorts by and reports when each job was submitted
+    (created_at), not when it began launching (submitted_at)."""
+
+    _FIELDS = ['job_id', 'status', 'submitted_at']
+
+    def _queue_submitted_ats(self):
+        jobs = jobs_utils.get_managed_job_queue(fields=self._FIELDS)['jobs']
+        return {
+            (job['job_id'], job['task_id']): job['submitted_at'] for job in jobs
+        }
+
+    @pytest.mark.asyncio
+    async def test_sort_by_submitted_at_uses_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        # Submitted first but launched last: a sort on the launch time would
+        # put it after `second`.
+        first = await _seed_job(engine,
+                                'first',
+                                created_at=_T100,
+                                launch_time=_T300 + _LAUNCH_DELAY)
+        second = await _seed_job(engine,
+                                 'second',
+                                 created_at=_T200,
+                                 launch_time=_T200 + _LAUNCH_DELAY)
+        pending = await _seed_job(engine,
+                                  'pending',
+                                  created_at=_T300,
+                                  launch_time=None)
+        for sort_order, expected in (('asc', [first, second, pending]),
+                                     ('desc', [pending, second, first])):
+            jobs, _ = state.get_managed_jobs_with_filters(
+                sort_by='submitted_at', sort_order=sort_order)
+            assert [job['job_id'] for job in jobs] == expected, sort_order
+
+    @pytest.mark.asyncio
+    async def test_pending_job_reports_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'pending',
+                                 created_at=_T100,
+                                 launch_time=None)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
+        # The column itself stays NULL until the job begins launching.
+        assert state.get_submitted_task_ids(job_id) == set()
+
+    @pytest.mark.asyncio
+    async def test_launched_job_keeps_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'launched',
+                                 created_at=_T100,
+                                 launch_time=_T100 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_launch_time_without_created_at(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'old',
+                                 created_at=None,
+                                 launch_time=_T200)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T200}
+
+    @pytest.mark.asyncio
+    async def test_pipeline_later_task_reports_its_launch_time(
+            self, _mock_managed_jobs_db_conn):
+        # Task 1 of a pipeline waits on task 0, not on a controller, so it
+        # keeps its own launch time rather than the job's submission time.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'pipeline',
+                                 created_at=_T100,
+                                 launch_time=_T100 + _LAUNCH_DELAY,
+                                 num_tasks=2)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): None,
+        }
+        await _launch_task(job_id, 1, _T300 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T300 + _LAUNCH_DELAY,
+        }
+
+    @pytest.mark.asyncio
+    async def test_job_group_tasks_report_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        # A job group's tasks all start waiting at submission.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'group',
+                                 created_at=_T100,
+                                 launch_time=None,
+                                 num_tasks=2,
+                                 execution='parallel')
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
+        for task_id in (0, 1):
+            await _launch_task(job_id, task_id, _T100 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
 
 
 class TestMultiTaskStatusFilterCharacterization:

@@ -90,7 +90,7 @@ def create_table(cursor, conn):
     #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
-    # TODO(SKY-1213): username is actually user hash, should rename.
+    # TODO: username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1348,7 +1348,7 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
-        # TODO(SKY-1214): combine get_job_queue with get_job_statuses.
+        # TODO: combine get_job_queue with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
             f'{user_hash!r}, {all_jobs})',

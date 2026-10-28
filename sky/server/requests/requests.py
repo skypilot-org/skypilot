@@ -610,6 +610,13 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
                                  COL_FILE_MOUNTS_BLOB_ID, 'TEXT')
 
+    # Cover retention selection without reading serialized request results.
+    # Existing databases build this index once during initialization.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS requests_retention_idx
+        ON {REQUEST_TABLE} (status, finished_at, request_id);
+    """)
+
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
@@ -773,9 +780,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles killing
+    the request processes and marking the requests cancelled.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -1388,11 +1394,11 @@ def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
 async def _clean_orphan_request_logs() -> None:
     """Delete request log files whose request row is already gone.
 
-    When the API server runs with more than one replica, the replicas share
-    one database but each writes its request logs to local disk, so the
-    row-driven cleanup above only reaches the files that sit on the replica
-    running it. A file left behind on another replica outlives the row that
-    names it, after which nothing on the database side can enumerate it.
+    When several API server instances share one database, each writes its
+    request logs to local disk, so the row-driven cleanup above only reaches
+    the files that sit on the instance running it. A file left behind on
+    another instance outlives the row that names it, after which nothing on
+    the database side can enumerate it.
 
     A file with no row is already garbage — it cannot be read back through
     the API — so the age cutoff is a grace period against reading a
@@ -1436,7 +1442,7 @@ async def _clean_orphan_request_logs() -> None:
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
-                                                 batch_size: int = 1000):
+                                                 batch_size: int = 100):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -1455,13 +1461,17 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    if batch_size <= 0:
+        raise ValueError('batch_size must be positive')
+    # Do not expand the retention window while draining a backlog.
+    cutoff = time.time() - retention_seconds
+    started = time.monotonic()
     debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
-                                         finished_before=time.time() -
-                                         retention_seconds,
+                                         finished_before=cutoff,
                                          limit=batch_size,
                                          fields=['request_id']))
         if len(reqs) == 0:
@@ -1501,7 +1511,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
     logger.info(f'Cleaned up {total_deleted} finished requests '
-                f'older than {retention_seconds} seconds')
+                f'older than {retention_seconds} seconds '
+                f'in {time.monotonic() - started:.3f}s')
 
     await _clean_orphan_request_logs()
 
@@ -1682,21 +1693,46 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return [Request.from_row(row) for row in rows]
 
     @init_db_async
-    @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
         if not request_ids:
             return
         assert _DB is not None
-        placeholders = ','.join(['?'] * len(request_ids))
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'Start deleting requests {request_ids}')
-        try:
-            await _DB.execute_and_commit_async(
-                f'DELETE FROM {REQUEST_TABLE} '
-                f'WHERE request_id IN ({placeholders})', tuple(request_ids))
-        finally:
-            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                logger.debug(f'End deleting requests {request_ids}')
+        # Large serialized results make row count alone an insufficient budget.
+        # An oversized row is indivisible and must be deleted on its own.
+        max_rows = 32
+        max_bytes = 8 * 1024 * 1024
+        size_sql = ' + '.join(f'COALESCE(length(CAST({column} AS BLOB)), 0)'
+                              for column in ('return_value', 'request_body',
+                                             'error', 'entrypoint'))
+        for offset in range(0, len(request_ids), max_rows):
+            ids = request_ids[offset:offset + max_rows]
+            placeholders = ','.join('?' for _ in ids)
+            # Return only sizes to Python, and release the read transaction
+            # before acquiring a writer lock.
+            async with _DB.execute_fetchall_async(
+                f'SELECT request_id, {size_sql} FROM {REQUEST_TABLE} '
+                f'WHERE request_id IN ({placeholders})', ids) as rows:
+                pending = list(rows)
+            while pending:
+                batch: List[str] = []
+                payload_bytes = 0
+                while pending:
+                    request_id, size = pending[0]
+                    if batch and payload_bytes + size > max_bytes:
+                        break
+                    pending.pop(0)
+                    batch.append(request_id)
+                    payload_bytes += size
+                placeholders = ','.join('?' for _ in batch)
+                started = time.monotonic()
+                await _DB.execute_and_commit_async(
+                    f'DELETE FROM {REQUEST_TABLE} '
+                    f'WHERE request_id IN ({placeholders})', batch)
+                logger.debug(f'Request GC batch rows={len(batch)} '
+                             f'payload_bytes={payload_bytes} '
+                             f'duration_s={time.monotonic() - started:.3f}')
+                # Commit first, then let other API processes acquire the lock.
+                await asyncio.sleep(0.05)
 
     # --- Status updates ---
 

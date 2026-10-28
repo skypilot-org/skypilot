@@ -65,12 +65,12 @@ Readers and writers are defined in `io_formats.py`:
 
 **Serialization:**
 - `to_dict()` / `from_dict()` — Serialize to/from dicts for transport via `task._metadata` and env vars
-- Custom readers/writers (defined outside the module) automatically include `_class_source` in serialization for remote reconstruction
+- Only readers/writers registered on the server are accepted: `from_dict` rejects unknown formats and never loads a class from source carried in the dict
 - Workers receive formats as JSON env vars: `SKY_BATCH_INPUT_FORMAT`, `SKY_BATCH_OUTPUT_FORMATS`
 
 **Multi-output:** `ds.map(..., output=[ImageWriter(...), JsonWriter(...)])` — each writer independently uploads, reduces, and cleans up.
 
-**Custom readers/writers:** Subclass `InputReader`/`OutputWriter`, register via `@registry.INPUT_READER_REGISTRY.type_register(name='...')` or `@registry.OUTPUT_WRITER_REGISTRY.type_register(name='...')`. Source code is automatically serialized. See `examples/batch/custom_formats/`.
+**Custom readers/writers:** Subclass `InputReader`/`OutputWriter` and register via `@registry.INPUT_READER_REGISTRY.type_register(name='...')` or `@registry.OUTPUT_WRITER_REGISTRY.type_register(name='...')`. The class must be installed and registered on the API server and workers; format classes are not shipped as source inside a task.
 
 ## Batch Task Detection and Metadata Flow
 
@@ -185,14 +185,12 @@ pytest tests/unit_tests/test_batch_manual_run.py       # Manual run tests
 # Smoke tests (require cloud resources)
 pytest tests/smoke_tests/test_batch.py::test_batch_simple
 pytest tests/smoke_tests/test_batch.py::test_batch_diffusion
-pytest tests/smoke_tests/test_batch.py::test_batch_custom_formats
 pytest tests/smoke_tests/test_batch.py::test_batch_cancel
 pytest tests/smoke_tests/test_batch.py::test_batch_ha_kill_running
 
 # Run examples
 bash examples/batch/simple/run.sh
 bash examples/batch/diffusion/run.sh
-bash examples/batch/custom_formats/run.sh
 ```
 
 ## Gotchas

@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import tarfile
 import time
@@ -17,6 +18,7 @@ from sky import logs
 from sky import provision
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -37,6 +39,64 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
+
+# Default wall-clock bounds for a single provisioning-phase remote command /
+# file sync, overridable via the `provision` section of ~/.sky/config.yaml.
+#
+# Without a bound, a wedged transport hangs `sky launch` forever with no
+# recovery: the cluster stays INIT, and a `sky serve up` controller stuck in
+# INIT cannot even be torn down. The motivating case is a `kubectl exec` stream
+# that transfers every byte but never delivers EOF, leaving both ends idle
+# indefinitely (skypilot-org/skypilot#10167).
+#
+# These are deliberately generous: a legitimate setup on a slow network can
+# take many minutes. Their job is to turn "hangs forever, silently" into
+# "fails, then retries" so the existing _auto_retry can recover -- not to
+# police slowness.
+#
+# Trade-off: a timeout kills only the local `ssh` / `kubectl exec` client. The
+# remote command runs without a pty/tty, so it is not signalled and keeps
+# running. For the wedged-stream case that is harmless (the remote side has
+# already finished; only EOF is lost), but if a command is genuinely slower
+# than the bound, the retry starts it again while the first copy is still
+# running on the node. The generous defaults are what keep that path rare;
+# raise the bound (or set it non-positive) for setups that legitimately take
+# longer.
+_DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
+_DEFAULT_FILE_MOUNT_TIMEOUT = 600
+
+
+def _timeout_from_config(key: str, default: int) -> Optional[int]:
+    """Reads a provisioning timeout (seconds) from the SkyPilot config.
+
+    Read at call time rather than import time so that per-request config
+    overrides (and remote API servers) see the right value. A non-positive
+    value disables the bound, restoring the previous unbounded behavior as an
+    escape hatch.
+    """
+    value = skypilot_config.get_nested(('provision', key), default)
+    if not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _setup_command_timeout() -> Optional[int]:
+    """Bound for setup commands, ray start, skylet start and logging setup."""
+    return _timeout_from_config('setup_command_timeout',
+                                _DEFAULT_SETUP_COMMAND_TIMEOUT)
+
+
+def _file_mount_timeout() -> Optional[int]:
+    """Bound for one remote operation of an internal file mount.
+
+    Applied separately to the mkdir and to the rsync, so a single mount can
+    take up to twice this value. That is deliberate -- they are independent
+    commands and either can wedge on its own -- but it means this is a
+    per-operation bound, not a per-mount one.
+    """
+    return _timeout_from_config('file_mount_timeout',
+                                _DEFAULT_FILE_MOUNT_TIMEOUT)
+
 
 # The open files (nofile) limit we want for ray. Ray recommends at least
 # 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
@@ -277,16 +337,53 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
 
+# `ray status` keeps a node under `Active:` after the GCS has marked it dead
+# (on Ray 2.56.1 it never drops off), so counting its node lines over-reports
+# after any node loss -- a resize-down, a preemption, a replaced worker. Ask
+# the GCS node table instead (state 0 is ALIVE). A bare GcsClient rather than
+# ray.init(): that starts a driver and a worker and leaves their logs on the
+# head per check, which a status refresh would pile up. Its per-node value is
+# a dict on Ray 2.9.3 and a GcsNodeInfo message on 2.56.1.
+# Nothing listening on the port prints the "Ray cluster is not found" line
+# that `ray status` printed up to Ray 2.9.3 and the health check keys on.
+_ALIVE_NODES_PY = (
+    'import os, socket, sys; '
+    'a = os.environ["RAY_ADDRESS"]; h, p = a.rsplit(":", 1); '
+    's = socket.socket(); s.settimeout(5); '
+    's.connect_ex((h, int(p))) == 0 or '
+    'sys.exit(print("Ray cluster is not found at", a) or 1); '
+    's.close(); '
+    'from ray._raylet import GcsClient; '
+    'ns = GcsClient(address=a).get_all_node_info(timeout=10).values(); '
+    'st = [n["state"] if isinstance(n, dict) else n.state for n in ns]; '
+    'print("SKY_ALIVE_NODES", st.count(0), len(st))')
+RAY_ALIVE_NODE_COUNT_COMMAND = (
+    f'{_RAY_PORT_COMMAND}; '
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '
+    f'-c {shlex.quote(_ALIVE_NODES_PY)}')
+# Parses RAY_ALIVE_NODE_COUNT_COMMAND's output: alive count, total count.
+RAY_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
+                                     re.MULTILINE)
+
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 # Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
 # the constants.RAY_STATUS literal — the probe picks a dynamic port.
+_RAY_HEAD_WAIT_TIMEOUT_SECONDS = 120
+# After `ray start --head`, `ray status` exits non-zero until the GCS is up,
+# then exits 0 printing "No cluster status." until the autoscaler first
+# reports (a few seconds, on both Ray 2.9.3 and 2.56.1). Wait past both.
+# Deadline rather than an iteration count, because a failing `ray status`
+# takes ~35s to return on 2.56.1.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'_sky_deadline=$(( $(date +%s) + {_RAY_HEAD_WAIT_TIMEOUT_SECONDS} )); '
+    'while [ $(date +%s) -lt $_sky_deadline ]; do '
+    '_sky_ray_status=$(RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
     f'{constants.SKY_REMOTE_RAY_PORT}}} '
-    f'{constants.SKY_RAY_CMD} status | grep -q "No cluster status."`; do '
-    'sleep 0.5; '
+    f'{constants.SKY_RAY_CMD} status 2>&1) && '
+    'case "$_sky_ray_status" in *"No cluster status."*) ;; *) break ;; esac; '
     'echo "Waiting ray cluster to be initialized"; '
+    'sleep 0.5; '
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
@@ -459,7 +556,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True)
+                source_bashrc=True,
+                timeout=_setup_command_timeout())
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -475,7 +573,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     stream_logs=False,
                     log_path=log_path,
                     require_outputs=True,
-                    source_bashrc=True)
+                    source_bashrc=True,
+                    timeout=_setup_command_timeout())
                 if not returncode:
                     break
 
@@ -650,7 +749,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         require_outputs=True,
         # Source bashrc for starting ray cluster to make sure actors started by
         # ray will have the correct PATH.
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: \n'
@@ -724,7 +824,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
             log_path=log_path_abs,
             # Source bashrc for starting ray cluster to make sure actors started
             # by ray will have the correct PATH.
-            source_bashrc=True)
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
 
     num_threads = subprocess_utils.get_parallel_threads(
         cluster_info.provider_name)
@@ -828,7 +929,8 @@ def start_skylet_on_head_node(
         stream_logs=False,
         require_outputs=True,
         log_path=log_path_abs,
-        source_bashrc=True)
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '
@@ -855,7 +957,8 @@ def _internal_file_mounts(file_mounts: Dict,
         rc, stdout, stderr = runner.run_setup(mkdir_command,
                                               log_path=log_path,
                                               stream_logs=False,
-                                              require_outputs=True)
+                                              require_outputs=True,
+                                              timeout=_file_mount_timeout())
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
@@ -868,6 +971,7 @@ def _internal_file_mounts(file_mounts: Dict,
             up=True,
             log_path=log_path,
             stream_logs=False,
+            timeout=_file_mount_timeout(),
         )
 
 
@@ -911,11 +1015,13 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         cmd = logging_agent.get_setup_command(cluster_name)
         logger.info(f'Running command on node: {cmd}')
-        returncode, stdout, stderr = runner.run(cmd,
-                                                stream_logs=False,
-                                                require_outputs=True,
-                                                log_path=log_path,
-                                                source_bashrc=True)
+        returncode, stdout, stderr = runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path,
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
         if returncode:
             raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '

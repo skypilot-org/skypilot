@@ -108,6 +108,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_env_ignored_when_global_allowed_contexts_is_set(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -367,6 +384,36 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
+    """A bad context name must not reveal contexts outside allowed_contexts."""
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        patches = [
+            patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                  return_value=['ctx-a', 'ctx-b']),
+            patch('sky.skypilot_config.get_workspace_cloud',
+                  return_value={'allowed_contexts': ['ctx-a']}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_unknown_context_lists_only_allowed(self):
+        with self.assertRaises(ValueError) as ctx:
+            kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
+        msg = str(ctx.exception)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
+
+    def test_existing_context_outside_allowed_still_validates(self):
+        # Existing clusters on a context later removed from allowed_contexts
+        # must still load, so existence is checked against the kubeconfig.
+        self.assertEqual(
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):
@@ -1281,16 +1328,12 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
 
-        # The pod patches Ray from a payload carried in its own spec, because
-        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
-        # the node is whatever `pip install skypilot` resolved to. Assert the
-        # variable is actually produced -- without this, dropping it from
-        # make_deploy_resources_variables leaves the payload tests green while
-        # the template renders an empty command.
-        self.assertIn('ray_patches_cmd', deploy_vars)
-        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
-        self.assertNotIn('from sky.skylet.ray_patches',
-                         deploy_vars['ray_patches_cmd'])
+        # 'ray_patches_cmd' and 'ray_installation_commands' are deliberately
+        # NOT here: both depend on the Ray version this cluster is pinned to,
+        # which only write_cluster_config knows. That they are still produced
+        # is asserted in tests/unit_tests/test_sky/test_ray_version_per_cluster.
+        self.assertNotIn('ray_patches_cmd', deploy_vars)
+        self.assertNotIn('ray_installation_commands', deploy_vars)
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -5194,10 +5237,17 @@ class TestKubernetesSpotLabelContext(unittest.TestCase):
         self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
         for call_args in mock_get_spot_label.call_args_list:
             self.assertEqual(call_args, mock.call('test-context'))
-        # ...and the resolved label must flow into the pod template vars.
-        self.assertEqual(deploy_vars['k8s_spot_label_key'],
-                         'karpenter.sh/capacity-type')
-        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':

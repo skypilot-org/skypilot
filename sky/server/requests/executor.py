@@ -50,6 +50,7 @@ from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server import versions
+from sky.server.auth import loopback
 from sky.server.requests import event_loop
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -60,12 +61,14 @@ from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
 from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
@@ -681,6 +684,90 @@ def _should_apply_workspace_resolver(is_daemon: bool,
     return not skypilot_config.is_active_workspace_set()
 
 
+# Server-only environment variables that are SKYPILOT_-prefixed (so they would
+# otherwise pass the SKYPILOT_ allowlist in _sanitize_request_env_vars) but must
+# never be taken from a client request. Each is either derived by the server
+# itself or names a server-side path/connection the client has no business
+# setting.
+_REQUEST_ENV_VARS_DENYLIST = frozenset({
+    constants.ENV_VAR_DB_CONNECTION_URI,
+    constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+    constants.ENV_VAR_DB_POOL_HOSTPORT,
+    constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+    timeline.TIMELINE_FILE_PATH_ENV_VAR,
+    kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR,
+})
+
+# The only env vars honored from a request that did not come from loopback:
+# identity, usage attribution and this request's own logging. Every other var
+# configures the server itself and must come from the server.
+_REMOTE_REQUEST_ENV_VARS = frozenset({
+    constants.USER_ID_ENV_VAR,
+    constants.USER_ENV_VAR,
+    constants.CLIENT_USER_HASH_ENV_VAR,
+    'SKYPILOT_CLIENT_TYPE',
+    usage_constants.USAGE_RUN_ID_ENV_VAR,
+    'SKYPILOT_IS_FROM_DASHBOARD',
+    env_options.Options.DISABLE_LOGGING.env_key,
+    env_options.Options.MINIMIZE_LOGGING.env_key,
+    env_options.Options.SUPPRESS_SENSITIVE_LOG.env_key,
+    env_options.Options.SHOW_DEBUG_INFO.env_key,
+})
+
+
+def _sanitize_request_env_vars(env_vars: Dict[str, str],
+                               from_loopback: bool) -> Dict[str, str]:
+    """Filter client-supplied request env vars down to a safe allowlist.
+
+    request_body.env_vars is sent by the client and, on any reachable server,
+    is untrusted input. It is overlaid onto the server process's os.environ
+    (and thus inherited by every subprocess a request spawns), so an unfiltered
+    overlay lets a client inject arbitrary environment into the server. Notably
+    KUBECONFIG would let a client point the server at a kubeconfig whose exec
+    credential plugin runs an arbitrary command on the server.
+
+    Mirror what the client legitimately sends (see
+    payloads.request_body_env_vars) rather than trying to enumerate every bad
+    key:
+
+    - SKYPILOT_-prefixed task/user vars are kept, except SKYPILOT_SERVER_-
+      prefixed vars (server-only) and the explicit _REQUEST_ENV_VARS_DENYLIST.
+    - Credential overrides (payloads.EXTERNAL_LOCAL_ENV_VARS, e.g. KUBECONFIG)
+      are kept only on a server that is not reachable by other parties, i.e. a
+      loopback `sky api start` where client and server are the same user. On a
+      deployed or network-reachable server they are dropped.
+    - Everything else is dropped.
+
+    That is for a request from loopback (the local API server, or a
+    controller calling its own server). A request from anywhere else keeps
+    only _REMOTE_REQUEST_ENV_VARS: config paths such as SKYPILOT_CONFIG and
+    any other server setting must come from the server, not from a client.
+    """
+    if not from_loopback:
+        return {
+            k: v for k, v in env_vars.items() if k in _REMOTE_REQUEST_ENV_VARS
+        }
+    # On a loopback single-user server the client and server are the same
+    # user, so credential overrides are same-user and allowed; on a deployed or
+    # non-loopback server they are not. Reuse the trust boundary the server
+    # already applies to file-mount sources.
+    enforce = server_common.should_enforce_mount_containment()
+    allow_local_credentials = not enforce
+    sanitized: Dict[str, str] = {}
+    for key, value in env_vars.items():
+        if key in payloads.EXTERNAL_LOCAL_ENV_VARS:
+            if allow_local_credentials:
+                sanitized[key] = value
+            continue
+        if key.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX):
+            continue
+        if key in _REQUEST_ENV_VARS_DENYLIST:
+            continue
+        if key.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+            sanitized[key] = value
+    return sanitized
+
+
 @contextlib.contextmanager
 def override_request_env_and_config(
         request_body: payloads.RequestBody, request_id: str,
@@ -694,6 +781,14 @@ def override_request_env_and_config(
     # for daemons, skip the env overlay and use the current process's
     # os.environ.
     is_daemon = daemons.is_daemon_request_id(request_id)
+    # Stamped server-side as True or False on every request a current server
+    # dispatches. None means the body predates this field, i.e. it was
+    # persisted by an older server and is being retried/resumed across an
+    # upgrade; keep its pre-upgrade behavior (loopback, no remote filtering) so
+    # an in-flight controller launch does not lose SKYPILOT_CONFIG. An older
+    # server applied no filtering at all, so this adds no exposure the upgrade
+    # did not already have.
+    from_loopback = getattr(request_body, 'from_loopback', None) is not False
     original_env = os.environ.copy()
     try:
         if is_daemon:
@@ -711,35 +806,18 @@ def override_request_env_and_config(
             # API server affecting client requests. If set on the client
             # side, it will be overridden by the request body.
             os.environ.pop('SKYPILOT_DEBUG', None)
-            # Remove the db connection uri from client supplied env vars, as
-            # the client should not set the db string on server side.
-            request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-            # Likewise the auth DB deadline: `add_or_update_user` below derives
-            # the server-side timeouts on its own transaction from it, and a
-            # client (in particular an older one that still forwards the
-            # variable) must not be able to loosen or break them.
-            request_body.env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
-                                      None)
-            # Remove the in-cluster context name from client supplied env
-            # vars. When a client runs inside a Kubernetes pod (e.g., a
-            # managed job with api_server_access), its env has
-            # SKYPILOT_IN_CLUSTER_CONTEXT_NAME set pod template. If this
-            # leaks into the server's os.environ, it causes the server to
-            # attempt in-cluster auth (load_incluster_config) instead of
-            # using its own kubeconfig, which fails when the server is not
-            # running in a Kubernetes pod.
-            request_body.env_vars.pop(
-                kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
-            # SKYPILOT_SERVER_-prefixed vars are server-only (e.g. the
-            # file-mount containment flag). A client must not be able to overlay
-            # them via its request env vars, so strip them before the overlay.
-            # The client already omits them, but a crafted request could include
-            # them, so enforce it here too.
-            for env_var in [
-                    k for k in request_body.env_vars
-                    if k.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
-            ]:
-                request_body.env_vars.pop(env_var, None)
+            # Overlay only the environment variables a client may legitimately
+            # set on the server. request_body.env_vars arrives over the wire
+            # and is attacker-controlled on a reachable server, so filter it to
+            # an allowlist (see _sanitize_request_env_vars) rather than
+            # denylisting known-bad keys. This drops the db connection strings,
+            # the auth DB deadline, the timeline path and the in-cluster
+            # context name (all server-side settings the client must not set),
+            # all SKYPILOT_SERVER_-prefixed vars, credential overrides such as
+            # KUBECONFIG on a reachable server, and any other key, before they
+            # can reach os.environ and the subprocesses launched from it.
+            request_body.env_vars = _sanitize_request_env_vars(
+                request_body.env_vars, from_loopback)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
@@ -765,7 +843,8 @@ def override_request_env_and_config(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
-                request_body.override_skypilot_config_path):
+                request_body.override_skypilot_config_path,
+                from_loopback=from_loopback):
             # Skip permission check for sky.workspaces.get request
             # as it is used to determine which workspaces the user
             # has access to.
@@ -808,9 +887,11 @@ def override_request_env_and_config(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
-                    logger.debug(f'{request_id} resolved workspace '
-                                 f'{resolution.workspace!r} from '
-                                 f'{resolution.source} for user {user.name}')
+                    ws_label = skypilot_config.workspace_label(
+                        resolution.workspace)
+                    logger.debug(f'{request_id} resolved workspace {ws_label} '
+                                 f'from {resolution.source} for user '
+                                 f'{user.name}')
                     # For resource-creating commands, surface the
                     # resolver's pick at INFO level so the user sees
                     # which workspace their cluster / job actually
@@ -825,14 +906,22 @@ def override_request_env_and_config(
                             _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
                             and resolution.source
                             not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
-                        logger.info(f'Using workspace {resolution.workspace!r} '
+                        workspace_name = skypilot_config.get_workspace_name(
+                            resolution.workspace)
+                        logger.info(f'Using workspace {workspace_name!r} '
                                     f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:
                         # Reject requests that the user does not have
                         # permission to access.
+                        # Name the workspace as the user sent it, not by the
+                        # id it resolved to.
+                        override = request_body.override_skypilot_config or {}
+                        workspace_ref = override.get('active_workspace')
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user, ws_action)
+                            user,
+                            ws_action,
+                            workspace_ref=workspace_ref)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -1276,17 +1365,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
         ctx.cancel()
 
 
-async def prepare_request_async(
-    request_id: str,
-    request_name: request_names.RequestName,
-    request_body: payloads.RequestBody,
-    func: Callable[P, Any],
-    request_cluster_name: Optional[str] = None,
-    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
-    is_skypilot_system: bool = False,
-    auth_user: Optional[models.User] = None,
-) -> api_requests.Request:
-    """Prepare a request for execution."""
+def stamp_request_body(request_body: payloads.RequestBody,
+                       auth_user: Optional[models.User],
+                       is_skypilot_system: bool = False) -> str:
+    """Stamps the caller's identity, client API version and workspace access
+    onto the request body. Returns the id of the user the request runs as."""
     if auth_user is not None:
         assert auth_user.name is not None
         # Use the authenticated user identity as the single source of truth
@@ -1298,7 +1381,7 @@ async def prepare_request_async(
     else:
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
-        user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')
         # This identity comes straight from the client and is stored as the
         # owner of any cluster the request creates, so reject a malformed one
         # here. A well-formed id is an invariant elsewhere in the codebase
@@ -1333,6 +1416,24 @@ async def prepare_request_async(
     # visible, and stamp it so the worker can enforce it. Overwrite
     # unconditionally — a client-supplied value must never be trusted.
     request_body.workspace_access = workspace_access.for_current_request()
+    # Same again for whether the request came from loopback; it decides which
+    # client env vars and config overrides the worker honors.
+    request_body.from_loopback = loopback.get_request_from_loopback()
+    return user_id
+
+
+async def prepare_request_async(
+    request_id: str,
+    request_name: request_names.RequestName,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
+) -> api_requests.Request:
+    """Prepare a request for execution."""
+    user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
@@ -1404,7 +1505,7 @@ async def schedule_internal_daemon_async(
     """Submit an internal daemon's request to the executor.
 
     Idempotent under concurrent callers (multiple uvicorn workers in the
-    same process; multiple replicas sharing a PG-backed request store):
+    same process; multiple API server instances sharing a request store):
 
     - First caller inserts a fresh PENDING row + enqueues onto the task
       queue.

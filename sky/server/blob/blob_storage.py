@@ -85,7 +85,7 @@ class BlobStorage(abc.ABC):
         """Acquire a GC coordination lock.
 
         Yields ``True`` if this caller should run GC, ``False`` otherwise.
-        Default: always yields ``True`` (single-replica mode).
+        Default: always yields ``True`` (single-server mode).
         """
         yield True
 

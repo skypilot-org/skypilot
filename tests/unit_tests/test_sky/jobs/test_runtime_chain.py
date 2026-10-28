@@ -325,6 +325,24 @@ class TestIsRegistered:
         assert runtime_chain.is_registered() is True
 
 
+class TestObservesRecovery:
+    """observes_recovery() is True only while a registered runtime implements
+    get_recovery_status."""
+
+    def test_empty(self):
+        assert runtime_chain.observes_recovery() is False
+
+    def test_runtime_without_the_hook(self):
+        runtime_chain.register(types.SimpleNamespace(owns=lambda handle: True))
+        assert runtime_chain.is_registered() is True
+        assert runtime_chain.observes_recovery() is False
+
+    def test_runtime_with_the_hook(self):
+        runtime_chain.register(types.SimpleNamespace(owns=lambda handle: True))
+        runtime_chain.register(_make_runtime('observer'))
+        assert runtime_chain.observes_recovery() is True
+
+
 def test_recovery_hooks_include_non_owners():
     runtime = _make_runtime('observer', owns_return=False)
     runtime_chain.register(runtime)
@@ -404,3 +422,57 @@ def test_conflict_warns_once():
         for _ in range(3):
             runtime_chain._claimants(_make_handle())
     warning.assert_called_once()
+
+
+class _OldRuntime:
+    """A runtime registered before the cost hook existed."""
+
+    def owns(self, handle):
+        del handle
+        return True
+
+
+class _CostRuntime:
+
+    def __init__(self, owns_return, handle_cost):
+        self._owns = owns_return
+        self.cost_units = mock.MagicMock(return_value=handle_cost)
+
+    def owns(self, handle):
+        del handle
+        return self._owns
+
+
+class TestCostUnits:
+    """cost_units dispatch."""
+
+    def test_no_runtime_defers(self):
+        assert runtime_chain.cost_units(_make_handle()) is None
+
+    def test_runtime_without_the_hook_defers(self):
+        runtime_chain.register(_OldRuntime())
+        assert runtime_chain.cost_units(_make_handle()) is None
+
+    def test_cost_units_asks_only_the_owner(self):
+        other = _CostRuntime(False, 3)
+        owner = _CostRuntime(True, 1)
+        runtime_chain.register(other)
+        runtime_chain.register(owner)
+        handle = _make_handle()
+        assert runtime_chain.cost_units(handle) == 1
+        other.cost_units.assert_not_called()
+        owner.cost_units.assert_called_once_with(handle)
+
+    def test_owner_returning_none_falls_through(self):
+        silent = _CostRuntime(True, None)
+        second = _CostRuntime(True, 2)
+        runtime_chain.register(silent)
+        runtime_chain.register(second)
+        assert runtime_chain.cost_units(_make_handle()) == 2
+
+    def test_legacy_handle_is_not_asked(self):
+        owner = _CostRuntime(True, 1)
+        runtime_chain.register(owner)
+        assert runtime_chain.cost_units(_make_handle(has_ray=True)) is None
+        assert runtime_chain.cost_units(None) is None
+        owner.cost_units.assert_not_called()
