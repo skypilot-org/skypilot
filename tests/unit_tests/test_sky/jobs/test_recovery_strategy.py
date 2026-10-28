@@ -1188,6 +1188,20 @@ async def test_reattach_launch_vanished_request_returns_none_without_launching(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recovery', [False, True])
+async def test_launch_again_launches_without_cleanup(monkeypatch, recovery):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor.launch_again(recovery=recovery) == 123.45
+
+    # Launched onto the existing cluster: no teardown first.
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_failover_launch_forwards_reattach_only(monkeypatch):
     executor = recovery_strategy.EagerFailoverStrategyExecutor.__new__(
         recovery_strategy.EagerFailoverStrategyExecutor)

@@ -554,6 +554,23 @@ class StrategyExecutor:
                                   recovery=recovery,
                                   reattach_only=True)
 
+    async def launch_again(self, recovery: bool) -> float:
+        """Launch onto the task's cluster again, without tearing it down.
+
+        For a resumed task whose cluster never came up and whose launch
+        request is gone: see JobController._reattach_live_launch. Like
+        launch(), this retries until the job is submitted.
+
+        Args:
+            recovery: Whether the task was RECOVERING rather than STARTING.
+
+        Returns:
+            The job's submit timestamp.
+        """
+        job_submit_at = await self._launch(max_retry=None, recovery=recovery)
+        assert job_submit_at is not None
+        return job_submit_at
+
     async def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
 

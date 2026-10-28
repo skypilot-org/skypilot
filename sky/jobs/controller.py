@@ -966,13 +966,24 @@ class JobController:
         that request, and launch again. Re-attach to the request instead, and
         record the task as started (or recovered) once its job is submitted.
 
+        If no launch request is live but the cluster never came up, launch
+        onto it again instead. Forced recovery tears the cluster down first
+        in case a job was half-submitted to it, and nothing can have been
+        submitted to a cluster that never came up; tearing it down would only
+        throw away what it already has (e.g. pods waiting in a resource
+        queue). This happens after an API server restart when the restarted
+        server runs the parked request again and that run fails (e.g. on a
+        transient error), or when the request ends while no controller is
+        attached to it.
+
         Runs before the monitor loop, so before any runtime observation of
         the task.
 
         Returns:
-            True if the task re-attached and its job is now on the cluster.
-            False if there is no live launch request, or it did not bring the
-            job up; the caller then forces recovery as before.
+            True if the task's job is now on the cluster. False if there is no
+            live launch request and the cluster came up before (or is gone),
+            or the re-attached request did not bring the job up; the caller
+            then forces recovery as before.
         """
         if self._pool is not None or prev_status not in (
                 managed_job_state.ManagedJobStatus.STARTING,
@@ -983,9 +994,17 @@ class JobController:
         await self._count_in_full()
         submitted_at = await self._strategy_executor.reattach_launch(
             recovery=recovering)
-        if submitted_at is None:
+        if submitted_at is not None:
+            logger.info(
+                f'Task {task_id} re-attached to its live launch request.')
+        elif await self._cluster_never_came_up(cluster_name):
+            logger.info(f'No live launch request for task {task_id}, and '
+                        f'cluster {cluster_name} never came up: launching '
+                        'onto it again instead of recovering it.')
+            submitted_at = await self._strategy_executor.launch_again(
+                recovery=recovering)
+        else:
             return False
-        logger.info(f'Task {task_id} re-attached to its live launch request.')
         if recovering:
             await managed_job_state.set_recovered_async(
                 self._job_id,
@@ -1000,6 +1019,14 @@ class JobController:
                 callback_func=callback_func)
         await self._update_cost_units(cluster_name)
         return True
+
+    async def _cluster_never_came_up(self, cluster_name: str) -> bool:
+        """Whether the cluster exists but has never been UP."""
+        record = await asyncio.to_thread(
+            global_user_state.get_cluster_from_name,
+            cluster_name,
+            include_user_info=False)
+        return record is not None and not record['cluster_ever_up']
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
