@@ -950,21 +950,9 @@ class StrategyExecutor:
         Raises:
             Exception: If the API server could not be reached.
         """
-        backoff = common_utils.Backoff(
-            _LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS)
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                live_requests = await self._list_live_launch_requests()
-                break
-            except Exception as e:  # pylint: disable=broad-except
-                if attempt >= _LIVE_LAUNCH_LOOKUP_ATTEMPTS:
-                    raise
-                logger.info('Failed to look up the live launch requests for '
-                            f'cluster {self.cluster_name}; retrying: '
-                            f'{common_utils.format_exception(e)}')
-                await asyncio.sleep(backoff.current_backoff())
+        live_requests = await self._retry_lookup(
+            self._list_live_launch_requests,
+            f'the live launch requests for cluster {self.cluster_name}')
         if not live_requests:
             return None
         kept = live_requests[0]
@@ -972,6 +960,69 @@ class StrategyExecutor:
                     f'({kept.status}) for cluster {self.cluster_name}.')
         await self._cancel_duplicate_launch_requests(kept, live_requests)
         return kept
+
+    async def _retry_lookup(self, lookup: Callable[[], Coroutine[Any, Any,
+                                                                 Any]],
+                            what: str) -> Any:
+        """Run a request lookup, retrying a few times if it fails.
+
+        Lookups here run when the API server may be restarting or
+        overloaded, so a single failure is common and says little.
+
+        Raises:
+            Exception: The last failure, if every try failed.
+        """
+        backoff = common_utils.Backoff(
+            _LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS)
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return await lookup()
+            except Exception as e:  # pylint: disable=broad-except
+                if attempt >= _LIVE_LAUNCH_LOOKUP_ATTEMPTS:
+                    raise
+                logger.info(f'Failed to look up {what}; retrying: '
+                            f'{common_utils.format_exception(e)}')
+                await asyncio.sleep(backoff.current_backoff())
+
+    async def _settle_failed_stream(self, request_id: str,
+                                    stream_error: Exception) -> bool:
+        """Decide what a launch request's failed log stream means.
+
+        The stream can fail without the request failing: e.g. on a 502 or a
+        connection error while the API server restarts. Treating that as a
+        failed launch would cancel the request and tear the cluster down.
+        Only the request's own status, as the server reports it, decides.
+
+        Returns:
+            True if the request is still live: re-attach with a new stream.
+            False if it has succeeded.
+
+        Raises:
+            Exception: The request's own error if it failed, or
+                `stream_error` if the server does not know the request.
+            _LaunchLookupFailed: If the request's status could not be read.
+        """
+        try:
+            request_payload = await self._retry_lookup(
+                lambda: self._get_request_payload(request_id),
+                f'the status of launch request {request_id}')
+        except Exception as e:
+            raise _LaunchLookupFailed(common_utils.format_exception(e)) from e
+        if request_payload is None:
+            raise stream_error
+        if request_payload.status in _LIVE_REQUEST_STATUS_VALUES:
+            logger.info(f'Lost the log stream of launch request {request_id} '
+                        f'({common_utils.format_exception(stream_error)}), '
+                        f'which is still {request_payload.status}: '
+                        're-attaching.')
+            return True
+        # Finished: its own outcome decides. This raises the request's error
+        # if it failed.
+        await asyncio.to_thread(
+            sdk.get, typing.cast(server_common.RequestId, request_id))
+        return False
 
     async def _other_launch_is_live(self) -> bool:
         """Whether a launch request is still live for this task's cluster.
@@ -1264,6 +1315,10 @@ class StrategyExecutor:
         # Whether this call adopted a launch request it did not submit; once
         # one launches the cluster, others still live are cancelled.
         adopted_live_request = False
+        # A re-attached request whose stream failed while its status could
+        # not be read: the next attempt re-attaches to it to learn its
+        # outcome, rather than launching beside it.
+        unsettled_request_id: Optional[str] = None
         while True:
             retry_cnt += 1
             # Why this attempt failed, for the backoff event below. Reset every
@@ -1377,8 +1432,20 @@ class StrategyExecutor:
                                         common_utils.format_exception(e)) from e
                                 if live_request is not None:
                                     adopted_live_request = True
+                                    unsettled_request_id = None
                                 if live_request is None:
-                                    if reattach_only:
+                                    if unsettled_request_id is not None:
+                                        # No longer live: its outcome
+                                        # decides, which a new stream of it
+                                        # returns.
+                                        logger.info(
+                                            'Re-attaching to launch request '
+                                            f'{unsettled_request_id} to '
+                                            'learn its outcome.')
+                                        reattach_request_id = (
+                                            unsettled_request_id)
+                                        unsettled_request_id = None
+                                    elif reattach_only:
                                         return None
                                 elif (live_request.status ==
                                       requests_lib.RequestStatus.WAITING.value):
@@ -1518,8 +1585,34 @@ class StrategyExecutor:
                                                 ).create_future())
                                             stream_task.set_result(result)
                                 assert stream_task is not None
-                                await self._await_launch_request(
-                                    request_id, stream_task)
+                                while True:
+                                    try:
+                                        await self._await_launch_request(
+                                            request_id, stream_task)
+                                        break
+                                    except _LaunchRequestParked:
+                                        raise
+                                    except Exception as e:  # pylint: disable=broad-except
+                                        # Only for a request this attempt
+                                        # re-attached to; the stream of a
+                                        # request it submitted keeps the
+                                        # usual failure handling.
+                                        if reattach_request_id is None:
+                                            raise
+                                        assert request_id is not None
+                                        try:
+                                            still_live = (
+                                                await
+                                                self._settle_failed_stream(
+                                                    request_id, e))
+                                        except _LaunchLookupFailed:
+                                            # Look again on the next attempt.
+                                            unsettled_request_id = request_id
+                                            raise
+                                        if not still_live:
+                                            break
+                                        stream_task = self._start_stream_task(
+                                            request_id)
                             except asyncio.CancelledError:
                                 if request_id:
                                     await self._cancel_launch_request(request_id

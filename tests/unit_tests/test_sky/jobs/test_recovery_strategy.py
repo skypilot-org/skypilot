@@ -311,6 +311,12 @@ def _patch_launch_environment(monkeypatch):
                         'get_runtime_user_restarts_async',
                         mock.AsyncMock(return_value=0))
     monkeypatch.setattr(recovery_strategy.sdk, 'api_start', mock.MagicMock())
+    # No request is known to the server unless a test says otherwise, and
+    # retried lookups do not wait.
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status',
+                        mock.MagicMock(return_value=[]))
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
     sdk_launch = mock.MagicMock(return_value='req-123')
     monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
     monkeypatch.setattr(recovery_strategy.global_user_state,
@@ -1185,6 +1191,130 @@ async def test_reattach_launch_vanished_request_returns_none_without_launching(
 
     patches.sdk_launch.assert_not_called()
     executor._await_launch_request.assert_not_awaited()
+
+
+def _reattached_stream_failure(monkeypatch, request_status):
+    """An adopted RUNNING request whose first stream fails with a 502.
+
+    `request_status` is what the server then reports for the request: a
+    status string, None (unknown to the server), or an exception (the
+    status cannot be read).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[_launch_request('req-old', 'RUNNING'), None])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        RuntimeError('502 Server Error: Bad Gateway for url: /api/stream'),
+        None,
+    ])
+    if isinstance(request_status, Exception):
+        executor._get_request_payload = mock.AsyncMock(
+            side_effect=request_status)
+    else:
+        executor._get_request_payload = mock.AsyncMock(
+            return_value=None
+            if request_status is None else _request_payload(request_status))
+    return executor, patches
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_live_request_reattaches(
+        monkeypatch):
+    """A 502 on the stream (e.g. while the API server restarts) is not the
+    launch failing: the request is still live, so re-attach to it instead of
+    cancelling it and tearing the cluster down."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'RUNNING')
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old'), mock.call('req-old')
+    ]
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_succeeded_request_succeeds(
+        monkeypatch):
+    executor, patches = _reattached_stream_failure(monkeypatch, 'SUCCEEDED')
+    sdk_get = mock.MagicMock(return_value='launched')
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    sdk_get.assert_called_once_with('req-old')
+    assert executor._await_launch_request.await_count == 1
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_failed_request_fails(monkeypatch):
+    """Only the server reporting the request failed makes it a failure."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'FAILED')
+    sdk_get = mock.MagicMock(side_effect=ValueError('the real failure'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    sdk_get.assert_called_once_with('req-old')
+    # The usual failure handling: teardown, then a fresh launch.
+    executor._cleanup_cluster.assert_called_once()
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_unknown_request_fails(
+        monkeypatch):
+    executor, patches = _reattached_stream_failure(monkeypatch, None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_called_once()
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_unreadable_status_waits(
+        monkeypatch):
+    """Not knowing how the request is doing: back off without tearing down,
+    then re-attach to the same request (its stream returns its outcome)
+    rather than launching beside it."""
+    executor, patches = _reattached_stream_failure(
+        monkeypatch, RuntimeError('502 Server Error: Bad Gateway'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old'), mock.call('req-old')
+    ]
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:launch_lookup_failed']
+
+
+@pytest.mark.asyncio
+async def test_submitted_request_stream_failure_keeps_failure_handling(
+        monkeypatch):
+    """The stream of a request this attempt submitted itself is handled as
+    before: its failure is the launch's failure."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._get_request_payload = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('launch failed'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._get_request_payload.assert_not_awaited()
+    executor._cleanup_cluster.assert_called_once()
+    assert patches.sdk_launch.call_count == 2
 
 
 @pytest.mark.asyncio
