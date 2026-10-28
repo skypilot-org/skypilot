@@ -23,8 +23,8 @@ from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
-from sky.server.auth import loopback
 from sky.server import versions
+from sky.server.auth import loopback
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
