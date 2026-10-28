@@ -96,6 +96,106 @@ class TestGetRolePermissions:
         assert {'path': '/workspaces/config', 'method': 'GET'} in blocklist
         assert {'path': '/foo', 'method': 'POST'} in blocklist
 
+    @staticmethod
+    def _permissions(roles, plugin_rules=None):
+
+        def fake_get_nested(keys, default_value=None, *args, **kwargs):
+            if keys == ('rbac', 'roles'):
+                return roles
+            return default_value
+
+        with mock.patch('sky.skypilot_config.get_nested',
+                        side_effect=fake_get_nested):
+            return rbac.get_role_permissions(plugin_rules=plugin_rules)
+
+    def test_custom_user_role_keeps_default_blocklist(self):
+        # A custom user role adds to the defaults; it must not replace them.
+        permissions = self._permissions({
+            'user': {
+                'permissions': {
+                    'blocklist': [{
+                        'path': '/foo',
+                        'method': 'POST'
+                    }]
+                }
+            }
+        })
+        blocklist = permissions['user']['permissions']['blocklist']
+        for entry in rbac._DEFAULT_USER_BLOCKLIST:  # pylint: disable=protected-access
+            assert entry in blocklist
+        assert {'path': '/foo', 'method': 'POST'} in blocklist
+
+    @pytest.mark.parametrize('user_role', [
+        {},
+        {
+            'permissions': {}
+        },
+        {
+            'permissions': {
+                'blocklist': None
+            }
+        },
+    ])
+    def test_user_role_without_blocklist_gets_defaults(self, user_role):
+        permissions = self._permissions({'user': user_role})
+        blocklist = permissions['user']['permissions']['blocklist']
+        for entry in rbac._DEFAULT_USER_BLOCKLIST:  # pylint: disable=protected-access
+            assert entry in blocklist
+
+    def test_mixed_case_user_role_merged(self):
+        permissions = self._permissions({
+            'User': {
+                'permissions': {
+                    'blocklist': [{
+                        'path': '/foo',
+                        'method': 'POST'
+                    }]
+                }
+            }
+        })
+        assert 'User' not in permissions
+        blocklist = permissions['user']['permissions']['blocklist']
+        assert {'path': '/foo', 'method': 'POST'} in blocklist
+        for entry in rbac._DEFAULT_USER_BLOCKLIST:  # pylint: disable=protected-access
+            assert entry in blocklist
+
+    def test_default_entry_in_custom_list_not_duplicated(self):
+        entry = rbac._DEFAULT_USER_BLOCKLIST[0]  # pylint: disable=protected-access
+        permissions = self._permissions(
+            {'user': {
+                'permissions': {
+                    'blocklist': [dict(entry)]
+                }
+            }})
+        assert permissions['user']['permissions']['blocklist'].count(entry) == 1
+
+    def test_plugin_rules_merged_into_custom_user_role(self):
+        plugin_rule = {'path': '/plugin', 'method': 'POST'}
+        permissions = self._permissions(
+            {
+                'user': {
+                    'permissions': {
+                        'blocklist': [{
+                            'path': '/foo',
+                            'method': 'POST'
+                        }]
+                    }
+                }
+            },
+            plugin_rules={
+                'user': [plugin_rule],
+                'bogus': [{
+                    'path': '/bogus',
+                    'method': 'POST'
+                }]
+            })
+        assert 'bogus' not in permissions
+        blocklist = permissions['user']['permissions']['blocklist']
+        assert plugin_rule in blocklist
+        assert {'path': '/foo', 'method': 'POST'} in blocklist
+        for entry in rbac._DEFAULT_USER_BLOCKLIST:  # pylint: disable=protected-access
+            assert entry in blocklist
+
 
 class TestGetViewerAllowlist:
     """rbac.get_viewer_allowlist composes defaults + config + plugin entries."""
