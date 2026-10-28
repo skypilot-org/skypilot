@@ -45,6 +45,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`status_check <config-yaml-jobs-status-check>`:
       min_elapsed_seconds: 60
       min_retries: 5
+    :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -69,6 +70,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
+    :ref:`setup_command_timeout <config-yaml-provision-setup-command-timeout>`: 1800
+    :ref:`file_mount_timeout <config-yaml-provision-file-mount-timeout>`: 600
+    :ref:`health_check_timeout <config-yaml-provision-health-check-timeout>`: 5
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -507,6 +511,28 @@ Example:
       min_elapsed_seconds: 600
       min_retries: 10
 
+.. _config-yaml-jobs-max-launching-jobs-per-user:
+
+``jobs.max_launching_jobs_per_user``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most managed jobs a single user can have started but not yet running (optional).
+
+The jobs controller only works on a limited number of jobs at a time (see :ref:`jobs-controller-sizing`), and it starts waiting jobs in priority order, then in submission order. A job keeps its place on the controller while it waits for resources, for example while its cluster's pods wait for quota or capacity. Without this limit, one user who submits many jobs that cannot run yet can fill every place, and everyone else's jobs wait even when there is capacity for them.
+
+With this limit set, once a user has this many jobs that are starting, waiting for resources or recovering, the controller starts other users' jobs first. That user's next job starts as soon as one of theirs begins running, finishes or is cancelled. Submitting is not limited: further jobs stay ``PENDING``. Jobs in a :ref:`pool <pool>` are neither counted nor held back.
+
+Several controller processes can start jobs at the same moment, so a user can briefly exceed the limit by up to the number of controller processes.
+
+Default: unset (no limit). Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    max_launching_jobs_per_user: 200
+
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
 
@@ -790,6 +816,75 @@ Example:
   rely on a conda environment, either set ``install_conda: true`` or use a
   custom image that ships conda.
 
+.. _config-yaml-provision-setup-command-timeout:
+
+``provision.setup_command_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote command SkyPilot runs while setting up its
+runtime on a new cluster: setup commands, starting Ray, starting the skylet and
+setting up logging (optional).
+
+A command that exceeds the timeout is treated as failed, and the step is
+retried. This keeps a stalled connection from hanging the launch forever. The
+timeout bounds elapsed time, not progress, so set it well above how long
+runtime setup legitimately takes on your nodes. Stopping a timed-out command
+only stops SkyPilot's local client; the remote command may keep running while
+the retry starts.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``1800``.
+
+.. _config-yaml-provision-file-mount-timeout:
+
+``provision.file_mount_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for each remote operation of SkyPilot's internal file
+mounts during runtime setup (optional).
+
+The directory creation and the file sync are bounded separately, so one mount
+can take up to twice this value. As with ``setup_command_timeout``, an operation
+that exceeds it is treated as failed and retried.
+
+Set it to ``0`` or a negative value to disable the timeout.
+
+Default: ``600``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    setup_command_timeout: 3600
+    file_mount_timeout: 1200
+
+.. _config-yaml-provision-health-check-timeout:
+
+``provision.health_check_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+How long, in seconds, SkyPilot keeps retrying the health probe of a cluster's
+head node after its first failure when refreshing the cluster's status
+(optional). Retries run every second. If the probe still fails, the cluster is
+marked ``INIT``, which a :ref:`managed job <managed-jobs>` treats as a
+preemption. ``0`` disables retries.
+
+Raise it if the head node is reached over a flaky link, e.g. SSH through
+:ref:`aws.use_ssm <config-yaml-aws-use-ssm>`. If the retries take longer than
+about 20 seconds, concurrent status refreshes of the cluster return its cached
+status.
+
+Default: ``5``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    health_check_timeout: 30
+
 .. _config-yaml-aws:
 
 ``aws``
@@ -960,7 +1055,8 @@ connections (including rsync) used to communicate between the local client
 and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
 since they are behind the proxy / may not have such a proxy set up.)
 
-Default: ``null``.
+Default: ``null``. This is an API server setting and cannot be overridden by
+client, project, or task configuration.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -1329,6 +1425,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 Format 2:
@@ -1653,6 +1752,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 
@@ -1697,9 +1799,21 @@ Default: ``loadbalancer``.
 ``kubernetes.remote_identity``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Service account for remote authentication (optional).
+Identity for the pods SkyPilot launches (optional).
 
-Name of the service account to use for remote authentication.
+One of:
+
+- ``SERVICE_ACCOUNT`` (default): pods run as ``skypilot-service-account``,
+  which SkyPilot creates and grants permissions.
+- The name of your own service account: pods run as that account. SkyPilot
+  creates nothing for it, and you own its permissions.
+- ``LOCAL_CREDENTIALS``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is
+  also uploaded to the pods.
+- ``NO_UPLOAD``: like ``SERVICE_ACCOUNT``, and your local kubeconfig is not
+  uploaded. The pods still have the service account's token.
+- ``NONE`` (case-insensitive, so ``none`` too): the pods get no Kubernetes
+  identity: no token is mounted and no roles are granted. Autodown is not
+  available. See :ref:`kubernetes-remote-identity-none`.
 
 .. _config-yaml-kubernetes-allowed-contexts:
 
@@ -1720,6 +1834,8 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+With a remote API server, both ``kubernetes.allowed_contexts`` and this environment variable
+are read from the server only; a client's config or environment value is ignored.
 
 .. _config-yaml-kubernetes-namespace:
 
@@ -2035,8 +2151,11 @@ Default: ``86400`` (24 hours).
 
 SkyServe replicas and pool workers are standing requests for capacity, so
 when this field is not set they wait for admission indefinitely instead of
-failing after 24 hours and re-entering the queue at the back. Set the field
-explicitly to bound their wait as well.
+failing after 24 hours and re-entering the queue at the back. So do managed
+jobs that set
+:ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
+which bounds their wait instead. Set the field explicitly to bound their wait
+as well.
 
 .. _config-yaml-kubernetes-dws:
 
@@ -2354,6 +2473,8 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
+
 .. _config-yaml-slurm:
 
 ``slurm``
@@ -2376,6 +2497,8 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
 
   slurm:
     allowed_clusters: all
+
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
 
 .. _config-yaml-slurm-submit-as-user:
 
@@ -3009,6 +3132,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 Format 2:
@@ -3305,7 +3431,7 @@ Example:
 ``logs``
 ~~~~~~~~
 
-External logging storage configuration (optional).
+External logging storage configuration (optional). Not applicable to client side config: set it in the API server's config. See :ref:`External Logging Storage <external-logging-storage>`.
 
 .. code-block:: yaml
 

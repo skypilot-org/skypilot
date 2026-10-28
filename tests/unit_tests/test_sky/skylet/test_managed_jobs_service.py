@@ -73,6 +73,11 @@ def _mock_global_user_state_db(tmp_path, monkeypatch):
     yield engine
 
 
+def _created_at(job_id: int) -> float:
+    jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+    return jobs[0]['created_at']
+
+
 @pytest.fixture
 def _seed_test_jobs(_mock_managed_jobs_db_conn, _mock_global_user_state_db):
     """Seed the database with test jobs in various states for comprehensive testing."""
@@ -347,7 +352,8 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # Never launched, so the queue reports its submission time.
+        assert target_job.submitted_at == _created_at(job_id1)
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -456,7 +462,8 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # Never launched, so the queue reports its submission time.
+        assert target_job.submitted_at == _created_at(job_id1)
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -506,9 +513,10 @@ class TestGetJobTable:
 
         job_data = {job.job_id: job for job in response.jobs}
 
-        # STARTING, RUNNING, SUCCEEDED jobs should have submitted_at > 0
-        # PENDING job should have submitted_at = 0.0
-        assert job_data[self.job_ids['job_id1']].submitted_at == 0.0
+        # Every job reports when it was submitted, including the PENDING
+        # one that has not begun launching.
+        assert job_data[self.job_ids['job_id1']].submitted_at == _created_at(
+            self.job_ids['job_id1'])
         assert job_data[self.job_ids['job_id2']].submitted_at > 0
         assert job_data[self.job_ids['job_id3']].submitted_at > 0
         assert job_data[self.job_ids['job_id4']].submitted_at > 0

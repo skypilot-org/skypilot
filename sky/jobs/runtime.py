@@ -1,9 +1,9 @@
 """ManagedJobRuntime: runtime adapter for managed jobs.
 
 Extension point for runtime-specific behavior in the managed-jobs
-lifecycle. Each method takes a cluster handle and returns ``None``
-to defer to the default behavior at the call site, or a non-None
-result to handle the operation.
+lifecycle. Methods identify jobs by a cluster handle or managed job ID
+and return ``None`` to defer to the default behavior at the call site,
+or a non-None result to handle the operation.
 
 Register a runtime with ``register(MyRuntime())``. Multiple runtimes
 can be registered and form a dispatch chain: the chain iterates in
@@ -268,6 +268,23 @@ class ManagedJobRuntime(Protocol):
         to the call site's default (``backend.tail_logs``)."""
         ...
 
+    def tail_managed_job_logs(
+        self,
+        *,
+        job_id: int,
+        task_id: Optional[int],
+        follow: bool,
+        tail: Optional[int],
+        tail_offset: Optional[int] = None,
+    ) -> Optional[int]:
+        """Stream logs by managed job ID, independently of a cluster handle.
+
+        Called after validating the job and resolving the task selector,
+        before branching on job status. ``task_id=None`` requests all tasks.
+        Return an exit code when handled, or None to use the standard reader.
+        """
+        ...
+
     def job_group_envs(
         self,
         tasks: List['task_lib.Task'],
@@ -293,6 +310,19 @@ class ManagedJobRuntime(Protocol):
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[List[str]]:
         """Return K8s DNS names for this handle's nodes, or ``None``."""
+        ...
+
+    def cost_units(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> Optional[int]:
+        """Controller cost units of a job running on this cluster.
+
+        Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
+        ``None`` for the full cost. A job counts in full against its
+        controller's job cap until a launch brings its cluster up: while it
+        launches or waits for resources, it costs the controller about the
+        same whatever its runtime."""
         ...
 
 
@@ -333,6 +363,17 @@ def is_registered() -> bool:
     thread-pool overhead when no runtime is installed.
     """
     return bool(_runtimes)
+
+
+def observes_recovery() -> bool:
+    """Whether any registered runtime implements ``get_recovery_status``.
+
+    Cheap synchronous check like ``is_registered``. When it is False, every
+    ``get_recovery_status`` dispatch returns None, so callers can skip the
+    dispatch and the work of preparing its ``previous`` cursor.
+    """
+    return any(
+        getattr(r, 'get_recovery_status', None) is not None for r in _runtimes)
 
 
 def _is_runtime_candidate(handle) -> bool:
@@ -458,10 +499,9 @@ def on_before_recovery(
     exit_codes: Optional[List[int]] = None,
     job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
-    # This hook fires for Ray-backed handles too — runtimes may
-    # capture VM logs before recovery — and ``handle`` may be None when
-    # the cluster is already unreachable. Runtimes self-filter inside
-    # the hook.
+    # This hook fires for Ray-backed handles too, and ``handle`` may be
+    # None when the cluster is already unreachable. Runtimes self-filter
+    # inside the hook.
     for r in _runtimes:
         # Defensive: a runtime registered by an older plugin build may not
         # implement this hook. Skip rather than crash on version skew.
@@ -511,6 +551,29 @@ def tail_logs(
     return None
 
 
+def tail_managed_job_logs(
+    *,
+    job_id: int,
+    task_id: Optional[int],
+    follow: bool,
+    tail: Optional[int],
+    tail_offset: Optional[int] = None,
+) -> Optional[int]:
+    """Dispatch job-ID log readers in registration order."""
+    for runtime in _runtimes:
+        hook = getattr(runtime, 'tail_managed_job_logs', None)
+        if hook is None:
+            continue
+        result = hook(job_id=job_id,
+                      task_id=task_id,
+                      follow=follow,
+                      tail=tail,
+                      tail_offset=tail_offset)
+        if result is not None:
+            return result
+    return None
+
+
 def job_group_envs(
     tasks: List['task_lib.Task'],
     job_id: int,
@@ -543,6 +606,21 @@ def k8s_dns_addresses_for_handle(
         return None
     for r in _claimants(handle):
         result = r.k8s_dns_addresses_for_handle(handle)
+        if result is not None:
+            return result
+    return None
+
+
+def cost_units(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> Optional[int]:
+    if not _is_runtime_candidate(handle):
+        return None
+    for r in _claimants(handle):
+        hook = getattr(r, 'cost_units', None)
+        if hook is None:
+            continue
+        result = hook(handle)
         if result is not None:
             return result
     return None

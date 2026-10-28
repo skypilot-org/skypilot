@@ -124,7 +124,7 @@ class CachePreloader {
 
   /**
    * Register a plugin page with its fetch functions for background preloading
-   * @param {string} pageName - The plugin page name (e.g., 'gpu-manager')
+   * @param {string} pageName - The plugin page name (e.g., 'my-page')
    * @param {Array<{fn: Function, args: Array}>} functions - Functions to preload
    */
   registerPluginPage(pageName, functions) {

@@ -451,10 +451,13 @@ FAQs
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
+    # Python 3.10, as SkyPilot's own runtime setup uses: Ray needs 3.10 or newer,
+    # and many base images ship an older python3.
     RUN export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-        python3 -m venv ~/skypilot-runtime && \
+        curl -LsSf https://astral.sh/uv/install.sh | sh && \
+        ~/.local/bin/uv venv --seed ~/skypilot-runtime --python 3.10 && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
         $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \

@@ -70,6 +70,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import {
   BatchRoleDialog,
@@ -133,9 +140,13 @@ export const USER_FILTER_SCHEMA = [
 // to on, so only the off state needs to travel.
 const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
 
-const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label }) => ({
+const SERVICE_ACCOUNT_SEARCH_PLACEHOLDER =
+  'Search by service account name, or created by';
+
+const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: multi ?? false,
 }));
 
 const MULTI_VALUE_LABELS = new Set(
@@ -752,6 +763,57 @@ export function Users() {
     );
   }
 
+  // Default filter input and active-filter chips.
+  const trackNewFilter = (property, value) =>
+    trackFilterUsed('user', { property, value });
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter users"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+  const serviceAccountSearchInput = (
+    <div className="relative flex-1 max-w-md">
+      <input
+        type="text"
+        placeholder={SERVICE_ACCOUNT_SEARCH_PLACEHOLDER}
+        value={serviceAccountSearchQuery}
+        onChange={(e) => {
+          setServiceAccountSearchQuery(e.target.value);
+        }}
+        className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+      />
+      {serviceAccountSearchQuery && (
+        <button
+          onClick={() => {
+            setServiceAccountSearchQuery('');
+          }}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          title="Clear search"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <>
       {/* Main Tabs with Controls */}
@@ -846,52 +908,33 @@ export function Users() {
       <div className="flex items-center justify-between mb-4">
         {activeMainTab === 'users' ? (
           <div className="w-full sm:w-auto max-w-xl">
-            <FilterDropdown
-              propertyList={PROPERTY_OPTIONS}
-              valueList={valueList}
-              setFilters={setFilters}
-              addFilter={addFilter}
-              onFilterAdd={(property, value) =>
-                trackFilterUsed('user', { property, value })
-              }
-              placeholder="Filter users"
+            <PluginSlot
+              name="users.filters.input"
+              context={{
+                filters,
+                setFilters,
+                addFilter,
+                propertyList: PROPERTY_OPTIONS,
+                valueList,
+                placeholder: 'Filter users',
+                onFilterAdd: trackNewFilter,
+                defaultContent: filterInput,
+              }}
+              fallback={filterInput}
             />
           </div>
         ) : activeMainTab === 'service-accounts' ? (
-          <div className="relative flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="Search by service account name, or created by"
-              value={serviceAccountSearchQuery}
-              onChange={(e) => {
-                setServiceAccountSearchQuery(e.target.value);
-              }}
-              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {serviceAccountSearchQuery && (
-              <button
-                onClick={() => {
-                  setServiceAccountSearchQuery('');
-                }}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear search"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
+          <PluginSlot
+            name="users.service-accounts.filters.input"
+            context={{
+              searchQuery: serviceAccountSearchQuery,
+              setSearchQuery: setServiceAccountSearchQuery,
+              placeholder: SERVICE_ACCOUNT_SEARCH_PLACEHOLDER,
+              defaultContent: serviceAccountSearchInput,
+            }}
+            wrapperClassName="w-full sm:w-auto max-w-xl"
+            fallback={serviceAccountSearchInput}
+          />
         ) : (
           <PluginSlot
             name="users.tab-filter"
@@ -954,7 +997,11 @@ export function Users() {
 
       {/* Display Active Filters - only for users tab */}
       {activeMainTab === 'users' && (
-        <Filters filters={filters} setFilters={setFilters} />
+        <PluginSlot
+          name="users.filters.active"
+          context={{ filters, setFilters, defaultContent: filterChips }}
+          fallback={filterChips}
+        />
       )}
 
       {/* Error/Success messages positioned at top right, below navigation bar */}
@@ -1082,6 +1129,7 @@ export function Users() {
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
               </select>
             </div>
           </div>
@@ -2514,6 +2562,7 @@ function UsersTable({
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
+                                <option value="viewer">Viewer</option>
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
@@ -2781,6 +2830,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
+    role: '',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -2824,6 +2874,34 @@ function ServiceAccountTokensView({
     if (!serverPaginated) return;
     setPage(1);
   }, [debouncedSearch, serverPaginated]);
+
+  // Start the Role field on the server's `rbac.default_role`, unless a role
+  // was already picked.
+  useEffect(() => {
+    if (!showCreateDialog) return undefined;
+    let cancelled = false;
+    const fetchDefaultRole = async () => {
+      try {
+        const response = await apiClient.get('/users/default-role');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to get default role');
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          setNewToken((prev) =>
+            prev.role ? prev : { ...prev, role: data.role }
+          );
+        }
+      } catch (error) {
+        console.error('Failed to get default role:', error);
+      }
+    };
+    fetchDefaultRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateDialog]);
 
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
@@ -3023,6 +3101,7 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
 
       const response = await apiClient.post(
@@ -3033,7 +3112,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30 });
+        setNewToken({ token_name: '', expires_in_days: 30, role: '' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3214,6 +3293,7 @@ function ServiceAccountTokensView({
                             >
                               <option value="admin">Admin</option>
                               <option value="user">User</option>
+                              <option value="viewer">Viewer</option>
                             </select>
                             <button
                               onClick={() => handleSaveEdit(token.token_id)}
@@ -3523,6 +3603,30 @@ function ServiceAccountTokensView({
                   />
                 </div>
                 <div className="grid gap-2">
+                  <label
+                    htmlFor="create-sa-role-select"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Role
+                  </label>
+                  <Select
+                    value={newToken.role}
+                    onValueChange={(role) => setNewToken({ ...newToken, role })}
+                  >
+                    <SelectTrigger
+                      id="create-sa-role-select"
+                      className="w-full focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
                     Expiration (days)
                   </label>
@@ -3575,7 +3679,9 @@ function ServiceAccountTokensView({
                 <button
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
                   onClick={handleCreateToken}
-                  disabled={creating || !newToken.token_name.trim()}
+                  disabled={
+                    creating || !newToken.token_name.trim() || !newToken.role
+                  }
                 >
                   {creating ? 'Creating...' : 'Create Token'}
                 </button>

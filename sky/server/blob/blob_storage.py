@@ -85,7 +85,7 @@ class BlobStorage(abc.ABC):
         """Acquire a GC coordination lock.
 
         Yields ``True`` if this caller should run GC, ``False`` otherwise.
-        Default: always yields ``True`` (single-replica mode).
+        Default: always yields ``True`` (single-server mode).
         """
         yield True
 
@@ -105,6 +105,21 @@ class BlobStorage(abc.ABC):
     @abc.abstractmethod
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         """Return the base blobs directory for a user."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def user_roots(self, user_id: str) -> List[pathlib.Path]:
+        """Return every directory a user's file mounts may resolve under.
+
+        The server contains client-supplied file-mount/workdir sources to
+        these roots (plus the plain ``clients/<user>/file_mounts`` dir) so a
+        caller cannot point a mount at an arbitrary server file. A backend
+        must list wherever it actually resolves a blob: the local backend
+        keeps blobs under the clients dir, a shared-filesystem backend also
+        resolves them from its shared tree and a local cache. No default is
+        provided on purpose: a wrong inherited root would silently reject
+        every launch on that backend.
+        """
         raise NotImplementedError
 
     def file_mounts_tmp_dir(self) -> str:

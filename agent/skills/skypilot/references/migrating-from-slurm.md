@@ -146,7 +146,7 @@ them with a warning:
 
 ```
 job-name  output  error  nodes  wait-all-nodes
-no-requeue  cpus-per-task  mem  gres  partition
+no-requeue  requeue  cpus-per-task  mem  gres  partition
 ```
 
 If a user asks for one of those, set it through `resources` / `name` instead.

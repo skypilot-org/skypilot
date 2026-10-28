@@ -4,9 +4,12 @@ import datetime
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import tempfile
 import textwrap
 import time
+from typing import Any, Dict
 import uuid
 
 import boto3
@@ -15,6 +18,8 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.client import sdk
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -243,6 +248,105 @@ def test_workspace_private_access_pre_login_user(generic_cloud: str):
     os.unlink(server_config_path)
 
 
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_cluster_job_spec_private_workspace(generic_cloud: str):
+    """A cluster job's spec is not readable outside the cluster's workspace.
+
+    The owner launches a cluster in a private workspace that only they belong
+    to. Another user, whose active workspace is the public `default`, asks for
+    the spec of its job 1 and must get a 403; the owner gets it. The same HTTP
+    request is sent as both users, so the 403 can only come from the
+    cluster-workspace check. Identities are simulated as in
+    test_workspace_private_access_pre_login_user.
+    """
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'This test requires a local API server it can restart with a '
+            'private-workspace config; skipped against a remote endpoint.')
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = f'spec-owner-{suffix}@example.com'
+    outsider = f'spec-outsider-{suffix}@example.com'
+    ws_name = f'spec-private-ws-{suffix}'
+    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
+    name = smoke_tests_utils.get_cluster_name()
+
+    owner_hash = hashlib.md5(
+        owner.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+
+    server_config_content = textwrap.dedent(f"""\
+        rbac:
+          default_role: user
+        workspaces:
+          default: {{}}
+          {ws_name}:
+            private: true
+            allowed_users:
+              - {owner}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+    # The owner works in the private workspace, set in a project config:
+    # a client SKYPILOT_CONFIG would be forwarded to the server and replace
+    # its config (and with it the workspace) for the request.
+    owner_dir = tempfile.mkdtemp(prefix='spec_owner_')
+    with open(os.path.join(owner_dir, '.sky.yaml'), 'w', encoding='utf-8') as f:
+        f.write(f'active_workspace: {ws_name}\n')
+    as_owner = (f'cd {owner_dir} && '
+                f'export {constants.USER_ID_ENV_VAR}="{owner_hash}"; '
+                f'export {constants.USER_ENV_VAR}="{owner}"; ')
+
+    def spec_status_as(user: str) -> str:
+        """HTTP status of asking for job 1's spec, as `user`."""
+        body = json.dumps({'cluster_name': name, 'job_id': 1})
+        return (f'curl -sS -o /dev/null -w "%{{http_code}}" -X POST '
+                f'-H "X-Auth-Request-Email: {user}" '
+                f'-H "Content-Type: application/json" '
+                f"-d '{body}' {base_url}/cluster_job_spec")
+
+    test = smoke_tests_utils.Test(
+        'test_cluster_job_spec_private_workspace',
+        [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            # First contact creates both users (see the pre-login test).
+            f'curl -sS -H "X-Auth-Request-Email: {owner}" '
+            f'{base_url}/users/me/workspace',
+            f'curl -sS -H "X-Auth-Request-Email: {outsider}" '
+            f'{base_url}/users/me/workspace',
+            f'{as_owner}sky check {generic_cloud}',
+            f'{as_owner}sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'{as_owner}s=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name} | grep {ws_name}',
+            # The owner can read the spec, through the same request.
+            f'code=$({spec_status_as(owner)}); echo "owner: $code"; '
+            f'[ "$code" = "200" ]',
+            f'{as_owner}python3 -c "from sky.client import sdk; '
+            f's = sdk.stream_and_get(sdk.cluster_job_spec({name!r}, 1)); '
+            f'assert s and {name!r} in s[\'entrypoint\'], s"',
+            # The outsider cannot.
+            f'code=$({spec_status_as(outsider)}); echo "outsider: $code"; '
+            f'[ "$code" = "403" ]',
+        ],
+        teardown=(
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path}; {as_owner}sky down -y {name} || true; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+            f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    # The default `sky status -u` preamble authenticates as the ambient user.
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+    os.unlink(server_config_path)
+    shutil.rmtree(owner_dir, ignore_errors=True)
+
+
 def _verify_cluster_created_by_user(cluster_name: str,
                                     region: str,
                                     expected_user_name: str,
@@ -460,6 +564,7 @@ def test_workspace_multiple_aws_profiles():
 @pytest.mark.no_remote_server
 # We can't restart the api server in the dependency test.
 @pytest.mark.no_dependency
+@pytest.mark.no_remote_identity_none  # Sets other identities.
 def test_workspace_k8s_remote_identity():
     """Does each team's cluster run under its own Kubernetes ServiceAccount?
 
@@ -553,3 +658,517 @@ def test_workspace_k8s_remote_identity():
         smoke_tests_utils.run_one_test(test)
     finally:
         os.unlink(server_config_path)
+
+
+# ---------- Test per-workspace prefix in a shared jobs bucket ----------
+@pytest.mark.aws
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_workspace_jobs_bucket_prefix(generic_cloud: str):
+    """Do workspaces sharing `jobs.bucket` upload under separate prefixes?
+
+    One server, one shared bucket, five workspaces:
+      team-a   -> s3://<bucket>/<root>/workspaces/team-a/job-<run_id>/...
+      team-b   -> s3://<bucket>/<root>/workspaces/team-b/job-<run_id>/...
+      Research -> s3://<bucket>/<root>/workspaces/research.979d6300/...
+      ml/prod  -> s3://<bucket>/<root>/workspaces/ml-prod.c0f7bb6f/...
+      default  -> s3://<bucket>/<root>/workspaces/default/job-<run_id>/...
+    `Research` and `ml/prod` stand for workspaces created before names were
+    validated; they map to a slug plus a hash of the exact name.
+
+    Bucket IAM can only enforce per-workspace RBAC if every object a job
+    uploads (workdir, folder mounts, single-file mounts) sits under its
+    workspace prefix. We list the bucket directly instead of trusting
+    SkyPilot's logs. Every job runs to completion to show its uploads are
+    usable from its workspace. Afterwards every job sub-path must be cleaned
+    up while the user-owned bucket survives.
+    """
+    ws_default = constants.SKYPILOT_DEFAULT_WORKSPACE
+    # (job name suffix, workspace, expected bucket key segment)
+    team_workspaces = [
+        ('a', 'team-a', 'team-a'),
+        ('b', 'team-b', 'team-b'),
+        ('r', 'Research', 'research.979d6300'),
+        ('m', 'ml/prod', 'ml-prod.c0f7bb6f'),
+    ]
+    all_workspaces = team_workspaces + [('d', ws_default, ws_default)]
+    name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'sky-ws-bucket-{int(time.time())}-{uuid.uuid4().hex[:6]}'
+    # A sub-path on jobs.bucket covers joining it with the workspace prefix.
+    bucket_root = 'smoke-root'
+
+    # Overlaid onto the existing server config by override_sky_config, so
+    # settings the test env relies on are kept. Config.update is shallow, so
+    # `jobs` must carry the low controller resources alongside the bucket.
+    low_resource = smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG
+    config_dict = {
+        **low_resource,
+        'jobs': {
+            **low_resource['jobs'],
+            'bucket': f's3://{bucket_name}/{bucket_root}',
+        },
+        'workspaces': {ws: {} for _, ws, _ in team_workspaces},
+    }
+
+    # Every kind of local upload: workdir, a folder mount, a single file.
+    local_dir_obj = tempfile.TemporaryDirectory(prefix='sky_ws_bucket_')
+    local_dir = local_dir_obj.name
+    workdir = os.path.join(local_dir, 'workdir')
+    folder = os.path.join(local_dir, 'folder')
+    os.makedirs(workdir)
+    os.makedirs(folder)
+    with open(os.path.join(workdir, 'marker.txt'), 'w') as f:
+        f.write('workdir\n')
+    with open(os.path.join(folder, 'data.txt'), 'w') as f:
+        f.write('folder\n')
+    single_file = os.path.join(local_dir, 'one.txt')
+    with open(single_file, 'w') as f:
+        f.write('file\n')
+    task_yaml = os.path.join(local_dir, 'task.yaml')
+    with open(task_yaml, 'w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            workdir: {workdir}
+            file_mounts:
+              /folder: {folder}
+              /one.txt: {single_file}
+            run: |
+              set -ex
+              cat marker.txt
+              cat /folder/data.txt
+              cat /one.txt
+            """))
+
+    list_keys = f'aws s3 ls --recursive s3://{bucket_name}/'
+    # Each launch's output, and the bucket sub-path its job uploaded to.
+    run_dir = os.path.join(local_dir, 'runs')
+    os.makedirs(run_dir)
+
+    def _launch_cmd(job_name: str, ws: str) -> str:
+        return (f'set -o pipefail; sky jobs launch -y -d -n {job_name} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config active_workspace={ws} {task_yaml} 2>&1 | '
+                f'tee {run_dir}/{job_name}.log')
+
+    def _check_job_upload_cmd(job_name: str, segment: str) -> str:
+        # Find the sub-path of the upload that belongs to this job: the last
+        # one synced before `Managed Job ID` is printed. If the server retries
+        # the launch request, earlier attempts sync to other sub-paths that no
+        # job refers to; those are not this job's upload.
+        return (
+            'out=$(sed "s/\\x1b\\[[0-9;?]*[A-Za-z]//g" '
+            f'{run_dir}/{job_name}.log | '
+            'awk "{print} /Managed Job ID:/{exit}"); '
+            'job_id=$(echo "$out" | grep -oE "Managed Job ID: [0-9]+" | '
+            'grep -oE "[0-9]+$"); '
+            'run=$(echo "$out" | grep "Storage synced" | '
+            f'grep -oE "{bucket_root}/workspaces/{_ere(segment)}/'
+            'job-[a-z0-9]+" | '
+            'tail -n 1); '
+            f'echo "{job_name}: job $job_id uploaded to $run"; '
+            '[ -n "$job_id" ] && [ -n "$run" ] || exit 1; '
+            f'echo "$run" > {run_dir}/{job_name}.run; '
+            f'keys=$(aws s3 ls --recursive s3://{bucket_name}/$run/); '
+            'echo "$keys"; '
+            'echo "$keys" | grep -E " $run/workdir/marker.txt$" && '
+            'echo "$keys" | grep -E " $run/local-file-mounts/[0-9]+/data.txt$" '
+            '&& echo "$keys" | grep -E " $run/tmp-files/file-0$"')
+
+    def _ere(text: str) -> str:
+        # The only regex metacharacter a bucket key segment can contain.
+        return text.replace('.', '\\.')
+
+    def _cancel_cmd(job_name: str, ws: str) -> str:
+        # Cancel is workspace-scoped.
+        return (f'sky jobs cancel -y -n {job_name} '
+                f'--config active_workspace={ws}')
+
+    wait_for_job = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name)
+
+    test = smoke_tests_utils.Test(
+        'test_workspace_jobs_bucket_prefix',
+        [
+            # The admin owns the shared bucket; SkyPilot must not delete it.
+            f'aws s3api create-bucket --bucket {bucket_name}',
+            # Restart so the server picks up the merged config (existing
+            # server config + team workspaces + shared bucket).
+            f'{smoke_tests_utils.SKY_API_RESTART}',
+            # Uploads finish before `jobs launch -d` returns, and the job
+            # sub-path is only deleted after the job ends, so the objects are
+            # listable right after each launch.
+            *[
+                cmd for suffix, ws, segment in all_workspaces
+                for cmd in (_launch_cmd(f'{name}-{suffix}', ws),
+                            _check_job_upload_cmd(f'{name}-{suffix}', segment))
+            ],
+            # Nothing is written outside a workspace prefix.
+            f'keys=$({list_keys}); echo "$keys"; '
+            f'! echo "$keys" | grep -vE " {bucket_root}/workspaces/'
+            f'({"|".join(_ere(seg) for _, _, seg in all_workspaces)})/job-"',
+            # The uploads were usable by every job, in every workspace.
+            *[
+                wait_for_job(job_name=f'{name}-{suffix}',
+                             job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                             timeout=900) for suffix, _, _ in all_workspaces
+            ],
+            # Cleanup finds each job's sub-path under its workspace prefix.
+            'for i in $(seq 1 36); do '
+            '  left=""; '
+            f'  for run in $(cat {run_dir}/*.run); do '
+            f'    aws s3 ls --recursive s3://{bucket_name}/$run/ | grep -q . '
+            '&& left="$left $run"; '
+            '  done; '
+            '  [ -z "$left" ] && exit 0; '
+            '  sleep 5; '
+            'done; echo "job sub-paths not cleaned up:$left"; exit 1',
+            # The user-owned bucket itself survives.
+            f'aws s3api head-bucket --bucket {bucket_name}',
+        ],
+        teardown=(''.join(f'{_cancel_cmd(f"{name}-{suffix}", ws)} || true; '
+                          for suffix, ws, _ in all_workspaces) +
+                  f'aws s3 rb s3://{bucket_name} --force || true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=40 * 60,
+    )
+
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        local_dir_obj.cleanup()
+
+
+# ---------- Test managed jobs in a non-default workspace ----------
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_managed_jobs_in_non_default_workspace(generic_cloud: str):
+    """Does a managed job in a non-default workspace run to completion?
+
+    The jobs controller launches the job's cluster through an API server of
+    its own, which has none of the main API server's config (no `workspaces`)
+    and has only just seen the job's user. The workspace check there must
+    still let the job launch, or the job retries on PermissionDeniedError and
+    stays PENDING forever.
+    """
+    workspace = 'team-a'
+    name = smoke_tests_utils.get_cluster_name()
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            workspace: {},
+        },
+    }
+    wait_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=900))
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_in_non_default_workspace',
+        [
+            # Restart so the server picks up the merged config (existing
+            # server config + the workspace).
+            smoke_tests_utils.SKY_API_RESTART,
+            f'sky jobs launch -y -d -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={workspace} echo hi',
+            # On failure, show why the controller could not launch the job.
+            # The waiter runs in a subshell: it ends with `exit 1` on timeout.
+            f'( {wait_succeeded} ) || {{ sky jobs logs --controller '
+            f'-n {name} --no-follow --config active_workspace={workspace} | '
+            'tail -n 40; exit 1; }',
+        ],
+        teardown=(f'sky jobs cancel -y -n {name} '
+                  f'--config active_workspace={workspace} || true; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test renaming a workspace that has running resources ----------
+# The workspace API has no SDK functions; the dashboard calls these endpoints.
+def _workspace_request(action: str, body: Dict[str, Any]) -> Any:
+    response = server_common.make_authenticated_request('POST',
+                                                        f'/workspaces/{action}',
+                                                        json=body)
+    return sdk.get(server_common.get_request_id(response))
+
+
+def _workspace_id(name: str) -> str:
+    for workspace_id, config in sdk.get(sdk.workspaces()).items():
+        if (config.get('name') or workspace_id) == name:
+            return workspace_id
+    raise ValueError(f'No workspace named {name!r}.')
+
+
+def _update_workspace(workspace: str, **changes: Any) -> None:
+    workspace_id = _workspace_id(workspace)
+    # `writable` / `read_only` are computed by the server, not stored.
+    config = {
+        key: value
+        for key, value in sdk.get(sdk.workspaces())[workspace_id].items()
+        if key not in ('writable', 'read_only')
+    }
+    _workspace_request('update', {
+        'workspace_name': workspace_id,
+        'config': {
+            **config,
+            **changes
+        }
+    })
+
+
+def _expect_refused(fn, message: str) -> None:
+    try:
+        fn()
+    except Exception as e:  # pylint: disable=broad-except
+        assert message in str(e), str(e)
+        return
+    raise AssertionError(f'Expected a refusal containing {message!r}.')
+
+
+# Deletes the named workspaces, retrying while a cancelled job still holds one.
+_DELETE_WORKSPACES = textwrap.dedent("""\
+    import sys, time
+    from sky.client import sdk
+    from sky.server import common
+    names = set(sys.argv[1:])
+    for _ in range(30):
+        ids = [i for i, c in sdk.get(sdk.workspaces()).items()
+               if (c.get('name') or i) in names]
+        if not ids:
+            break
+        for i in ids:
+            r = common.make_authenticated_request(
+                'POST', '/workspaces/delete', json={'workspace_name': i})
+            try:
+                sdk.get(common.get_request_id(r))
+            except Exception as e:  # pylint: disable=broad-except
+                print(e)
+        time.sleep(10)
+""")
+
+
+def _delete_workspaces_cmd(*names: str) -> str:
+    return f'python -c {shlex.quote(_DELETE_WORKSPACES)} {" ".join(names)}'
+
+
+def _in_any_workspace_cmd(cmd: str, *workspaces: str) -> str:
+    # Cluster and job commands act only in the active workspace, and the
+    # resource is in whichever of these exists when the test stopped.
+    return ' || '.join(f'{cmd} --config active_workspace={workspace}'
+                       for workspace in workspaces)
+
+
+# Workspace writes through the API land in the server's config; with
+# Postgres that config is stored in the database and overlays the config file
+# of every later test, so these tests run only against a config file.
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres
+def test_workspace_rename_with_active_resources(generic_cloud: str):
+    """A workspace with a running cluster and managed job can be renamed.
+
+    Only the name changes: the resources keep running and show the new name,
+    other changes are still refused while they run, and the freed old name
+    of a generated-id workspace no longer reaches it.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    renamed = f'{name}-ws2'
+    infra = f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG}'
+
+    def check_refusals():
+        _expect_refused(
+            lambda: _update_workspace(renamed, gcp={'disabled': True}),
+            'Please terminate these resources first')
+        _expect_refused(lambda: _update_workspace(renamed, name='default'),
+                        "'default' already exists")
+        _expect_refused(lambda: _update_workspace('default', name='main'),
+                        'cannot be renamed')
+
+    test = smoke_tests_utils.Test(
+        'workspace_rename_with_active_resources',
+        [
+            lambda: _workspace_request('create', {
+                'workspace_name': workspace,
+                'config': {}
+            }),
+            f'sky launch -y -d -c {name} {infra} --workspace {workspace} '
+            '"sleep 10000"',
+            f'sky jobs launch -y -d -n {name} {infra} '
+            f'--workspace {workspace} "sleep 10000"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            lambda: _update_workspace(workspace, name=renamed),
+            check_refusals,
+            # The resources run on, under the new name.
+            f's=$(sky status -v {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep UP | grep {renamed}',
+            f's=$(sky jobs queue -v); echo "$s"; '
+            f'echo "$s" | grep {name} | grep RUNNING | grep {renamed}',
+            f'sky launch -y --dryrun -c {name}-dry {infra} '
+            f'--workspace {renamed} echo hi',
+            # A generated id's old name is free, so it reaches nothing now.
+            f'out=$(sky launch -y --dryrun -c {name}-dry {infra} '
+            f'--workspace {workspace} echo hi 2>&1); echo "$out"; '
+            'echo "$out" | grep "does not exist"',
+        ],
+        teardown='; '.join([
+            _in_any_workspace_cmd(f'sky down -y {name}', renamed, workspace),
+            _in_any_workspace_cmd(f'sky jobs cancel -y -n {name}', renamed,
+                                  workspace),
+            _delete_workspaces_cmd(workspace, renamed),
+        ]),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres  # See test_workspace_rename_with_active_resources.
+def test_workspace_name_reuse_job_recovery(generic_cloud: str):
+    """A renamed workspace's old name, taken by another workspace, never
+    captures its jobs.
+
+    The job's recovery relaunches its cluster in the original workspace, and
+    a cancel scoped by the reused name misses it while the new name finds it.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    renamed = f'{name}-ws2'
+    yaml_content = textwrap.dedent("""\
+        resources:
+          job_recovery:
+            max_restarts_on_errors: 0
+            recover_on_exit_codes: [29]
+
+        run: |
+          sleep 60
+          exit 29
+        """)
+
+    def rename_and_reuse():
+        _update_workspace(workspace, name=renamed)
+        _workspace_request('create', {
+            'workspace_name': workspace,
+            'config': {}
+        })
+
+    # Relaunched at least once (the recovery count is the fourth column from
+    # the end) and still alive: a relaunch that could not resolve its
+    # workspace would fail the job instead.
+    wait_recovered = (
+        'for i in $(seq 40); do '
+        # Table rows start with the job id; debug log lines also name the job.
+        f'  s=$(sky jobs queue | grep -E "^[0-9]+ .* {name} " | head -n1); '
+        '  echo "$s"; '
+        '  n=$(echo "$s" | awk \'{print $(NF-3)}\'); '
+        '  if [ "$n" != "-" ] && [ "$n" -gt 0 ] && echo "$s" | '
+        '     grep -qE "RUNNING|RECOVERING|STARTING|PENDING"; then exit 0; fi; '
+        '  sleep 15; '
+        'done; exit 1')
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'workspace_name_reuse_job_recovery',
+            [
+                lambda: _workspace_request('create', {
+                    'workspace_name': workspace,
+                    'config': {}
+                }),
+                f'sky jobs launch -y -d -n {name} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--workspace {workspace} {f.name}',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=600),
+                rename_and_reuse,
+                wait_recovered,
+                f'sky jobs queue -v | grep -E "^[0-9]+ " | grep -w {renamed}',
+                # Scoped by the reused name: another workspace, so no cancel.
+                f'sky jobs cancel -y -n {name} '
+                f'--config active_workspace={workspace} || true',
+                'sleep 10',
+                f'sky jobs queue | grep -E "^[0-9]+ .* {name} " | '
+                'grep -v CANCELL',
+                f'sky jobs cancel -y -n {name} '
+                f'--config active_workspace={renamed}',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.CANCELLED],
+                    timeout=300),
+            ],
+            teardown='; '.join([
+                _in_any_workspace_cmd(f'sky jobs cancel -y -n {name}', renamed,
+                                      workspace),
+                _delete_workspaces_cmd(workspace, renamed),
+            ]),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=40 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# Kubernetes and Slurm SSH goes through the API server's SSH proxy.
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres  # See test_workspace_rename_with_active_resources.
+def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
+    """SSH reaches a cluster in a workspace created while the server runs.
+
+    The SSH proxy looks the cluster up in the API server process, which does
+    not reload the workspace config per request.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    workspace = f'{name}-ws'
+    test = smoke_tests_utils.Test(
+        'ssh_into_cluster_in_new_workspace',
+        [
+            lambda: _workspace_request('create', {
+                'workspace_name': workspace,
+                'config': {}
+            }),
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} --workspace {workspace} '
+            'echo hi',
+            f'out=$(ssh {name} echo ssh-ok); echo "$out"; '
+            'echo "$out" | grep -x ssh-ok',
+        ],
+        teardown='; '.join([
+            f'sky down -y {name} --config active_workspace={workspace}',
+            _delete_workspaces_cmd(workspace),
+        ]),
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

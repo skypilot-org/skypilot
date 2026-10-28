@@ -184,6 +184,16 @@ class RequestBody(BasePayload):
     # worker-side gate then requires 'write'. See
     # `sky.server.requests.workspace_access`.
     workspace_access: Optional[str] = None
+    # Whether the request came from loopback, i.e. the local API server or a
+    # controller calling its own server. Set server-side in
+    # `stamp_request_body`, like `workspace_access`; a client-sent value is
+    # overwritten. The default is False, so a body that is constructed but
+    # never stamped (a future code path) is treated as remote (fail closed). A
+    # body pickled before this field existed has no such attribute, so a reader
+    # using `getattr(body, 'from_loopback', None)` sees None, not this default,
+    # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
+    # and the override logic in `executor.py`.
+    from_loopback: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -219,6 +229,7 @@ class RequestBody(BasePayload):
         kwargs.pop('file_mounts_blob_id')
         kwargs.pop('client_api_version', None)
         kwargs.pop('workspace_access', None)
+        kwargs.pop('from_loopback', None)
         return kwargs
 
     @property
@@ -321,7 +332,9 @@ class LaunchBody(RequestBody):
     quiet_optimizer: bool = False
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
-    disable_controller_check: bool = False
+    # No disable_controller_check here: the Kubernetes service account is
+    # chosen by the controller-name prefix, so only in-process callers may
+    # skip that check. Old clients still send it; extra='ignore' drops it.
     # When True, resize the existing cluster to the num_nodes specified in
     # the task instead of performing a normal launch.
     resize: bool = False
@@ -352,8 +365,6 @@ class LaunchBody(RequestBody):
             'is_launched_by_jobs_controller')
         kwargs['_is_launched_by_sky_serve_controller'] = kwargs.pop(
             'is_launched_by_sky_serve_controller')
-        kwargs['_disable_controller_check'] = kwargs.pop(
-            'disable_controller_check')
         kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
         kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
@@ -428,6 +439,12 @@ class QueueBody(RequestBody):
     cluster_name: str
     skip_finished: bool = False
     all_users: bool = False
+
+
+class ClusterJobSpecBody(RequestBody):
+    """The request body for the cluster job spec endpoint."""
+    cluster_name: str
+    job_id: int
 
 
 class CancelBody(RequestBody):
@@ -765,6 +782,9 @@ class ServeUpBody(RequestBody):
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
         kwargs['task'] = dag.tasks[0]
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches replicas.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -927,6 +947,9 @@ class JobsPoolApplyBody(RequestBody):
             kwargs['task'] = dag.tasks[0]
         else:
             kwargs['task'] = None
+        # Pass the blob id through so that a consolidation-mode controller can
+        # re-resolve the blob when it launches workers.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -971,6 +994,10 @@ class UpdateWorkspaceBody(RequestBody):
     """The request body for updating a specific workspace configuration."""
     workspace_name: str = ''  # Will be set from path parameter
     config: Dict[str, Any]
+    # The workspace config the update was based on. When set, the update is
+    # rejected with WorkspaceConfigConflictError if the workspace no longer
+    # holds it (compared under the config lock).
+    expected_config: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceBody(RequestBody):
