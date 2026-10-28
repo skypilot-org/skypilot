@@ -32,6 +32,8 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -131,6 +133,10 @@ _PARKED_POLL_MAX_CONSECUTIVE_ERRORS = 8
 # path.
 _LIVE_REQUEST_STATUS_VALUES = frozenset(
     s.value for s in requests_lib.RequestStatus.active_statuses())
+
+# Name of the inner sky.launch requests in the API server's request table.
+_LAUNCH_REQUEST_NAME = (server_constants.REQUEST_NAME_PREFIX +
+                        request_names.RequestName.CLUSTER_LAUNCH.value)
 
 # The blocking sync-SDK log stream of each inner launch request runs in a
 # worker thread. Deliberately NOT asyncio.to_thread's default executor: a
@@ -492,6 +498,43 @@ class StrategyExecutor:
         assert job_submit_at is not None
         return job_submit_at
 
+    async def reattach_launch(self, recovery: bool) -> Optional[float]:
+        """Re-attach to a launch request left live by a previous controller.
+
+        For a task that was STARTING or RECOVERING when the previous
+        controller process stopped: its launch request may still be live on
+        the API server (running, or parked waiting to resume). Re-attaching
+        to it avoids tearing the cluster down and launching it again.
+
+        Args:
+            recovery: Whether the task was RECOVERING rather than STARTING,
+                i.e. which of the two to restore it to if the request parks.
+
+        Returns:
+            The job's submit timestamp if a live launch request was found and
+            the job started on its cluster. None if there is no live launch
+            request, or if it did not bring the job up; this never submits a
+            new launch request, and the caller then recovers the task as it
+            would without one.
+        """
+        if self.pool is not None:
+            return None
+        # Checked here too, so that a task with nothing to re-attach to does
+        # not wait for a launch slot just to find that out.
+        try:
+            live_request = await self._find_live_launch_request()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to look up a live launch request for '
+                           f'cluster {self.cluster_name}: '
+                           f'{common_utils.format_exception(e)}')
+            return None
+        if live_request is None:
+            return None
+        return await self._launch(max_retry=1,
+                                  raise_on_failure=False,
+                                  recovery=recovery,
+                                  reattach_only=True)
+
     async def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
 
@@ -776,6 +819,65 @@ class StrategyExecutor:
             return None
         return request_payloads[0]
 
+    async def _find_live_launch_request(self) -> Optional[Any]:
+        """Find a live launch request for this task's cluster, if any.
+
+        A launch request outlives the controller process that submitted it:
+        if the controller restarts while the request is parked (WAITING) or
+        still running, the request carries on on the API server, but its id
+        was only held in the old process's memory. Looking it up by cluster
+        name lets the new controller re-attach to it instead of submitting a
+        second launch beside it. Cluster names are unique per managed job
+        task, so a live launch request for the cluster belongs to this task.
+
+        Looking the request up, rather than persisting its id, leaves no
+        window between sdk.launch returning and the id being written.
+
+        If several launch requests are live (e.g. left by an older controller
+        that launched again), the newest is kept and the others are cancelled,
+        best-effort, so that only one of them can run the task on the
+        cluster.
+
+        Returns:
+            The payload (request_id, status, status_msg) of the live launch
+            request, or None if there is none.
+
+        Raises:
+            Exception: If the API server could not be reached.
+        """
+        assert self.cluster_name is not None
+        request_payloads = await asyncio.to_thread(
+            sdk.api_status,
+            cluster_name=self.cluster_name,
+            fields=[
+                'request_id',
+                'name',
+                'cluster_name',
+                'status',
+                'status_msg',
+                'created_at',
+            ])
+
+        def is_live_launch(payload: Any) -> bool:
+            return (payload.name == _LAUNCH_REQUEST_NAME and
+                    payload.cluster_name == self.cluster_name and
+                    payload.status in _LIVE_REQUEST_STATUS_VALUES)
+
+        live_requests = sorted(filter(is_live_launch, request_payloads),
+                               key=lambda p: (p.created_at, p.request_id))
+        if not live_requests:
+            return None
+        *stale_requests, live_request = live_requests
+        for stale_request in stale_requests:
+            logger.info('Cancelling launch request '
+                        f'{stale_request.request_id}: a newer launch request '
+                        f'({live_request.request_id}) is live for cluster '
+                        f'{self.cluster_name}.')
+            await self._cancel_launch_request(stale_request.request_id)
+        logger.info(f'Found live launch request {live_request.request_id} '
+                    f'({live_request.status}) for cluster {self.cluster_name}.')
+        return live_request
+
     def _start_stream_task(self, request_id: str) -> 'asyncio.Future':
         """Start awaiting the inner launch request in a worker thread.
 
@@ -933,15 +1035,22 @@ class StrategyExecutor:
     async def _launch(self,
                       max_retry: Optional[int] = 3,
                       raise_on_failure: bool = True,
-                      recovery: bool = False) -> Optional[float]:
+                      recovery: bool = False,
+                      reattach_only: bool = False) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
         handling for the preemption to the caller.
 
+        Before submitting a new launch request, each attempt looks for a live
+        launch request for the cluster (see _find_live_launch_request) and
+        re-attaches to it instead.
+
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
             raise_on_failure: Whether to raise an exception if the launch fails.
+            reattach_only: Only re-attach to a live launch request; return
+                None instead of submitting a new one. See reattach_launch().
 
         Returns:
             The job's submit timestamp, or None if failed to submit the job
@@ -1091,6 +1200,28 @@ class StrategyExecutor:
                                                          f'{env_var}: {value}')
                                             os.environ[env_var] = value
 
+                                # A launch request left live by a previous
+                                # controller process (e.g. parked when it
+                                # restarted) still owns the cluster: adopt it
+                                # rather than launch a second time beside it.
+                                live_request = (
+                                    await self._find_live_launch_request())
+                                if live_request is None:
+                                    if reattach_only:
+                                        return None
+                                elif (live_request.status ==
+                                      requests_lib.RequestStatus.WAITING.value):
+                                    # Wait for it to resume the way a park
+                                    # observed by this process does, without
+                                    # holding the launch slot.
+                                    raise _LaunchRequestParked(
+                                        live_request.request_id,
+                                        live_request.status_msg)
+                                else:
+                                    reattach_request_id = (
+                                        live_request.request_id)
+
+                            if reattach_request_id is None:
                                 # The blob holds the original upload. Once
                                 # submit has rewritten the task to cloud URLs,
                                 # the retry reads the bucket and the local
@@ -1161,10 +1292,17 @@ class StrategyExecutor:
                                     parked_stream_task = None
                                     logger.info('Re-attaching to launch '
                                                 f'request {request_id}.')
-                                    if (stream_task is not None and
-                                            stream_task.done() and
-                                            stream_task.exception()
-                                            is not None):
+                                    if stream_task is None:
+                                        # An adopted request (see
+                                        # _find_live_launch_request) has no
+                                        # stream to carry over. A fresh one
+                                        # replays the request's log from the
+                                        # start, and returns its outcome even
+                                        # if it has finished since.
+                                        stream_task = self._start_stream_task(
+                                            request_id)
+                                    elif (stream_task.done() and
+                                          stream_task.exception() is not None):
                                         # The carried stream already failed -
                                         # e.g. a transient transport error
                                         # while the API server was briefly
@@ -1600,9 +1738,10 @@ class FailoverStrategyExecutor(StrategyExecutor):
     async def _launch(self,
                       max_retry: Optional[int] = 3,
                       raise_on_failure: bool = True,
-                      recovery: bool = False) -> Optional[float]:
+                      recovery: bool = False,
+                      reattach_only: bool = False) -> Optional[float]:
         job_submitted_at = await super()._launch(max_retry, raise_on_failure,
-                                                 recovery)
+                                                 recovery, reattach_only)
         if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
             handle = await asyncio.to_thread(
