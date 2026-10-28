@@ -2129,6 +2129,7 @@ class Kubernetes(clouds.Cloud):
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
+                node_is_schedulable = node.is_ready() and not node.is_cordoned()
                 if node.metadata.labels:
                     # Check for Nebius clusters
                     for label_key, _ in node.metadata.labels.items():
@@ -2158,6 +2159,8 @@ class Kubernetes(clouds.Cloud):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
                             saw_aws_efa_node = True
+                            if not node_is_schedulable:
+                                break
                             metadata: Optional[Dict[str, Any]] = None
                             # Only check for AWS EFA count if GPU is specified
                             if (not k8s_acc_label_key or not k8s_resource_key or
