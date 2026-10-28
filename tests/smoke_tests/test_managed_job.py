@@ -2561,8 +2561,9 @@ def test_managed_jobs_launch_limit_keeps_recovered_jobs():
     limit = 2
 
     def _launch(job_name: str, *args: str) -> str:
+        # Flags go before the entrypoint that follows `--`.
         return (f'sky jobs launch -n {job_name} --infra kubernetes '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {" ".join(args)} -y -d')
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {" ".join(args)}')
 
     def _row(job_name: str) -> str:
         # The job's row in the verbose queue, which carries DETAILS.
