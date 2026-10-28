@@ -177,6 +177,30 @@ def test_a_task_held_by_the_per_user_launch_limit_is_not_stalled(
     assert _ids(stall.scan_never_claimed()) == {3}
 
 
+def test_a_recovered_task_is_not_treated_as_held(engine, monkeypatch):
+    """The scheduler never holds a job back once it has started a launch."""
+    monkeypatch.setattr(stall.managed_job_utils,
+                        'get_max_launching_jobs_per_user', lambda: 1)
+    _claimed(engine, 1, age=_RECENT, user_hash='a', schedule_state='LAUNCHING')
+    # Job 2 is a job group that recovery set back to WAITING: its first task
+    # is parked (back to PENDING, keeping submitted_at) and its second task
+    # was never submitted.
+    _add_job(engine,
+             2,
+             status='PENDING',
+             submitted_at=time.time() - _OLD,
+             user_hash='a',
+             schedule_state='WAITING')
+    _add_job(engine,
+             2,
+             task_id=1,
+             status='PENDING',
+             eligible_at=time.time() - _OLD,
+             with_info=False)
+
+    assert _ids(stall.scan_never_claimed()) == {2}
+
+
 def test_held_tasks_do_not_fill_the_candidate_window(engine, monkeypatch):
     monkeypatch.setattr(stall.managed_job_utils,
                         'get_max_launching_jobs_per_user', lambda: 1)

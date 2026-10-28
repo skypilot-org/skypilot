@@ -240,14 +240,18 @@ LIMIT {candidate_limit}
 # A WAITING task that the per-user launch limit holds back is queued behind its
 # own user's jobs, not stalled. Applied here, before the LIMIT, so that held
 # tasks cannot fill the candidate window and hide a real stall behind them.
-# `users_at_limit` is state.users_at_launch_limit_sql, the scheduler's rule.
+# `users_at_limit` is state.users_at_launch_limit_sql, the scheduler's rule; the
+# last IN is state._has_live_task (state.CLAIMED_LIVE_PREDICATE), a job the
+# scheduler never holds back.
 _LAUNCH_LIMIT_CLAUSE = """
       AND (
           ji.schedule_state IS NULL
           OR ji.schedule_state <> 'WAITING'
           OR ji.pool IS NOT NULL
           OR ji.user_hash IS NULL
-          OR ji.user_hash NOT IN ({users_at_limit}))"""
+          OR ji.user_hash NOT IN ({users_at_limit})
+          OR ji.spot_job_id IN (
+              SELECT spot_job_id FROM spot WHERE {claimed_live}))"""
 
 # `claimed_in_flight` is state.CLAIMED_IN_FLIGHT_PREDICATE, the same string the
 # partial index that serves this query is built from. Interpolated rather than
@@ -660,7 +664,8 @@ def scan_never_claimed(
     if max_launching_jobs_per_user is not None:
         launch_limit_clause = _LAUNCH_LIMIT_CLAUSE.format(
             users_at_limit=managed_job_state.users_at_launch_limit_sql(
-                max_launching_jobs_per_user, engine.dialect))
+                max_launching_jobs_per_user, engine.dialect),
+            claimed_live=managed_job_state.CLAIMED_LIVE_PREDICATE)
     sql = _NEVER_CLAIMED_SELECT.format(
         now=_now_expr(engine),
         # Coerced, not trusted: these reach the statement by interpolation.
