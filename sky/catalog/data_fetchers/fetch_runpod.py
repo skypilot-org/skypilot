@@ -464,11 +464,11 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
     # Return None if memory or vcpus not valid
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
         print(f'Skipping GPU {base_gpu_name}:'
-              ' vCPUs must be a positive number, not {vcpus}')
+              f' vCPUs must be a positive number, not {vcpus}')
         return None
     if not isinstance(memory, (float, int)) or memory <= 0:
         print(f'Skipping GPU {base_gpu_name}:'
-              ' Memory must be a positive number, not {memory}')
+              f' Memory must be a positive number, not {memory}')
         return None
 
     gpu_info_dict = {
