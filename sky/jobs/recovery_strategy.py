@@ -834,9 +834,14 @@ class StrategyExecutor:
         window between sdk.launch returning and the id being written.
 
         If several launch requests are live (e.g. left by an older controller
-        that launched again), the newest is kept and the others are cancelled,
+        that launched again), one is kept and the others are cancelled,
         best-effort, so that only one of them can run the task on the
-        cluster.
+        cluster. A running request is kept if there is one: it is the one
+        making progress, and cancelling it would interrupt it mid-launch.
+        Otherwise the oldest, i.e. the original, is kept. The requests left
+        to cancel are then queued or parked ones, which cancelling only
+        marks as cancelled: no process is killed and the cluster is not
+        touched.
 
         Returns:
             The payload (request_id, status, status_msg) of the live launch
@@ -863,17 +868,21 @@ class StrategyExecutor:
                     payload.cluster_name == self.cluster_name and
                     payload.status in _LIVE_REQUEST_STATUS_VALUES)
 
+        def keep_order(payload: Any) -> Tuple[bool, float, str]:
+            return (payload.status != requests_lib.RequestStatus.RUNNING.value,
+                    payload.created_at, payload.request_id)
+
         live_requests = sorted(filter(is_live_launch, request_payloads),
-                               key=lambda p: (p.created_at, p.request_id))
+                               key=keep_order)
         if not live_requests:
             return None
-        *stale_requests, live_request = live_requests
-        for stale_request in stale_requests:
+        live_request, *duplicate_requests = live_requests
+        for duplicate_request in duplicate_requests:
             logger.info('Cancelling launch request '
-                        f'{stale_request.request_id}: a newer launch request '
-                        f'({live_request.request_id}) is live for cluster '
+                        f'{duplicate_request.request_id}: launch request '
+                        f'{live_request.request_id} is also live for cluster '
                         f'{self.cluster_name}.')
-            await self._cancel_launch_request(stale_request.request_id)
+            await self._cancel_launch_request(duplicate_request.request_id)
         logger.info(f'Found live launch request {live_request.request_id} '
                     f'({live_request.status}) for cluster {self.cluster_name}.')
         return live_request

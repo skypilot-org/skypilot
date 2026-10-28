@@ -655,27 +655,46 @@ async def test_find_live_launch_request_returns_none_without_one(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_find_live_launch_request_keeps_newest_and_cancels_rest(
+async def test_find_live_launch_request_keeps_oldest_and_cancels_rest(
         monkeypatch):
-    """Duplicates left by an older controller collapse to one request."""
+    """Duplicates left by an older controller collapse to the original."""
     executor = _make_bare_executor()
     executor.cluster_name = 'test-cluster'
     executor._cancel_launch_request = mock.AsyncMock()
-    newest = _launch_request('req-b', 'PENDING', created_at=5.0)
+    original = _launch_request('req-a', 'WAITING', created_at=1.0)
     monkeypatch.setattr(
         recovery_strategy.sdk,
         'api_status',
         mock.MagicMock(return_value=[
-            newest,
-            _launch_request('req-a', 'WAITING', created_at=1.0),
-            # Same created_at as the newest: the request id breaks the tie.
-            _launch_request('req-a2', 'RUNNING', created_at=5.0),
+            _launch_request('req-c', 'PENDING', created_at=5.0),
+            # Same created_at as req-c: the request id breaks the tie.
+            _launch_request('req-b', 'WAITING', created_at=5.0),
+            original,
         ]))
 
-    assert await executor._find_live_launch_request() is newest
+    assert await executor._find_live_launch_request() is original
     assert executor._cancel_launch_request.await_args_list == [
-        mock.call('req-a'), mock.call('req-a2')
+        mock.call('req-b'), mock.call('req-c')
     ]
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_keeps_a_running_request(monkeypatch):
+    """Cancelling a running launch would interrupt it mid-launch, so a
+    running request is kept over older parked ones."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    running = _launch_request('req-b', 'RUNNING', created_at=5.0)
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_status',
+        mock.MagicMock(return_value=[
+            _launch_request('req-a', 'WAITING', created_at=1.0),
+            running,
+        ]))
+
+    assert await executor._find_live_launch_request() is running
+    executor._cancel_launch_request.assert_awaited_once_with('req-a')
 
 
 @pytest.mark.asyncio
