@@ -32,7 +32,11 @@ _QUEUE = pbs_adaptor.PbsQueue('workq', True, 'Execution', True, True,
                               '48:00:00', '01:00:00')
 
 
-def _job(job_id='77.pbs', state='R', hosts=('node1', 'node2'), comment=None):
+def _job(job_id='77.pbs',
+         state='R',
+         hosts=('node1', 'node2'),
+         comment=None,
+         run_count=1):
     return pbs_adaptor.JobInfo(job_id=job_id,
                                name=_CLUSTER,
                                state=state,
@@ -40,7 +44,8 @@ def _job(job_id='77.pbs', state='R', hosts=('node1', 'node2'), comment=None):
                                exec_hosts=list(hosts),
                                comment=comment,
                                exit_status=None,
-                               owner='alice@login')
+                               owner='alice@login',
+                               run_count=run_count)
 
 
 class TestQsubDirectives:
@@ -582,12 +587,23 @@ class TestCreateVirtualInstance:
         assert record.created_instance_ids == []
         assert record.head_instance_id == 'job77.pbs-node1'
 
-    def test_job_dies_before_ready_shows_log(self):
+    @pytest.mark.parametrize('failed_job,error', [
+        (_job(state='F', hosts=()), 'exited'),
+        (_job(state='H',
+              hosts=(),
+              comment='job held, too many failed attempts to run'),
+         'held .*too many failed attempts'),
+        (_job(hosts=('node9',),
+              comment='Job run at Wed on (node9:ncpus=4)',
+              run_count=5), r'failed to start .* 5 times \(last on node9\)'),
+    ])
+    def test_job_fails_before_ready_shows_log(self, failed_job, error):
+        # The job runs, then fails while the node agents are starting.
         client = mock.MagicMock()
         client.query_jobs.return_value = []
         client.submit_job.return_value = '77.pbs'
-        client.get_job.return_value = _job()
-        client.get_job_state.return_value = 'F'
+        jobs = iter([_job()])
+        client.get_job.side_effect = lambda _: next(jobs, failed_job)
         login_runner = mock.MagicMock()
 
         def _run(cmd, **kwargs):
@@ -610,7 +626,7 @@ class TestCreateVirtualInstance:
                                'add_cluster_event'), \
              mock.patch.object(instance.time, 'sleep'), \
              mock.patch.object(instance.logger, 'error') as log_error:
-            with pytest.raises(RuntimeError, match='exited'):
+            with pytest.raises(RuntimeError, match=error):
                 instance.run_instances('mycluster', 'test-cluster', _CLUSTER,
                                        self._config())
         assert 'no sshd binary' in log_error.call_args.args[0]

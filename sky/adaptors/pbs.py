@@ -133,6 +133,9 @@ class JobInfo(NamedTuple):
     comment: Optional[str]
     exit_status: Optional[int]
     owner: Optional[str]
+    # How many times PBS has started the job; it reruns a job that fails to
+    # start on a node, and holds it after too many attempts.
+    run_count: int = 0
 
 
 class PbsInventorySnapshot(NamedTuple):
@@ -330,6 +333,7 @@ def parse_jobs_output(stdout: str) -> List[JobInfo]:
                 exit_status=(_parse_int(exit_status)
                              if exit_status is not None else None),
                 owner=attrs.get('Job_Owner'),
+                run_count=_parse_int(attrs.get('run_count', '0')),
             ))
     return jobs
 

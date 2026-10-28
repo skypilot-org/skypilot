@@ -108,6 +108,7 @@ Job Id: 123.pbs
 \tusr/local/bin:/usr/bin,PBS_O_WORKDIR=/home/alice
     comment = Job run at Mon Oct 26 at 10:00 on (node1:ncpus=4)+(node2:ncpus=8)
     project = _pbs_project_default
+    run_count = 2
 
 Job Id: 124.pbs
     Job_Name = sky-abc-user
@@ -224,6 +225,8 @@ class TestParsers:
         assert running.state == 'R'
         assert running.exec_hosts == ['node1', 'node2']
         assert running.owner == 'alice@login'
+        assert running.run_count == 2
+        assert queued.run_count == 0
         assert queued.state == 'Q'
         assert queued.exec_hosts == []
         assert queued.comment.startswith('Not Running')

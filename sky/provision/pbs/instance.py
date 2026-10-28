@@ -46,6 +46,9 @@ _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 # How long the node sshds get to come up once the job runs. Pulls nothing
 # from the network, so this is generous.
 _NODE_READY_TIMEOUT_SECONDS = 10 * 60
+# Give up once PBS has tried to start the job this many times: repeated failed
+# starts usually mean a faulty node, and PBS keeps sending the job back to it.
+_MAX_JOB_RUNS = 5
 # How long to wait for SSH through the login node to reach every node.
 _NODE_SSH_TIMEOUT_SECONDS = 5 * 60
 
@@ -670,11 +673,12 @@ def _wait_for_job_ready(
 ) -> Dict[int, pbs_utils.NodeEndpoint]:
     """Wait until every node published its sshd port.
 
-    Fails if the job leaves the queue first, or if the agents take longer
-    than _NODE_READY_TIMEOUT_SECONDS.
+    Fails if the job leaves the queue first, if PBS holds it or keeps failing
+    to start it, or if the agents take longer than _NODE_READY_TIMEOUT_SECONDS.
     """
     list_cmd = pbs_utils.list_node_port_files_command(sky_cluster_home_dir)
     deadline = time.time() + _NODE_READY_TIMEOUT_SECONDS
+    last_run_count = 0
     while True:
         _, stdout = _run_on_login_node(
             login_node_runner, list_cmd,
@@ -682,11 +686,28 @@ def _wait_for_job_ready(
         endpoints = pbs_utils.parse_node_port_files(stdout)
         if all(rank in endpoints for rank in range(num_nodes)):
             return endpoints
-        job_state = client.get_job_state(job_id)
-        if job_state is None or job_state.upper() in _TERMINAL_JOB_STATES:
+        job = client.get_job(job_id)
+        job_state = job.state.upper() if job is not None else None
+        if job_state is None or job_state in _TERMINAL_JOB_STATES:
             raise RuntimeError(f'PBS job {job_id} exited ({job_state}) before '
                                'its nodes were ready. See the job log for '
                                f'details: {pbs_log}')
+        assert job is not None
+        if job_state == 'H':
+            raise RuntimeError(
+                f'PBS held job {job_id} before its nodes were ready: '
+                f'{job.comment}. See the job log for details: {pbs_log}')
+        if job.run_count > last_run_count:
+            if last_run_count:
+                logger.warning(f'PBS restarted job {job_id} (attempt '
+                               f'{job.run_count}): {job.comment}')
+            last_run_count = job.run_count
+        if job.run_count >= _MAX_JOB_RUNS:
+            raise RuntimeError(
+                f'PBS failed to start job {job_id} {job.run_count} times '
+                f'(last on {", ".join(job.exec_hosts) or "no node"}): '
+                f'{job.comment}. A node may be faulty. See the job log for '
+                f'details: {pbs_log}')
         if time.time() > deadline:
             raise RuntimeError(
                 f'PBS job {job_id} did not start sshd on all {num_nodes} '
