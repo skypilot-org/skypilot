@@ -474,6 +474,20 @@ def get_default_role() -> str:
     return (configured or RoleName.ADMIN.value).lower()
 
 
+def _get_config_roles() -> Dict[str, Any]:
+    """`rbac.roles` from the config, keyed by lowercased supported role name."""
+    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
+                                              default_value={})
+    roles: Dict[str, Any] = {}
+    for role, permissions in config_roles.items():
+        role_name = role.lower()
+        if role_name not in get_supported_roles():
+            logger.warning(f'Invalid role: {role_name}')
+            continue
+        roles[role_name] = permissions
+    return roles
+
+
 def get_viewer_allowlist(
     plugin_allowlist: Optional[List[Dict[str, str]]] = None
 ) -> List[Dict[str, str]]:
@@ -497,10 +511,7 @@ def get_viewer_allowlist(
     """
     combined: List[Dict[str, str]] = list(_DEFAULT_VIEWER_ALLOWLIST)
 
-    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
-                                              default_value={})
-    viewer_cfg = config_roles.get(RoleName.VIEWER.value, {}) if isinstance(
-        config_roles, dict) else {}
+    viewer_cfg = _get_config_roles().get(RoleName.VIEWER.value, {})
     extra = ((viewer_cfg.get('permissions') or {}).get('allowlist') or
              []) if isinstance(viewer_cfg, dict) else []
     for rule in extra:
@@ -610,18 +621,8 @@ def get_role_permissions(
             }
         }
     """
-    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
-                                              default_value={})
     supported_roles = get_supported_roles()
-    # Built into a new dict: normalizing keys in place (e.g. `User`) would
-    # resize the dict being iterated.
-    config_permissions: Dict[str, Any] = {}
-    for role, permissions in config_roles.items():
-        role_name = role.lower()
-        if role_name not in supported_roles:
-            logger.warning(f'Invalid role: {role_name}')
-            continue
-        config_permissions[role_name] = permissions
+    config_permissions = _get_config_roles()
 
     # Built-in rules are merged into the configured role like plugin rules, so
     # a custom `rbac.roles.user` adds to the defaults instead of replacing them.

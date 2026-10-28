@@ -268,6 +268,21 @@ class TestGetViewerAllowlist:
         # ...and the operator-supplied entry is added on top.
         assert {'path': '/plugins/api/cron/list', 'method': 'POST'} in allowlist
 
+    def test_mixed_case_viewer_role_overrides_applied(self):
+        extra = {
+            'Viewer': {
+                'permissions': {
+                    'allowlist': [{
+                        'path': '/plugins/api/cron/list',
+                        'method': 'POST'
+                    }]
+                }
+            }
+        }
+        with mock.patch('sky.skypilot_config.get_nested', return_value=extra):
+            allowlist = rbac.get_viewer_allowlist()
+        assert {'path': '/plugins/api/cron/list', 'method': 'POST'} in allowlist
+
     def test_operator_overrides_dedupe(self):
         # Operator re-asserts an entry that's already in the default;
         # it should appear once.
