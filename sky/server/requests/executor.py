@@ -50,6 +50,8 @@ from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server import versions
+from sky.server.auth import loopback
+from sky.server.requests import event_loop
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -59,11 +61,14 @@ from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
+from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
@@ -209,12 +214,13 @@ def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits. Must run before
+    # anything (plugins included) writes a live gauge in this process.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
-    # Same rationale as in sky.server.uvicorn.Server.run: reap this
-    # executor's prometheus multiproc files when it exits.
-    metrics_lib.register_multiproc_cleanup_atexit()
     # The main API server process captures its env at startup and forwards
     # it via initargs (see RequestWorker.run). Adopt that snapshot directly
     # so the worker doesn't depend on its own spawn-time os.environ, which
@@ -270,19 +276,17 @@ def _refresh_waiting_status_msg(request_id: str, retry_suffix: str,
         request_task.status_msg = _waiting_status_msg(reason, retry_suffix)
 
 
-def _wait_for_continue_condition(
-        condition: Any, *, is_cancelled: Callable[[], bool],
-        fallback_wait_seconds: float,
-        update_status_msg: Callable[[str], None]) -> bool:
-    """Run a continue condition's wait, tolerating an older ``wait()``.
+def _condition_wait_kwargs(wait_fn: Callable, *, is_cancelled: Callable,
+                           fallback_wait_seconds: float,
+                           update_status_msg: Callable) -> Dict[str, Any]:
+    """Build the kwargs for a wait, tolerating an older signature.
 
     The continue-condition contract is duck-typed (see
     ``continue_condition.ContinueCondition``), and implementations live in
     separately versioned packages, so ``update_status_msg`` is passed only to
-    a ``wait()`` that accepts it rather than raising TypeError on one that
-    does not.
+    a wait that accepts it rather than raising TypeError on one that does not.
 
-    The probe reads the signature, so a ``wait()`` wrapped by a decorator that
+    The probe reads the signature, so a wait wrapped by a decorator that
     neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
     accepting the callback: the wait still runs, it just never reports a
     reason.
@@ -291,12 +295,36 @@ def _wait_for_continue_condition(
         'is_cancelled': is_cancelled,
         'fallback_wait_seconds': fallback_wait_seconds,
     }
-    parameters = inspect.signature(condition.wait).parameters
+    parameters = inspect.signature(wait_fn).parameters
     if ('update_status_msg' in parameters or
             any(parameter.kind is inspect.Parameter.VAR_KEYWORD
                 for parameter in parameters.values())):
         kwargs['update_status_msg'] = update_status_msg
+    return kwargs
+
+
+def _wait_for_continue_condition(
+        condition: Any, *, is_cancelled: Callable[[], bool],
+        fallback_wait_seconds: float,
+        update_status_msg: Callable[[str], None]) -> bool:
+    """Run a continue condition's wait in the calling thread."""
+    kwargs = _condition_wait_kwargs(condition.wait,
+                                    is_cancelled=is_cancelled,
+                                    fallback_wait_seconds=fallback_wait_seconds,
+                                    update_status_msg=update_status_msg)
     return condition.wait(**kwargs)
+
+
+def _async_condition_wait(condition: Any) -> Optional[Callable]:
+    """The condition's ``wait_async`` coroutine function, if it has one.
+
+    Only a real coroutine function opts a condition into the shared waiter
+    loop: a plain callable that happens to be named ``wait_async`` cannot be
+    awaited, and silently degrading it to the fallback wait would discard the
+    condition's actual policy in ``wait()``.
+    """
+    wait_async = getattr(condition, 'wait_async', None)
+    return wait_async if inspect.iscoroutinefunction(wait_async) else None
 
 
 class RequestWorker:
@@ -449,6 +477,18 @@ class RequestWorker:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
+            if condition is not None:
+                wait_async = _async_condition_wait(condition)
+                if wait_async is not None:
+                    # An async-capable condition waits as a coroutine on the
+                    # shared request event loop; this monitor thread ends here
+                    # instead of blocking for the length of the pause.
+                    event_loop.run(
+                        self._wait_async_and_reschedule(wait_async,
+                                                        request_element,
+                                                        retry_wait_seconds,
+                                                        retry_suffix))
+                    return
             try:
                 if condition is not None:
                     should_reschedule = _wait_for_continue_condition(
@@ -473,6 +513,56 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
                 logger.info(f'Rescheduled request {request_id} for retry')
+
+    async def _wait_async_and_reschedule(self, wait_async: Callable,
+                                         request_element: Tuple[str, bool,
+                                                                bool],
+                                         retry_wait_seconds: float,
+                                         retry_suffix: str) -> None:
+        """Drive a condition's ``wait_async`` and requeue on resume.
+
+        Same policy as the thread path in ``handle_task_result``: a failing
+        wait falls back to one fixed backoff and reschedules, a False verdict
+        drops the request. Runs on the shared waiter loop, so everything
+        blocking — the DB access behind the callbacks, the queue put — must
+        go through the loop's thread pool.
+        """
+        request_id, _, _ = request_element
+        loop = asyncio.get_running_loop()
+
+        async def is_cancelled() -> bool:
+            return await loop.run_in_executor(None,
+                                              _request_is_gone_or_cancelled,
+                                              request_id)
+
+        async def update_status_msg(reason: str) -> None:
+            await loop.run_in_executor(None, _refresh_waiting_status_msg,
+                                       request_id, retry_suffix, reason)
+
+        try:
+            try:
+                kwargs = _condition_wait_kwargs(
+                    wait_async,
+                    is_cancelled=is_cancelled,
+                    fallback_wait_seconds=retry_wait_seconds,
+                    update_status_msg=update_status_msg)
+                should_reschedule = await wait_async(**kwargs)
+            except Exception as wait_err:  # pylint: disable=broad-except
+                logger.error(
+                    f'Continue-condition wait failed for {request_id}: '
+                    f'{common_utils.format_exception(wait_err)}')
+                await asyncio.sleep(retry_wait_seconds)
+                should_reschedule = True
+            if should_reschedule:
+                queue = _get_queue(self.schedule_type)
+                await loop.run_in_executor(None, queue.put, request_element)
+                logger.info(f'Rescheduled request {request_id} for retry')
+        except Exception as e:  # pylint: disable=broad-except
+            # Nothing reads this coroutine's future; an exception escaping
+            # here would otherwise vanish, with the request left parked.
+            logger.error(
+                f'Continue-condition handling failed for {request_id}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -594,6 +684,90 @@ def _should_apply_workspace_resolver(is_daemon: bool,
     return not skypilot_config.is_active_workspace_set()
 
 
+# Server-only environment variables that are SKYPILOT_-prefixed (so they would
+# otherwise pass the SKYPILOT_ allowlist in _sanitize_request_env_vars) but must
+# never be taken from a client request. Each is either derived by the server
+# itself or names a server-side path/connection the client has no business
+# setting.
+_REQUEST_ENV_VARS_DENYLIST = frozenset({
+    constants.ENV_VAR_DB_CONNECTION_URI,
+    constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+    constants.ENV_VAR_DB_POOL_HOSTPORT,
+    constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+    timeline.TIMELINE_FILE_PATH_ENV_VAR,
+    kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR,
+})
+
+# The only env vars honored from a request that did not come from loopback:
+# identity, usage attribution and this request's own logging. Every other var
+# configures the server itself and must come from the server.
+_REMOTE_REQUEST_ENV_VARS = frozenset({
+    constants.USER_ID_ENV_VAR,
+    constants.USER_ENV_VAR,
+    constants.CLIENT_USER_HASH_ENV_VAR,
+    'SKYPILOT_CLIENT_TYPE',
+    usage_constants.USAGE_RUN_ID_ENV_VAR,
+    'SKYPILOT_IS_FROM_DASHBOARD',
+    env_options.Options.DISABLE_LOGGING.env_key,
+    env_options.Options.MINIMIZE_LOGGING.env_key,
+    env_options.Options.SUPPRESS_SENSITIVE_LOG.env_key,
+    env_options.Options.SHOW_DEBUG_INFO.env_key,
+})
+
+
+def _sanitize_request_env_vars(env_vars: Dict[str, str],
+                               from_loopback: bool) -> Dict[str, str]:
+    """Filter client-supplied request env vars down to a safe allowlist.
+
+    request_body.env_vars is sent by the client and, on any reachable server,
+    is untrusted input. It is overlaid onto the server process's os.environ
+    (and thus inherited by every subprocess a request spawns), so an unfiltered
+    overlay lets a client inject arbitrary environment into the server. Notably
+    KUBECONFIG would let a client point the server at a kubeconfig whose exec
+    credential plugin runs an arbitrary command on the server.
+
+    Mirror what the client legitimately sends (see
+    payloads.request_body_env_vars) rather than trying to enumerate every bad
+    key:
+
+    - SKYPILOT_-prefixed task/user vars are kept, except SKYPILOT_SERVER_-
+      prefixed vars (server-only) and the explicit _REQUEST_ENV_VARS_DENYLIST.
+    - Credential overrides (payloads.EXTERNAL_LOCAL_ENV_VARS, e.g. KUBECONFIG)
+      are kept only on a server that is not reachable by other parties, i.e. a
+      loopback `sky api start` where client and server are the same user. On a
+      deployed or network-reachable server they are dropped.
+    - Everything else is dropped.
+
+    That is for a request from loopback (the local API server, or a
+    controller calling its own server). A request from anywhere else keeps
+    only _REMOTE_REQUEST_ENV_VARS: config paths such as SKYPILOT_CONFIG and
+    any other server setting must come from the server, not from a client.
+    """
+    if not from_loopback:
+        return {
+            k: v for k, v in env_vars.items() if k in _REMOTE_REQUEST_ENV_VARS
+        }
+    # On a loopback single-user server the client and server are the same
+    # user, so credential overrides are same-user and allowed; on a deployed or
+    # non-loopback server they are not. Reuse the trust boundary the server
+    # already applies to file-mount sources.
+    enforce = server_common.should_enforce_mount_containment()
+    allow_local_credentials = not enforce
+    sanitized: Dict[str, str] = {}
+    for key, value in env_vars.items():
+        if key in payloads.EXTERNAL_LOCAL_ENV_VARS:
+            if allow_local_credentials:
+                sanitized[key] = value
+            continue
+        if key.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX):
+            continue
+        if key in _REQUEST_ENV_VARS_DENYLIST:
+            continue
+        if key.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+            sanitized[key] = value
+    return sanitized
+
+
 @contextlib.contextmanager
 def override_request_env_and_config(
         request_body: payloads.RequestBody, request_id: str,
@@ -607,6 +781,14 @@ def override_request_env_and_config(
     # for daemons, skip the env overlay and use the current process's
     # os.environ.
     is_daemon = daemons.is_daemon_request_id(request_id)
+    # Stamped server-side as True or False on every request a current server
+    # dispatches. None means the body predates this field, i.e. it was
+    # persisted by an older server and is being retried/resumed across an
+    # upgrade; keep its pre-upgrade behavior (loopback, no remote filtering) so
+    # an in-flight controller launch does not lose SKYPILOT_CONFIG. An older
+    # server applied no filtering at all, so this adds no exposure the upgrade
+    # did not already have.
+    from_loopback = getattr(request_body, 'from_loopback', None) is not False
     original_env = os.environ.copy()
     try:
         if is_daemon:
@@ -624,19 +806,18 @@ def override_request_env_and_config(
             # API server affecting client requests. If set on the client
             # side, it will be overridden by the request body.
             os.environ.pop('SKYPILOT_DEBUG', None)
-            # Remove the db connection uri from client supplied env vars, as
-            # the client should not set the db string on server side.
-            request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-            # Remove the in-cluster context name from client supplied env
-            # vars. When a client runs inside a Kubernetes pod (e.g., a
-            # managed job with api_server_access), its env has
-            # SKYPILOT_IN_CLUSTER_CONTEXT_NAME set pod template. If this
-            # leaks into the server's os.environ, it causes the server to
-            # attempt in-cluster auth (load_incluster_config) instead of
-            # using its own kubeconfig, which fails when the server is not
-            # running in a Kubernetes pod.
-            request_body.env_vars.pop(
-                kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            # Overlay only the environment variables a client may legitimately
+            # set on the server. request_body.env_vars arrives over the wire
+            # and is attacker-controlled on a reachable server, so filter it to
+            # an allowlist (see _sanitize_request_env_vars) rather than
+            # denylisting known-bad keys. This drops the db connection strings,
+            # the auth DB deadline, the timeline path and the in-cluster
+            # context name (all server-side settings the client must not set),
+            # all SKYPILOT_SERVER_-prefixed vars, credential overrides such as
+            # KUBECONFIG on a reachable server, and any other key, before they
+            # can reach os.environ and the subprocesses launched from it.
+            request_body.env_vars = _sanitize_request_env_vars(
+                request_body.env_vars, from_loopback)
             os.environ.update(request_body.env_vars)
             # Note: may be overridden by AuthProxyMiddleware.
             # TODO(zhwu): we need to make the entire request a context
@@ -647,6 +828,7 @@ def override_request_env_and_config(
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             _, user = global_user_state.add_or_update_user(user,
                                                            return_user=True)
+            _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -661,7 +843,8 @@ def override_request_env_and_config(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
-                request_body.override_skypilot_config_path):
+                request_body.override_skypilot_config_path,
+                from_loopback=from_loopback):
             # Skip permission check for sky.workspaces.get request
             # as it is used to determine which workspaces the user
             # has access to.
@@ -704,9 +887,11 @@ def override_request_env_and_config(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
-                    logger.debug(f'{request_id} resolved workspace '
-                                 f'{resolution.workspace!r} from '
-                                 f'{resolution.source} for user {user.name}')
+                    ws_label = skypilot_config.workspace_label(
+                        resolution.workspace)
+                    logger.debug(f'{request_id} resolved workspace {ws_label} '
+                                 f'from {resolution.source} for user '
+                                 f'{user.name}')
                     # For resource-creating commands, surface the
                     # resolver's pick at INFO level so the user sees
                     # which workspace their cluster / job actually
@@ -721,14 +906,22 @@ def override_request_env_and_config(
                             _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
                             and resolution.source
                             not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
-                        logger.info(f'Using workspace {resolution.workspace!r} '
+                        workspace_name = skypilot_config.get_workspace_name(
+                            resolution.workspace)
+                        logger.info(f'Using workspace {workspace_name!r} '
                                     f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:
                         # Reject requests that the user does not have
                         # permission to access.
+                        # Name the workspace as the user sent it, not by the
+                        # id it resolved to.
+                        override = request_body.override_skypilot_config or {}
+                        workspace_ref = override.get('active_workspace')
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user, ws_action)
+                            user,
+                            ws_action,
+                            workspace_ref=workspace_ref)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -779,6 +972,51 @@ def _gated_sigterm_handler(signum: int,
         os.write(2, b'SIGTERM received while worker idle; ignored.\n')
     except Exception:  # pylint: disable=broad-except
         pass
+
+
+def _maybe_observe_request_pending(request: api_requests.Request) -> None:
+    """Observe creation -> first-execution-start time, once per request.
+
+    Must be called before the caller flips the request to RUNNING. PENDING
+    means the request never started executing before: the retry/pause
+    requeue path is the only writer of WAITING, so a WAITING request here
+    is a re-execution (e.g. retry_until_up), not the first start. pid
+    cannot discriminate this, since the ExecutionRetryableError handler
+    clears it before requeueing. Observing only the first start also means
+    retry backoff after that start can never re-inflate the histogram
+    (see #9988).
+    """
+    if request.status != api_requests.RequestStatus.PENDING:
+        return
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
+
+
+def _seed_role_if_missing(user_id: str) -> None:
+    """Give the request's user a role if they do not have one yet.
+
+    The auth middlewares seed a role when they first see a user, but a request
+    that reaches the server without authentication creates the user here. One
+    such server is the API server on a jobs controller, which sees the job's
+    user first on the request that launches the job's cluster. Without a role
+    the user fails every workspace check except `default`, so the job retries
+    forever.
+
+    Best-effort: `role_seed_missing` can be wrong on a worker whose policy copy
+    is stale, and the seed takes the distributed policy lock, which can time
+    out. A skipped or failed seed must not fail a request that would succeed
+    without it; the workspace check that follows decides as before.
+    """
+    service = permission.permission_service
+    if not (service.role_seed_missing(user_id) and
+            service.claim_role_seed_attempt(user_id)):
+        return
+    try:
+        permission.seed_new_user_role(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to seed a role for user {user_id}: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def _request_execution_wrapper(request_id: str,
@@ -853,12 +1091,12 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            _maybe_observe_request_pending(request_task)
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
             request_task.status_msg = None
             func = request_task.entrypoint
-            request_body = request_task.request_body
             request_name = request_task.name
 
         # Store copies of the original stdout and stderr file descriptors
@@ -882,7 +1120,7 @@ def _request_execution_wrapper(request_id: str,
                              sky_logging.add_debug_log_handler(request_id))
             with debug_log_ctx, \
                 override_request_env_and_config(
-                    request_body, request_id, request_name), \
+                    request_task.request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
@@ -892,7 +1130,7 @@ def _request_execution_wrapper(request_id: str,
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
                                            group='request_execution'):
-                    return_value = func(**request_body.to_kwargs())
+                    return_value = func(**request_task.request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
         logger.info(f'Request {request_id} cancelled by user')
@@ -924,8 +1162,22 @@ def _request_execution_wrapper(request_id: str,
                      f'{common_utils.format_exception(e)}')
         return
     else:
-        api_requests.set_request_succeeded(
-            request_id, return_value if not ignore_return_value else None)
+        try:
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
+        except Exception as e:  # pylint: disable=broad-except
+            # A database error can hold the whole result as a statement
+            # parameter, so only the driver's message is recorded.
+            reason = str(getattr(e, 'orig', None) or e)[:1000]
+            api_requests.set_request_failed(
+                request_id,
+                RuntimeError(
+                    f'Failed to store the result of request {request_id}: '
+                    f'{reason}'))
+            _restore_output()
+            logger.error(f'Request {request_id} failed to store its result: '
+                         f'{reason}')
+            return
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
@@ -935,8 +1187,12 @@ def _request_execution_wrapper(request_id: str,
         _in_request_execution = False
         _restore_output()
         try:
-            # Capture the peak RSS before GC.
+            # Capture the peak RSS while the request's result is still
+            # referenced.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Unreference the request's payload and result before
+            # release_memory() so that their memory can be returned too.
+            return_value = request_task = None
             # Clear request level cache to release all memory used by the
             # request.
             annotations.clear_request_level_cache()
@@ -1041,6 +1297,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    _maybe_observe_request_pending(request)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
@@ -1108,17 +1365,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
         ctx.cancel()
 
 
-async def prepare_request_async(
-    request_id: str,
-    request_name: request_names.RequestName,
-    request_body: payloads.RequestBody,
-    func: Callable[P, Any],
-    request_cluster_name: Optional[str] = None,
-    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
-    is_skypilot_system: bool = False,
-    auth_user: Optional[models.User] = None,
-) -> api_requests.Request:
-    """Prepare a request for execution."""
+def stamp_request_body(request_body: payloads.RequestBody,
+                       auth_user: Optional[models.User],
+                       is_skypilot_system: bool = False) -> str:
+    """Stamps the caller's identity, client API version and workspace access
+    onto the request body. Returns the id of the user the request runs as."""
     if auth_user is not None:
         assert auth_user.name is not None
         # Use the authenticated user identity as the single source of truth
@@ -1130,7 +1381,20 @@ async def prepare_request_async(
     else:
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
-        user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')
+        # This identity comes straight from the client and is stored as the
+        # owner of any cluster the request creates, so reject a malformed one
+        # here. A well-formed id is an invariant elsewhere in the codebase
+        # (controller_utils asserts it), and an id that does not round-trip to
+        # a real user leaves clusters that the owner filter in get_clusters()
+        # can never associate back with anyone. See #9621. The SDK's
+        # get_user_hash() only ever returns a valid id, so this guards
+        # non-SDK callers of the API.
+        # Skipped for system requests, whose id is replaced below anyway.
+        if (not is_skypilot_system and
+                not common_utils.is_valid_user_hash(user_id)):
+            raise exceptions.InvalidUserIdError(
+                f'Invalid user id: {user_id!r}.')
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
@@ -1152,6 +1416,24 @@ async def prepare_request_async(
     # visible, and stamp it so the worker can enforce it. Overwrite
     # unconditionally — a client-supplied value must never be trusted.
     request_body.workspace_access = workspace_access.for_current_request()
+    # Same again for whether the request came from loopback; it decides which
+    # client env vars and config overrides the worker honors.
+    request_body.from_loopback = loopback.get_request_from_loopback()
+    return user_id
+
+
+async def prepare_request_async(
+    request_id: str,
+    request_name: request_names.RequestName,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
+) -> api_requests.Request:
+    """Prepare a request for execution."""
+    user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
@@ -1223,7 +1505,7 @@ async def schedule_internal_daemon_async(
     """Submit an internal daemon's request to the executor.
 
     Idempotent under concurrent callers (multiple uvicorn workers in the
-    same process; multiple replicas sharing a PG-backed request store):
+    same process; multiple API server instances sharing a request store):
 
     - First caller inserts a fresh PENDING row + enqueues onto the task
       queue.
@@ -1271,7 +1553,23 @@ async def schedule_prepared_request(request_task: api_requests.Request,
     async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        try:
+            await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+            # A PENDING request that never made it onto the queue is
+            # stranded: no worker will pick it up and nothing else moves it to
+            # a terminal state, and a queue backend that recovers stale PENDING
+            # rows would resurrect and execute it long after the caller saw
+            # this error. If the put actually committed despite the error, the
+            # request is either still unclaimed (the FAILED mark lands and the
+            # row is discarded at dequeue) or already claimed by a worker (the
+            # mark is skipped and the claimed run's outcome stands).
+            logger.error(
+                f'Failed to enqueue request {request_task.request_id}: '
+                f'{common_utils.format_exception(e)}')
+            await api_requests.set_request_failed_if_pending_async(
+                request_task.request_id, e)
+            raise
 
     if precondition is not None:
         # Schedule precondition wait as a background task so the caller

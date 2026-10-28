@@ -13,6 +13,18 @@ SCARF_GATEWAY_URL = os.environ.get('SKYPILOT_SCARF_GATEWAY_URL',
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
+# How long a recorded GPU capacity row stays valid. Installed capacity
+# changes on the timescale of node pool edits, so a fleet-size metric does not
+# need per-heartbeat freshness; at the 10 minute heartbeat interval this is
+# six heartbeats per query. Rows live in the kv_cache DB table and expire on
+# their own. This cache backs telemetry only — scheduling and `sky status`
+# continue to read node info directly, and must never be served from here.
+NODE_INFO_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+# kv_cache key prefix for the per-infra capacity rows. Ids under it look like
+# 'kubernetes/<context>' and 'slurm/<cluster>'.
+NODE_INFO_CACHE_KEY_PREFIX = 'usage/gpu_capacity/'
+
 USAGE_POLICY_MESSAGE = (
     'SkyPilot collects usage data to improve its services. '
     '`setup` and `run` commands are not collected to '

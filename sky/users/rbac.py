@@ -10,8 +10,15 @@ from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Default user blocklist for user role
-# Cannot access workspace CUD operations.
+# Default user blocklist for user role.
+# Cannot access workspace/user CUD operations, debug dumps, label GPU nodes (a
+# cluster-admin operation that runs jobs on the cluster), or SSH Node Pool
+# mutations. SSH Node Pools are a global, non-workspace-scoped resource (the
+# pool registry, its stored SSH keys, and the deploy/teardown of k3s on the
+# managed hosts), so mutating them is admin-only. The two SSH Node Pool read
+# routes (GET '' and GET /:pool_name/status) stay allowed and are also on the
+# viewer allowlist. Keep the SSH Node Pool entries in sync with the routes in
+# sky/ssh_node_pools/server.py.
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
@@ -49,8 +56,35 @@ _DEFAULT_USER_BLOCKLIST = [{
     'path': '/debug/dump_create',
     'method': 'POST'
 }, {
+    'path': '/kubernetes_label_gpus',
+    'method': 'POST'
+}, {
     'path': '/debug/dump_download/:filename',
     'method': 'GET'
+}, {
+    'path': '/ssh_node_pools',
+    'method': 'POST'
+}, {
+    'path': '/ssh_node_pools/:pool_name',
+    'method': 'DELETE'
+}, {
+    'path': '/ssh_node_pools/keys',
+    'method': 'POST'
+}, {
+    'path': '/ssh_node_pools/keys',
+    'method': 'GET'
+}, {
+    'path': '/ssh_node_pools/deploy',
+    'method': 'POST'
+}, {
+    'path': '/ssh_node_pools/:pool_name/deploy',
+    'method': 'POST'
+}, {
+    'path': '/ssh_node_pools/down',
+    'method': 'POST'
+}, {
+    'path': '/ssh_node_pools/:pool_name/down',
+    'method': 'POST'
 }]
 
 # Default allowlist for the viewer role. Viewer is allowlist-based: any
@@ -96,6 +130,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
     },
     {
         'path': '/queue',
+        'method': 'POST'
+    },
+    {
+        'path': '/cluster_job_spec',
         'method': 'POST'
     },
     {

@@ -84,8 +84,24 @@ def is_valid_user_hash(user_hash: Optional[str]) -> bool:
         return False
     # Must start with a letter, followed by alphanumeric characters and hyphens
     # This covers both old hex format (e.g., "abc123") and new service account
-    # format (e.g., "sa-abc123-token-xyz")
-    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
+    # format (e.g., "sa-abc123-token-xyz").
+    #
+    # fullmatch, not match with a trailing '$': '$' also matches just before a
+    # final newline, so a value ending in one was accepted and then used as an
+    # identity distinct from the same value without it.
+    return bool(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]*', user_hash))
+
+
+def is_single_path_component(name: Optional[str]) -> bool:
+    """Whether `name` is safe to join as a single path component.
+
+    Rejects a name that is empty, '.', '..', or contains a path separator or
+    NUL byte, i.e. anything that would not stay directly inside the directory
+    it is joined under. Used to validate a client-supplied user id before it
+    becomes a directory under the API server's clients dir.
+    """
+    return (name is not None and name not in ('', '.', '..') and
+            not any(c in name for c in ('/', '\\', '\x00')))
 
 
 def generate_user_hash() -> str:
@@ -413,6 +429,24 @@ def is_in_request_context() -> bool:
     propagating to a caller that cannot reschedule it.
     """
     return context.get_context_var(_REQUEST_ID_KEY) is not None
+
+
+def get_current_request_actor() -> Optional[str]:
+    """Names who is making the current API request, for audit messages.
+
+    Returns e.g. ``alice (request ID: 2f0c8e2b-...)``, suitable for embedding
+    in an event log so a record says who asked for an action and under which
+    request. Returns None outside a server-side request execution (see
+    ``set_request_context``): an in-process caller has no requesting user or
+    request to name.
+    """
+    if not is_in_request_context():
+        return None
+    user = get_current_user()
+    # The hash is the fallback identity: a display name is not guaranteed
+    # (e.g. an identity recorded before names were stored).
+    who = user.name or user.id
+    return f'{who} (request ID: {get_current_request_id()})'
 
 
 def get_current_command() -> str:
@@ -768,8 +802,7 @@ def class_fullname(cls, skip_builtins: bool = True):
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
-                     use_bracket: bool = False) -> str:
+def format_exception(e: BaseException, use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
     Args:
@@ -1269,22 +1302,48 @@ def removeprefix(string: str, prefix: str) -> str:
     return string
 
 
-def release_memory():
+# jemalloc's MALLCTL_ARENAS_ALL: the arena index that addresses all arenas.
+_JEMALLOC_PURGE_ALL_ARENAS = b'arena.4096.purge'
+
+
+@functools.lru_cache(maxsize=1)
+def _get_free_memory_returner() -> Optional[Callable[[], int]]:
+    """Returns a function that returns freed heap memory to the OS.
+
+    Uses jemalloc's purge when jemalloc is the process allocator (e.g.
+    preloaded via LD_PRELOAD), where glibc's malloc_trim is a no-op, and
+    glibc's malloc_trim otherwise.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    process = ctypes.CDLL(None)
+    mallctl = getattr(process, 'mallctl', None)
+    if mallctl is not None:
+        mallctl.argtypes = [
+            ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_size_t
+        ]
+        mallctl.restype = ctypes.c_int
+        return lambda: mallctl(_JEMALLOC_PURGE_ALL_ARENAS, None, None, None, 0)
+    malloc_trim = getattr(process, 'malloc_trim', None)
+    if malloc_trim is None:
+        # Not glibc, e.g. musl (alpine).
+        return None
+    return lambda: malloc_trim(0)
+
+
+def release_memory() -> None:
     """Release the process memory"""
-    # Do the best effort to release the python heap and let malloc_trim
-    # be more efficient.
+    # Do the best effort to release the python heap first, so that the
+    # allocator has more free memory to return.
     try:
         gc.collect()
-        if sys.platform.startswith('linux'):
-            # Will fail on musl (alpine), but at least it works on our
-            # official docker images.
-            libc = ctypes.CDLL('libc.so.6')
-            return libc.malloc_trim(0)
-        return 0
+        returner = _get_free_memory_returner()
+        if returner is not None:
+            returner()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
-        return 0
 
 
 def base64_url_encode(data: bytes) -> str:

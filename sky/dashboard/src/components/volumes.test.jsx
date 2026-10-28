@@ -16,11 +16,18 @@ jest.mock('@/plugins/PluginSlot', () => ({
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
-  useTableColumns: () => [],
+  useTableColumns: jest.fn(() => []),
 }));
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import dashboardCache from '@/lib/cache';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { VolumesTable } from '@/components/volumes';
 
 // A CSI provisioner's refusal, long enough that the cell must truncate it.
@@ -174,5 +181,222 @@ describe('VolumesTable details column', () => {
       container.querySelectorAll('table tbody tr')
     ).map((row) => row.querySelectorAll('td')[detailsIndex]?.textContent);
     expect(cellsInColumn).toContain('-');
+  });
+});
+
+describe('VolumesTable size column while a resize is pending', () => {
+  // The recorded size is the capacity the volume has now, so a resize that
+  // has not landed is invisible in it, and one waiting on the node can stay
+  // that way indefinitely. What it is waiting for is composed by the server,
+  // so the table just renders it.
+  const resizing = (
+    status,
+    message = 'Resizing to 2Gi. Restart the cluster.'
+  ) => ({
+    ...volume('vol-resizing'),
+    size: 1,
+    resize_status: status,
+    resize_target_size: 2,
+    resize_message: message,
+  });
+
+  it('shows only the current size when nothing is resizing', async () => {
+    const { container } = await renderTable([volume('vol-steady')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).not.toContain('→');
+  });
+
+  it('shows where the size is heading while a resize is pending', async () => {
+    const { container } = await renderTable([resizing('pending_on_node')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).toContain('2Gi');
+  });
+
+  it("shows the server's explanation without hovering, in details", async () => {
+    const { container } = await renderTable([resizing('pending_on_node')]);
+
+    expect(container.textContent).toContain('Restart the cluster');
+  });
+
+  it('leaves the details column to an error when there is one', async () => {
+    // An error means the volume is unusable, which outranks a resize that has
+    // not landed; the resize keeps its tooltip on the size cell.
+    const withBoth = {
+      ...resizing('pending_on_node'),
+      status: 'NOT_READY',
+      error_message: 'PVC is pending. ProvisioningFailed: no capacity',
+    };
+    const { container } = await renderTable([withBoth]);
+
+    const details =
+      container.querySelector('table tbody tr').lastElementChild
+        .previousElementSibling;
+    expect(details.textContent).toContain('ProvisioningFailed');
+    expect(details.textContent).not.toContain('Restart the cluster');
+  });
+
+  it('expands a resize explanation, not only an error', async () => {
+    // The expanded row used to be gated on the error message, so "show more"
+    // flipped to "show less" with nothing revealed.
+    const long = `Waiting for user to (re-)start a pod to finish file system resize of volume on node. Restart the cluster or job using this volume to finish the resize.`;
+    const { container } = await renderTable([
+      resizing('pending_on_node', long),
+    ]);
+
+    fireEvent.click(screen.getByText('... show more'));
+
+    const expanded = container.querySelector('tr.expanded-details');
+    expect(expanded).toBeTruthy();
+    expect(expanded.textContent).toContain('finish the resize.');
+  });
+
+  it('ignores a target that rounds to the size already shown', async () => {
+    // Sizes are whole GiB on both sides, so a resize smaller than that -- or
+    // one whose space has landed while the state has not cleared -- would
+    // render an arrow pointing at the size next to it.
+    const { container } = await renderTable([
+      { ...resizing('pending_on_node'), resize_target_size: 1 },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+    // The reason still reaches the user through the details column.
+    expect(container.textContent).toContain('Restart the cluster');
+  });
+
+  it('ignores a status from a server that reports no target size', async () => {
+    // An older server sends none of these fields; a half-populated row must
+    // not render a dangling arrow.
+    const { container } = await renderTable([
+      { ...volume('vol-half'), resize_status: 'in_progress' },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+  });
+});
+
+describe('VolumesTable sorting by a plugin column', () => {
+  // A column a plugin adds, whose value lives with the plugin rather than on
+  // the volume record.
+  const mountPaths = { 'vol-a': '/mnt/zeta', 'vol-b': '/mnt/alpha' };
+  const mountColumn = (header) => ({
+    id: 'mount-path',
+    table: 'volumes',
+    header: { label: 'Mount Path', order: 55, ...header },
+    cell: { render: (v) => mountPaths[v.name] || '-' },
+  });
+
+  const rowNames = (container) =>
+    Array.from(container.querySelectorAll('table tbody tr')).map(
+      (tr) => tr.querySelector('a')?.textContent
+    );
+
+  afterEach(() => {
+    useTableColumns.mockImplementation(() => []);
+  });
+
+  it('sorts by the value the column computes', async () => {
+    useTableColumns.mockImplementation(() => [
+      mountColumn({
+        sortKey: 'mount_path',
+        sortValue: (v) => mountPaths[v.name] ?? null,
+      }),
+    ]);
+    // vol-0 has no mount path, and sorts last in either direction.
+    const { container } = await renderTable([
+      volume('vol-0'),
+      volume('vol-a'),
+      volume('vol-b'),
+    ]);
+    expect(rowNames(container)).toEqual(['vol-0', 'vol-a', 'vol-b']);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a', 'vol-0']);
+    expect(headers(container)).toContain('Mount Path ↑');
+
+    fireEvent.click(screen.getByText(/Mount Path/));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b', 'vol-0']);
+    expect(headers(container)).toContain('Mount Path ↓');
+  });
+
+  it('sorts by the field named by sortKey when no value is given', async () => {
+    useTableColumns.mockImplementation(() => [
+      mountColumn({ sortKey: 'size' }),
+    ]);
+    const { container } = await renderTable([
+      { ...volume('vol-a'), size: 5 },
+      { ...volume('vol-b'), size: 2 },
+    ]);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+  });
+
+  it('re-sorts when the plugin reports that its values changed', async () => {
+    // The plugin's data changes while the volumes do not.
+    const paths = { 'vol-a': '/mnt/b', 'vol-b': '/mnt/c' };
+    let notify = () => {};
+    const columns = [
+      mountColumn({
+        sortKey: 'mount_path',
+        sortValue: (v) => paths[v.name] ?? null,
+        sortValueSubscribe: (onChange) => {
+          notify = onChange;
+          return () => {
+            notify = () => {};
+          };
+        },
+      }),
+    ];
+    useTableColumns.mockImplementation(() => columns);
+    const { container } = await renderTable([volume('vol-a'), volume('vol-b')]);
+
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+
+    paths['vol-b'] = '/mnt/a';
+    act(() => notify());
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+  });
+
+  it('leaves a built-in column to its own field when a plugin reuses its key', async () => {
+    const pluginSizes = { 'vol-a': 1, 'vol-b': 9 };
+    const columns = [
+      mountColumn({ sortKey: 'size', sortValue: (v) => pluginSizes[v.name] }),
+    ];
+    useTableColumns.mockImplementation(() => columns);
+    const { container } = await renderTable([
+      { ...volume('vol-a'), size: 5 },
+      { ...volume('vol-b'), size: 2 },
+    ]);
+
+    // The built-in Size header sorts by the volume's size...
+    fireEvent.click(screen.getByText('Size'));
+    expect(rowNames(container)).toEqual(['vol-b', 'vol-a']);
+    expect(headers(container)).toContain('Size ↑');
+    expect(headers(container)).toContain('Mount Path');
+
+    // ...and the plugin's header by its own value, with the arrow on it alone.
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(rowNames(container)).toEqual(['vol-a', 'vol-b']);
+    expect(headers(container)).toContain('Mount Path ↑');
+    expect(headers(container)).toContain('Size');
+  });
+
+  it('computes the value once per row, not once per comparison', async () => {
+    const sortValue = jest.fn((v) => v.name);
+    const columns = [mountColumn({ sortKey: 'mount_path', sortValue })];
+    useTableColumns.mockImplementation(() => columns);
+    const names = ['vol-e', 'vol-d', 'vol-c', 'vol-b', 'vol-a'];
+    await renderTable(names.map((n) => volume(n)));
+
+    sortValue.mockClear();
+    fireEvent.click(screen.getByText('Mount Path'));
+    expect(sortValue).toHaveBeenCalledTimes(names.length);
   });
 });

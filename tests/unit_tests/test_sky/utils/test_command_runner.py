@@ -4,22 +4,27 @@ from contextlib import suppress
 import os
 import select
 import shlex
+import shutil
 import socket
 import subprocess
 import tempfile
 import threading
 import time
 from unittest import mock
+import zipfile
 
 import paramiko
 import pytest
+import sqlalchemy
 
 from sky import exceptions
 from sky import skypilot_config
+from sky.data import storage_utils
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import interactive_utils
+from sky.utils.db import kv_cache
 
 
 def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
@@ -354,7 +359,25 @@ class TestSSHCommandRunnerInteractiveAuth:
                 os.unlink(log_path)
 
 
+def _with_output_marker(cmd: str) -> str:
+    return f'echo {command_runner._SLURM_OUTPUT_START_MARKER}\n{cmd}'
+
+
+def _without_output_marker(cmd: str) -> str:
+    marker_line = f'echo {command_runner._SLURM_OUTPUT_START_MARKER}\n'
+    assert cmd.startswith(marker_line)
+    return cmd[len(marker_line):]
+
+
 class TestSlurmCommandRunnerUserImpersonation:
+
+    @pytest.fixture(autouse=True)
+    def isolated_home_cache(self, tmp_path, monkeypatch):
+        engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/cache.db')
+        kv_cache.Base.metadata.create_all(engine)
+        monkeypatch.setattr(kv_cache._db_manager, '_engine', engine)
+        yield
+        engine.dispose()
 
     @staticmethod
     def _login_runner(slurm_user, ssh_user='root'):
@@ -377,120 +400,75 @@ class TestSlurmCommandRunnerUserImpersonation:
             container_args=None,
             slurm_user=slurm_user)
 
-    @staticmethod
-    def _payload(command):
-        """The inner login-shell command wrap_command_as_user builds."""
-        return f'cd -- "$HOME" || exit 1; {command}'
-
-    def test_wrap_command_as_user(self):
-        command = 'echo "$HOME" && printf %s "a b"'
-
-        wrapped = command_runner.wrap_command_as_user(command, 'alice')
-
-        assert shlex.split(wrapped) == [
-            'su', '--login', '--shell', '/bin/bash', '--command',
-            self._payload(command), '--', 'alice'
-        ]
-
-    def test_wrap_command_as_user_with_sudo_targets_user_not_root(self):
-        command = 'echo "$HOME" && printf %s "a b"'
-
-        wrapped = command_runner.wrap_command_as_user(command,
+    @pytest.mark.parametrize('use_sudo', [False, True])
+    def test_wrap_command_preserves_literal_arguments(self, use_sudo):
+        args = ['/usr/bin/printf', '%s', 'a b; $(id)', '$HOME', 'a\nb']
+        wrapped = command_runner.wrap_command_as_user(args,
                                                       'alice',
-                                                      use_sudo=True)
+                                                      use_sudo=use_sudo)
+        prefix = (['sudo', '--non-interactive', '-H', '-u', 'alice', '--']
+                  if use_sudo else ['runuser', '-u', 'alice', '--'])
+        assert shlex.split(wrapped) == prefix + args
 
-        argv = shlex.split(wrapped)
-        assert argv == [
-            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-            '--login', '-c',
-            self._payload(command)
-        ]
-        # sudo must drop to the target user rather than running as root, so
-        # that deployers never need to grant passwordless sudo to `su`.
+    @pytest.mark.parametrize('argv', ['', [], 'squeue --me'])
+    def test_wrap_rejects_shell_strings(self, argv):
+        with pytest.raises(ValueError):
+            command_runner.wrap_command_as_user(argv, 'alice')
+
+    @pytest.mark.parametrize('ssh_user', ['root', 'ubuntu'])
+    def test_login_node_direct_command(self, ssh_user):
+        runner = self._login_runner('alice', ssh_user=ssh_user)
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as run:
+            runner.run(['squeue', '--me'], require_outputs=True)
+        argv = shlex.split(run.call_args.args[1])
+        assert argv[-2:] == ['squeue', '--me']
         assert argv[argv.index('-u') + 1] == 'alice'
-        assert 'su' not in argv
+        assert '/bin/bash' not in argv
 
-    def test_wrap_command_as_user_preserves_shell_argv0(self):
-        # `$0`/`$@` must survive to the inner shell verbatim: the rsync
-        # integration relies on `exec rsync "$@"` being expanded once, by the
-        # inner shell, with `$0` set to the passed argv0.
-        command = 'exec rsync "$@"'
-
-        for use_sudo in (False, True):
-            wrapped = command_runner.wrap_command_as_user(command,
-                                                          'alice',
-                                                          shell_argv0='rsync',
-                                                          use_sudo=use_sudo)
-            argv = shlex.split(wrapped)
-            assert argv[-1] == 'rsync'
-            assert self._payload(command) in argv
-            # Exactly one inner shell, as _inline_command_quote_levels assumes.
-            assert argv.count('/bin/bash') == 1
-
-    def test_login_node_run_as_user(self):
-        runner = self._login_runner('alice')
-        with mock.patch.object(command_runner.SSHCommandRunner,
-                               'run',
-                               autospec=True,
-                               return_value=(0, '', '')) as mock_run:
-            runner.run('squeue --me', require_outputs=True)
-
-        remote_command = mock_run.call_args.args[1]
-        assert shlex.split(remote_command) == [
-            'su', '--login', '--shell', '/bin/bash', '--command',
-            self._payload('squeue --me'), '--', 'alice'
-        ]
-
-    def test_login_node_run_as_user_with_sudo(self):
+    def test_shell_orchestration_runs_as_login_user(self):
         runner = self._login_runner('alice', ssh_user='ubuntu')
+        cmd = 'sinfo | cat'
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'run',
                                autospec=True,
-                               return_value=(0, '', '')) as mock_run:
-            runner.run('squeue --me', require_outputs=True)
-
-        remote_command = mock_run.call_args.args[1]
-        assert shlex.split(remote_command) == [
-            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-            '--login', '-c',
-            self._payload('squeue --me')
-        ]
+                               return_value=(0, '', '')) as run:
+            runner.run(cmd, require_outputs=True, stream_logs=False)
+        assert run.call_args.args[1] == _with_output_marker(cmd)
 
     def test_login_node_sudo_failure_propagates(self):
         runner = self._login_runner('alice', ssh_user='ubuntu')
-        with mock.patch.object(
-                command_runner.SSHCommandRunner,
-                'run',
-                autospec=True,
-                return_value=(1, '',
-                              'sudo: a password is required')) as mock_run:
-            result = runner.run('squeue --me', require_outputs=True)
+        failure = (1, '', 'sudo: a password is required')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=failure) as run:
+            assert runner.run(['squeue', '--me'],
+                              require_outputs=True) == failure
+        assert run.call_count == 1
 
-        assert result == (1, '', 'sudo: a password is required')
-        assert mock_run.call_count == 1
-
-    def test_login_node_run_unchanged_when_disabled(self):
+    def test_disabled_impersonation_quotes_argv(self):
         runner = self._login_runner(None, ssh_user='ubuntu')
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'run',
                                autospec=True,
-                               return_value=(0, '', '')) as mock_run:
-            runner.run('squeue --me', require_outputs=True)
-
-        assert mock_run.call_args.args[1] == 'squeue --me'
+                               return_value=0) as run:
+            runner.run(['cat', '/path with spaces'])
+        assert shlex.split(
+            run.call_args.args[1]) == ['cat', '/path with spaces']
 
     def test_login_node_rsync_as_user(self):
         runner = self._login_runner('alice', ssh_user='ubuntu')
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'rsync',
-                               autospec=True) as mock_rsync:
-            runner.rsync('/tmp/source', '~/.sky/file', up=True)
-
-        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
-        assert shlex.split(remote_command) == [
-            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-            '--login', '-c',
-            self._payload('exec rsync "$@"'), 'rsync'
+                               autospec=True) as rsync:
+            runner.rsync('/tmp/source',
+                         '/home/alice/.sky_provision/file',
+                         up=True)
+        assert shlex.split(rsync.call_args.kwargs['remote_rsync_command']) == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'rsync'
         ]
 
     def test_srun_as_user(self):
@@ -498,34 +476,281 @@ class TestSlurmCommandRunnerUserImpersonation:
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'run',
                                autospec=True,
-                               return_value=0) as mock_run:
-            runner.run('whoami')
-
-        remote_command = shlex.split(mock_run.call_args.args[1])
-        assert remote_command[:9] == [
-            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-            '--login', '-c'
+                               return_value=0) as run:
+            runner.run('printf "%s" "a b; $(id)"')
+        argv = shlex.split(run.call_args.args[1])
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
         ]
-        assert len(remote_command) == 10
-        assert remote_command[9].startswith(self._payload('srun --unbuffered'))
-        assert 'whoami' in remote_command[9]
+        assert argv[-3:-1] == ['bash', '-c']
+        assert argv[-1].endswith('printf "%s" "a b; $(id)"')
 
     def test_srun_rsync_as_user(self):
         runner = self._slurm_runner('alice', ssh_user='ubuntu')
         with mock.patch.object(command_runner.SSHCommandRunner,
                                'rsync',
-                               autospec=True) as mock_rsync:
+                               autospec=True) as rsync:
             runner.rsync('/tmp/source', '~/file', up=True)
-
-        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
-        argv = shlex.split(remote_command)
-        assert argv[:9] == [
-            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
-            '--login', '-c'
+        argv = shlex.split(rsync.call_args.kwargs['remote_rsync_command'])
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
         ]
-        assert argv[9].startswith(self._payload('exec srun --unbuffered'))
-        assert argv[9].endswith('rsync "$@"')
-        assert argv[10:] == ['rsync']
+        assert argv[-1] == 'rsync'
+        assert 'bash' not in argv
+
+    def test_home_lookup_runs_as_login_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(
+                    0, 'banner\nalice:x:1001:1001::/home/alice:/bin/bash\n',
+                    '')) as run:
+            assert runner.get_remote_home_dir() == '/home/alice'
+        assert shlex.split(
+            run.call_args.args[1]) == ['getent', 'passwd', 'alice']
+
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_login_node_rsync_resolves_tilde_via_home_lookup(self, timeout):
+        """rsync passes the lookup a timeout; the override must accept it."""
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        rsync_commands = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            rsync_commands.append(command)
+            return 0, '', ''
+
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run, \
+             mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner.rsync('/tmp',
+                         '~/.sky_provision/file',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert shlex.split(
+            run.call_args.args[1]) == ['getent', 'passwd', 'alice']
+        if timeout is None:
+            assert run.call_args.kwargs['timeout'] is None
+        else:
+            assert 0 < run.call_args.kwargs['timeout'] <= timeout
+        assert len(rsync_commands) == 1
+        assert '/home/alice/.sky_provision/file' in rsync_commands[0]
+
+    def test_home_cache_shared_between_runners_and_expires(self):
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run, mock.patch.object(
+                                  command_runner.time,
+                                  'time',
+                                  return_value=1000) as now:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            now.return_value = 1029
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            assert run.call_count == 1
+            now.return_value = 1030
+            run.return_value = (0, 'alice:x:1001:1001::/new/alice:/bin/bash',
+                                '')
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/new/alice'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('changes', [
+        {
+            'slurm_user': 'bob'
+        },
+        {
+            'node': ('other.example.com', 22)
+        },
+        {
+            'node': ('login.example.com', 2222)
+        },
+        {
+            'ssh_user': 'ubuntu'
+        },
+        {
+            'ssh_proxy_command': 'ssh gateway -W %h:%p'
+        },
+        {
+            'ssh_proxy_jump': 'gateway'
+        },
+    ])
+    def test_home_cache_isolates_connection_and_user(self, changes):
+        kwargs = dict(node=('login.example.com', 22),
+                      ssh_user='root',
+                      ssh_private_key=None,
+                      slurm_user='alice')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, 'alice:x:1001:1001::/home/alice:/bin/bash',
+                              '')) as run:
+            assert self._login_runner(
+                'alice').get_remote_home_dir() == '/home/alice'
+            kwargs.update(changes)
+            user = kwargs['slurm_user']
+            run.return_value = (0, f'{user}:x:1001:1001::/other/home:/bin/bash',
+                                '')
+            runner = command_runner.SlurmLoginNodeCommandRunner(**kwargs)
+            assert runner.get_remote_home_dir() == '/other/home'
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('result', [
+        (2, '', ''),
+        (0, 'alice:x:1001:1001::relative:/bin/bash', ''),
+        (0, 'bob:x:1001:1001::/home/bob:/bin/bash', ''),
+    ])
+    def test_home_cache_does_not_store_failed_lookups(self, result):
+        runner = self._login_runner('alice')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=result) as run:
+            for _ in range(2):
+                with pytest.raises(ValueError, match='Cannot resolve home'):
+                    runner.get_remote_home_dir()
+            assert run.call_count == 2
+
+    @pytest.mark.parametrize('container_args,home', [
+        (None, '/home/alice/.sky_clusters/test'),
+        ('--container-name=test:exec', '/root'),
+    ])
+    def test_compute_home_lookup_runs_in_allocation(self, container_args, home):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        runner.container_args = container_args
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, f'SKYPILOT_HOME_DIR: {home}\n',
+                                             '')) as run:
+            assert runner.get_remote_home_dir() == home
+        argv = shlex.split(_without_output_marker(run.call_args.args[1]))
+        assert argv[:7] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
+        ]
+        assert '--jobid=123' in argv
+        if container_args:
+            assert container_args in argv
+        assert 'SKYPILOT_HOME_DIR:' in argv[-1]
+
+    def test_home_lookup_failure_is_not_login_home(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=(2, '', '')):
+            with pytest.raises(ValueError, match='Cannot resolve home'):
+                runner.get_remote_home_dir()
+
+
+class TestSlurmLoginShellOutput:
+    """Tests for dropping what the login shell prints before a command."""
+
+    _BANNER = 'Welcome to hpc-login \u2603\nLmod: loading site modules\n'
+
+    @staticmethod
+    def _login_runner():
+        return command_runner.SlurmLoginNodeCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            slurm_user=None)
+
+    @staticmethod
+    def _slurm_runner():
+        return command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None)
+
+    @pytest.mark.parametrize('runner_fn', ['_login_runner', '_slurm_runner'])
+    def test_drops_login_shell_banner(self, runner_fn):
+        runner = getattr(self, runner_fn)()
+        marker = command_runner._SLURM_OUTPUT_START_MARKER
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, f'{self._BANNER}{marker}\n[1, 2]\n',
+                              'stderr banner\n')) as run:
+            assert runner.run('cat exit_codes',
+                              require_outputs=True,
+                              stream_logs=False,
+                              separate_stderr=True) == (0, '[1, 2]\n',
+                                                        'stderr banner\n')
+        assert run.call_args.args[0].startswith(f'echo {marker}\n')
+
+    def test_returns_stdout_unchanged_without_marker(self):
+        runner = self._login_runner()
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=(255, '', 'connection refused\n')):
+            assert runner.run('sinfo', require_outputs=True,
+                              stream_logs=False) == (255, '',
+                                                     'connection refused\n')
+
+    @pytest.mark.parametrize('kwargs', [
+        {
+            'stream_logs': False
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'run_in_background': True
+        },
+        {
+            'require_outputs': True
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'log_path': '/tmp/setup.log'
+        },
+    ])
+    def test_no_marker_when_output_is_not_only_returned(self, kwargs):
+        # Streamed and logged output is written before the marker could be
+        # dropped, so the marker would show up there.
+        runner = self._login_runner()
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=0) as run:
+            runner.run('sinfo', **kwargs)
+        assert run.call_args.args[0] == 'sinfo'
+
+    def test_marker_keeps_command_output_and_returncode(self):
+        runner = self._login_runner()
+
+        def run_in_bash(cmd, **kwargs):
+            del kwargs  # Unused.
+            proc = subprocess.run(['bash', '-c', f'echo banner; {cmd}'],
+                                  capture_output=True,
+                                  text=True,
+                                  check=False)
+            return proc.returncode, proc.stdout, proc.stderr
+
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               side_effect=run_in_bash):
+            assert runner.run(
+                "printf 'line1\\nline2\\n'; printf 'err' >&2; exit 3",
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True) == (3, 'line1\nline2\n', 'err')
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
@@ -1147,134 +1372,119 @@ class TestRsyncTimeout:
         assert len(calls) == 1
 
 
-def _extract_exclude_from_path(command: str):
-    """Return the path passed to rsync's --exclude-from, or None.
+class TestRemoteHomeDirLookup:
+    """Tests for resolving a `~` rsync path through get_remote_home_dir."""
 
-    The path is shell-quoted in the command, so tokenize with shlex to undo
-    any quoting before splitting off the value.
-    """
-    for token in shlex.split(command):
-        if token.startswith('--exclude-from='):
-            return token.split('=', 1)[1]
-    return None
+    @staticmethod
+    def _capture_rsync_commands():
+        commands = []
 
+        def fake_run_with_log(command, *args, **kwargs):
+            del args, kwargs  # Unused.
+            commands.append(command)
+            return 0, '', ''
 
-class TestRsyncSkyignoreExclude:
-    """The rsync up path computes the exclude list in Python (honoring
-    .skyignore '!' negation) and passes it to rsync via --exclude-from."""
+        return commands, fake_run_with_log
 
-    def _write_skyignore(self, src_dir, content: str) -> None:
-        skyignore = os.path.join(src_dir,
-                                 command_runner.constants.SKY_IGNORE_FILE)
-        with open(skyignore, 'w', encoding='utf-8') as f:
-            f.write(content)
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_ssh_default_home_dir_resolves_tilde_target(self, timeout) -> None:
+        """The SSH default callable must accept the per-attempt timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                 '/dev/null')
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/sky_workdir',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
 
-    def _run_up(self, src_dir):
-        """Run an up-sync with run_with_log mocked.
+        assert len(commands) == 1
+        assert "ubuntu@1.2.3.4:'~/sky_workdir'" in commands[0]
+        mock_sleep.assert_not_called()
 
-        Returns a dict capturing the rsync `command` and, while the temp file
-        still exists (i.e. inside the run_with_log call, before the finally
-        cleanup), the `exclude_path` and its `exclude_lines`.
+    @pytest.mark.parametrize('timeout', [None, 60])
+    def test_slurm_runner_resolves_tilde_target(self, timeout) -> None:
+        """Slurm passes its own home-dir callable; it must take the timeout."""
+        commands, fake_run_with_log = self._capture_rsync_commands()
+        runner = command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None)
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner.rsync('/tmp',
+                         '~/.sky/.runtime_files',
+                         up=True,
+                         stream_logs=False,
+                         timeout=timeout)
+
+        assert len(commands) == 1
+        assert '/home/alice/.sky_clusters/test/.sky/.runtime_files' in commands[
+            0]
+        mock_sleep.assert_not_called()
+
+    def test_lookup_retries_share_the_rsync_deadline(self) -> None:
+        """A wedged lookup cannot overshoot the rsync's total timeout.
+
+        Each lookup attempt gets only the remaining budget, and no new attempt
+        starts once the budget is spent, however large max_retry is.
         """
-        captured = {'exclude_path': None, 'exclude_lines': None}
+        lookup_timeouts = []
+
+        def wedged_lookup(timeout):
+            lookup_timeouts.append(timeout)
+            clock[0] += timeout  # The attempt burns its whole budget.
+            raise exceptions.CommandError(124, 'echo ~', 'timed out', None)
+
+        clock = [1000.0]
+        rsync_calls = []
 
         def fake_run_with_log(command, *args, **kwargs):
-            captured['command'] = command
-            path = _extract_exclude_from_path(command)
-            captured['exclude_path'] = path
-            if path is not None:
-                with open(path, encoding='utf-8') as f:
-                    captured['exclude_lines'] = f.read().splitlines()
+            del args, kwargs  # Unused.
+            rsync_calls.append(command)
             return 0, '', ''
 
-        with mock.patch.object(command_runner.log_lib,
-                               'run_with_log',
-                               side_effect=fake_run_with_log):
-            runner = command_runner.LocalProcessCommandRunner()
-            runner.rsync(str(src_dir), '/tmp/dst', up=True, stream_logs=False)
-        return captured
-
-    def test_negation_reincluded_file_not_excluded(self, tmp_path) -> None:
-        """A file re-included by '!' must not appear in the exclude file."""
-        (tmp_path / 'a.json').write_text('x')
-        (tmp_path / 'keep.json').write_text('x')
-        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
-
-        captured = self._run_up(tmp_path)
-
-        assert captured['exclude_path'] is not None
-        # Paths are anchored to the transfer root with a leading '/'.
-        assert '/a.json' in captured['exclude_lines']
-        assert '/keep.json' not in captured['exclude_lines']
-
-    def test_no_exclude_file_when_nothing_excluded(self, tmp_path) -> None:
-        """With nothing to exclude, no --exclude-from is passed and no temp
-        file is left behind."""
-        (tmp_path / 'a.json').write_text('x')
-        # An empty .skyignore excludes nothing; using .skyignore avoids the
-        # gitignore path needing a real git repo.
-        self._write_skyignore(tmp_path, '')
-
-        captured = self._run_up(tmp_path)
-
-        assert captured['exclude_path'] is None
-        assert '--exclude-from' not in captured['command']
-
-    def test_exclude_file_cleaned_up_on_success(self, tmp_path) -> None:
-        """The temp exclude file is removed after rsync finishes."""
-        (tmp_path / 'a.json').write_text('x')
-        self._write_skyignore(tmp_path, '*.json\n')
-
-        captured = self._run_up(tmp_path)
-
-        assert captured['exclude_path'] is not None
-        assert not os.path.exists(captured['exclude_path'])
-
-    def test_exclude_file_cleaned_up_on_unexpected_error(self,
-                                                         tmp_path) -> None:
-        """Even if rsync raises an unexpected error, the finally block removes
-        the temp exclude file (no leak)."""
-        (tmp_path / 'a.json').write_text('x')
-        self._write_skyignore(tmp_path, '*.json\n')
-
-        seen = {'path': None}
-
-        def fake_run_with_log(command, *args, **kwargs):
-            seen['path'] = _extract_exclude_from_path(command)
-            raise RuntimeError('boom')
+        def fake_sleep(seconds):
+            clock[0] += seconds
 
         with mock.patch.object(command_runner.log_lib,
                                'run_with_log',
-                               side_effect=fake_run_with_log):
-            runner = command_runner.LocalProcessCommandRunner()
-            with pytest.raises(RuntimeError):
-                runner.rsync(str(tmp_path),
-                             '/tmp/dst',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time,
+                               'sleep',
+                               side_effect=fake_sleep), \
+             mock.patch.object(command_runner.time,
+                               'monotonic',
+                               side_effect=lambda: clock[0]):
+            runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'ubuntu',
+                                                     '/dev/null')
+            with pytest.raises(exceptions.CommandError):
+                runner.rsync('/tmp',
+                             '~/sky_workdir',
                              up=True,
-                             stream_logs=False)
+                             stream_logs=False,
+                             max_retry=5,
+                             get_remote_home_dir=wedged_lookup,
+                             timeout=30)
 
-        assert seen['path'] is not None
-        assert not os.path.exists(seen['path'])
+        # The first attempt used the whole 30s budget, so no retry started,
+        # and the rsync itself never ran.
+        assert lookup_timeouts == [30]
+        assert clock[0] - 1000.0 <= 30
+        assert not rsync_calls
 
-    def test_down_sync_does_not_compute_excludes(self, tmp_path) -> None:
-        """The exclude logic is up-only; a down-sync passes no --exclude-from
-        even when a .skyignore is present at the (local) source path."""
-        (tmp_path / 'a.json').write_text('x')
-        self._write_skyignore(tmp_path, '*.json\n')
 
-        captured = {'command': None}
-
-        def fake_run_with_log(command, *args, **kwargs):
-            captured['command'] = command
-            return 0, '', ''
-
-        with mock.patch.object(command_runner.log_lib,
-                               'run_with_log',
-                               side_effect=fake_run_with_log):
-            runner = command_runner.LocalProcessCommandRunner()
-            runner.rsync(str(tmp_path), '/tmp/dst', up=False, stream_logs=False)
-
-        assert '--exclude-from' not in captured['command']
 class TestInlineCommandLimit:
     """Inline-vs-upload decision, per runner transport."""
 
@@ -1297,18 +1507,17 @@ class TestInlineCommandLimit:
 
     @pytest.mark.parametrize('slurm_user,via_srun,expected', [
         (None, False, 2),
-        ('alice', False, 3),
+        ('alice', False, 2),
         (None, True, 3),
-        ('alice', True, 4),
+        ('alice', True, 3),
     ])
     def test_slurm_quote_levels(self, slurm_user, via_srun, expected):
-        # srun adds a `bash -c` shell and a slurm_user adds a `su --command`
-        # one; each layer re-quotes the payload.
+        # srun adds a `bash -c` shell that re-quotes the payload.
         runner = self._slurm_runner(slurm_user, via_srun)
         assert runner._inline_command_quote_levels() == expected
 
-    def test_slurm_user_quoting_pushes_command_over_limit(self):
-        # A command that fits at 2 quote levels but not at 4.
+    def test_srun_quoting_pushes_command_over_limit(self):
+        # A command that fits at 2 quote levels but not at 3.
         command = "a'b" * 5000
         assert not self._slurm_runner(
             None, False).is_command_length_over_limit(command)
@@ -1371,3 +1580,547 @@ class TestInlineCommandLimit:
         assert limit('ssh-other') == 20480
         # A real Kubernetes context still reads the kubernetes block.
         assert limit('gke-x') == 8192
+
+
+@pytest.mark.skipif(shutil.which('rsync') is None, reason='rsync is required')
+@pytest.mark.parametrize('source_name', ['source with spaces', '작업폴더', '작업 폴더'])
+@pytest.mark.parametrize('with_excludes', [False, True])
+def test_rsync_skyignore_with_source_path_characters(tmp_path, monkeypatch,
+                                                     source_name,
+                                                     with_excludes) -> None:
+    """Real rsync must preserve spaces and Unicode in paths and file contents."""
+    source = tmp_path / source_name
+    source.mkdir()
+    target = tmp_path / '전송 대상'
+    target.mkdir()
+    # Exercise quoting of any generated filter file as well as the source.
+    filter_dir = tmp_path / '임시 필터'
+    filter_dir.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+    skyignore = '*.json\n!keep.json\n' if with_excludes else ''
+    (source / '.skyignore').write_text(skyignore, encoding='utf-8')
+    (source / 'keep.json').write_text('재포함할 내용', encoding='utf-8')
+    (source / 'excluded.json').write_text('제외할 내용', encoding='utf-8')
+    nested = source / '하위 폴더'
+    nested.mkdir()
+    (nested / '일반 파일.txt').write_text('전송할 내용', encoding='utf-8')
+
+    runner = command_runner.LocalProcessCommandRunner()
+    runner.rsync(str(source), str(target), up=True, stream_logs=False)
+
+    expected = {'.skyignore', 'keep.json', '하위 폴더/일반 파일.txt'}
+    if not with_excludes:
+        expected.add('excluded.json')
+    actual = {
+        path.relative_to(target).as_posix()
+        for path in target.rglob('*')
+        if path.is_file()
+    }
+    assert actual == expected
+    for relative_path in expected:
+        assert (target /
+                relative_path).read_bytes() == (source /
+                                                relative_path).read_bytes()
+    assert not list(filter_dir.iterdir())
+
+
+@pytest.mark.skipif(shutil.which('rsync') is None, reason='rsync is required')
+@pytest.mark.skipif(shutil.which('git') is None, reason='git is required')
+class TestRsyncIgnoreRegression:
+    """Check ignore behavior using actual transfers, not generated commands."""
+
+    @pytest.fixture(autouse=True)
+    def isolate_git_config(self, tmp_path, monkeypatch):
+        """Keep the developer's Git ignore configuration out of these tests."""
+        global_config = tmp_path / 'gitconfig'
+        global_config.write_text('', encoding='utf-8')
+        monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(global_config))
+        monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+        for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                     'GIT_CONFIG_COUNT'):
+            monkeypatch.delenv(name, raising=False)
+
+    @staticmethod
+    def _write(root, relative_path, content='payload'):
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+
+    @staticmethod
+    def _git(root, *args):
+        subprocess.run(['git', '-C', str(root), *args],
+                       check=True,
+                       capture_output=True)
+
+    @staticmethod
+    def _sync(source, target, *, up=True, **kwargs):
+        target.mkdir()
+        command_runner.LocalProcessCommandRunner().rsync(str(source),
+                                                         str(target),
+                                                         up=up,
+                                                         stream_logs=False,
+                                                         **kwargs)
+        # Upload copies the contents; local download copies the source folder.
+        return target if up else target / source.name
+
+    @pytest.mark.parametrize('pattern,ignored', [
+        ('*.key', '.certs/prod.key'),
+        ('*.js', '[volume].js'),
+        ('*.bak', 'data*.bak'),
+        ('*.bak', 'data?.bak'),
+    ])
+    def test_hidden_and_literal_filenames_are_excluded(self, tmp_path, pattern,
+                                                       ignored):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', pattern + '\n!keep.txt\n')
+        self._write(source, ignored)
+        self._write(source, 'keep.txt')
+        if ignored in ('data*.bak', 'data?.bak'):
+            self._write(source, '.skyignore', pattern + '\n!dataX.bak\n')
+            self._write(source, 'dataX.bak')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / ignored).exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+        if ignored in ('data*.bak', 'data?.bak'):
+            assert (target / 'dataX.bak').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignored,kept', [
+        pytest.param(r'private\name.txt', r'keep\name.txt', id='backslash'),
+        pytest.param('private\nname.txt', 'keep\nname.txt', id='newline'),
+    ])
+    @pytest.mark.parametrize('with_negation', [False, True])
+    def test_special_filename_characters(self, tmp_path, ignored, kept,
+                                         with_negation):
+        """Match unusual filenames without serializing them into filter rules."""
+        source = tmp_path / 'source'
+        rules = ('*.txt*\n!*keep*.txt*\n'
+                 if with_negation else '*private*.txt*\n')
+        self._write(source, '.skyignore', rules)
+        self._write(source, ignored, 'must not be transferred')
+        self._write(source, kept, 'special filename contents')
+        self._write(source, 'keep.txt', 'ordinary filename contents')
+        self._write(source, 'control.csv', 'unmatched file contents')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        expected = {'.skyignore', kept, 'keep.txt', 'control.csv'}
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*')
+            if path.is_file()
+        }
+        assert actual == expected
+        for relative_path in expected:
+            assert (target /
+                    relative_path).read_bytes() == (source /
+                                                    relative_path).read_bytes()
+
+    @pytest.mark.parametrize('filename', [
+        pytest.param('한글 자료.txt', id='korean-with-space'),
+        pytest.param('자료\u2028이름.txt', id='unicode-line-separator'),
+    ])
+    @pytest.mark.parametrize('reinclude', [False, True])
+    @pytest.mark.parametrize('via_zip', [False, True])
+    def test_literal_skyignore_patterns_preserve_filename(
+            self, tmp_path, filename, reinclude, via_zip):
+        """Preserve literal pattern bytes through ZIP and rsync uploads."""
+        source = tmp_path / 'source'
+        rules = ('*.txt*\n!' + filename + '\n' if reinclude else filename +
+                 '\n!control.csv\n')
+        self._write(source, filename, 'special file contents')
+        self._write(source, '자료.txt', 'ordinary file contents')
+        self._write(source, 'control.csv', 'control file contents')
+        (source / '.skyignore').write_bytes(rules.encode('utf-8'))
+
+        if via_zip:
+            archive = tmp_path / 'upload.zip'
+            storage_utils.zip_files_and_folders([str(source)],
+                                                archive,
+                                                relative_to_items=True)
+            with zipfile.ZipFile(archive) as zipf:
+                zipf.extractall(tmp_path / 'server')
+            staged = tmp_path / 'server' / source.name
+        else:
+            staged = source
+        target = self._sync(staged, tmp_path / 'target')
+
+        expected = {'.skyignore', 'control.csv'}
+        expected.add(filename if reinclude else '자료.txt')
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*')
+            if path.is_file()
+        }
+        assert actual == expected
+        for relative_path in expected:
+            assert (target /
+                    relative_path).read_bytes() == (source /
+                                                    relative_path).read_bytes()
+
+    def test_crlf_with_unterminated_last_rule(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, 'private.txt')
+        self._write(source, 'keep.txt')
+        (source / '.skyignore').write_bytes(b'*.txt\r\n!keep.txt')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.txt').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('with_negation', [False, True])
+    def test_non_utf8_comment_does_not_break_rsync(self, tmp_path,
+                                                   with_negation):
+        source = tmp_path / 'source'
+        self._write(source, 'private.txt')
+        self._write(source, 'keep.txt')
+        rules = b'# legacy comment: \xff\nprivate.txt\n'
+        if with_negation:
+            rules += b'!keep.txt\n'
+        (source / '.skyignore').write_bytes(rules)
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.txt').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_nested_skyignore_is_honored(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '')
+        self._write(source, 'svc/.skyignore', '*.txt\n')
+        self._write(source, 'svc/private.txt')
+        self._write(source, 'svc/keep.csv')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'svc/private.txt').exists()
+        assert (target / 'svc/keep.csv').read_text() == 'payload'
+
+    @pytest.mark.parametrize('rules,included', [
+        ('*.json\n!keep.json\n', True),
+        ('*.json\n!keep.json\n*.json\n', False),
+        ('*.json\n!keep.json\nkeep.json\n', False),
+    ])
+    def test_last_matching_rule_wins(self, tmp_path, rules, included):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'keep.json').exists() == included
+        assert not (target / 'private.json').exists()
+
+    @pytest.mark.parametrize('rules,keep,other', [
+        ('data/\n!data/keep.json\n', False, False),
+        ('data/*\n!data/keep.json\n', True, False),
+        ('data/\n!data/\n', True, True),
+    ])
+    def test_directory_reinclusion(self, tmp_path, rules, keep, other):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        self._write(source, 'data/keep.json')
+        self._write(source, 'data/other.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'data/keep.json').exists() == keep
+        assert (target / 'data/other.json').exists() == other
+
+    @pytest.mark.parametrize('rules,expected', [
+        ('data/**\n!data/keep.json\n', {'data/keep.json'}),
+        ('data/\n!data/keep.json\n', set()),
+        ('data/**\n!data/keep.json\ndata/keep.json\n', set()),
+        ('data/**\n!data/sub/keep.json\n', set()),
+        ('data/**\n!data/**\n',
+         {'data/keep.json', 'data/private.json', 'data/sub/keep.json'}),
+        ('data/\n!data/**\n', set()),
+    ])
+    @pytest.mark.parametrize('via_zip', [False, True])
+    def test_recursive_directory_reinclusion(self, tmp_path, rules, expected,
+                                             via_zip):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        for filename in ('data/keep.json', 'data/private.json',
+                         'data/sub/keep.json'):
+            self._write(source, filename)
+
+        if via_zip:
+            archive = tmp_path / 'upload.zip'
+            storage_utils.zip_files_and_folders([str(source)],
+                                                archive,
+                                                relative_to_items=True)
+            with zipfile.ZipFile(archive) as zipf:
+                zipf.extractall(tmp_path / 'server')
+            source = tmp_path / 'server' / source.name
+
+        target = self._sync(source, tmp_path / 'target')
+
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*.json')
+            if path.is_file()
+        }
+        assert actual == expected
+
+    def test_root_rules_take_precedence_over_nested_rules(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.txt\n!svc/keep.txt\n')
+        self._write(source, 'svc/.skyignore', '*.txt\n*.csv\n')
+        self._write(source, 'svc/keep.txt')
+        self._write(source, 'svc/private.txt')
+        self._write(source, 'svc/private.csv')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'svc/keep.txt').read_text() == 'payload'
+        assert not (target / 'svc/private.txt').exists()
+        assert not (target / 'svc/private.csv').exists()
+
+    def test_skyignore_overrides_gitignore(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, '.gitignore', 'keep.json\n')
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'keep.json').read_text() == 'payload'
+        assert not (target / 'private.json').exists()
+
+    def test_zip_then_rsync_preserves_reincluded_file(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+        archive = tmp_path / 'upload.zip'
+        storage_utils.zip_files_and_folders([str(source)],
+                                            archive,
+                                            relative_to_items=True)
+        extracted = tmp_path / 'server'
+        with zipfile.ZipFile(archive) as zipf:
+            zipf.extractall(extracted)
+        staged = extracted / source.name
+        assert (staged / '.skyignore').is_file()
+        assert (staged / 'keep.json').is_file()
+        assert not (staged / 'private.json').exists()
+
+        target = self._sync(staged, tmp_path / 'target')
+
+        assert (target / 'keep.json').read_text() == 'payload'
+        assert not (target / 'private.json').exists()
+
+    def test_gitignore_without_repository(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.gitignore', 'data/\n')
+        self._write(source, 'data/private.txt')
+        self._write(source, 'keep.txt')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'data').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignore_location', ['parent', 'global'])
+    def test_git_rules_outside_source_do_not_exclude_files(
+            self, tmp_path, ignore_location):
+        repo = tmp_path / 'repo'
+        source = repo / 'source'
+        self._write(source, 'results.log')
+        # Keep Git from collapsing a wholly ignored source into './'.
+        self._write(source, 'keep.txt')
+        self._git(repo, 'init', '-q')
+        if ignore_location == 'parent':
+            self._write(repo, '.gitignore', '*.log\n')
+        else:
+            self._write(tmp_path, 'global-ignore', '*.log\n')
+            self._git(repo, 'config', '--global', 'core.excludesFile',
+                      str(tmp_path / 'global-ignore'))
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'results.log').read_text() == 'payload'
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_corrupt_git_index_does_not_break_transfer(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.gitignore', '*.log\n')
+        self._write(source, 'private.log')
+        self._write(source, 'keep.txt')
+        self._git(source, 'init', '-q')
+        self._write(source, '.git/index', 'invalid index')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.log').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_source_git_info_exclude_is_honored(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, 'private.log')
+        self._write(source, 'keep.txt')
+        self._git(source, 'init', '-q')
+        self._write(source, '.git/info/exclude', '*.log\n')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.log').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignore_file', ['.skyignore', '.gitignore'])
+    def test_download_honors_ignore_file(self, tmp_path, ignore_file):
+        source = tmp_path / 'source'
+        self._write(source, ignore_file, '*.key\n')
+        self._write(source, 'private.key')
+        self._write(source, 'keep.txt')
+
+        target = self._sync(source, tmp_path / 'target', up=False)
+
+        assert not (target / 'private.key').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_invalid_retry_count_does_not_leak_filter(self, tmp_path,
+                                                      monkeypatch):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'private.json')
+        filter_dir = tmp_path / 'filters'
+        filter_dir.mkdir()
+        monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+        with pytest.raises((AssertionError, ValueError)):
+            self._sync(source, tmp_path / 'target', max_retry=0)
+
+        assert not list(filter_dir.iterdir())
+
+    def test_missing_filter_does_not_mask_transfer_error(
+            self, tmp_path, monkeypatch):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'private.json')
+        filter_dir = tmp_path / 'filters'
+        filter_dir.mkdir()
+        monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+        def fail_transfer(*args, **kwargs):
+            del args, kwargs
+            for path in filter_dir.rglob('*'):
+                if path.is_file():
+                    path.unlink()
+            raise RuntimeError('original transfer error')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fail_transfer):
+            with pytest.raises(RuntimeError, match='original transfer error'):
+                self._sync(source, tmp_path / 'target')
+
+
+def _extract_skyignore_filter_path(command: str):
+    """Return the path passed to rsync's merge filter, or None.
+
+    The path is shell-quoted in the command, so tokenize with shlex to undo
+    any quoting before splitting off the value.
+    """
+    for token in shlex.split(command):
+        if token.startswith('--filter=merge '):
+            return token[len('--filter=merge '):]
+    return None
+
+
+class TestRsyncSkyignoreFilter:
+    """Check translated filter contents and lifetime around rsync attempts."""
+
+    def _write_skyignore(self, src_dir, content: str) -> None:
+        skyignore = os.path.join(src_dir,
+                                 command_runner.constants.SKY_IGNORE_FILE)
+        with open(skyignore, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _run_up(self, src_dir):
+        """Run an up-sync with run_with_log mocked.
+
+        Returns a dict capturing the rsync `command` and, while the temp file
+        still exists (i.e. inside the run_with_log call, before the finally
+        cleanup), the `filter_path` and its `filter_lines`.
+        """
+        captured = {'filter_path': None, 'filter_lines': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['command'] = command
+            path = _extract_skyignore_filter_path(command)
+            captured['filter_path'] = path
+            if path is not None:
+                with open(path, encoding='utf-8') as f:
+                    captured['filter_lines'] = f.read().splitlines()
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(str(src_dir), '/tmp/dst', up=True, stream_logs=False)
+        return captured
+
+    def test_negation_precedes_exclude_rule(self, tmp_path) -> None:
+        """Include rules precede the patterns they override in the merge file."""
+        (tmp_path / 'a.json').write_text('x')
+        (tmp_path / 'keep.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is not None
+        assert captured['filter_lines'] == ['+ keep.json', '- *.json']
+
+    def test_no_filter_file_when_nothing_excluded(self, tmp_path) -> None:
+        """With nothing to exclude, no merge filter is passed and no temp
+        file is left behind."""
+        (tmp_path / 'a.json').write_text('x')
+        # An empty .skyignore excludes nothing; using .skyignore avoids the
+        # gitignore path needing a real git repo.
+        self._write_skyignore(tmp_path, '')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is None
+        assert '--filter=merge ' not in captured['command']
+
+    def test_filter_file_cleaned_up_on_success(self, tmp_path) -> None:
+        """The temporary filter file is removed after rsync finishes."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is not None
+        assert not os.path.exists(captured['filter_path'])
+
+    def test_filter_file_cleaned_up_on_unexpected_error(self, tmp_path) -> None:
+        """An unexpected rsync error also cleans up the temporary filter."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        seen = {'path': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            seen['path'] = _extract_skyignore_filter_path(command)
+            raise RuntimeError('boom')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(RuntimeError):
+                runner.rsync(str(tmp_path),
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False)
+
+        assert seen['path'] is not None
+        assert not os.path.exists(seen['path'])

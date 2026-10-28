@@ -331,6 +331,12 @@ To create a private workspace, set the ``private`` field to ``true`` in the work
 Private workspaces can only be accessed by admins or the users in the ``allowed_users`` list. For
 users who cannot access the workspace, they cannot see/access/operate on the workspace or the resources in the workspace.
 
+The same applies to infrastructure: a non-admin user can only read GPU and node
+information (for example, ``sky gpus list`` and the dashboard's Infra page) for the
+Kubernetes contexts, SSH Node Pools and Slurm clusters allowed by the workspaces
+they can see (``allowed_contexts``, ``allowed_node_pools`` and ``allowed_clusters``).
+Any other context or cluster is reported as not found.
+
 .. note::
 
    The ``allowed_users`` field can be a list of user names or IDs. Note, if you
@@ -410,6 +416,24 @@ service account by its token name, just like a human user:
    ``user`` role (in the dashboard's **Users** page under the service accounts
    tab, or via the ``/service-account-tokens/update-role`` API), then add it to
    the ``allowed_users`` of the workspaces it should reach.
+
+Who appears in the user list
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admins see every user. Everyone else sees themselves and the members of every
+workspace they can read: the workspaces whose clusters and jobs they can see.
+A public workspace counts as having everyone as a member, so a user who can
+read one sees every user. A private workspace with ``read_access: all`` adds
+only its ``allowed_users``.
+
+To keep the list scoped, make every workspace private, including ``default``,
+and add each user only to the workspaces they need. A user whose request does
+not name a workspace then lands in their preferred workspace, or their only
+workspace. A user in several workspaces must pick one with
+``sky workspace use <name>``, or each such request fails as ambiguous.
+A user who is in no workspace and can read none is refused everything. To let
+them still run read requests such as ``sky status``, but not launch, also set
+``read_access: all`` on ``default``.
 
 User management
 ----------------

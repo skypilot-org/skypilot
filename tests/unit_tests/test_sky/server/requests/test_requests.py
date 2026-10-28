@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
 import time
 from typing import List, Optional
@@ -11,7 +12,10 @@ import filelock
 import pytest
 
 from sky import core
+from sky import sky_logging
 from sky.server import constants as server_constants
+from sky.server import daemons
+from sky.server.blob import blob_storage as requests_bs
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
@@ -31,17 +35,22 @@ def isolated_database(tmp_path):
     temp_db_path = tmp_path / "requests.db"
     temp_log_path = tmp_path / "logs"
     temp_log_path.mkdir()
+    temp_debug_log_path = tmp_path / "debug_logs"
+    temp_debug_log_path.mkdir()
 
     # Patch the database path and log path constants
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
         with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
-            # Reset the global database variable to force re-initialization
-            requests._DB = None
-            yield
-            # Clean up after the test
-            requests._DB = None
+            with mock.patch('sky.sky_logging.DEBUG_LOG_DIR',
+                            str(temp_debug_log_path)):
+                # Reset the global database variable to force
+                # re-initialization
+                requests._DB = None
+                yield
+                # Clean up after the test
+                requests._DB = None
 
 
 @pytest.mark.asyncio
@@ -680,6 +689,125 @@ async def test_clean_finished_requests_cleans_both_paths(
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None
+
+
+@pytest.mark.asyncio
+async def test_clean_orphan_request_logs(isolated_database):
+    """Test that log files whose request row is gone are reclaimed."""
+    current_time = time.time()
+    # Older than the grace period the sweep applies to the age cutoff.
+    stale_mtime = current_time - 10 * requests_bs.GC_GRACE_SECONDS
+
+    live_request = requests.Request(request_id='live-req',
+                                    name='test-request',
+                                    entrypoint=dummy,
+                                    request_body=payloads.RequestBody(),
+                                    status=RequestStatus.RUNNING,
+                                    created_at=stale_mtime,
+                                    user_id='test-user')
+    await requests.create_if_not_exists_async(live_request)
+
+    request_log_dir, debug_log_dir = requests.request_log_dirs()
+
+    # No request row: the files to reclaim. The same request ID in both
+    # directories exercises the grouping of a request's files.
+    orphans = [
+        request_log_dir / 'orphan-req.log', debug_log_dir / 'orphan-req.log'
+    ]
+    for orphan in orphans:
+        orphan.write_text('orphan')
+        os.utime(orphan, (stale_mtime, stale_mtime))
+
+    # Stale, but the request is still in the database.
+    live = request_log_dir / 'live-req.log'
+    live.write_text('live')
+    os.utime(live, (stale_mtime, stale_mtime))
+    # No request row, but written within the grace period.
+    fresh = request_log_dir / 'fresh-req.log'
+    fresh.write_text('fresh')
+    # A running internal daemon's log, which can go a long time without a
+    # write and has no row of its own on a replica that skips it.
+    daemon_log = (request_log_dir /
+                  f'{daemons.INTERNAL_REQUEST_DAEMONS[0].id}.log')
+    daemon_log.write_text('daemon')
+    os.utime(daemon_log, (stale_mtime, stale_mtime))
+    # Not a log file.
+    lock = request_log_dir / '.orphan-req.lock'
+    lock.write_text('')
+    os.utime(lock, (stale_mtime, stale_mtime))
+    kept = [live, fresh, daemon_log, lock]
+
+    with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+        await requests.clean_finished_requests_with_retention(60)
+
+    for path in orphans:
+        assert not path.exists(), f'{path} should have been reclaimed'
+    for path in kept:
+        assert path.exists(), f'{path} should have been kept'
+
+    messages = [call[0][0] for call in mock_logger.info.call_args_list]
+    assert any('Cleaned up 2 orphan request log file(s)' in message
+               for message in messages), messages
+
+
+@pytest.mark.asyncio
+async def test_clean_orphan_request_logs_many_files(isolated_database):
+    """Test reclaiming more orphans than fit in one existence query."""
+    stale_mtime = time.time() - 10 * requests_bs.GC_GRACE_SECONDS
+    count = 2 * requests._ORPHAN_LOG_QUERY_CHUNK_SIZE + 1
+    log_dir = requests.request_log_dirs()[0]
+    for i in range(count):
+        path = log_dir / f'orphan-{i}.log'
+        path.write_text('x')
+        os.utime(path, (stale_mtime, stale_mtime))
+
+    await requests.clean_finished_requests_with_retention(60)
+
+    assert not list(log_dir.glob('orphan-*.log'))
+
+
+def test_list_stale_log_files_missing_dir(tmp_path):
+    """Test that a missing log directory yields nothing, not an error."""
+    assert requests._list_stale_log_files(tmp_path / 'gone', time.time()) == []
+
+
+@pytest.mark.asyncio
+async def test_request_task_filter_request_ids(isolated_database):
+    """Test filtering requests by request ID."""
+    for request_id in ['req-a', 'req-b', 'req-c']:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=request_id,
+                             name='test-request',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=time.time(),
+                             user_id='test-user'))
+
+    found = await requests.get_request_tasks_async(
+        req_filter=requests.RequestTaskFilter(request_ids=['req-a', 'req-c'],
+                                              fields=['request_id']))
+    assert {req.request_id for req in found} == {'req-a', 'req-c'}
+
+    found = await requests.get_request_tasks_async(
+        req_filter=requests.RequestTaskFilter(request_ids=[]))
+    assert not found
+
+
+def test_reset_db_and_logs_clears_debug_log_dir(isolated_database, tmp_path):
+    """Test that startup clears the request debug log directory."""
+    debug_log = pathlib.Path(sky_logging.DEBUG_LOG_DIR) / 'stale-req.log'
+    debug_log.write_text('stale')
+
+    with mock.patch('sky.server.common.clear_local_api_server_database'), \
+         mock.patch('sky.server.blob.blob_storage.get_blob_storage'), \
+         mock.patch('sky.server.requests.storage.get_request_backend'), \
+         mock.patch(
+             'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+             str(tmp_path / 'legacy_logs')):
+        requests.reset_db_and_logs()
+
+    assert not debug_log.exists()
 
 
 @pytest.mark.asyncio

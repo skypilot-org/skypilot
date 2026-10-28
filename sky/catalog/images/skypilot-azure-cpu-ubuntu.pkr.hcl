@@ -1,3 +1,9 @@
+variable "skypilot_src" {
+  type        = string
+  default     = ""
+  description = "pip source to bake SkyPilot from, e.g. git+https://github.com/skypilot-org/skypilot@<sha>. Empty uses the latest skypilot-nightly."
+}
+
 variable "client_secret" {
   type        = string
   description = "The client secret for the packer client registered in Azure (see Azure app registration)"
@@ -62,6 +68,7 @@ build {
   provisioner "shell" {
     environment_vars = [
       "CLOUD=azure",
+      "SKYPILOT_SRC=${var.skypilot_src}",
     ]
     script = "./provisioners/skypilot.sh"
   }

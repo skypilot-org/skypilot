@@ -429,6 +429,27 @@ def kubernetes_label_gpus(
     return server_common.get_request_id(response)
 
 
+def _omit_job_section_for_older_server(dag: 'sky.Dag') -> None:
+    """Drops the tasks' `job:` section if the server predates it.
+
+    An older server rejects the unknown key. `job:` only affects managed
+    jobs, whose launch refuses such a server before reaching here (see
+    sky/jobs/client/sdk.py), so nothing is lost.
+    """
+    if not any(task.job for task in dag.tasks):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    min_version = (
+        server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)
+    if remote_api_version is not None and remote_api_version >= min_version:
+        return
+    for task in dag.tasks:
+        # pylint: disable=protected-access
+        task._job = {}
+    logger.debug('`job` is ignored because the server does not support it '
+                 'yet.')
+
+
 def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
     if not any(
             isinstance(volume_config, dict) and 'host_path' in volume_config
@@ -475,6 +496,7 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -590,7 +612,10 @@ def _raise_exception_object_on_client(e: BaseException) -> None:
 def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _skip_local_paths: bool = False,
 ) -> None:
     """Validates the tasks.
 
@@ -606,6 +631,10 @@ def validate(
         admin_policy_request_options: Request options used for admin policy
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+        _skip_local_paths: Do not check the workdir and file mount sources on
+            this machine. For callers whose sources are API server paths
+            inside an upload blob; the server resolves the blob and checks
+            the paths when it runs the request.
     """
     _check_slurm_host_path_volume_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
@@ -627,9 +656,10 @@ def validate(
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
             task._user_specified_yaml = None
-        task.expand_and_validate_workdir()
-        if not workdir_only:
-            task.expand_and_validate_file_mounts()
+        if not _skip_local_paths:
+            task.expand_and_validate_workdir()
+            if not workdir_only:
+                task.expand_and_validate_file_mounts()
         if omit_local_disk:
             for resource in task.resources:
                 # pylint: disable=protected-access
@@ -664,6 +694,10 @@ def validate(
                 resource._max_hourly_cost = None
             logger.debug('`max_hourly_cost` is ignored because the server '
                          'does not support it yet.')
+
+    # Also covers launch() and exec(), which validate the DAG before they
+    # send it.
+    _omit_job_section_for_older_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -710,7 +744,6 @@ def launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -897,7 +930,6 @@ def launch(
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
             _file_mounts_blob_id,
             _extra_launch_context,
             _include_credentials,
@@ -923,7 +955,6 @@ def _launch(
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _include_credentials: bool = False,
@@ -931,7 +962,13 @@ def _launch(
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
 
-    validate(dag, admin_policy_request_options=request_options)
+    # A caller that passes a blob (a jobs or serve controller) sends sources
+    # that are paths inside that blob on the API server. They may not exist on
+    # this host: the server extracts the blob on whichever host handles the
+    # request and checks the paths there.
+    validate(dag,
+             admin_policy_request_options=request_options,
+             _skip_local_paths=_file_mounts_blob_id is not None)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.
@@ -940,7 +977,7 @@ def _launch(
     confirm_shown = False
     if _need_confirmation:
         cluster_status = None
-        # TODO(SKY-998): we should reduce RTTs before launching the cluster.
+        # TODO: we should reduce RTTs before launching the cluster.
         status_request_id = status([cluster_name], all_users=True)
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
@@ -1071,7 +1108,6 @@ def _launch(
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
-        disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
         resize=resize,
         extra_launch_context=_extra_launch_context or {},
@@ -1804,6 +1840,40 @@ def queue(
     )
     response = server_common.make_authenticated_request(
         'POST', '/queue', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(67)
+@annotations.client_api
+def cluster_job_spec(
+        cluster_name: str,
+        job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        The request ID of the cluster job spec request.
+
+    Request Returns:
+        spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+            the job's spec was not recorded (e.g. it was submitted by an older
+            API server version), otherwise:
+
+            .. code-block:: python
+
+                {
+                    'task_yaml': (str) the task YAML, with secrets redacted,
+                    'entrypoint': (str) the command that submitted the job,
+                }
+    """
+    body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
+    response = server_common.make_authenticated_request(
+        'POST', '/cluster_job_spec', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -2585,10 +2655,17 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
                silent: bool = False) -> server_common.RequestId[List[str]]:
     """Aborts a request or all requests.
 
+    With neither request_ids nor all_users, aborts all of the caller's own
+    requests.
+
     Args:
         request_ids: The request ID(s) to abort. Can be a single string or a
-            list of strings.
-        all_users: Whether to abort all requests from all users.
+            list of strings. On a server with per-user auth, an admin can
+            abort any request by id and other users only their own; on a
+            server without it, anyone can abort any request by id.
+        all_users: Whether to abort all requests from all users. On a server
+            with per-user auth, a non-admin aborts only their own. Cannot be
+            combined with request_ids.
         silent: Whether to suppress the output.
 
     Returns:
@@ -2598,10 +2675,13 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
         A list of request IDs that were cancelled.
 
     Raises:
-        click.BadParameter: If no request ID is specified and not all or
-            all_users is not set.
+        ValueError: If both request_ids and all_users are given.
     """
     echo = logger.info if not silent else logger.debug
+    # Same rule as `sky api cancel`: ids name what to cancel, all_users means
+    # every request, so asking for both is ambiguous.
+    if request_ids is not None and all_users:
+        raise ValueError('Can only specify one of request_ids or all_users.')
     user_id = None
     if not all_users:
         user_id = common_utils.get_user_hash()
@@ -2685,7 +2765,9 @@ def api_status(
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
-        fields: The fields to get. If None, get all fields.
+        fields: The fields to get. If None, get all fields except
+            return_value and error. This argument is ignored if request_ids
+            is not None.
         cluster_name: Filter requests by cluster name.
             If None, show all requests.
 
@@ -3121,6 +3203,77 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
     return _validate_endpoint(env_endpoint), True
 
 
+# Kept short: all the probe needs to learn is whether the edge redirects, and
+# a server too slow to say so is the regular health check's story to tell.
+_REDIRECT_PROBE_TIMEOUT_SECONDS = 2.5
+
+
+def _detect_https_redirect(endpoint: str) -> Optional[str]:
+    """Returns the HTTPS endpoint an ``http://`` one redirects to, if any.
+
+    An API server behind an ingress that force-redirects HTTP to HTTPS is a
+    silent trap. ``/api/health`` is a GET, so it follows the redirect intact
+    and ``sky api info`` reports the server as HEALTHY -- but every POST-based
+    command is turned into a GET by that same redirect (dropping the method and
+    body on a 301/302 is what every mainstream HTTP client does) and comes back
+    as an opaque ``405 Method Not Allowed``. Secure session cookies are
+    withheld from a plain-HTTP request too, so SSO auth silently does not apply
+    either. The result is a server that looks healthy while nothing works.
+
+    Login is the cheap place to catch this: the endpoint has not been persisted
+    yet and nothing has been authenticated against it.
+
+    Best-effort -- returns None on any failure and leaves the regular health
+    check to report an unreachable or unhealthy server.
+    """
+    parsed = urlparse.urlparse(endpoint)
+    if parsed.scheme != 'http':
+        return None
+    # Probe with a bare request rather than `make_authenticated_request` /
+    # `get_api_server_status_response`, on both counts deliberately:
+    #   * Unauthenticated. This runs before `api_login` has settled which
+    #     credential the login uses, so an authenticated probe would send
+    #     whatever token is left over in the config -- one issued for whatever
+    #     server was configured before -- to this endpoint, in cleartext. The
+    #     OAuth path hides that residual token from its own requests for
+    #     exactly this reason; the probe must not undo that. Credentials
+    #     embedded in the endpoint are dropped for the same reason.
+    #   * Uncached. `get_api_server_status_response` memoizes on the endpoint
+    #     for 5s, so priming it here would hand that pre-authentication
+    #     response straight to the health check that is meant to validate a
+    #     newly supplied service-account token.
+    # Only the redirect chain is read; the status code is never consulted, so
+    # the 401 an unauthenticated probe collects is fine.
+    probe_url = urlparse.urlunparse(('http', parsed.netloc.rsplit('@', 1)[-1],
+                                     f'{parsed.path}/api/health', '', '', ''))
+    try:
+        response = requests.get(probe_url,
+                                timeout=_REDIRECT_PROBE_TIMEOUT_SECONDS,
+                                allow_redirects=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Endpoint redirect probe failed, using {endpoint} '
+                     f'as configured: {e}')
+        return None
+    # Walk the redirect chain and take the first hop that is the same host and
+    # path over HTTPS. Requiring all three to match keeps us off an SSO proxy's
+    # login page, which is a legitimate redirect out of /api/health to somewhere
+    # that is emphatically not the API server endpoint.
+    request_path = f'{parsed.path}/api/health'
+    for hop in list(response.history) + [response]:
+        hop_parsed = urlparse.urlparse(hop.url)
+        if (hop_parsed.scheme != 'https' or
+                hop_parsed.hostname != parsed.hostname or
+                hop_parsed.path != request_path):
+            continue
+        # Rebuild from the redirect target so a port change is picked up,
+        # then put back any credentials the probe URL deliberately dropped.
+        netloc = hop_parsed.netloc
+        if parsed.username is not None:
+            netloc = f'{parsed.netloc.rsplit("@", 1)[0]}@{netloc}'
+        return urlparse.urlunparse(('https', netloc, parsed.path, '', '', ''))
+    return None
+
+
 def _check_endpoint_in_env_var() -> None:
     """Rejects logout when the endpoint is set in the environment variable."""
     # Logging out clears the endpoint and credentials from the config file, but
@@ -3293,6 +3446,27 @@ def api_login(endpoint: Optional[str] = None,
     # endpoint came from the environment variable, which already takes
     # precedence over the config file, so the config file must be left alone.
     endpoint, from_env = _resolve_login_endpoint(endpoint)
+    # Resolve the scheme before anything else reads the endpoint: it decides
+    # what gets written to the config file, and whether the cookies minted
+    # below are marked Secure.
+    redirected = _detect_https_redirect(endpoint)
+    if redirected is not None:
+        shown = server_common.redact_url_password(redirected)
+        if from_env:
+            # The environment variable outranks the config file for every
+            # command, so correcting the endpoint here would fix this login and
+            # nothing after it. Say what to change instead.
+            click.secho(
+                f'{server_common.redact_url_password(endpoint)} redirects to '
+                f'{shown}. Set {constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                f'{shown}.',
+                fg='yellow')
+        else:
+            click.secho(
+                f'{server_common.redact_url_password(endpoint)} redirects to '
+                f'{shown}; using the https endpoint.',
+                fg='yellow')
+            endpoint = redirected
 
     def _show_logged_in_message(
             endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
@@ -3652,11 +3826,11 @@ def _build_client_info() -> Dict[str, Any]:
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
-        'environment': {
+        'environment': debug_dump_helpers.redact_env_vars({
             k: v
             for k, v in sorted(os.environ.items())
             if k.startswith(('SKYPILOT_', 'SKY_'))
-        },
+        }),
         'user_config': user_config,
         'merged_config': merged_config,
     }

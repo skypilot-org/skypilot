@@ -1,4 +1,5 @@
 """Runner for commands to be executed on the cluster."""
+import contextlib
 import enum
 import fcntl
 import hashlib
@@ -15,8 +16,8 @@ import tempfile
 import termios
 import threading
 import time
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Tuple, Type, Union)
 import urllib.parse
 import uuid
 
@@ -38,6 +39,7 @@ from sky.utils import infra_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
@@ -47,6 +49,11 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
+_SLURM_HOME_DIR_CACHE_TTL_SECONDS = 30
+# Printed ahead of each Slurm login-node command whose output is returned, so
+# that whatever the login shell prints first (profile.d banners, module-system
+# notices) can be dropped.
+_SLURM_OUTPUT_START_MARKER = 'SKYPILOT_SLURM_OUTPUT_START'
 
 # Largest command, in bytes, to inline into what a runner sends rather than
 # writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
@@ -72,11 +79,6 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 # TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
 # consistency between bucket upload and rsync.
-# NOTE(Hawon-Oh): _rsync() no longer uses these filters; it now relies on
-# storage_utils.get_excluded_files (which honors .skyignore negation '!') via
-# --exclude-from. These are only still used by
-# backend_utils.path_size_megabytes, so remove them once that caller is
-# migrated too.
 RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
@@ -86,6 +88,72 @@ RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
+
+# Returncode reported when a command is killed because it exceeded its
+# `timeout`. 124 is what timeout(1) uses, and -- unlike 255 -- it does not
+# collide with ssh's "connection failed" code. That distinction matters:
+# callers such as `setup_runtime_on_cluster` treat 255 as a transient network
+# blip and retry it in an inner loop, which would multiply with the outer
+# `_auto_retry` and turn a wedged command into a much longer stall.
+TIMEOUT_RETURNCODE = 124
+
+
+@contextlib.contextmanager
+def _skyignore_rsync_filter(
+        skyignore_path: Optional[pathlib.Path]) -> Iterator[Optional[str]]:
+    """Translate root skyignore negations while leaving matching to rsync."""
+    if skyignore_path is None or not skyignore_path.is_file():
+        yield None
+        return
+    # Preserve filename bytes, including spaces and Unicode line separators.
+    # Only LF and CRLF delimit rules; rsync does not require UTF-8 input.
+    lines = skyignore_path.read_bytes().split(b'\n')
+    patterns = [line[:-1] if line.endswith(b'\r') else line for line in lines]
+    patterns = [line for line in patterns if line and not line.startswith(b'#')]
+    if not any(
+            pattern.startswith(b'!') and len(pattern) > 1
+            for pattern in patterns):
+        # Preserve the original dir-merge behavior when no negations are used.
+        yield None
+        return
+    rules = []
+    # Rsync uses the first matching rule; skyignore negations use the last.
+    for pattern in reversed(patterns):
+        if pattern.startswith(b'!'):
+            pattern = pattern[1:]
+            if pattern:
+                rules.append(b'+ ' + pattern)
+        else:
+            rules.append(b'- ' + pattern)
+    with tempfile.TemporaryDirectory(prefix='skyignore-') as filter_dir:
+        filter_path = pathlib.Path(filter_dir) / 'filter'
+        filter_path.write_bytes(b'\n'.join(rules) + b'\n')
+        yield f'--filter={shlex.quote("merge " + str(filter_path))}'
+
+
+def _timed_out_result(
+    cmd: Union[str, List[str]],
+    timeout: int,
+    require_outputs: bool,
+) -> Union[int, Tuple[int, str, str]]:
+    """Builds the result for a command killed by its timeout.
+
+    `log_lib.run_with_log` has already terminated the process tree by the time
+    this is called. We surface a non-zero returncode rather than letting
+    `subprocess.TimeoutExpired` escape, so that existing callers -- which all
+    branch on the returncode -- report a normal command failure and retry.
+    """
+    cmd_str = cmd if isinstance(cmd, str) else ' '.join(cmd)
+    stderr = (f'Command timed out after {timeout} seconds: {cmd_str}\n'
+              'The timer bounds elapsed wall-clock time, not progress, so this '
+              'is either a genuinely slow command or a wedged connection; see '
+              'the log above for how far it got. Only the local client was '
+              'stopped: the remote command may still be running.')
+    logger.warning(f'Command timed out after {timeout} seconds.')
+    if require_outputs:
+        return TIMEOUT_RETURNCODE, '', stderr
+    return TIMEOUT_RETURNCODE
+
 
 DEFAULT_SSH_CONTROL_NAME = '__default__'
 
@@ -100,38 +168,17 @@ _SSH_AUTH_FAILURE_PATTERNS = [
 ]
 
 
-def wrap_command_as_user(command: str,
+def wrap_command_as_user(argv: List[str],
                          user: str,
-                         shell_argv0: Optional[str] = None,
                          use_sudo: bool = False) -> str:
-    """Build a command that a privileged SSH user runs as a Unix user."""
-    # A login shell is required: Slurm clients (squeue, sbatch, scancel, ...)
-    # are invoked by bare name, so sites that install Slurm outside sudoers'
-    # `secure_path` need the target user's profile to set PATH. `su --login`
-    # also chdir's to the target's home; `sudo -u` stays in the caller's cwd,
-    # so restore it here to keep both forms equivalent.
-    payload = f'cd -- "$HOME" || exit 1; {command}'
+    """Build a direct executable invocation as a Unix user."""
+    if not argv or isinstance(argv, str):
+        raise ValueError('User commands must be nonempty argument lists.')
     if use_sudo:
-        # `-u <user>` is load-bearing: without it sudo runs the command as
-        # root, which would require granting the SSH user passwordless sudo to
-        # `su` (root-equivalent and not constrainable in sudoers). `-H` sets
-        # HOME for sites that do not enable `env_reset`. `sudo -i` is not
-        # usable here: it re-serializes argv through the target's login shell,
-        # evaluating the command string twice and pre-expanding `$0`/`$@`.
-        argv = [
-            'sudo', '--non-interactive', '-H', '-u', user, '--', '/bin/bash',
-            '--login', '-c', payload
-        ]
+        prefix = ['sudo', '--non-interactive', '-H', '-u', user, '--']
     else:
-        # The SSH user is already root, so no sudo grant is needed and root's
-        # `su` never authenticates.
-        argv = [
-            'su', '--login', '--shell', '/bin/bash', '--command', payload, '--',
-            user
-        ]
-    if shell_argv0 is not None:
-        argv.append(shell_argv0)
-    return shlex.join(argv)
+        prefix = ['runuser', '-u', user, '--']
+    return shlex.join(prefix + argv)
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -139,7 +186,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    # Leave room for OpenSSH's %C hash and temporary suffix on macOS.
+    path = f'/tmp/sky_ssh_{user_hash}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -419,15 +467,20 @@ class CommandRunner:
         limit = self.max_inline_command_length()
         return self.inline_command_size(command) > limit
 
-    def get_remote_home_dir(self) -> str:
+    def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
         # Use pattern matching to extract home directory.
         # Some container images print MOTD when login shells start, which can
         # contaminate command output. We use a unique pattern to extract the
         # actual home directory reliably.
+        #
+        # `timeout` matters because this runs a remote command *before* an
+        # rsync's own deadline would otherwise start: a wedged transport here
+        # would hang the caller forever even though the rsync is bounded.
         rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
                                       require_outputs=True,
                                       separate_stderr=True,
-                                      stream_logs=False)
+                                      stream_logs=False,
+                                      timeout=timeout)
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
                              f'{output + stderr}')
@@ -440,6 +493,10 @@ class CommandRunner:
             raise ValueError('Failed to find remote home directory identifier: '
                              f'{output + stderr}')
         return remote_home_dir
+
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote argv for this runner's execution identity."""
+        return shlex.join(argv)
 
     def _get_command_to_run(
         self,
@@ -512,19 +569,37 @@ class CommandRunner:
     def get_remote_home_dir_with_retry(
         self,
         max_retry: int,
-        get_remote_home_dir: Callable[[], str],
+        get_remote_home_dir: Callable[..., str],
+        deadline: Optional[float] = None,
     ) -> str:
-        """Returns the remote home directory with retry."""
+        """Returns the remote home directory with retry.
+
+        `get_remote_home_dir` is called with one argument: the timeout (or
+        None) for that attempt.
+
+        `deadline`, when set, is a `time.monotonic()` value bounding the whole
+        lookup, retries and backoff included: each attempt gets only the
+        budget that is left, and no new attempt starts once it is spent. This
+        keeps a wedged transport from hanging here, and keeps the lookup from
+        overshooting the caller's own deadline.
+        """
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         retries_left = max_retry
         assert retries_left > 0, f'max_retry {max_retry} must be positive.'
         while retries_left >= 0:
+            attempt_timeout: Optional[int] = None
+            if deadline is not None:
+                # >=1s so we never pass 0, which would disable the timeout.
+                attempt_timeout = max(1, int(deadline - time.monotonic()))
             try:
-                return get_remote_home_dir()
+                return get_remote_home_dir(attempt_timeout)
             except Exception:  # pylint: disable=broad-except
                 if retries_left == 0:
                     raise
                 sleep_time = backoff.current_backoff()
+                if (deadline is not None and
+                        time.monotonic() + sleep_time >= deadline):
+                    raise
                 logger.warning(f'Failed to get remote home dir '
                                f'- retrying in {sleep_time} seconds.')
                 retries_left -= 1
@@ -542,7 +617,7 @@ class CommandRunner:
             stream_logs: bool = True,
             max_retry: int = 1,
             prefix_command: Optional[str] = None,
-            get_remote_home_dir: Callable[[], str] = lambda: '~',
+            get_remote_home_dir: Callable[..., str] = lambda _=None: '~',
             timeout: Optional[int] = None,
             remote_rsync_command: Optional[str] = None) -> None:
         """Builds the rsync command."""
@@ -553,11 +628,26 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
         rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
+        # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        # Set when uploading; the temp file is created in the `up` branch below,
-        # after the remote home-dir lookup, so a failure there cannot leak it.
-        exclude_file: Optional[str] = None
+        skyignore_path = resolved_source / constants.SKY_IGNORE_FILE
+        filter_index = len(rsync_command)
+        if skyignore_path.exists():
+            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+        else:
+            rsync_command.append(RSYNC_FILTER_GITIGNORE)
+            if up:
+                # Build --exclude-from argument.
+                if (resolved_source / GIT_EXCLUDE).exists():
+                    # Ensure file exists; otherwise, rsync will error out.
+                    #
+                    # We shlex.quote() because the path may contain spaces:
+                    #   'my dir/.git/info/exclude'
+                    # Without quoting rsync fails.
+                    rsync_command.append(
+                        RSYNC_EXCLUDE_OPTION.format(
+                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
@@ -566,6 +656,18 @@ class CommandRunner:
                 f'--rsync-path={shlex.quote(remote_rsync_command)}')
         maybe_dest_prefix = ('' if node_destination is None else
                              f'{node_destination}:')
+
+        # `timeout`, when set, bounds the total wall-clock time of the rsync
+        # including all retries and backoff waits, rather than each individual
+        # attempt. This guarantees the call returns within `timeout` seconds
+        # even if a connection hangs, which matters for callers that rsync
+        # across many clusters (e.g. the debug dump).
+        #
+        # The deadline starts HERE, before the `~` resolution below, because
+        # that resolution runs its own remote command. If it started after,
+        # a wedged remote-home lookup would hang unbounded and the rsync would
+        # never reach its timer at all.
+        deadline = (time.monotonic() + timeout) if timeout is not None else None
 
         if up:
             resolved_target = target
@@ -577,27 +679,9 @@ class CommandRunner:
                 if target.startswith('~'):
                     remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
-                        get_remote_home_dir=get_remote_home_dir)
+                        get_remote_home_dir=get_remote_home_dir,
+                        deadline=deadline)
                     resolved_target = target.replace('~', remote_home_dir)
-            # --exclude-from: exclude files matched by .skyignore/.gitignore.
-            if resolved_source.is_dir():
-                # pylint: disable-next=import-outside-toplevel
-                from sky.data import storage_utils
-                excluded_files = storage_utils.get_excluded_files(
-                    str(resolved_source))
-                if excluded_files:
-                    fd, exclude_file = tempfile.mkstemp(prefix='skyignore-',
-                                                        suffix='.exclude')
-                    with os.fdopen(fd, 'w') as f:
-                        # Anchor each path to the rsync root with '/' so an
-                        # entry matches exactly that file/dir, not a same-named
-                        # path deeper in the tree.
-                        f.write('\n'.join('/' + p.replace(os.sep, '/')
-                                          for p in excluded_files))
-                    # We shlex.quote() the temp-file path because it may contain
-                    # spaces; without quoting rsync would fail to read it.
-                    rsync_command.append(
-                        RSYNC_EXCLUDE_OPTION.format(shlex.quote(exclude_file)))
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
@@ -617,25 +701,22 @@ class CommandRunner:
                 if source.startswith('~'):
                     remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
-                        get_remote_home_dir=get_remote_home_dir)
+                        get_remote_home_dir=get_remote_home_dir,
+                        deadline=deadline)
                     resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{maybe_dest_prefix}{resolved_source!r}',
                 f'{resolved_target!r}',
             ])
-        command = ' '.join(rsync_command)
-        logger.debug(f'Running rsync command: {command}')
-
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
-        # `timeout`, when set, bounds the total wall-clock time of the rsync
-        # including all retries and backoff waits, rather than each individual
-        # attempt. This guarantees the call returns within `timeout` seconds
-        # even if a connection hangs, which matters for callers that rsync
-        # across many clusters (e.g. the debug dump).
-        deadline = (time.monotonic() + timeout) if timeout is not None else None
         timed_out = False
-        try:
+        with _skyignore_rsync_filter(
+                skyignore_path if up else None) as merge_filter:
+            if merge_filter is not None:
+                rsync_command.insert(filter_index, merge_filter)
+            command = ' '.join(rsync_command)
+            logger.debug(f'Running rsync command: {command}')
             while max_retry >= 0:
                 attempt_timeout: Optional[int] = None
                 if deadline is not None:
@@ -686,13 +767,6 @@ class CommandRunner:
                         stderr = f'rsync timed out after {timeout} seconds.'
                         break
                 time.sleep(sleep_time)
-        finally:
-            # Always remove the exclude temp file, even if a rsync attempt
-            # raised unexpectedly. On the normal and failure paths this runs
-            # before handle_returncode below, so the file is cleaned up even
-            # when rsync exits non-zero.
-            if exclude_file is not None:
-                os.unlink(exclude_file)
 
         direction = 'up' if up else 'down'
         timeout_hint = (f'rsync timed out after {timeout} seconds. '
@@ -724,6 +798,7 @@ class CommandRunner:
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -743,6 +818,10 @@ class CommandRunner:
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
             run_in_background: Whether to run the command in the background.
+            timeout: Optional wall-clock timeout in seconds for the command. On
+                expiry the process tree is terminated and
+                `TIMEOUT_RETURNCODE` is returned instead of raising. None means
+                no timeout (default).
 
         Returns:
             returncode
@@ -1226,9 +1305,15 @@ class SSHCommandRunner(CommandRunner):
         ) + [f'{self.ssh_user}@{self.ip}']
 
     def _retry_with_interactive_auth(
-            self, session_id: str, command: List[str], log_path: str,
-            require_outputs: bool, process_stream: bool, stream_logs: bool,
+            self,
+            session_id: str,
+            command: List[str],
+            log_path: str,
+            require_outputs: bool,
+            process_stream: bool,
+            stream_logs: bool,
             executable: str,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
         """Retries command with interactive auth.
 
@@ -1335,6 +1420,7 @@ class SSHCommandRunner(CommandRunner):
                                             shell=True,
                                             executable=executable,
                                             preexec_fn=setup_pty_session,
+                                            timeout=timeout,
                                             **kwargs)
             except Exception as e:
                 raise RuntimeError(f'Exception in setup: {e}') from e
@@ -1388,6 +1474,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1464,14 +1551,19 @@ class SSHCommandRunner(CommandRunner):
             executable = '/bin/bash'
 
         try:
-            result = log_lib.run_with_log(' '.join(command),
-                                          log_path,
-                                          require_outputs=require_outputs,
-                                          stream_logs=stream_logs,
-                                          process_stream=process_stream,
-                                          shell=True,
-                                          executable=executable,
-                                          **kwargs)
+            try:
+                result = log_lib.run_with_log(' '.join(command),
+                                              log_path,
+                                              require_outputs=require_outputs,
+                                              stream_logs=stream_logs,
+                                              process_stream=process_stream,
+                                              shell=True,
+                                              executable=executable,
+                                              timeout=timeout,
+                                              **kwargs)
+            except subprocess.TimeoutExpired:
+                assert timeout is not None
+                return _timed_out_result(cmd, timeout, require_outputs)
             if not self.enable_interactive_auth:
                 return result
 
@@ -1507,11 +1599,19 @@ class SSHCommandRunner(CommandRunner):
                 return result
 
             session_id = str(uuid.uuid4())
-            return self._retry_with_interactive_auth(session_id, command,
-                                                     log_path, require_outputs,
-                                                     process_stream,
-                                                     stream_logs, executable,
-                                                     **kwargs)
+            try:
+                return self._retry_with_interactive_auth(session_id,
+                                                         command,
+                                                         log_path,
+                                                         require_outputs,
+                                                         process_stream,
+                                                         stream_logs,
+                                                         executable,
+                                                         timeout=timeout,
+                                                         **kwargs)
+            except subprocess.TimeoutExpired:
+                assert timeout is not None
+                return _timed_out_result(cmd, timeout, require_outputs)
         finally:
             # Clean up the SSH verbose log file.
             if ssh_log_file is not None:
@@ -1531,7 +1631,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
-        get_remote_home_dir: Callable[[], str] = lambda: '~',
+        get_remote_home_dir: Callable[..., str] = lambda _=None: '~',
         timeout: Optional[int] = None,
         remote_rsync_command: Optional[str] = None,
     ) -> None:
@@ -1547,7 +1647,8 @@ class SSHCommandRunner(CommandRunner):
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
             get_remote_home_dir: A callable that returns the remote home
-              directory. Defaults to '~'.
+              directory. It is called with one argument, the timeout (or
+              None) for that lookup. Defaults to '~'.
             timeout: Optional total timeout in seconds for the rsync, including
               all retries and backoff waits. None means no timeout (default).
             remote_rsync_command: Command used to start rsync on the remote.
@@ -1723,6 +1824,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1748,6 +1850,10 @@ class KubernetesCommandRunner(CommandRunner):
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
             run_in_background: Whether to run the command in the background.
+            timeout: Optional wall-clock timeout in seconds. Without one a
+                `kubectl exec` whose stream never delivers EOF wedges the
+                caller forever (see #10167); with one the command fails and
+                the caller's existing retry can take over.
 
         Returns:
             returncode
@@ -1828,14 +1934,19 @@ class KubernetesCommandRunner(CommandRunner):
             # immediately at EOF, making it impossible to detect
             # disconnection.
             kwargs.setdefault('stdin', subprocess.PIPE)
-        result = log_lib.run_with_log(' '.join(command),
-                                      log_path,
-                                      require_outputs=require_outputs,
-                                      stream_logs=stream_logs,
-                                      process_stream=process_stream,
-                                      shell=True,
-                                      executable=executable,
-                                      **kwargs)
+        try:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          timeout=timeout,
+                                          **kwargs)
+        except subprocess.TimeoutExpired:
+            assert timeout is not None
+            return _timed_out_result(cmd, timeout, require_outputs)
         # When `kubectl exec` fails because the target pod is already gone
         # (e.g. it was OOMKilled), the bare kubectl error ("cannot exec into a
         # container in a completed pod") hides the real cause. Enrich stderr
@@ -1974,6 +2085,7 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command.
 
@@ -1996,6 +2108,8 @@ class LocalProcessCommandRunner(CommandRunner):
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
+        if isinstance(cmd, list):
+            cmd = shlex.join(cmd)
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
@@ -2029,15 +2143,21 @@ class LocalProcessCommandRunner(CommandRunner):
         command_str = command_str.replace(constants.SKY_PYTHON_CMD,
                                           sys.executable)
         logger.debug(f'Running command locally: {command_str}')
-        return log_lib.run_with_log(command_str,
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    env=clean_env_module.get_clean_server_env(),
-                                    **kwargs)
+        try:
+            return log_lib.run_with_log(
+                command_str,
+                log_path,
+                require_outputs=require_outputs,
+                stream_logs=stream_logs,
+                process_stream=process_stream,
+                shell=True,
+                executable=executable,
+                timeout=timeout,
+                env=clean_env_module.get_clean_server_env(),
+                **kwargs)
+        except subprocess.TimeoutExpired:
+            assert timeout is not None
+            return _timed_out_result(cmd, timeout, require_outputs)
 
     @timeline.event
     def rsync(
@@ -2080,23 +2200,69 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         self.slurm_user = slurm_user
         self._use_sudo = ssh_user != 'root'
 
-    def _inline_command_quote_levels(self) -> int:
-        # wrap_command_as_user adds one inner login-shell `-c` command.
-        extra = 1 if self.slurm_user is not None else 0
-        return super()._inline_command_quote_levels() + extra
+    def command_as_user(self, argv: List[str]) -> str:
+        """Quote one executable for the allocation owner."""
+        if self.slurm_user is None:
+            return shlex.join(argv)
+        return wrap_command_as_user(argv,
+                                    self.slurm_user,
+                                    use_sudo=self._use_sudo)
 
     def run(
         self,
         cmd: Union[str, List[str]],
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        if self.slurm_user is not None:
-            if isinstance(cmd, list):
-                cmd = ' '.join(cmd)
-            cmd = wrap_command_as_user(cmd,
-                                       self.slurm_user,
-                                       use_sudo=self._use_sudo)
-        return super().run(cmd, **kwargs)
+        """Run argv as the allocation owner, or shell code as the SSH user."""
+        if isinstance(cmd, list):
+            cmd = self.command_as_user(cmd)
+        # The login shell may print before the command runs (profile.d
+        # banners, module-system notices), which would be parsed as command
+        # output. Print a marker first and drop everything up to it. Only
+        # done when outputs are returned and neither streamed nor logged,
+        # since streaming and logging happen before the marker is dropped.
+        if (not kwargs.get('require_outputs', False) or
+                kwargs.get('run_in_background', False) or
+                kwargs.get('stream_logs', True) or
+                kwargs.get('log_path', os.devnull) != os.devnull):
+            return super().run(cmd, **kwargs)
+        cmd = f'echo {_SLURM_OUTPUT_START_MARKER}\n{cmd}'
+        result = super().run(cmd, **kwargs)
+        assert not isinstance(result, int)
+        rc, stdout, stderr = result
+        _, found, rest = stdout.partition(_SLURM_OUTPUT_START_MARKER + '\n')
+        if found:
+            stdout = rest
+        return rc, stdout, stderr
+
+    def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
+        if self.slurm_user is None:
+            return super().get_remote_home_dir(timeout)
+        identity = (self.ip, self.port, self.ssh_user, self.slurm_user,
+                    self._ssh_proxy_command, self._ssh_proxy_jump)
+        identity_hash = hashlib.sha256(repr(identity).encode()).hexdigest()
+        cache_key = f'slurm:home_dir:{identity_hash}'
+        cached_home = kv_cache.get_cache_entry(cache_key)
+        if cached_home is not None:
+            return cached_home
+        rc, stdout, stderr = SSHCommandRunner.run(
+            self,
+            shlex.join(['getent', 'passwd', self.slurm_user]),
+            require_outputs=True,
+            separate_stderr=True,
+            stream_logs=False,
+            timeout=timeout)
+        if rc == 0:
+            for line in stdout.splitlines():
+                fields = line.split(':')
+                if (len(fields) == 7 and fields[0] == self.slurm_user and
+                        os.path.isabs(fields[5])):
+                    kv_cache.add_or_update_cache_entry(
+                        cache_key, fields[5],
+                        time.time() + _SLURM_HOME_DIR_CACHE_TTL_SECONDS)
+                    return fields[5]
+        raise ValueError(f'Cannot resolve home directory for '
+                         f'{self.slurm_user!r}: {stdout}\n{stderr}')
 
     def rsync(
         self,
@@ -2111,10 +2277,7 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
     ) -> None:
         remote_rsync_command = None
         if self.slurm_user is not None:
-            remote_rsync_command = wrap_command_as_user('exec rsync "$@"',
-                                                        self.slurm_user,
-                                                        shell_argv0='rsync',
-                                                        use_sudo=self._use_sudo)
+            remote_rsync_command = self.command_as_user(['rsync'])
         super().rsync(source,
                       target,
                       up=up,
@@ -2195,6 +2358,9 @@ class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
         self.slurm_node = slurm_node
         self.container_args = container_args
 
+    def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
+        return CommandRunner.get_remote_home_dir(self, timeout)
+
     def _rsync_via_srun(
         self,
         source: str,
@@ -2258,7 +2424,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                             log_path=log_path,
                             stream_logs=stream_logs,
                             max_retry=max_retry,
-                            get_remote_home_dir=lambda: remote_home_dir,
+                            get_remote_home_dir=lambda _=None: remote_home_dir,
                             timeout=timeout)
             finally:
                 try:
@@ -2269,25 +2435,23 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                    f'{common_utils.exception_to_string(e)}')
             return
 
-        rsync_command = (
-            f'exec srun --unbuffered --quiet --overlap {extra_srun_args}'
-            f'--jobid={shlex.quote(self.job_id)} '
-            f'--nodelist={shlex.quote(self.slurm_node)} '
-            f'--nodes=1 --ntasks=1 rsync "$@"')
-        remote_rsync_command = wrap_command_as_user(rsync_command,
-                                                    self.slurm_user,
-                                                    shell_argv0='rsync',
-                                                    use_sudo=self._use_sudo)
-        SSHCommandRunner.rsync(self,
-                               source,
-                               target,
-                               up=up,
-                               log_path=log_path,
-                               stream_logs=stream_logs,
-                               max_retry=max_retry,
-                               get_remote_home_dir=lambda: remote_home_dir,
-                               timeout=timeout,
-                               remote_rsync_command=remote_rsync_command)
+        rsync_command = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                         f'{extra_srun_args}'
+                         f'--jobid={shlex.quote(self.job_id)} '
+                         f'--nodelist={shlex.quote(self.slurm_node)} '
+                         f'--nodes=1 --ntasks=1 rsync')
+        remote_rsync_command = self.command_as_user(shlex.split(rsync_command))
+        SSHCommandRunner.rsync(
+            self,
+            source,
+            target,
+            up=up,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            max_retry=max_retry,
+            get_remote_home_dir=lambda _=None: remote_home_dir,
+            timeout=timeout,
+            remote_rsync_command=remote_rsync_command)
 
     def _inline_command_quote_levels(self) -> int:
         # _run_via_srun adds an `srun ... bash -c` shell.
@@ -2329,13 +2493,14 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                          f'{cmd}')
             extra_srun_args = ''
 
-        srun_cmd = (
-            f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
-            f'--nodelist={self.slurm_node} '
-            f'--nodes=1 --ntasks=1 {extra_srun_args}'
-            f'bash -c {shlex.quote(inner_cmd)}')
+        srun_cmd = ('srun --unbuffered --quiet --overlap --chdir=/tmp '
+                    f'--jobid={self.job_id} '
+                    f'--nodelist={self.slurm_node} '
+                    f'--nodes=1 --ntasks=1 {extra_srun_args}'
+                    f'bash -c {shlex.quote(inner_cmd)}')
 
-        return SlurmLoginNodeCommandRunner.run(self, srun_cmd, **kwargs)
+        return SlurmLoginNodeCommandRunner.run(self, shlex.split(srun_cmd),
+                                               **kwargs)
 
     def rsync(
         self,

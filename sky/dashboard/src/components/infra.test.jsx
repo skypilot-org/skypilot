@@ -16,6 +16,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import {
   InfrastructureSection,
   slurmRequestableCounts,
+  countUpSlurmNodes,
 } from '@/components/infra';
 
 // The infrastructure table renders one sub-row per GPU type. A Slurm cluster
@@ -34,6 +35,9 @@ const renderSection = (props) =>
       isInitialLoad={false}
       groupedPerContextGPUs={{}}
       groupedPerNodeGPUs={{}}
+      // Progressive per-context loading: a row renders its data only once
+      // its context has settled, so default every listed context to loaded.
+      loadedContexts={new Set(props.contexts || [])}
       {...props}
     />
   );
@@ -251,6 +255,68 @@ describe('slurmRequestableCounts', () => {
   });
 });
 
+describe('countUpSlurmNodes', () => {
+  const n = (state) => ({ node_name: 'x', node_state: state });
+
+  it('excludes powered-down (~) nodes from the up count', () => {
+    const nodes = [n('alloc'), n('idle'), n('idle~'), n('idle~'), n('mix')];
+    expect(countUpSlurmNodes(nodes)).toEqual({ up: 3, poweredDown: 2 });
+  });
+
+  it('treats every node as up when none are powered down', () => {
+    expect(countUpSlurmNodes([n('alloc'), n('idle')])).toEqual({
+      up: 2,
+      poweredDown: 0,
+    });
+  });
+
+  it('tolerates missing/blank state and empty input', () => {
+    expect(countUpSlurmNodes([{ node_name: 'x' }, n('')])).toEqual({
+      up: 2,
+      poweredDown: 0,
+    });
+    expect(countUpSlurmNodes([])).toEqual({ up: 0, poweredDown: 0 });
+    expect(countUpSlurmNodes(undefined)).toEqual({ up: 0, poweredDown: 0 });
+  });
+});
+
+describe('InfrastructureSection Slurm node count', () => {
+  const nodeWithState = (nodeName, state) => ({
+    node_name: nodeName,
+    partition: 'all*',
+    gpu_name: 'H100',
+    gpu_total: 8,
+    gpu_free: 0,
+    cluster: 'prod-gpu',
+    node_state: state,
+  });
+
+  it('shows the up-node count, folding out powered-down cloud nodes', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['prod-gpu'],
+      gpus: [{ gpu_name: 'H100', gpu_total: 24, gpu_free: 0 }],
+      groupedPerContextGPUs: {
+        'prod-gpu': [{ gpu_name: 'H100', gpu_total: 24, gpu_free: 0 }],
+      },
+      groupedPerNodeGPUs: {
+        'prod-gpu': [
+          nodeWithState('n1', 'alloc'),
+          nodeWithState('n2', 'mix'),
+          nodeWithState('n3', 'idle~'),
+          nodeWithState('n4', 'idle~'),
+          nodeWithState('n5', 'idle~'),
+        ],
+      },
+    });
+    const rows = tableRows(container);
+    // 2 up + 3 power-saved: the Nodes cell shows 2, never the raw 5.
+    expect(normalize(rows[0])).toMatch(/prod-gpu\s*2/);
+    // The power-saved hint is informational, not a warning.
+    expect(rows[0].querySelector('svg.lucide-info')).not.toBeNull();
+  });
+});
+
 describe('InfrastructureSection Kubernetes GPU-type rows', () => {
   it('still renders one row per GPU type with no partition column', () => {
     const { container } = renderSection({
@@ -280,5 +346,91 @@ describe('InfrastructureSection Kubernetes GPU-type rows', () => {
     expect(container.querySelector('table').textContent).not.toContain(
       'Partition'
     );
+  });
+});
+
+describe('InfrastructureSection inactive (not-enabled) context rows', () => {
+  const K8S_PROPS = {
+    title: 'Kubernetes',
+    contexts: ['usw9b'],
+    gpus: [{ gpu_name: 'H100', gpu_total: 8, gpu_free: 8 }],
+    groupedPerContextGPUs: {
+      usw9b: [
+        { gpu_name: 'H100', gpu_total: 8, gpu_free: 8, context: 'usw9b' },
+      ],
+    },
+    groupedPerNodeGPUs: { usw9b: [] },
+    loadedContexts: new Set(['usw9b']),
+    inactiveContexts: [
+      { name: 'parked-ctx', note: 'Excluded by kubernetes.allowed_contexts' },
+    ],
+  };
+
+  it('appends a name-only row with dashes in every capacity cell', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const rows = tableRows(container);
+    // One active GPU-type row, then the inactive row.
+    expect(rows).toHaveLength(2);
+    const cells = cellTexts(rows[1]);
+    expect(cells).toContain('parked-ctxNot enabled');
+    // Nodes, CPU, Memory, GPU Type, GPUs, Utilization — no data, no skeleton.
+    expect(cells.filter((c) => c === '-')).toHaveLength(6);
+  });
+
+  it('navigates to the context detail page on name click', () => {
+    // The detail page is where a plugin explains the not-enabled state and
+    // offers remediation, so the name must navigate like any other row.
+    const handleContextClick = jest.fn();
+    const { container } = renderSection({ ...K8S_PROPS, handleContextClick });
+    const inactiveRow = tableRows(container)[1];
+    fireEvent.click(inactiveRow.querySelector('.cursor-pointer'));
+    expect(handleContextClick).toHaveBeenCalledWith('parked-ctx');
+  });
+
+  it('keeps the namePrefix and actions slots live, keyed k8s/<name>', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const inactiveRow = tableRows(container)[1];
+    const slots = Array.from(inactiveRow.querySelectorAll('[data-slot]')).map(
+      (el) => [
+        el.getAttribute('data-slot'),
+        el.getAttribute('data-row-id'),
+        el.getAttribute('data-row-kind'),
+      ]
+    );
+    expect(slots).toEqual([
+      ['infra.row.namePrefix', 'parked-ctx', 'k8s'],
+      ['infra.row.actions', 'parked-ctx', 'k8s'],
+    ]);
+  });
+
+  it('counts inactive rows in their own badge, not the context count', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const header = normalize(container.querySelector('.p-5 > div'));
+    expect(header).toContain('1 context');
+    expect(header).toContain('1 not enabled');
+  });
+
+  it('renders the section when only inactive contexts exist', () => {
+    const { container } = renderSection({
+      ...K8S_PROPS,
+      contexts: [],
+      gpus: [],
+      groupedPerContextGPUs: {},
+      loadedContexts: new Set(),
+    });
+    expect(container.textContent).not.toContain('No Kubernetes found');
+    expect(tableRows(container)).toHaveLength(1);
+    expect(cellTexts(tableRows(container)[0])).toContain(
+      'parked-ctxNot enabled'
+    );
+  });
+
+  it('renders nothing extra when there are none', () => {
+    const { container } = renderSection({
+      ...K8S_PROPS,
+      inactiveContexts: [],
+    });
+    expect(tableRows(container)).toHaveLength(1);
+    expect(container.textContent).not.toContain('not enabled');
   });
 });
