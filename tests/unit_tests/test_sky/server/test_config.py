@@ -1,3 +1,8 @@
+import base64
+import contextlib
+import hashlib
+import json
+import logging
 import os
 import tempfile
 from unittest import mock
@@ -6,6 +11,10 @@ import jwt as pyjwt
 import pytest
 
 from sky.server import config
+from sky.server import daemons
+from sky.skylet import constants as skylet_constants
+from sky.utils import annotations
+from sky.utils import controller_utils
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
@@ -83,7 +92,6 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.env_options.Options.RUNNING_IN_BUILDKITE.get',
             return_value=False)
 def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
-    from sky.utils import controller_utils
     reserved_memory_mb = float(
         controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
 
@@ -137,8 +145,6 @@ def test_memory_aware_sizing_reserves_server_workers(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
 def test_memory_aware_sizing_consolidation_mode(cpu_count, mem_size_gb):
     """In consolidation mode the in-process controllers are reserved for."""
-    from sky.utils import controller_utils
-
     with _memory_aware_sizing(), \
          mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
@@ -165,8 +171,6 @@ def test_memory_aware_sizing_consolidation_mode(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
 def test_memory_aware_sizing_off_by_default(cpu_count, mem_size_gb):
     """Without the env var, consolidation mode reserves nothing."""
-    from sky.utils import controller_utils
-
     with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=True), \
          mock.patch.object(controller_utils, '_is_consolidation_mode',
@@ -185,9 +189,6 @@ def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
     _get_parallelism() sizes that machine assuming only the headroom was
     withheld, so the gate must not switch it to the scaling reservation.
     """
-    from sky.skylet import constants as skylet_constants
-    from sky.utils import controller_utils
-
     env = {skylet_constants.OVERRIDE_CONSOLIDATION_MODE: 'true'}
     if gate_on:
         from sky.utils import env_options
@@ -205,8 +206,6 @@ def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
 def test_no_controller_reservation_outside_consolidation(
         cpu_count, mem_size_gb):
     """Outside consolidation mode the controllers cost the API server nothing."""
-    from sky.utils import controller_utils
-
     with _memory_aware_sizing(), \
          mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
                            return_value=False), \
@@ -231,6 +230,185 @@ def test_permanent_processes_fit_in_memory(cpu_count, mem_size_gb):
          mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
         c = config.compute_server_config(deploy=True, quiet=True)
     assert _permanent_worker_memory_gb(c) <= mem_size_gb
+
+
+def _explicit_counts(**counts):
+    """Set the explicit worker/controller count env vars."""
+    names = {
+        'long': skylet_constants.ENV_VAR_SERVER_LONG_WORKERS,
+        'short': skylet_constants.ENV_VAR_SERVER_SHORT_WORKERS,
+        'controllers': skylet_constants.ENV_VAR_SERVER_JOBS_CONTROLLERS,
+    }
+    return mock.patch.dict(os.environ,
+                           {names[k]: str(v) for k, v in counts.items()})
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_explicit_worker_counts_override_derived(cpu_count, mem_size_gb):
+    """Explicit counts replace the derived ones in both deployment modes."""
+    with _explicit_counts(long=10, short=40):
+        deployed = config.compute_server_config(deploy=True, quiet=True)
+        local = config.compute_server_config(deploy=False, quiet=True)
+    assert deployed.long_worker_config.garanteed_parallelism == 10
+    assert deployed.short_worker_config.garanteed_parallelism == 40
+    # Local mode caps derived long workers at _MAX_LONG_WORKERS_LOCAL; an
+    # explicit count is not capped.
+    assert local.long_worker_config.garanteed_parallelism == 10
+    assert local.short_worker_config.garanteed_parallelism == 40
+    assert local.long_worker_config.burstable_parallelism == 1024
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_explicit_long_workers_feed_short_derivation(cpu_count, mem_size_gb):
+    """Pinning only the long pool re-derives the short pool from the rest."""
+    derived = config.compute_server_config(deploy=True, quiet=True)
+    with _explicit_counts(long=4):
+        c = config.compute_server_config(deploy=True, quiet=True)
+    assert c.long_worker_config.garanteed_parallelism == 4
+    assert (c.short_worker_config.garanteed_parallelism ==
+            config._max_short_worker_parallism(48, 4))
+    assert (c.short_worker_config.garanteed_parallelism >
+            derived.short_worker_config.garanteed_parallelism)
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=1)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=1)
+def test_explicit_worker_counts_survive_low_resource_mode(
+        cpu_count, mem_size_gb):
+    """Low-resource local mode zeroes only the pools that were not pinned."""
+    with _explicit_counts(long=2):
+        c = config.compute_server_config(deploy=False, quiet=True)
+    assert c.long_worker_config.garanteed_parallelism == 2
+    assert c.short_worker_config.garanteed_parallelism == 0
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_blank_explicit_worker_count_is_unset(cpu_count, mem_size_gb):
+    derived = config.compute_server_config(deploy=True, quiet=True)
+    with _explicit_counts(long='  ', short=''):
+        c = config.compute_server_config(deploy=True, quiet=True)
+    assert c.long_worker_config.garanteed_parallelism == (
+        derived.long_worker_config.garanteed_parallelism)
+    assert c.short_worker_config.garanteed_parallelism == (
+        derived.short_worker_config.garanteed_parallelism)
+
+
+@pytest.mark.parametrize('value,message', [
+    ('abc', 'not an integer'),
+    ('1.5', 'not an integer'),
+    ('0', 'at least 1'),
+    ('-3', 'at least 1'),
+])
+def test_invalid_explicit_long_workers_rejected(value, message):
+    with _explicit_counts(long=value), pytest.raises(ValueError, match=message):
+        config.compute_server_config(deploy=True, quiet=True)
+
+
+def test_explicit_short_workers_below_daemon_floor_rejected_at_startup():
+    """The short pool may not be pinned below the internal daemons' need."""
+    floor = config._min_pinned_short_workers()
+    with _explicit_counts(short=floor - 1), pytest.raises(ValueError,
+                                                          match='at least'):
+        config.validate_explicit_worker_counts()
+    with _explicit_counts(short=floor):
+        config.validate_explicit_worker_counts()
+        c = config.compute_server_config(deploy=True, quiet=True)
+    assert c.short_worker_config.garanteed_parallelism == floor
+
+
+def test_pinned_short_floor_counts_disabled_daemons():
+    """A daemon disabled at startup can be enabled later by live config."""
+    all_daemons = config._min_pinned_short_workers()
+    with mock.patch.object(config,
+                           '_get_min_short_workers',
+                           return_value=all_daemons - 1), \
+         _explicit_counts(short=all_daemons - 1), \
+         pytest.raises(ValueError, match='at least'):
+        config.validate_explicit_worker_counts()
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_daemons_enabled_after_startup_leave_an_idle_short_worker(
+        cpu_count, mem_size_gb):
+    """Live config enables every daemon after startup on a pinned pool."""
+    pinned = config._min_pinned_short_workers()
+    with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(controller_utils, '_is_consolidation_mode',
+                           return_value=True), \
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True), \
+         _explicit_counts(short=pinned):
+        config.validate_explicit_worker_counts()
+        with mock.patch.object(config,
+                               '_get_min_short_workers',
+                               return_value=config._MIN_IDLE_SHORT_WORKERS +
+                               len(daemons.INTERNAL_REQUEST_DAEMONS)):
+            # The derived controller count re-runs compute_server_config().
+            annotations.clear_request_level_cache()
+            c = config.compute_server_config(deploy=True, quiet=True)
+            controllers = controller_utils.get_number_of_jobs_controllers()
+    annotations.clear_request_level_cache()
+    short = c.short_worker_config.garanteed_parallelism
+    assert short == pinned
+    assert short - len(daemons.INTERNAL_REQUEST_DAEMONS) >= 1
+    assert controllers >= 1
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_short_floor_computed_only_when_needed(cpu_count, mem_size_gb):
+    """The floor walks the daemon skip checks, some of which log."""
+    with mock.patch.object(config,
+                           '_get_min_short_workers',
+                           wraps=config._get_min_short_workers) as floor:
+        config.validate_explicit_worker_counts()
+        assert floor.call_count == 0
+        config.compute_server_config(deploy=True, quiet=True)
+        assert floor.call_count == 1
+        with _explicit_counts(short=40):
+            config.validate_explicit_worker_counts()
+            config.compute_server_config(deploy=True, quiet=True)
+        assert floor.call_count == 1
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_explicit_jobs_controllers_override(cpu_count, mem_size_gb):
+    with _explicit_counts(controllers=5):
+        assert controller_utils.get_number_of_jobs_controllers() == 5
+    for bad in ('0', str(controller_utils.MAX_CONTROLLERS + 1), 'many'):
+        with _explicit_counts(controllers=bad), pytest.raises(ValueError):
+            controller_utils.get_number_of_jobs_controllers()
+    with _explicit_counts(controllers=controller_utils.MAX_CONTROLLERS):
+        assert (controller_utils.get_number_of_jobs_controllers() ==
+                controller_utils.MAX_CONTROLLERS)
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_explicit_worker_counts_flow_into_controller_budget(
+        cpu_count, mem_size_gb):
+    """Smaller pinned pools leave the derived controller count more memory."""
+    with _memory_aware_sizing(), \
+         mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(controller_utils, '_is_consolidation_mode',
+                           return_value=True), \
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
+        # _get_parallelism is request-cached; each count needs a fresh read.
+        annotations.clear_request_level_cache()
+        derived = controller_utils.get_number_of_jobs_controllers()
+        with _explicit_counts(long=8, short=20):
+            annotations.clear_request_level_cache()
+            pinned = controller_utils.get_number_of_jobs_controllers()
+    annotations.clear_request_level_cache()
+    # 48 GB: derived pools (24 long, 53 short) leave room for 17 controllers;
+    # pinned pools (8 long, 20 short) leave room for 37.
+    assert (derived, pinned) == (17, 37)
 
 
 def test_parallel_size_long():
@@ -620,6 +798,50 @@ class TestLoadExternalProxyConfig:
         assert proxy_config.jwt_identity_claim == 'sub'
 
 
+def _alb_style_token(claims: dict, padded: bool) -> str:
+    """Build a JWT shaped like the AWS ALB ``x-amzn-oidc-data`` header.
+
+    The signature is never verified on this path, so a fixed 64-byte value
+    stands in for the ES256 ``r || s`` signature. 64 is not a multiple of 3,
+    so that segment always ends in ``==`` when padded, which is what makes
+    real ALB tokens fail strict compact-JWS decoding.
+    """
+    header = {
+        'typ': 'JWT',
+        'alg': 'ES256',
+        'kid': '11111111-2222-3333-4444-555555555555',
+        'iss': 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_x',
+    }
+    segments = [
+        json.dumps(header, separators=(',', ':')).encode(),
+        json.dumps(claims, separators=(',', ':')).encode(),
+        b'\x01' * 64,
+    ]
+    encoded = [base64.urlsafe_b64encode(seg).decode() for seg in segments]
+    if not padded:
+        encoded = [seg.rstrip('=') for seg in encoded]
+    return '.'.join(encoded)
+
+
+@contextlib.contextmanager
+def _capture_sky_logs(caplog, name: str, level: int):
+    """Capture records from the non-propagating ``sky`` logger ``name``.
+
+    ``sky_logging`` sets ``propagate = False`` on the ``sky`` logger, so the
+    caplog handler on the root logger never sees these records on pytest
+    < 9.1 (the version Python 3.9 resolves). Attach the handler to the
+    emitting logger itself, as tests/unit_tests/test_sky/server/
+    test_ssh_proxy_ws.py does.
+    """
+    emitter = logging.getLogger(name)
+    with caplog.at_level(level, logger=name):
+        emitter.addHandler(caplog.handler)
+        try:
+            yield caplog
+        finally:
+            emitter.removeHandler(caplog.handler)
+
+
 class TestExtractIdentityFromJwt:
     """Test cases for JWT identity extraction in server.py."""
 
@@ -667,6 +889,44 @@ class TestExtractIdentityFromJwt:
 
         result = _extract_identity_from_jwt('', 'email')
         assert result is None
+
+    def test_padded_alb_style_jwt(self):
+        """Segments padded with '=' (as the AWS ALB emits) still decode.
+
+        PyJWT >= 2.14 rejects padded segments; the server strips the padding
+        before decoding because this path never verifies the signature.
+        """
+        from sky.server.server import _extract_identity_from_jwt
+
+        token = _alb_style_token({
+            'sub': '12345',
+            'email': 'test@example.com'
+        },
+                                 padded=True)
+        # The fixture must carry the shape that trips strict decoders.
+        assert token.rsplit('.', maxsplit=1)[-1].endswith('==')
+
+        assert _extract_identity_from_jwt(token, 'email') == 'test@example.com'
+        assert _extract_identity_from_jwt(token, 'sub') == '12345'
+
+    def test_strip_jwt_padding_keeps_compact_tokens(self):
+        """Stripping is a no-op on compact tokens and maps padded to compact."""
+        from sky.server.server import _strip_jwt_padding
+
+        compact = _alb_style_token({'email': 'test@example.com'}, padded=False)
+        padded = _alb_style_token({'email': 'test@example.com'}, padded=True)
+        assert _strip_jwt_padding(compact) == compact
+        assert _strip_jwt_padding(padded) == compact
+
+    def test_undecodable_jwt_logs_warning(self, caplog):
+        """A header the server cannot decode is reported at WARNING."""
+        from sky.server import server
+
+        with _capture_sky_logs(caplog, server.logger.name, logging.WARNING):
+            assert server._extract_identity_from_jwt(  # pylint: disable=protected-access
+                'not-a-valid-jwt', 'email') is None
+        assert any('Failed to decode JWT from header' in record.getMessage()
+                   for record in caplog.records)
 
 
 class TestExtractUserFromHeader:
@@ -768,3 +1028,25 @@ class TestExtractUserFromHeader:
         user = _extract_user_from_header(request, proxy_config)
 
         assert user is None
+
+    def test_extract_from_padded_jwt_header(self):
+        """A padded ALB-style JWT header mints the same user as a compact."""
+        from sky.server.server import _extract_user_from_header
+
+        request = mock.MagicMock()
+        request.headers = {
+            'x-amzn-oidc-data': _alb_style_token(
+                {'email': 'jwt-user@example.com'}, padded=True)
+        }
+        proxy_config = config.ExternalProxyConfig(
+            enabled=True,
+            header_name='x-amzn-oidc-data',
+            header_format='jwt',
+            jwt_identity_claim='email',
+        )
+
+        user = _extract_user_from_header(request, proxy_config)
+
+        assert user is not None
+        assert user.name == 'jwt-user@example.com'
+        assert user.id == hashlib.md5(b'jwt-user@example.com').hexdigest()[:8]

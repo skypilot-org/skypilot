@@ -303,6 +303,7 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--task` — Cancel one dynamic task of the job (a job launched from inside it), by the index shown in `sky jobs queue` or by name. A declared task cannot be cancelled alone.
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
@@ -354,9 +355,13 @@ Launch a managed job from a YAML or a command.
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
 - `--pool`, `-p` — (Experimental; optional) Pool to use for jobs submission.
 - `--num-jobs` — Number of jobs to submit.
+- `--job-group` — Attach to an existing job group, by job id or unique running job name. The job is shown under it and cancelled with it. Defaults to the surrounding job group when launched from inside one.
+- `--no-job-group` — Launch a top-level job even when running inside a job group (do not attach to it).
+- `--depends-on` — Comma-separated managed job IDs to wait for. The job starts once all of them succeed, and is cancelled if any of them ends otherwise. The launch fails if one of them has already ended without succeedi...
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
+- `--output`, `-o` — Print only the submitted job IDs, for scripts: `id` prints one per line, `json` prints {"job_ids": [...]}. Everything else goes to stderr. Implies --detach-run.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
@@ -668,7 +673,7 @@ Cancel a request running on SkyPilot API server.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `REQUEST_IDS` — text
 - `--all`, `-a` — Cancel all your requests.
-- `--all-users`, `-u` — Cancel all requests from all users.
+- `--all-users`, `-u` — Cancel all requests from all users. On a server with per-user auth, a non-admin cancels only their own.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky api info`

@@ -6,6 +6,7 @@ import uuid
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.exceptions import ProvisionUnsupportedError
 from sky.provision.nebius import constants as nebius_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -514,6 +515,17 @@ def stop(instance_id: str) -> None:
 
 def start(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
+    instance = nebius.sync_call(
+        service.get(nebius.compute().GetInstanceRequest(id=instance_id),
+                    timeout=nebius.READ_TIMEOUT))
+    if (instance.spec.check_presence('preemptible') and
+            instance.spec.which_field_in_oneof('pricing_model') is None):
+        raise ProvisionUnsupportedError(
+            f'Nebius VM {instance_id} requires explicit spot pricing opt-in. '
+            'While the VM is stopped, select price-taking spot pricing in '
+            'its Nebius spec, then retry sky start. Do this for every legacy '
+            'preemptible VM in the cluster. SkyPilot does not change pricing '
+            'consent automatically.')
     nebius.sync_call(
         service.start(nebius.compute().StartInstanceRequest(id=instance_id)))
     retry_count = 0
@@ -692,9 +704,10 @@ def launch(cluster_name_on_cloud: str,
                     recovery_policy=nebius.compute().InstanceRecoveryPolicy.FAIL
                     if use_spot else None,
                     preemptible=nebius.compute().PreemptibleSpec(
-                        priority=1,
                         on_preemption=nebius.compute().PreemptibleSpec.
                         PreemptionPolicy.STOP) if use_spot else None,
+                    follows_spot_price=nebius.compute().FollowsSpotPriceSpec()
+                    if use_spot else None,
                 ))))
         instance_id = ''
         retry_count = 0

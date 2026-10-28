@@ -3,16 +3,22 @@
 import asyncio
 import contextlib
 import datetime
+import random
 import shlex
 import textwrap
+import threading
 import time
+from typing import Optional
 from unittest import mock
 
 import filelock
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
+from sqlalchemy import orm
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
@@ -661,6 +667,25 @@ class TestGetManagedJobsWithFilters:
         returned_job_ids = [job['job_id'] for job in jobs]
         assert set(returned_job_ids) == set(job_ids)
 
+    def test_file_contents_not_selected_without_fields(self, _seed_test_jobs):
+        """Without fields the queue returns the user YAML, not file contents."""
+        job_id = _seed_test_jobs['job_id1']
+        jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+        assert jobs[0]['user_yaml'] == '/tmp/user1.yaml'
+        assert jobs[0]['dag_yaml_content'] is None
+        assert jobs[0]['env_file_content'] is None
+        assert jobs[0]['config_file_content'] is None
+
+        # Naming a column still selects it.
+        jobs, _ = state.get_managed_jobs_with_filters(
+            job_ids=[job_id], fields=['job_id', 'dag_yaml_content'])
+        assert jobs[0]['dag_yaml_content'] == '/tmp/dag1.yaml'
+
+        # The controller reads the contents through their own query.
+        contents = state.get_job_file_contents(job_id)
+        assert contents['dag_yaml_content'] == '/tmp/dag1.yaml'
+        assert contents['env_file_content'] == '/tmp/env1'
+
     def test_with_workspace_filter(self, _seed_test_jobs):
         """Test filtering by accessible_workspaces."""
         jobs, total = state.get_managed_jobs_with_filters(
@@ -999,7 +1024,7 @@ class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
     Priority: external failures (plugin-reported), then a user-job failure
-    reason (non-zero exit on a healthy cluster, SKY-6411), then the last
+    reason (non-zero exit on a healthy cluster), then the last
     cluster event, then the generic preemption fallback.
     """
 
@@ -1122,19 +1147,31 @@ class TestCancelEventsOnlyOnTransition:
         mock_add_event.assert_not_awaited()
 
 
-# Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
-# stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
+# Fixed epoch timestamps (seconds) for the time-range fixture, stored as
+# sqlalchemy.Float columns like time.time().
 _T100 = 100.0
 _T200 = 200.0
 _T300 = 300.0
+# How long after submission the seeded jobs began launching. Larger than the
+# spread of the submission times, so a window that matched on the launch time
+# (submitted_at) instead of the submission time (created_at) would fail.
+_LAUNCH_DELAY = 1000.0
 # Bounds far in the past (_T*, ~1970) and future (~year 2286) relative to the
-# current time, used to exercise NULL submitted_at (pending) handling.
+# current time, used for jobs submitted just now.
 _FAR_FUTURE = 9_999_999_999.0
+
+
+def _set_created_at(engine, job_id: int, created_at: Optional[float]) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.update(state.spot_table).where(
+                state.spot_table.c.spot_job_id == job_id).values(
+                    created_at=created_at))
 
 
 @pytest.fixture
 def _seed_timed_jobs(_mock_managed_jobs_db_conn):
-    """Seed three RUNNING jobs with explicit, distinct submitted_at times."""
+    """Seed three RUNNING jobs with explicit, distinct submission times."""
 
     async def mock_callback(status: str):
         pass
@@ -1157,13 +1194,14 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
                               task_name='task0',
                               resources_str='{}',
                               metadata='{}')
+            _set_created_at(_mock_managed_jobs_db_conn, job_id, submit_time)
             state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
                                         f'/tmp/user-{key}.yaml',
                                         f'/tmp/env-{key}', None, 100)
-            # submitted_at is written here from the explicit submit_time.
-            await state.set_starting_async(job_id, 0, f'run-{key}', submit_time,
+            launch_time = submit_time + _LAUNCH_DELAY
+            await state.set_starting_async(job_id, 0, f'run-{key}', launch_time,
                                            '{}', {}, mock_callback)
-            await state.set_started_async(job_id, 0, submit_time, mock_callback)
+            await state.set_started_async(job_id, 0, launch_time, mock_callback)
             ids[key] = job_id
         return ids
 
@@ -1176,7 +1214,7 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_pending_job(_mock_managed_jobs_db_conn):
-    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    """Seed one job left in PENDING: submitted now, never launched."""
     job_id = state.set_job_info_without_job_id(name='job-pending',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -1192,9 +1230,9 @@ def _seed_pending_job(_mock_managed_jobs_db_conn):
 
 
 @pytest.fixture
-def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
-    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
-    (it never reached STARTING)."""
+def _seed_cancelled_while_pending(_mock_managed_jobs_db_conn):
+    """Seed a job cancelled while PENDING: terminal, submitted now, and never
+    launched (NULL submitted_at)."""
     job_id = state.set_job_info_without_job_id(name='job-cancelled',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -1212,40 +1250,99 @@ def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
     return job_id
 
 
-class TestSubmittedAtRangeFilter:
-    """Time-range filter on submitted_at via get_managed_jobs_with_filters."""
+@pytest.fixture
+def _seed_job_without_submission_time(_mock_managed_jobs_db_conn):
+    """Seed a PENDING job with neither created_at nor submitted_at, as written
+    before the created_at column existed."""
+    job_id = state.set_job_info_without_job_id(name='job-old',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    _set_created_at(_mock_managed_jobs_db_conn, job_id, None)
+    return job_id
 
-    def _submitted_ats(self, jobs):
-        return sorted(job['submitted_at'] for job in jobs)
+
+async def _noop_callback(status: str) -> None:
+    del status
+
+
+async def _seed_job(engine,
+                    name: str,
+                    created_at: Optional[float],
+                    launch_time: Optional[float],
+                    num_tasks: int = 1,
+                    execution: Optional[str] = None) -> int:
+    """Seed a job whose tasks were all submitted at created_at, with task 0
+    launched at launch_time (left PENDING when None)."""
+    job_id = state.set_job_info_without_job_id(name=name,
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1',
+                                               execution=execution)
+    for task_id in range(num_tasks):
+        state.set_pending(job_id,
+                          task_id=task_id,
+                          task_name=f'task{task_id}',
+                          resources_str='{}',
+                          metadata='{}')
+    _set_created_at(engine, job_id, created_at)
+    state.scheduler_set_waiting([job_id], f'/tmp/dag-{name}.yaml',
+                                f'/tmp/user-{name}.yaml', f'/tmp/env-{name}',
+                                None, 100)
+    if launch_time is not None:
+        await _launch_task(job_id, 0, launch_time)
+    return job_id
+
+
+async def _launch_task(job_id: int, task_id: int, launch_time: float) -> None:
+    await state.set_starting_async(job_id, task_id, f'run-{job_id}-{task_id}',
+                                   launch_time, '{}', {}, _noop_callback)
+
+
+class TestSubmittedAtRangeFilter:
+    """Time-range filter on the submission time (created_at) via
+    get_managed_jobs_with_filters."""
+
+    def _submission_times(self, jobs):
+        return sorted(job['created_at'] for job in jobs)
 
     def test_submitted_after_excludes_earlier(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T200)
         # Inclusive lower bound: mid (_T200) and late (_T300) match.
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T200, _T300]
+        assert self._submission_times(jobs) == [_T200, _T300]
 
     def test_submitted_after_boundary_is_inclusive(self, _seed_timed_jobs):
         # A row exactly at submitted_after is included (>=).
         jobs, _ = state.get_managed_jobs_with_filters(submitted_after=_T300)
-        assert self._submitted_ats(jobs) == [_T300]
+        assert self._submission_times(jobs) == [_T300]
 
     def test_submitted_before_excludes_later(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_before=_T200)
         # Inclusive upper bound: early (_T100) and mid (_T200) match.
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T100, _T200]
+        assert self._submission_times(jobs) == [_T100, _T200]
 
     def test_submitted_before_boundary_is_inclusive(self, _seed_timed_jobs):
         jobs, _ = state.get_managed_jobs_with_filters(submitted_before=_T100)
-        assert self._submitted_ats(jobs) == [_T100]
+        assert self._submission_times(jobs) == [_T100]
 
     def test_window_combines_after_and_before(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_after=_T200, submitted_before=_T200)
         # Only the row exactly at _T200 falls inside [_T200, _T200].
         assert total == 1
-        assert self._submitted_ats(jobs) == [_T200]
+        assert self._submission_times(jobs) == [_T200]
 
     def test_empty_window_returns_nothing(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters(
@@ -1256,7 +1353,7 @@ class TestSubmittedAtRangeFilter:
     def test_no_window_returns_all(self, _seed_timed_jobs):
         jobs, total = state.get_managed_jobs_with_filters()
         assert total == 3
-        assert self._submitted_ats(jobs) == [_T100, _T200, _T300]
+        assert self._submission_times(jobs) == [_T100, _T200, _T300]
 
     def test_window_with_other_filters(self, _seed_timed_jobs):
         # Combine the window with an accessible_workspaces filter: only the
@@ -1264,15 +1361,15 @@ class TestSubmittedAtRangeFilter:
         jobs, total = state.get_managed_jobs_with_filters(
             accessible_workspaces=['ws1'], submitted_before=_T200)
         assert total == 2
-        assert self._submitted_ats(jobs) == [_T100, _T200]
+        assert self._submission_times(jobs) == [_T100, _T200]
 
     def test_status_count_respects_window(self, _seed_timed_jobs):
         # All three jobs are RUNNING; the window must cut the status counts.
         counts = state.get_status_count_with_filters(submitted_after=_T200)
         assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
 
-    # A pending job (NULL submitted_at) is treated as submitted "now", so the
-    # window keeps or drops it the same way it would a job submitted right now.
+    # A pending job has not begun launching (NULL submitted_at), and the window
+    # matches it by when it was submitted: the current time, for this fixture.
     def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
         assert total == 1
@@ -1296,28 +1393,146 @@ class TestSubmittedAtRangeFilter:
         assert jobs == []
         assert total == 0
 
-    # A terminal job that never got a submitted_at (cancelled/failed before
-    # STARTING) has no submission time, so it is excluded from any window —
-    # it must not be treated as submitted "now" like a still-pending job.
-    def test_terminal_no_submit_present_without_filter(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters()
+    # A job cancelled while PENDING never launched, but it was submitted, so
+    # the window matches it by its submission time like any other job.
+    def test_cancelled_while_pending_kept_by_past_lower_bound(
+            self, _seed_cancelled_while_pending):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
         assert total == 1
         assert jobs[0]['submitted_at'] is None
         assert jobs[0]['status'].is_terminal()
 
-    def test_terminal_no_submit_excluded_from_lower_bound(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+    def test_cancelled_while_pending_dropped_by_past_upper_bound(
+            self, _seed_cancelled_while_pending):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T300)
         assert jobs == []
         assert total == 0
 
-    def test_terminal_no_submit_excluded_from_future_upper_bound(
-            self, _seed_terminal_no_submit):
-        jobs, total = state.get_managed_jobs_with_filters(
-            submitted_before=_FAR_FUTURE)
-        assert jobs == []
-        assert total == 0
+    def test_no_submission_time_present_without_filter(
+            self, _seed_job_without_submission_time):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['created_at'] is None
+        assert jobs[0]['submitted_at'] is None
+
+    def test_no_submission_time_excluded_from_any_window(
+            self, _seed_job_without_submission_time):
+        for window in ({
+                'submitted_after': _T100
+        }, {
+                'submitted_before': _FAR_FUTURE
+        }):
+            jobs, total = state.get_managed_jobs_with_filters(**window)
+            assert jobs == [], window
+            assert total == 0, window
+
+
+class TestSubmissionTimeSortAndQueue:
+    """The queue sorts by and reports when each job was submitted
+    (created_at), not when it began launching (submitted_at)."""
+
+    _FIELDS = ['job_id', 'status', 'submitted_at']
+
+    def _queue_submitted_ats(self):
+        jobs = jobs_utils.get_managed_job_queue(fields=self._FIELDS)['jobs']
+        return {
+            (job['job_id'], job['task_id']): job['submitted_at'] for job in jobs
+        }
+
+    @pytest.mark.asyncio
+    async def test_sort_by_submitted_at_uses_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        # Submitted first but launched last: a sort on the launch time would
+        # put it after `second`.
+        first = await _seed_job(engine,
+                                'first',
+                                created_at=_T100,
+                                launch_time=_T300 + _LAUNCH_DELAY)
+        second = await _seed_job(engine,
+                                 'second',
+                                 created_at=_T200,
+                                 launch_time=_T200 + _LAUNCH_DELAY)
+        pending = await _seed_job(engine,
+                                  'pending',
+                                  created_at=_T300,
+                                  launch_time=None)
+        for sort_order, expected in (('asc', [first, second, pending]),
+                                     ('desc', [pending, second, first])):
+            jobs, _ = state.get_managed_jobs_with_filters(
+                sort_by='submitted_at', sort_order=sort_order)
+            assert [job['job_id'] for job in jobs] == expected, sort_order
+
+    @pytest.mark.asyncio
+    async def test_pending_job_reports_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'pending',
+                                 created_at=_T100,
+                                 launch_time=None)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
+        # The column itself stays NULL until the job begins launching.
+        assert state.get_submitted_task_ids(job_id) == set()
+
+    @pytest.mark.asyncio
+    async def test_launched_job_keeps_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'launched',
+                                 created_at=_T100,
+                                 launch_time=_T100 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T100}
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_launch_time_without_created_at(
+            self, _mock_managed_jobs_db_conn):
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'old',
+                                 created_at=None,
+                                 launch_time=_T200)
+        assert self._queue_submitted_ats() == {(job_id, 0): _T200}
+
+    @pytest.mark.asyncio
+    async def test_pipeline_later_task_reports_its_launch_time(
+            self, _mock_managed_jobs_db_conn):
+        # Task 1 of a pipeline waits on task 0, not on a controller, so it
+        # keeps its own launch time rather than the job's submission time.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'pipeline',
+                                 created_at=_T100,
+                                 launch_time=_T100 + _LAUNCH_DELAY,
+                                 num_tasks=2)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): None,
+        }
+        await _launch_task(job_id, 1, _T300 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T300 + _LAUNCH_DELAY,
+        }
+
+    @pytest.mark.asyncio
+    async def test_job_group_tasks_report_submission_time(
+            self, _mock_managed_jobs_db_conn):
+        # A job group's tasks all start waiting at submission.
+        job_id = await _seed_job(_mock_managed_jobs_db_conn,
+                                 'group',
+                                 created_at=_T100,
+                                 launch_time=None,
+                                 num_tasks=2,
+                                 execution='parallel')
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
+        for task_id in (0, 1):
+            await _launch_task(job_id, task_id, _T100 + _LAUNCH_DELAY)
+        assert self._queue_submitted_ats() == {
+            (job_id, 0): _T100,
+            (job_id, 1): _T100,
+        }
 
 
 class TestMultiTaskStatusFilterCharacterization:
@@ -1882,3 +2097,685 @@ class TestInfraFilterCodegenCompatibility:
         with pytest.raises(RuntimeError,
                            match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
             self._run_branch(code, one_older)
+
+
+class TestIncludeTreeCodegenCompatibility:
+    """The generated queue code against a controller that predates
+    `include_tree`: same arrangement as the infra filter above. Dropped, the
+    request would be answered with the roots alone -- which looks complete
+    and is not -- so the old controller has to refuse instead."""
+
+    def _run_branch(self, built: str, version: int):
+        return TestInfraFilterCodegenCompatibility._run_branch(
+            self, built, version)
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'include_tree' not in kwargs
+        # The rest of the request still goes through unchanged.
+        assert kwargs['job_ids'] == [1]
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is True
+        assert kwargs['job_ids'] == [1]
+        # Not asked for: passed as False, not omitted, on a new controller.
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1])
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION)
+        assert kwargs['include_tree'] is False
+
+    def test_old_controller_refuses_a_tree_request(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(job_ids=[1],
+                                                          include_tree=True)
+        one_older = jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INCLUDE_TREE_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
+
+    def test_current_version_accepts_the_kwarg(self):
+        # The guard and the branch that passes the kwarg are keyed on the
+        # same version, and it is the version this tree ships.
+        assert (jobs_utils.INCLUDE_TREE_MANAGED_JOBS_VERSION ==
+                managed_job_constants.MANAGED_JOBS_VERSION)
+
+
+class TestTreeRootIds:
+    """`tree_root_ids`: every row of the trees rooted at those ids. The ids
+    come from `get_tree_root_ids`; `utils.get_managed_job_queue` resolves the
+    API's `include_tree` request into them once."""
+
+    @staticmethod
+    def _tree():
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        eval1 = new_job('eval-1', parent_job_id=root, parent_task_id=1)
+        eval1a = new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        return root, eval1, eval1a
+
+    @staticmethod
+    def _keys(rows):
+        return sorted((j['job_id'], j['task_id']) for j in rows)
+
+    def test_root_ids_normalize_and_dedupe(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        assert state.get_tree_root_ids([root]) == [root]
+        assert state.get_tree_root_ids([eval1a]) == [root]
+        # Three names for one tree are that one tree; an unknown id is
+        # nothing; the answer is sorted.
+        assert state.get_tree_root_ids([eval1a, other, root, eval1,
+                                        12345]) == [root, other]
+        assert state.get_tree_root_ids([]) == []
+        assert state.get_tree_root_ids([12345]) == []
+
+    def test_whole_tree_from_any_node(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        whole = [(root, 0), (root, 1), (eval1, 0), (eval1a, 0)]
+        for named in ([root], [eval1], [eval1a], [root, eval1, eval1a]):
+            rows, total = state.get_managed_jobs_with_filters(
+                tree_root_ids=state.get_tree_root_ids(named))
+            assert self._keys(rows) == whole, named
+            # The total counts trees, so three ids from one tree are one.
+            assert total == 1, named
+
+    def test_job_ids_alone_is_unchanged(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[eval1])
+        assert self._keys(rows) == [(eval1, 0)]
+        assert total == 1
+        rows, total = state.get_managed_jobs_with_filters(job_ids=[root])
+        assert self._keys(rows) == [(root, 0), (root, 1)]
+
+    def test_a_member_id_passed_as_a_root_matches_only_itself(
+            self, _mock_managed_jobs_db_conn):
+        # The contract the callers uphold by resolving first.
+        root, eval1, eval1a = self._tree()
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=[eval1])
+        assert self._keys(rows) == [(eval1, 0)]
+        assert total == 1
+
+    def test_several_trees(self, _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        other = TestParentJobLinks._new_job('other')
+        other_child = TestParentJobLinks._new_job('other-child',
+                                                  parent_job_id=other)
+        roots = state.get_tree_root_ids([eval1a, other_child])
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=roots)
+        assert total == 2
+        assert self._keys(rows) == [(root, 0), (root, 1), (eval1, 0),
+                                    (eval1a, 0), (other, 0), (other_child, 0)]
+        # Newest tree first, the same order the list gives.
+        assert [j['job_id'] for j in rows][:2] == [other, other_child]
+
+    def test_visibility_still_applies(self, _mock_managed_jobs_db_conn):
+        root, eval1, _ = self._tree()
+        roots = state.get_tree_root_ids([eval1])
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=roots,
+            accessible_workspaces=['ws'],
+            user_hashes=['user1'])
+        assert total == 1 and len(rows) == 4
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=roots, accessible_workspaces=['nope'])
+        assert rows == [] and total == 0
+
+    def test_counts_and_options_cover_the_tree(self,
+                                               _mock_managed_jobs_db_conn):
+        root, eval1, eval1a = self._tree()
+        TestParentJobLinks._new_job('other')
+        roots = state.get_tree_root_ids([eval1])
+        counts = state.get_status_count_with_filters(tree_root_ids=roots)
+        assert sum(counts.values()) == 4
+        counts = state.get_status_count_with_filters(job_ids=[eval1])
+        assert sum(counts.values()) == 1
+        # Nothing here has been placed, so no infra either way; the point is
+        # the call takes the parameter and does not blow up on it.
+        assert state.get_infra_options_with_filters(tree_root_ids=roots) == []
+
+    def test_legacy_job_without_job_info_is_its_own_root(
+            self, _mock_managed_jobs_db_conn):
+        # A job from before job_info existed: spot rows only. The queue lists
+        # it (outer join), so a tree request for it must find it too.
+        root, _, _ = self._tree()
+        legacy = 500
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.spot_table.insert().values(
+                spot_job_id=legacy,
+                task_id=0,
+                task_name='legacy',
+                job_name='legacy',
+                status=state.ManagedJobStatus.SUCCEEDED.value,
+                resources='{}'))
+        assert state.get_tree_root_ids([legacy]) == [legacy]
+        assert state.get_tree_root_ids([legacy, root]) == [root, legacy]
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=[legacy])
+        assert self._keys(rows) == [(legacy, 0)]
+        assert total == 1
+
+    def test_unknown_or_empty_roots_select_nothing(self,
+                                                   _mock_managed_jobs_db_conn):
+        self._tree()
+        rows, total = state.get_managed_jobs_with_filters(
+            tree_root_ids=state.get_tree_root_ids([12345]))
+        assert rows == [] and total == 0
+        rows, total = state.get_managed_jobs_with_filters(tree_root_ids=[])
+        assert rows == [] and total == 0
+
+
+class TestPaginationByTreeRoot:
+    """The queue pages and counts by top-level job: a job launched from inside
+    another job rides along with its root instead of taking a page slot."""
+
+    def test_members_stay_on_their_roots_page(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        plain = new_job('plain')
+        eval1 = new_job('eval-1', parent_job_id=root, parent_task_id=1)
+        eval1a = new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        newest = new_job('newest')
+
+        # Three top-level jobs, however many members and tasks.
+        page1, total = state.get_managed_jobs_with_filters(page=1, limit=2)
+        assert total == 3
+        # Newest root first; the members (higher ids than their root) do not
+        # push the root off the page or claim slots of their own.
+        assert [j['job_id'] for j in page1] == [newest, plain]
+
+        page2, total = state.get_managed_jobs_with_filters(page=2, limit=2)
+        assert total == 3
+        # The root's two tasks and both members, on the root's page.
+        assert sorted((j['job_id'], j['task_id']) for j in page2) == [
+            (root, 0), (root, 1), (eval1, 0), (eval1a, 0)
+        ]
+
+        page3, _ = state.get_managed_jobs_with_filters(page=3, limit=2)
+        assert page3 == []
+
+    def test_unpaginated_listing_is_unchanged(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        eval1 = new_job('eval-1', parent_job_id=root)
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert sorted(j['job_id'] for j in jobs) == [root, eval1]
+
+
+class TestTreeRowOrder:
+    """Every surface reads a tree the same way: the root's declared tasks, then
+    the launched jobs by dynamic task index."""
+
+    def test_rows_come_out_in_display_order(self, _mock_managed_jobs_db_conn):
+        new_job = TestParentJobLinks._new_job
+        root = new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        # Attach out of index order so the ids do not happen to sort right.
+        eval3 = state.set_job_info_without_job_id(name='eval-3',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  root_job_id=root,
+                                                  parent_job_id=root,
+                                                  parent_task_id=1,
+                                                  dynamic_task_index=3)
+        state.set_pending(eval3, 0, 'eval-3', '{}', '{}')
+        eval2 = state.set_job_info_without_job_id(name='eval-2',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  root_job_id=root,
+                                                  parent_job_id=root,
+                                                  parent_task_id=1,
+                                                  dynamic_task_index=2)
+        state.set_pending(eval2, 0, 'eval-2', '{}', '{}')
+        newer = new_job('newer')
+
+        def order(**kwargs):
+            rows, _ = state.get_managed_jobs_with_filters(**kwargs)
+            return [(r['job_id'], r['task_id']) for r in rows]
+
+        # Newest tree first; within the tree declared tasks 0, 1 then the
+        # members by index (2 before 3 although 3 attached first).
+        expected = [(newer, 0), (root, 0), (root, 1), (eval2, 0), (eval3, 0)]
+        assert order() == expected
+        assert order(page=1, limit=10) == expected
+        # An explicit sort keeps the within-tree order as the tie-breaker.
+        assert order(sort_by='job_id', sort_order='desc', page=1,
+                     limit=10) == expected
+
+
+class TestDynamicTaskIndex:
+    """Dynamic tasks number on from the root's declared tasks, in attach order,
+    from an atomic counter on the root's row."""
+
+    def test_indices_continue_the_root_s_tasks(self,
+                                               _mock_managed_jobs_db_conn):
+        root = TestParentJobLinks._new_job('group')
+        state.set_pending(root,
+                          task_id=1,
+                          task_name='watcher',
+                          resources_str='{}',
+                          metadata='{}')
+        # Two declared tasks (0, 1): the dynamic tasks are 2, 3, 4.
+        assert state.next_dynamic_task_index(root) == 2
+        assert state.next_dynamic_task_index(root) == 3
+        assert state.next_dynamic_task_index(root) == 4
+
+    def test_index_is_stored_on_the_member(self, _mock_managed_jobs_db_conn):
+        root = TestParentJobLinks._new_job('group')
+        index = state.next_dynamic_task_index(root)
+        member = state.set_job_info_without_job_id(name='eval',
+                                                   workspace='ws',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1',
+                                                   root_job_id=root,
+                                                   parent_job_id=root,
+                                                   parent_task_id=0,
+                                                   dynamic_task_index=index)
+        state.set_pending(member,
+                          task_id=0,
+                          task_name='eval',
+                          resources_str='{}',
+                          metadata='{}')
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'root_job_id', 'dynamic_task_index'],
+            job_ids=[member])
+        assert jobs[0]['dynamic_task_index'] == 1  # one declared task: 0
+        assert jobs[0]['root_job_id'] == root
+
+    def test_unknown_root_raises(self, _mock_managed_jobs_db_conn):
+        with pytest.raises(ValueError):
+            state.next_dynamic_task_index(999999)
+
+
+class TestParentJobLinks:
+    """root/parent/parent_task persistence and the cancel tree fetch."""
+
+    @staticmethod
+    def _new_job(name: str,
+                 parent_job_id=None,
+                 parent_task_id=None,
+                 root_job_id=None,
+                 with_task: bool = True) -> int:
+        # The launch path passes the root explicitly (it travels in the
+        # parent task's env); for a direct member it is the parent itself.
+        if parent_job_id is not None and root_job_id is None:
+            root_job_id = parent_job_id
+        job_id = state.set_job_info_without_job_id(
+            name=name,
+            workspace='ws',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1',
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id)
+        if with_task:
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name=name,
+                              resources_str='{}',
+                              metadata='{}')
+        return job_id
+
+    @staticmethod
+    def _links(job_ids):
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'root_job_id', 'parent_job_id', 'parent_task_id'],
+            job_ids=job_ids)
+        return {
+            j['job_id']:
+            (j['root_job_id'], j['parent_job_id'], j['parent_task_id'])
+            for j in jobs
+        }
+
+    def test_top_level_job_has_no_links(self, _mock_managed_jobs_db_conn):
+        job_id = self._new_job('root')
+        assert self._links([job_id]) == {job_id: (None, None, None)}
+        assert not state.get_jobs_launched_from([job_id])
+        assert not state.get_jobs_launched_from([])
+
+    def test_direct_member_links_round_trip(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        assert self._links([child]) == {child: (root, root, 1)}
+        assert state.get_jobs_launched_from([root]) == [(child, root)]
+
+    def test_codegen_set_job_info_persists_links(self,
+                                                 _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        # The remote-controller (codegen) path supplies the job id itself.
+        state.set_job_info(job_id=900,
+                           name='child',
+                           workspace='ws',
+                           entrypoint='ep',
+                           pool=None,
+                           pool_hash=None,
+                           user_hash='user1',
+                           root_job_id=root,
+                           parent_job_id=root,
+                           parent_task_id=0)
+        state.set_pending(900,
+                          task_id=0,
+                          task_name='child',
+                          resources_str='{}',
+                          metadata='{}')
+        assert self._links([900]) == {900: (root, root, 0)}
+        assert state.get_jobs_launched_from([root]) == [(900, root)]
+
+    @staticmethod
+    def _set_task_status(job_id: int, status: state.ManagedJobStatus) -> None:
+        engine = state._db_manager.get_engine()
+        with orm.Session(engine) as session:
+            session.execute(
+                sqlalchemy.update(state.spot_table).where(
+                    state.spot_table.c.spot_job_id == job_id).values(
+                        status=status.value))
+            session.commit()
+
+    def test_insert_checks_the_parent_in_its_own_transaction(
+            self, _mock_managed_jobs_db_conn):
+        # The launch path checks the parent up front, but the row lands much
+        # later; the insert re-checks so a cancel in between cannot orphan
+        # the child under a CANCELLING root. Anything not finished accepts.
+        root = self._new_job('group')
+        for status in (state.ManagedJobStatus.PENDING,
+                       state.ManagedJobStatus.STARTING,
+                       state.ManagedJobStatus.RUNNING,
+                       state.ManagedJobStatus.RECOVERING):
+            self._set_task_status(root, status)
+            self._new_job(f'eval-{status.value}', parent_job_id=root)
+        for status in (state.ManagedJobStatus.CANCELLING,
+                       state.ManagedJobStatus.CANCELLED,
+                       state.ManagedJobStatus.SUCCEEDED,
+                       state.ManagedJobStatus.FAILED):
+            self._set_task_status(root, status)
+            with pytest.raises(ValueError, match=status.value):
+                self._new_job(f'late-{status.value}', parent_job_id=root)
+        # Nothing was written for the refused ones.
+        assert [j for j, _ in state.get_jobs_launched_from([root])
+               ] == [root + 1, root + 2, root + 3, root + 4]
+
+    def test_insert_refuses_a_missing_parent(self, _mock_managed_jobs_db_conn):
+        with pytest.raises(ValueError, match='no such managed job'):
+            self._new_job('orphan', parent_job_id=12345)
+
+    def test_insert_checks_the_root_too(self, _mock_managed_jobs_db_conn):
+        # A grandchild attaches under a RUNNING eval while the group (root)
+        # is being cancelled: the root owns the lifecycle, so the insert is
+        # refused on the root's status even though the direct parent is fine.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        eval1 = self._new_job('eval-1', parent_job_id=root)
+        self._set_task_status(eval1, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match=f'job {root}: it is CANCELLING'):
+            self._new_job('eval-1a', parent_job_id=eval1, root_job_id=root)
+        # And the other way round: root fine, direct parent cancelling.
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(eval1, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match=f'job {eval1}: it is CANCELLING'):
+            self._new_job('eval-1b', parent_job_id=eval1, root_job_id=root)
+
+    def test_root_is_read_from_the_parent_row_not_the_caller(
+            self, _mock_managed_jobs_db_conn):
+        # The guard finds the root through the parent's own row, so a caller
+        # that names no root (or the wrong one) cannot weaken it.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        eval1 = self._new_job('eval-1', parent_job_id=root)
+        self._set_task_status(eval1, state.ManagedJobStatus.RUNNING)
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        for claimed_root in (None, eval1):
+            with pytest.raises(ValueError,
+                               match=f'job {root}: it is CANCELLING'):
+                state.set_job_info_without_job_id(name='eval-1a',
+                                                  workspace='ws',
+                                                  entrypoint='ep',
+                                                  pool=None,
+                                                  pool_hash=None,
+                                                  user_hash='u',
+                                                  parent_job_id=eval1,
+                                                  root_job_id=claimed_root)
+
+    def test_concurrent_attaches_never_land_after_the_cancel(
+            self, _mock_managed_jobs_db_conn):
+        # Five attaches race a CANCELLING write on the root, four rounds with
+        # jittered starts. Whatever the interleaving, the database ends up
+        # consistent: every attach either landed (and the tree walk finds
+        # it) or was refused on CANCELLING; nothing half-way. The ordering
+        # guarantee itself is pinned by the deterministic test below, since
+        # wall-clock timestamps taken after a commit can be reordered by
+        # thread scheduling.
+        for _ in range(4):
+            root = self._new_job('group')
+            self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+            lock = threading.Lock()
+            outcomes: List[str] = []
+
+            def attach(i, root=root):
+                time.sleep(random.uniform(0, 0.02))
+                try:
+                    self._new_job(f'eval-{i}', parent_job_id=root)
+                    with lock:
+                        outcomes.append('inserted')
+                except ValueError as e:
+                    assert 'CANCELLING' in str(e), str(e)
+                    with lock:
+                        outcomes.append('refused')
+
+            def cancel(root=root):
+                time.sleep(random.uniform(0, 0.02))
+                self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+
+            threads = [
+                threading.Thread(target=attach, args=(i,)) for i in range(5)
+            ] + [threading.Thread(target=cancel)]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+            assert len(outcomes) == 5
+            assert len(state.get_jobs_launched_from(
+                [root])) == outcomes.count('inserted')
+
+    def test_cancel_waits_for_an_attach_holding_the_lock(
+            self, _mock_managed_jobs_db_conn):
+        # The ordering guarantee, deterministically: an attach that has taken
+        # the guard's lock and is still inside its transaction holds off the
+        # CANCELLING write. The write lands only after the attach commits,
+        # so the child exists (it was found by the sweep that follows the
+        # write) and the next attach is refused.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.RUNNING)
+        original = state._check_parent_accepts_attachment  # pylint: disable=protected-access
+        hold_seconds = 0.6
+
+        def slow_guard(session, parent_job_id):
+            original(session, parent_job_id)
+            time.sleep(hold_seconds)  # still inside the insert's transaction
+
+        insert_done = {}
+        cancel_done = {}
+
+        def attach():
+            with mock.patch.object(state, '_check_parent_accepts_attachment',
+                                   slow_guard):
+                self._new_job('eval-slow', parent_job_id=root)
+            insert_done['at'] = time.monotonic()
+
+        def cancel():
+            time.sleep(0.1)  # let the attach take the lock first
+            started = time.monotonic()
+            self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+            cancel_done['at'] = time.monotonic()
+            cancel_done['waited'] = cancel_done['at'] - started
+
+        threads = [
+            threading.Thread(target=attach),
+            threading.Thread(target=cancel)
+        ]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        # The write waited for the lock (most of the hold) and finished after
+        # the insert committed; the child is in the tree; a late attach is
+        # refused.
+        assert cancel_done['waited'] > hold_seconds / 2, cancel_done
+        assert cancel_done['at'] > insert_done['at']
+        assert len(state.get_jobs_launched_from([root])) == 1
+        with pytest.raises(ValueError, match='CANCELLING'):
+            self._new_job('eval-late', parent_job_id=root)
+
+    def test_codegen_insert_path_has_the_same_guard(self,
+                                                    _mock_managed_jobs_db_conn):
+        # set_job_info is the helper the controller-side codegen emits; it
+        # must refuse a cancelling parent exactly like the other path.
+        root = self._new_job('group')
+        self._set_task_status(root, state.ManagedJobStatus.CANCELLING)
+        with pytest.raises(ValueError, match='CANCELLING'):
+            state.set_job_info(9999,
+                               name='late',
+                               workspace='ws',
+                               entrypoint='ep',
+                               pool=None,
+                               pool_hash=None,
+                               user_hash='u',
+                               parent_job_id=root,
+                               root_job_id=root)
+        assert state.get_jobs_launched_from([root]) == []
+
+    def test_tree_fetch_from_any_node(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        c1 = self._new_job('c1', parent_job_id=root, parent_task_id=1)
+        c2 = self._new_job('c2', parent_job_id=root, parent_task_id=1)
+        g1 = self._new_job('g1', parent_job_id=c1, root_job_id=root)
+        gg1 = self._new_job('gg1', parent_job_id=g1, root_job_id=root)
+        unrelated = self._new_job('other')
+        unrelated_child = self._new_job('other-child', parent_job_id=unrelated)
+
+        tree = [(c1, root), (c2, root), (g1, c1), (gg1, g1)]
+        # From the root, from a middle node, from a leaf: the same tree comes
+        # back (the caller picks its subtree from the parent edges), and the
+        # roots themselves are never in it.
+        assert state.get_jobs_launched_from([root]) == tree
+        assert state.get_jobs_launched_from([c1]) == tree
+        assert state.get_jobs_launched_from([gg1]) == tree
+        # Several trees at once; an unknown id contributes nothing.
+        assert state.get_jobs_launched_from(
+            [root, unrelated, 12345]) == (tree + [(unrelated_child, unrelated)])
+
+    def test_job_info_row(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        row = state.get_job_info_row(child)
+        assert row == state.JobInfoRow(job_id=child,
+                                       name='child',
+                                       workspace='ws',
+                                       user_hash='user1',
+                                       root_job_id=root,
+                                       parent_job_id=root,
+                                       parent_task_id=1)
+        assert row.tree_root_job_id == root
+        root_row = state.get_job_info_row(root)
+        assert root_row is not None
+        assert root_row.root_job_id is None
+        assert root_row.tree_root_job_id == root
+        assert state.get_job_info_row(12345) is None
+
+    def test_job_info_row_resolves_missing_workspace(
+            self, _mock_managed_jobs_db_conn):
+        # A row from before workspaces existed counts as the default one.
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.job_info_table.insert().values(spot_job_id=500,
+                                                              name='legacy',
+                                                              workspace=None))
+        row = state.get_job_info_row(500)
+        assert row is not None
+        assert row.workspace == constants.SKYPILOT_DEFAULT_WORKSPACE
+
+    def test_queue_returns_link_fields(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        by_id = self._links([root, child])
+        assert by_id[root] == (None, None, None)
+        assert by_id[child] == (root, root, 1)
+
+
+class _CountingRowMapping(dict):
+    """Stands in for a SQLAlchemy RowMapping, counting direct ``.get()`` calls.
+
+    A real ``RowMapping`` does not return a default cheaply for a key that is
+    not in the result set: it routes through ``_key_fallback`` and
+    *constructs* a ``NoSuchColumnError`` first. ``_get_jobs_dict`` names every
+    column unconditionally, so if it read them off the RowMapping, a query
+    narrowed by ``fields`` would pay one exception object per unselected
+    column per row.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.direct_gets = 0
+
+    def get(self, key, default=None):
+        self.direct_gets += 1
+        return super().get(key, default)
+
+
+def test_get_jobs_dict_reads_selected_columns_without_probing_row_mapping():
+    """Only the ambiguous Column keys may be read off the RowMapping.
+
+    Guards the cost, not just the result: reverting to ``r.get('...')`` per
+    column still returns the right dict, but reintroduces one exception
+    construction per unselected column per row.
+    """
+    # The shape a `fields`-narrowed query produces: a few selected columns,
+    # every other column absent from the result set.
+    row = _CountingRowMapping({
+        'job_id': 7,
+        'task_id': 0,
+        'job_name': 'my-job',
+        'status': state.ManagedJobStatus.RUNNING,
+    })
+
+    result = state._get_jobs_dict(row)  # pylint: disable=protected-access
+
+    assert result['_job_id'] == 7
+    assert result['task_id'] == 0
+    assert result['status'] == state.ManagedJobStatus.RUNNING
+    # Columns the query did not select come back as None, not as an error.
+    assert result['dag_yaml_content'] is None
+    assert result['pool'] is None
+    # Two ambiguous columns (spot.spot_job_id and job_info.spot_job_id) are
+    # keyed by Column object and must stay on the RowMapping; nothing else
+    # may touch it.
+    assert row.direct_gets <= 2

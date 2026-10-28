@@ -15,6 +15,7 @@ import {
   InfoIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 import {
   checkGrafanaAvailability,
@@ -418,6 +419,8 @@ export function InfrastructureSection({
   statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
   inactiveContexts = [], // [{name, note?}] rows listed without capacity data
 }) {
+  // contextWorkspaceMap holds workspace ids; show names.
+  const { workspaceName } = useWorkspacesConfig();
   // Add defensive check for contexts (memoized so downstream useMemos don't
   // recompute on every render when `contexts` is nullish)
   const safeContexts = React.useMemo(() => contexts || [], [contexts]);
@@ -604,7 +607,7 @@ export function InfrastructureSection({
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 max-sm:flex-wrap max-sm:gap-y-3">
             <div className="flex items-center">
               <h3 className="text-lg font-semibold">{title}</h3>
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
@@ -617,13 +620,12 @@ export function InfrastructureSection({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 max-sm:w-full">
               {actionButton}
-              {/* Color key for the Utilization bars, pinned to the right end;
-                  only meaningful when the table has GPU rows to explain. */}
-              {gpus && gpus.length > 0 && (
-                <UtilizationLegend className="hidden sm:flex" />
-              )}
+              {/* Color key for the Utilization bars, pinned to the right end
+                  (own line on phones); only meaningful when the table has
+                  GPU rows to explain. */}
+              {gpus && gpus.length > 0 && <UtilizationLegend />}
             </div>
           </div>
           <GpuTypeSummaryStrip gpus={gpus} />
@@ -916,9 +918,7 @@ export function InfrastructureSection({
                             <AllowedNodesRowBadge id={rowId} kind={rowKind} />
                             {contextErrors[context] && !statusByKey && (
                               // Hidden when a plugin is contributing status data
-                              // via the infra.row.namePrefix slot — the plugin's
-                              // status dot + per-context detail page cover this
-                              // information already.
+                              // via the infra.row.namePrefix slot.
                               <NonCapitalizedTooltip
                                 content={`Context unreachable: ${contextErrors[context]}`}
                                 className="text-sm text-muted-foreground"
@@ -929,7 +929,8 @@ export function InfrastructureSection({
                           </div>
                           {workspaces.length > 0 && (
                             <div className="text-sm text-gray-500 mt-1.5">
-                              (workspaces: {workspaces.join(', ')})
+                              (workspaces:{' '}
+                              {workspaces.map(workspaceName).join(', ')})
                             </div>
                           )}
                         </td>
@@ -1138,7 +1139,8 @@ export function InfrastructureSection({
                       </div>
                       {workspaces.length > 0 && (
                         <div className="text-sm text-gray-500 mt-1.5 truncate">
-                          (workspaces: {workspaces.join(', ')})
+                          (workspaces:{' '}
+                          {workspaces.map(workspaceName).join(', ')})
                         </div>
                       )}
                     </div>
@@ -1598,8 +1600,7 @@ export function ContextDetails({
                       // Build taint info separately. Taints whose
                       // `tolerated` flag is set by the backend (i.e. matched
                       // by `kubernetes.pod_config.spec.tolerations`) do not
-                      // count against node health on the Infra page — they're
-                      // surfaced in the GPU Manager drawer instead.
+                      // count against node health on the Infra page.
                       const taints = node.taints || [];
                       const untoleratedTaints = taints.filter(
                         (t) => t && t.tolerated !== true
@@ -2696,6 +2697,7 @@ function InfrastructureHint() {
 }
 
 export function GPUs() {
+  const { workspaceName } = useWorkspacesConfig();
   // Plugin-contributed extra rows + status data.
   //
   // OSS does not know any plugin id; we discover providers by hook name.
@@ -3447,9 +3449,8 @@ export function GPUs() {
     };
   }, [handleRefresh]);
 
-  // Listen for plugin-emitted refresh requests, e.g. when a plugin's
-  // "Add infra" / "Remove infra" flow finishes, so the host page picks up
-  // the new state without the user having to click Refresh manually.
+  // Listen for plugin-emitted refresh requests, so the host page picks up
+  // new state without the user having to click Refresh manually.
   useEffect(() => {
     const onRefreshEvent = () => handleRefresh();
     window.addEventListener('skydashboard:infra:refresh', onRefreshEvent);
@@ -3533,8 +3534,7 @@ export function GPUs() {
   }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
   // Filter cloud infrastructure data based on selected workspace, then merge
-  // in any plugin-contributed cloud rows (e.g. misconfigured clouds that have
-  // credentials registered but didn't show up in workspace-enabled clouds).
+  // in any plugin-contributed cloud rows not already present.
   const filteredCloudInfraData = React.useMemo(() => {
     const base = (() => {
       if (!cloudInfraData || cloudInfraData.length === 0) return [];
@@ -3882,7 +3882,7 @@ export function GPUs() {
               <p className="text-sm text-gray-500">
                 {selectedWorkspace === 'all'
                   ? 'No enabled clouds available.'
-                  : `No enabled clouds for workspace "${selectedWorkspace}".`}
+                  : `No enabled clouds for workspace "${workspaceName(selectedWorkspace)}".`}
               </p>
             )
           ) : (
@@ -4125,8 +4125,7 @@ export function GPUs() {
 
     // If all infrastructure is disabled, show ONLY the empty-state hint —
     // hide the per-type cards (which would all be empty anyway). Plugins can
-    // replace the default OSS hint via the `infra.emptyState` slot (e.g. to
-    // show a richer "Connect your first infrastructure" CTA).
+    // replace the default OSS hint via the `infra.emptyState` slot.
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
@@ -4265,19 +4264,25 @@ export function GPUs() {
           the back link above already serves as the leaf navigation,
           and the page-level Refresh / Add Infra controls don't apply
           when viewing one infra. Hiding the whole row also closes the
-          ~36px gap (h-5 + mb-4) between the back link and the h1. */}
+          ~36px gap (h-5 + mb-4) between the back link and the h1.
+          Below lg it is two rows: title + plugin actions, then workspace
+          + refresh. Narrow-only rules use max-lg: so plugin stylesheets,
+          which load later, cannot override them. */}
       {!selectedContext && (
-        <div className="flex items-center justify-between mb-4 h-5">
-          <div className="text-base flex items-center">
-            <Link href="/infra" className="text-sky-blue cursor-default">
+        <div className="flex items-center mb-4 max-lg:flex-wrap max-lg:gap-y-3 lg:h-5">
+          <div className="flex-1 text-base flex items-center">
+            <Link
+              href="/infra"
+              className="text-sky-blue cursor-default leading-none text-base"
+            >
               Infrastructure
             </Link>
           </div>
-          <div className="flex items-center">
+          <div className="max-lg:order-3 max-lg:w-full flex items-center">
             {/* Workspace Selector */}
             {availableWorkspaces.length > 0 && (
               <div className="flex items-center mr-4">
-                <label className="text-sm font-medium text-gray-700 mr-2">
+                <label className="max-lg:hidden text-sm font-medium text-gray-700 mr-2">
                   Workspace:
                 </label>
                 <Select
@@ -4291,7 +4296,7 @@ export function GPUs() {
                     <SelectItem value="all">All Workspaces</SelectItem>
                     {availableWorkspaces.map((workspace) => (
                       <SelectItem key={workspace} value={workspace}>
-                        {workspace}
+                        {workspaceName(workspace)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -4299,36 +4304,47 @@ export function GPUs() {
               </div>
             )}
 
-            {isAnyLoading && (
-              <div className="flex items-center mr-2">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
-              </div>
-            )}
-            {!isAnyLoading && lastFetchedTime && (
-              <LastUpdatedTimestamp
-                timestamp={lastFetchedTime}
-                className="mr-2"
-              />
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={isAnyLoading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && 'Refresh'}
-            </button>
-            <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
+            <div className="ml-auto flex items-center">
+              {isAnyLoading && (
+                <div className="flex items-center mr-2">
+                  <CircularProgress size={15} className="mt-0" />
+                  <span className="max-lg:hidden ml-2 text-gray-500">
+                    Loading...
+                  </span>
+                </div>
+              )}
+              {!isAnyLoading && lastFetchedTime && (
+                <div className="max-lg:hidden lg:flex lg:items-center">
+                  <LastUpdatedTimestamp
+                    timestamp={lastFetchedTime}
+                    className="mr-2"
+                  />
+                </div>
+              )}
+              <button
+                onClick={handleRefresh}
+                disabled={isAnyLoading}
+                title="Refresh"
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+              >
+                <RotateCwIcon
+                  className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`}
+                />
+                {!isMobile && 'Refresh'}
+              </button>
+            </div>
           </div>
+          <PluginSlot
+            name="infra.headerActions"
+            wrapperClassName="max-lg:order-2 lg:ml-3"
+          />
         </div>
       )}
 
       <PluginSlot name="infra.attentionBanner" />
 
       {selectedContext && (
-        // Large h1 title + plugin-injected header actions (e.g. Remove)
-        // on a single row.
+        // Large h1 title + plugin-injected header actions on a single row.
         <div className="flex items-center justify-between gap-3 mb-5">
           <h1
             className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${

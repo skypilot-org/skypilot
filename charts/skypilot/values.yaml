@@ -254,8 +254,10 @@ apiService:
 
   # Spread API server pods across topology domains (e.g., zones).
   # When set, a topologySpreadConstraints entry is rendered with
-  # maxSkew=1, whenUnsatisfiable=DoNotSchedule, and a labelSelector
-  # that matches the API server pods automatically.
+  # maxSkew=1, whenUnsatisfiable=DoNotSchedule, a labelSelector
+  # that matches the API server pods automatically, and
+  # matchLabelKeys=[pod-template-hash] so each rollout spreads its new
+  # pods independently of the pods it replaces (Kubernetes 1.27+).
   # Example: "topology.kubernetes.io/zone"
   # @schema type: [string, null]
   topologySpreadTopologyKey: null

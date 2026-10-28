@@ -5,11 +5,13 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
+from sky.server.requests import payloads
 from sky.skylet import constants as skylet_constants
 from sky.workspaces import constants as workspace_constants
 
@@ -268,12 +270,14 @@ class TestQueue:
                                sort_by,
                                sort_order,
                                submitted_after=None,
-                               submitted_before=None):
+                               submitted_before=None,
+                               include_tree=False):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
                 'accessible_workspaces': accessible_workspaces,
                 'job_ids': job_ids,
+                'include_tree': include_tree,
                 'workspace_match': workspace_match,
                 'name_match': name_match,
                 'pool_match': pool_match,
@@ -665,6 +669,230 @@ class TestQueue:
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
         assert total_no_filter == 3
 
+    def test_queue_include_tree_reaches_the_controller(self, monkeypatch):
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        captured = {}
+        fake = jobs_core.managed_job_utils.ManagedJobCodeGen.get_job_table
+
+        def capturing(**kwargs):
+            captured.update(kwargs)
+            return fake(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
+                            'get_job_table', capturing)
+        jobs_core.queue_v2(refresh=False, all_users=True, job_ids=[1])
+        assert captured['include_tree'] is False
+        jobs_core.queue_v2(refresh=False,
+                           all_users=True,
+                           job_ids=[1],
+                           include_tree=True)
+        assert captured['include_tree'] is True
+        assert captured['job_ids'] == [1]
+
+    def test_queue_surfaces_a_controller_that_refuses_include_tree(
+            self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        marker = jobs_core.managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MARKER
+
+        class RefusingBackend:
+
+            def run_on_head(self,
+                            handle,
+                            code,
+                            require_outputs,
+                            stream_logs,
+                            separate_stderr=False):
+                return 1, '', f'RuntimeError: {marker}: too old for trees\n'
+
+        monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                            lambda handle: RefusingBackend())
+        monkeypatch.setattr(jobs_core.backends, 'CloudVmRayBackend',
+                            RefusingBackend)
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='too old for trees'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True)
+
+    def test_queue_spares_a_runner_that_predates_include_tree(
+            self, monkeypatch):
+        # A plugin's runner built against the previous protocol must keep
+        # serving ordinary queue requests; only a tree request is refused.
+        jobs = [_make_job(1), _make_job(2)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        class OldRunner:
+
+            def fetch_managed_job_table(self, *, handle, backend, skip_finished,
+                                        accessible_workspaces, job_ids,
+                                        workspace_match, name_match, pool_match,
+                                        infra_match, page, limit, user_hashes,
+                                        statuses, fields, sort_by, sort_order,
+                                        submitted_after, submitted_before):
+                seen['job_ids'] = job_ids
+                return default.fetch_managed_job_table(
+                    handle=handle,
+                    backend=backend,
+                    skip_finished=skip_finished,
+                    accessible_workspaces=accessible_workspaces,
+                    job_ids=job_ids,
+                    include_tree=False,
+                    workspace_match=workspace_match,
+                    name_match=name_match,
+                    pool_match=pool_match,
+                    infra_match=infra_match,
+                    page=page,
+                    limit=limit,
+                    user_hashes=user_hashes,
+                    statuses=statuses,
+                    fields=fields,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    submitted_after=submitted_after,
+                    submitted_before=submitted_before)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: OldRunner())
+        filtered, total, _, _, _ = jobs_core.queue_v2(refresh=False,
+                                                      all_users=True,
+                                                      job_ids=[2])
+        assert seen['job_ids'] == [2]
+        assert total == 1 and [j['job_id'] for j in filtered] == [2]
+        with pytest.raises(exceptions.NotSupportedError):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[2],
+                               include_tree=True)
+
+    def test_queue_passes_include_tree_to_a_kwargs_runner(self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        default = jobs_core._DefaultManagedJobRunner()  # pylint: disable=protected-access
+        seen = {}
+
+        class ForwardingRunner:
+
+            def fetch_managed_job_table(self, **kwargs):
+                seen.update(kwargs)
+                return default.fetch_managed_job_table(**kwargs)
+
+        monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                            lambda: ForwardingRunner())
+        jobs_core.queue_v2(refresh=False,
+                           all_users=True,
+                           job_ids=[1],
+                           include_tree=True)
+        assert seen['include_tree'] is True
+
+    def test_queue_refuses_include_tree_without_ids_or_with_extras(
+            self, monkeypatch):
+        jobs = [_make_job(1)]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+        with pytest.raises(ValueError, match='requires job_ids'):
+            jobs_core.queue_v2(refresh=False, all_users=True, include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True,
+                               page=1,
+                               limit=5)
+        with pytest.raises(ValueError, match='skip_finished, statuses'):
+            jobs_core.queue_v2(refresh=False,
+                               all_users=True,
+                               job_ids=[1],
+                               include_tree=True,
+                               skip_finished=True,
+                               statuses=['RUNNING'])
+        # Visibility is not a filter: all_users=False is allowed.
+        jobs_core.queue_v2(refresh=False, job_ids=[1], include_tree=True)
+
+
+class TestGetManagedJobQueueIncludeTree:
+    """`get_managed_job_queue` turns `include_tree` into resolved tree roots
+    once, and refuses the combinations whose meaning is undecided."""
+
+    def _patch(self, monkeypatch, roots):
+        seen = {}
+
+        def fake_roots(job_ids):
+            seen['resolved'] = seen.get('resolved', 0) + 1
+            seen['job_ids'] = list(job_ids)
+            return roots
+
+        def fake_infra(**kw):
+            seen['infra'] = kw
+            return []
+
+        def fake_status(**kw):
+            seen['status'] = kw
+            return {}
+
+        def fake_jobs(**kw):
+            seen['jobs'] = kw
+            return [], 0
+
+        st = jobs_utils.managed_job_state
+        monkeypatch.setattr(st, 'get_tree_root_ids', fake_roots)
+        monkeypatch.setattr(st, 'get_infra_options_with_filters', fake_infra)
+        monkeypatch.setattr(st, 'get_status_count_with_filters', fake_status)
+        monkeypatch.setattr(st, 'get_managed_jobs_with_filters', fake_jobs)
+        monkeypatch.setattr(st, 'get_managed_jobs_total', lambda: 0)
+        return seen
+
+    def test_resolves_roots_once_and_passes_them_to_all_three(
+            self, monkeypatch):
+        seen = self._patch(monkeypatch, roots=[3])
+        jobs_utils.get_managed_job_queue(job_ids=[5, 4], include_tree=True)
+        assert seen['resolved'] == 1
+        assert seen['job_ids'] == [5, 4]
+        for key in ('infra', 'status', 'jobs'):
+            assert seen[key]['tree_root_ids'] == [3], key
+            assert seen[key]['job_ids'] is None, key
+
+    def test_without_include_tree_passes_ids_through(self, monkeypatch):
+        seen = self._patch(monkeypatch, roots=[3])
+        jobs_utils.get_managed_job_queue(job_ids=[5])
+        assert 'resolved' not in seen
+        for key in ('infra', 'status', 'jobs'):
+            assert seen[key]['job_ids'] == [5], key
+            assert seen[key]['tree_root_ids'] is None, key
+
+    def test_refuses_include_tree_without_ids_or_with_extras(self, monkeypatch):
+        self._patch(monkeypatch, roots=[3])
+        with pytest.raises(ValueError, match='requires job_ids'):
+            jobs_utils.get_managed_job_queue(include_tree=True)
+        with pytest.raises(ValueError, match='pagination'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             page=1,
+                                             limit=1)
+        with pytest.raises(ValueError, match='name_match, statuses'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             name_match='x',
+                                             statuses=['PENDING'])
+        with pytest.raises(ValueError, match='skip_finished'):
+            jobs_utils.get_managed_job_queue(job_ids=[5],
+                                             include_tree=True,
+                                             skip_finished=True)
+
+
+def test_queue_v2_body_carries_include_tree():
+    # The HTTP handler hands the body to queue_v2_api as kwargs, so the field
+    # has to round-trip; an old client that never sends it gets False.
+    body = payloads.JobsQueueV2Body(refresh=False, job_ids=[1])
+    assert body.to_kwargs()['include_tree'] is False
+    body = payloads.JobsQueueV2Body(refresh=False,
+                                    job_ids=[1],
+                                    include_tree=True)
+    assert body.to_kwargs()['include_tree'] is True
+
 
 class TestDumpManagedJobQueue:
 
@@ -684,6 +912,7 @@ class TestDumpManagedJobQueue:
             'job_duration': 0,
             'end_at': None,
             'failure_reason': None,
+            'created_at': None,
         }
         defaults.update(kwargs)
         return defaults
@@ -726,6 +955,7 @@ class TestDumpManagedJobQueue:
                                                infra_match,
                                                page,
                                                limit,
+                                               tree_root_ids=None,
                                                sort_by=None,
                                                sort_order=None,
                                                submitted_after=None,
@@ -754,6 +984,7 @@ class TestDumpManagedJobQueue:
                                                pool_match,
                                                user_hashes,
                                                skip_finished,
+                                               tree_root_ids=None,
                                                infra_match=None,
                                                submitted_after=None,
                                                submitted_before=None,
@@ -770,7 +1001,9 @@ class TestDumpManagedJobQueue:
                                                          limit=None)
             return status_counts
 
-        def fake_get_managed_jobs_highest_priority():
+        def fake_get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=None):
+            del max_launching_jobs_per_user
             if not jobs:
                 return skylet_constants.MIN_PRIORITY
             return max(
@@ -1055,3 +1288,58 @@ class TestDumpManagedJobQueue:
 
         job = decoded['jobs'][0]
         assert 'In backoff, waiting for resources' in job['details']
+
+
+def test_workspace_filter_matches_names_not_ids(monkeypatch):
+    """The typed filter is matched against names (and exact ids); the
+    controller gets ids."""
+    from sky import backends
+
+    # 'team-a' was renamed 'archive'; its id is still 'team-a'.
+    workspaces = {
+        'default': {},
+        'team-a': {
+            'name': 'archive'
+        },
+        'ws-0123456789ab': {
+            'name': 'research-team'
+        },
+    }
+    captured: Dict[str, Any] = {}
+
+    class FakeRunner:
+
+        def fetch_managed_job_table(self, **kwargs):
+            captured.update(kwargs)
+            return [], 0, {}, 0, []
+
+    handle = mock.Mock(is_grpc_enabled_with_flag=False)
+    monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                        lambda *args, **kwargs: handle)
+    monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                        lambda _: mock.Mock(spec=backends.CloudVmRayBackend))
+    monkeypatch.setattr(jobs_core.workspaces_core,
+                        'get_accessible_workspace_names',
+                        lambda action: set(workspaces))
+    monkeypatch.setattr(jobs_core.workspaces_core, '_load_workspaces',
+                        lambda: workspaces)
+    monkeypatch.setattr(jobs_core.managed_job_runner, 'current',
+                        lambda: FakeRunner())
+
+    def narrowed(match):
+        captured.clear()
+        result = _unwrap(jobs_core.queue_v2)(refresh=False,
+                                             all_users=True,
+                                             workspace_match=match)
+        if not captured:
+            assert result == ([], 0, {}, 0, [])
+            return None
+        assert captured['workspace_match'] is None
+        return sorted(captured['accessible_workspaces'])
+
+    # A name matches by substring; an id never does, only exactly.
+    assert narrowed('team') == ['ws-0123456789ab']
+    assert narrowed('team-a') == ['team-a']
+    # No match never reaches the controller: old ones read an empty list as
+    # no filter and would return every job.
+    assert narrowed('zz-no-such') is None

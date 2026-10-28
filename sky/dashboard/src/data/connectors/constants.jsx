@@ -56,7 +56,7 @@ export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 // upgrade then still reports its own build's version, not the new server's, so
 // it can't over-report support for wire formats its code doesn't handle.
 // Enforced by tests/unit_tests/test_api_version_consistency.py.
-export const CLIENT_API_VERSION = '59';
+export const CLIENT_API_VERSION = '67';
 // Header names expected by the server's APIVersionMiddleware. Mirrors
 // sky/server/constants.py:API_VERSION_HEADER / VERSION_HEADER.
 // The middleware (versions._check_version_compatibility) requires BOTH
@@ -107,6 +107,28 @@ export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
   ...CLOUDS_LIST.map((cloud) => [cloud.toLowerCase(), cloud]),
   ['kubernetes', 'Kubernetes'],
   ['ssh', 'SSH Node Pool'],
+]);
+
+// Every key a workspace config may use for a cloud section, lowercased:
+// the server's ALL_CLOUDS and STORAGE_ONLY_CLOUDS (sky/skylet/constants.py),
+// which include clouds the dashboard has no display name for. Keep in sync
+// with those lists. Anything else at the top level of a workspace is an
+// access-control key or a plugin-registered property, never a cloud.
+export const WORKSPACE_CLOUD_KEYS = new Set([
+  ...CLOUDS_LIST.map((cloud) => cloud.toLowerCase()),
+  'kubernetes',
+  'ssh',
+  'slurm',
+  'primeintellect',
+  'hyperbolic',
+  'seeweb',
+  'shadeform',
+  'yotta',
+  'mithril',
+  'cloudflare',
+  'coreweave',
+  'vastdata',
+  'huggingface',
 ]);
 
 export const COMMON_GPUS = [

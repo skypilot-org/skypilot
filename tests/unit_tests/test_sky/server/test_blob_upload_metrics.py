@@ -80,7 +80,7 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
                         str(tmp_path / 'logs'))
     monkeypatch.setattr(client_common, '_FILE_UPLOAD_LOCK_DIR',
                         str(tmp_path / 'locks'))
-    monkeypatch.setattr(client_common, '_UPLOAD_CHUNK_BYTES', chunk_bytes)
+    monkeypatch.setattr(server_constants, 'UPLOAD_CHUNK_BYTES', chunk_bytes)
     monkeypatch.setattr(
         client_common.tempfile, 'NamedTemporaryFile',
         functools.partial(client_common.tempfile.NamedTemporaryFile,

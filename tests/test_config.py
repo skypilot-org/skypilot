@@ -609,6 +609,94 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
         'provision_timeout'] == PROVISION_TIMEOUT
 
 
+def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
+    """A client must not set `<cloud>.ssh_proxy_command`: it runs as a
+    server-side SSH ProxyCommand during provisioning, so it is server-owned."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            aws:
+              ssh_proxy_command: ssh -W %h:%p server-bastion
+            gcp:
+              vpc_name: test-vpc
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    # A client override of the key is ignored; the server value stands.
+    with skypilot_config.override_skypilot_config({
+            'aws': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            },
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region='us-east-1',
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p server-bastion'
+        # A cloud with no server-side value falls back to None, not the client.
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+    # A non-command override on the same cloud still applies.
+    with skypilot_config.override_skypilot_config({
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned',
+                'vpc_name': 'client-vpc'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('vpc_name',),
+            default_value=None) == 'client-vpc'
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+
+def test_ssh_proxy_command_kept_for_controller_launch(monkeypatch,
+                                                      tmp_path) -> None:
+    """A jobs/serve controller launches through its local API server with the
+    job config in SKYPILOT_CONFIG; the server loads it as its own config, so
+    the job's ssh_proxy_command survives the client-override strip."""
+    job_config = {
+        'gcp': {
+            'ssh_proxy_command': 'ssh -W %h:%p bastion'
+        },
+        # The controller's own cloud, restricted to the controller's regions.
+        'aws': {
+            'ssh_proxy_command': {
+                'us-east-1': None
+            }
+        },
+    }
+    config_path = tmp_path / 'job_config.yaml'
+    yaml_utils.dump_yaml(str(config_path), job_config)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(copy.deepcopy(job_config)):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p bastion'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == {
+                                              'us-east-1': None
+                                          }
+
+
 def test_config_with_invalid_override(monkeypatch, tmp_path,
                                       enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
@@ -722,8 +810,9 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
         # Check values are overridden
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
+        # ssh_proxy_command is server-owned, so its override is ignored.
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+                                          None) == original_proxy
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
@@ -770,8 +859,9 @@ def test_override_skypilot_config_without_original_config(
     with skypilot_config.override_skypilot_config(override_configs):
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
-        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+        # ssh_proxy_command is server-owned; with no server value it stays None.
+        assert skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None) is None
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
@@ -1011,6 +1101,62 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
                 'be ignored. Remove these keys to disable this warning. If you '
                 'want to specify it, please modify it on server side or contact '
                 'your administrator.')
+
+
+def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
+    """A client override must not make private workspaces readable."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        workspaces:
+            team-b:
+                private: true
+                allowed_users: [bob]
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'workspace_config': {
+            'read_access': 'all'
+        }}):
+        assert skypilot_config.get_nested(
+            ('workspace_config', 'read_access'), None) is None
+
+
+def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
+    """A client override must not replace the server's admin policy."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        admin_policy: server_policy.ServerPolicy
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'admin_policy': 'client_policy.ClientPolicy'}):
+        # The server's admin policy is kept; the client override is ignored.
+        assert skypilot_config.get_nested(('admin_policy',),
+                                          None) == 'server_policy.ServerPolicy'
+
+
+def test_client_cannot_override_logs(monkeypatch, tmp_path):
+    """A client override must not redirect where the server ships its logs."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        logs:
+            store: gcp
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config({'logs': {'store': 'aws'}}):
+        assert skypilot_config.get_nested(('logs', 'store'), None) == 'gcp'
 
 
 def test_hierarchical_server_config(monkeypatch, tmp_path):
@@ -2532,3 +2678,49 @@ def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
                 'account': 'task-account'
             }
         }}) == 'task-account'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
+                                                    from_loopback) -> None:
+    """A remote client cannot widen the infra the server allows; a loopback
+    client still layers these keys. Other overrides apply either way."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'allowed_contexts': 'all',
+                'provision_timeout': 123
+            },
+            'ssh': {
+                'allowed_node_pools': ['other-pool']
+            },
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+        },
+            from_loopback=from_loopback):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])

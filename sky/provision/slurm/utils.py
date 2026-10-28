@@ -21,6 +21,7 @@ from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
@@ -29,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
-_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.+-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
@@ -190,7 +191,8 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
             'Cannot derive a valid Unix user from SkyPilot user '
             f'{user_name!r}. Slurm submit users must start with a lowercase '
             'letter or "_" '
-            'and contain only lowercase letters, digits, "_", ".", or "-".')
+            'and contain only lowercase letters, digits, "_", ".", "+", or "-".'
+        )
     return submit_user
 
 
@@ -1490,11 +1492,8 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
-# Accepted sbatch --time formats:
-#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
 # See: https://slurm.schedmd.com/sbatch.html#OPT_time
-_TIME_FORMAT_RE = re.compile(
-    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_PATTERN)
 
 
 def validate_sbatch_time(value: str) -> None:
@@ -1513,7 +1512,8 @@ def validate_sbatch_time(value: str) -> None:
     if not _TIME_FORMAT_RE.fullmatch(value):
         raise ValueError(
             f'Invalid slurm.sbatch_options.time {value!r}. '
-            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s, '
+            'UNLIMITED, INFINITE, -1.')
 
 
 def srun_sshd_command(
@@ -1575,6 +1575,7 @@ def srun_sshd_command(
             'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
+            '--chdir=/tmp',
             '--overlap',
             '--quiet',
             '--unbuffered',
@@ -1596,6 +1597,7 @@ def srun_sshd_command(
     # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
+        '--chdir=/tmp',
         '--quiet',
         '--unbuffered',
         '--overlap',

@@ -788,6 +788,11 @@ export default function PoolDetailPage() {
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={worker.status} />
+                          {worker.status_detail && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {worker.status_detail}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>{worker.version || '-'}</TableCell>
                         <TableCell>

@@ -2,6 +2,7 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.nebius import constants as nebius_constants
@@ -21,6 +22,8 @@ MAX_RETRIES_TO_LAUNCH = 120  # Maximum number of retries
 # before deleting the cluster's security group. 60 * 5s = 5 minutes, which
 # covers typical Nebius instance reap times.
 _TERMINATION_POLL_ATTEMPTS = 60
+# Attempts to list instances in cleanup_ports before giving up.
+_CLEANUP_LIST_ATTEMPTS = 3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -246,31 +249,37 @@ def stop_instances(
         utils.stop(instance_id)
 
 
-def _wait_for_instances_terminated(region: str, cluster_name_on_cloud: str,
-                                   project_id: str) -> bool:
+def _wait_for_instances_terminated(region: str,
+                                   cluster_name_on_cloud: str,
+                                   project_id: str,
+                                   worker_only: bool = False) -> bool:
     """Waits until the cluster has no instances left at the provider.
 
     Nebius instance deletion is async: `utils.remove` returns once the
     DeleteInstance request is accepted, not when the instance (and its
     NIC's security group attachment) is actually gone. Returns True once
-    the cluster's instance list is empty; False on timeout (the caller may
-    still attempt SG deletion, which retries internally).
+    the cluster's instance list is empty (ignoring the head node when
+    `worker_only`); False on timeout.
     """
     for attempt in range(_TERMINATION_POLL_ATTEMPTS):
         instances = _filter_instances(region,
                                       cluster_name_on_cloud,
                                       status_filters=None,
                                       project_id=project_id)
+        if worker_only:
+            instances = {
+                inst_id: inst
+                for inst_id, inst in instances.items()
+                if not inst['name'].endswith('-head')
+            }
         if not instances:
             return True
         logger.debug(f'Waiting for {len(instances)} instance(s) of '
                      f'{cluster_name_on_cloud} to finish terminating '
                      f'(attempt {attempt + 1}/{_TERMINATION_POLL_ATTEMPTS}).')
         time.sleep(utils.POLL_INTERVAL)
-    logger.warning(
-        f'Instances of {cluster_name_on_cloud} still present after '
-        f'{_TERMINATION_POLL_ATTEMPTS * utils.POLL_INTERVAL}s; attempting '
-        f'security group deletion anyway.')
+    logger.warning(f'Instances of {cluster_name_on_cloud} still present after '
+                   f'{_TERMINATION_POLL_ATTEMPTS * utils.POLL_INTERVAL}s.')
     return False
 
 
@@ -309,7 +318,8 @@ def _cleanup_security_group(cluster_name_on_cloud: str,
             # `sky.provision.aws.instance.cleanup_ports` (Case 4). Without
             # this, the SG delete's bounded retry often expires while VMs
             # still hold the SG, leaking one SG per cluster until the
-            # per-network SG quota is exhausted.
+            # per-network SG quota is exhausted. On timeout, still attempt
+            # the SG delete: its internal retry may catch a late detach.
             _wait_for_instances_terminated(provider_config['region'],
                                            cluster_name_on_cloud, project_id)
         utils.delete_security_group(sg_id)
@@ -337,6 +347,10 @@ def terminate_instances(
                                   project_id=project_id)
     terminated_ok = False
     try:
+        # Send a delete request to every instance before reporting failures,
+        # so one instance that fails to delete (e.g. a stuck worker) cannot
+        # keep the others, in particular the head, from being deleted.
+        failures: List[str] = []
         for inst_id, inst in instances.items():
             logger.debug(f'Terminating instance {inst_id}: {inst}')
             if worker_only and inst['name'].endswith('-head'):
@@ -344,12 +358,30 @@ def terminate_instances(
             try:
                 utils.remove(inst_id)
             except Exception as e:  # pylint: disable=broad-except
+                failures.append(
+                    f'{inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}')
+        if failures:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Failed to terminate instance(s) '
+                                   f'{"; ".join(failures)}')
+        if worker_only:
+            # Wait for the workers to be gone before returning. A resize
+            # scale-down re-provisions right after this call; while the
+            # deleted workers are still listed as RUNNING, `run_instances`
+            # counts them against the requested node count and fails, and
+            # the failure cleanup then tries to stop VMs that are already
+            # being deleted. Raise on timeout so the caller does not proceed
+            # while termination is unconfirmed.
+            if not _wait_for_instances_terminated(provider_config['region'],
+                                                  cluster_name_on_cloud,
+                                                  project_id,
+                                                  worker_only=True):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Failed to terminate instance {inst_id}: '
-                        f'{common_utils.format_exception(e, use_bracket=False)}'
-                    ) from e
-        if not worker_only:
+                        f'Timed out waiting for the worker instances of '
+                        f'{cluster_name_on_cloud} to terminate.')
+        else:
             utils.delete_cluster(cluster_name_on_cloud,
                                  provider_config['region'],
                                  project_id=project_id)
@@ -485,11 +517,66 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    # Intentional no-op. The cluster-specific security group is owned by
-    # the VM lifecycle, not the port lifecycle: it's created in
-    # `bootstrap_instances` and deleted in `terminate_instances` (when
-    # `worker_only=False`). Deleting it here would (a) tear down ingress
-    # for SSH and intra-cluster Ray traffic on a still-running cluster if
-    # this were ever called outside teardown, and (b) generate noisy
-    # FAILED_PRECONDITION retries while VMs still hold the NIC.
-    del cluster_name_on_cloud, ports, provider_config
+    # The cluster-specific security group is owned by the VM lifecycle, not
+    # the port lifecycle: it's created in `bootstrap_instances` and normally
+    # deleted in `terminate_instances` (when `worker_only=False`). That
+    # delete never runs on autodown, though: skylet calls
+    # `terminate_instances` on the head node itself, and the head VM is gone
+    # before the SG cleanup gets its turn. `post_teardown_cleanup` calls us
+    # from the API server once the cluster is known to be terminated, so
+    # this is the backstop that reaps the SG in that case.
+    #
+    # Only delete once the cluster has no instances left: deleting the SG
+    # under a live VM would tear down its SSH and intra-cluster ingress, and
+    # Nebius rejects the delete anyway while a NIC still holds the SG.
+    del ports
+    assert provider_config is not None
+    # A user-managed (BYO) SG is never deleted by SkyPilot, so there is
+    # nothing to do and no reason to list instances (a listing failure would
+    # otherwise block an already completed teardown).
+    sg_block = provider_config.get('security_group') or {}
+    if not bool(sg_block.get('ManagedBySkyPilot', True)):
+        return
+    # Retry the listing a few times so a transient API error does not fail
+    # the teardown (or a provisioning failover, which also calls us).
+    for attempt in range(_CLEANUP_LIST_ATTEMPTS):
+        try:
+            project_id = provider_config.get('project_id')
+            if project_id is None:
+                project_id = utils.get_project_by_region(
+                    provider_config['region'])
+            instances = _filter_instances(provider_config['region'],
+                                          cluster_name_on_cloud,
+                                          status_filters=None,
+                                          project_id=project_id)
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            if attempt + 1 < _CLEANUP_LIST_ATTEMPTS:
+                logger.debug(f'Failed to list instances of '
+                             f'{cluster_name_on_cloud} (attempt '
+                             f'{attempt + 1}/{_CLEANUP_LIST_ATTEMPTS}): {e}')
+                time.sleep(utils.POLL_INTERVAL)
+                continue
+            # Raise rather than skip: returning normally would let
+            # `post_teardown_cleanup` drop the cluster record and config,
+            # leaving no later pass to reap the SG. Raising keeps both, so the
+            # next status refresh retries (a status refresh shows the cluster
+            # as UNKNOWN meanwhile), and `sky down --purge` still proceeds
+            # since it skips cleanup_ports failures. A provisioning failover
+            # stops here as it already does when the same listing fails in
+            # its non-terminated-node check, rather than moving on while this
+            # cluster's instances and SG are in an unknown state.
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to list instances of {cluster_name_on_cloud!r} to '
+                'clean up its security group: '
+                f'{common_utils.format_exception(e, use_bracket=False)}') from e
+    assert project_id is not None
+    if instances:
+        logger.debug(f'{len(instances)} instance(s) of '
+                     f'{cluster_name_on_cloud} still present; leaving the '
+                     'security group in place.')
+        return
+    _cleanup_security_group(cluster_name_on_cloud,
+                            provider_config,
+                            project_id,
+                            wait_for_instances=False)

@@ -186,7 +186,7 @@ class VolumeTable(abc.ABC):
             infra,
             size,
             row.get('user_name', '-'),
-            row.get('workspace', '-'),
+            row.get('workspace_name') or row.get('workspace', '-'),
             log_utils.human_duration(row.get('launched_at', 0)),
             row.get('status', ''),
             last_attached_at_str,

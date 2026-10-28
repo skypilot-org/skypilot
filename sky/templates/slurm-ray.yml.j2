@@ -16,6 +16,8 @@ provider:
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
   sky_base_dir: {{sky_base_dir | tojson}}
+  # Persisted across stop/start; separates snapshots of same-name clusters.
+  snapshot_id: {{snapshot_id | tojson}}
 {% if image_id is not none %}
   # Container-ness is read from this persisted field (see
   # provision/slurm/instance.py::get_command_runners); it must not be probed
