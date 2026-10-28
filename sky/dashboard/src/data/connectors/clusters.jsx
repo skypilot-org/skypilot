@@ -162,6 +162,8 @@ export async function getClusters({
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
         workspace_name: cluster.workspace_name || cluster.workspace,
+        // Only present when the server includes managed-job/service clusters.
+        is_managed: cluster.is_managed === true,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
@@ -407,6 +409,28 @@ export async function downloadJobLogs({
   } catch (error) {
     console.error('Error downloading logs:', error);
     showToast(`Error downloading logs: ${error.message}`, 'error');
+  }
+}
+
+export async function terminateCluster({ clusterName, workspace }) {
+  showToast(`Terminating cluster ${clusterName}...`, 'info');
+  try {
+    await apiClient.fetch('/down', {
+      cluster_name: clusterName,
+      override_skypilot_config: {
+        active_workspace: workspace || 'default',
+      },
+    });
+    dashboardCache.invalidateFunction(getClusters);
+    showToast(`Cluster ${clusterName} terminated.`, 'success');
+    return true;
+  } catch (error) {
+    console.error('Error terminating cluster:', error);
+    showToast(
+      `Error terminating cluster ${clusterName}: ${error.message}`,
+      'error'
+    );
+    return false;
   }
 }
 

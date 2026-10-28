@@ -19,6 +19,10 @@ jest.mock('@/data/connectors/client', () => ({
   __esModule: true,
   apiClient: { fetch: jest.fn() },
 }));
+jest.mock('@/data/connectors/toast', () => ({
+  __esModule: true,
+  showToast: jest.fn(),
+}));
 
 // Plugin enhancements are a no-op passthrough for these tests.
 jest.mock('@/plugins/dataEnhancement', () => ({
@@ -28,11 +32,13 @@ jest.mock('@/plugins/dataEnhancement', () => ({
 
 import dashboardCache from '@/lib/cache';
 import { apiClient } from '@/data/connectors/client';
+import { showToast } from '@/data/connectors/toast';
 import {
   getClusters,
   getClusterHistory,
   getClusterJobSpec,
   getOtherUsersClustersCount,
+  terminateCluster,
   useClusterData,
 } from '@/data/connectors/clusters';
 
@@ -271,5 +277,37 @@ describe('useClusterData ownership scoping (client path)', () => {
       'mine-active',
     ]);
     expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('terminateCluster', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('posts /down for the cluster in its workspace', async () => {
+    apiClient.fetch.mockResolvedValue(null);
+
+    await expect(
+      terminateCluster({ clusterName: 'c1', workspace: 'team-a' })
+    ).resolves.toBe(true);
+
+    expect(apiClient.fetch).toHaveBeenCalledTimes(1);
+    expect(apiClient.fetch).toHaveBeenCalledWith('/down', {
+      cluster_name: 'c1',
+      override_skypilot_config: { active_workspace: 'team-a' },
+    });
+  });
+
+  it('reports a failure instead of throwing', async () => {
+    apiClient.fetch.mockRejectedValue(new Error('boom'));
+
+    await expect(
+      terminateCluster({ clusterName: 'c1', workspace: 'team-a' })
+    ).resolves.toBe(false);
+    expect(showToast).toHaveBeenCalledWith(
+      'Error terminating cluster c1: boom',
+      'error'
+    );
   });
 });
