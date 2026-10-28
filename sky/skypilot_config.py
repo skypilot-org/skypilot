@@ -179,9 +179,11 @@ _CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS = 20
 
 # Tries at reading the file named by ENV_VAR_SKYPILOT_CONFIG when it is
 # missing or its handle is stale (see _reload_config_from_internal_file).
-# About 2 seconds in all with the backoff below.
-_INTERNAL_CONFIG_READ_ATTEMPTS = 5
-_INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS = 0.2
+# About 10 seconds in all with the backoff below (capped at 2 seconds a try):
+# on a busy shared filesystem a stale handle can outlast a couple of seconds.
+_INTERNAL_CONFIG_READ_ATTEMPTS = 9
+_INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS = 0.25
+_INTERNAL_CONFIG_READ_MAX_BACKOFF_FACTOR = 8
 
 # How often a contended acquirer retries the config lock. The Postgres lock
 # acquires via `pg_try_advisory_lock` polled every `poll_interval` seconds; its
@@ -929,7 +931,8 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     # pass on a retry; failing would fail the request before it even starts.
     config_path = os.path.expanduser(internal_config_path)
     backoff = common_utils.Backoff(
-        _INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS)
+        _INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS,
+        _INTERNAL_CONFIG_READ_MAX_BACKOFF_FACTOR)
     attempt = 0
     while True:
         attempt += 1
