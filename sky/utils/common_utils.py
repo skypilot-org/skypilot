@@ -1084,7 +1084,8 @@ def truncate_long_string(s: str,
         max_length: Maximum length of the truncated string.
         truncate_middle: Whether to truncate in the middle of the string.
             If True, the middle part of the string is replaced with '...'.
-            If False, truncation happens at the end preserving whole words.
+            If False, the first max_length characters are kept and '...' is
+            appended.
 
     Returns:
         Truncated string.
@@ -1110,21 +1111,7 @@ def truncate_long_string(s: str,
             return s[:start_length] + '...'
         return s[:start_length] + '...' + s[-end_length:]
 
-    # Original end-truncation logic
-    splits = s.split(' ')
-    if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'  # Use '…'?
-    # Truncate on word boundary.
-    i = 0
-    total = 0
-    for i, part in enumerate(splits):
-        total += len(part)
-        if total >= max_length:
-            break
-    prefix = ' '.join(splits[:i])
-    if len(prefix) < max_length:
-        prefix += s[len(prefix):max_length]
-    return prefix + '...'
+    return s[:max_length] + '...'
 
 
 def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':

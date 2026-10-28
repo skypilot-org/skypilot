@@ -71,6 +71,14 @@ class TestTruncateLongString:
             'abcdefghijklmnopqrstuvwxyz', 11,
             truncate_middle=True) == 'abcd...wxyz'
 
+    def test_end_truncation_counts_spaces(self):
+        # A command line is mostly short tokens, so the spaces between them
+        # make up a large part of its length.
+        s = 'sky launch -c a -y -i 5 --down --gpus H100:8 train.yaml'
+        result = common_utils.truncate_long_string(s, 25)
+        assert len(result) <= 25 + 3
+        assert result == s[:25] + '...'
+
 
 class TestCheckClusterNameIsValid:
 
