@@ -1,5 +1,4 @@
 """sdk.api_status: the cluster_name filter and its old-server warning."""
-import logging
 from unittest import mock
 
 import pytest
@@ -21,31 +20,32 @@ def sent_params():
         yield lambda: request.call_args.kwargs['params']
 
 
-def _warnings(caplog):
-    return [
-        r for r in caplog.records
-        if r.levelno == logging.WARNING and 'ignored' in r.getMessage()
-    ]
+def _api_status_with_server_version(version):
+    """Call api_status(cluster_name=...); return the logger.warning mock.
 
-
-@pytest.mark.parametrize('version', [None, 38, 60])
-def test_cluster_name_is_sent_without_warning(sent_params, caplog, version):
-    """An unknown version (e.g. no health check has run in this process) is
-    not an old one; the flag is sent, so there is nothing to warn about."""
+    The warning is checked on the module's logger directly rather than with
+    caplog: whether the logger propagates to pytest's handler depends on
+    logging setup done by other tests.
+    """
     with mock.patch.object(sdk.versions,
                            'get_remote_api_version',
                            return_value=version), \
-         caplog.at_level(logging.WARNING):
+         mock.patch.object(sdk.logger, 'warning') as warning:
         sdk.api_status(cluster_name='c1')
-    assert sent_params()['cluster_name'] == 'c1'
-    assert not _warnings(caplog)
+    return warning
 
 
-def test_old_server_warns_that_cluster_name_is_ignored(sent_params, caplog):
-    with mock.patch.object(sdk.versions,
-                           'get_remote_api_version',
-                           return_value=37), \
-         caplog.at_level(logging.WARNING):
-        sdk.api_status(cluster_name='c1')
+@pytest.mark.parametrize('version', [None, 38, 60])
+def test_cluster_name_is_sent_without_warning(sent_params, version):
+    """An unknown version (e.g. no health check has run in this process) is
+    not an old one; the flag is sent, so there is nothing to warn about."""
+    warning = _api_status_with_server_version(version)
     assert sent_params()['cluster_name'] == 'c1'
-    assert _warnings(caplog)
+    warning.assert_not_called()
+
+
+def test_old_server_warns_that_cluster_name_is_ignored(sent_params):
+    warning = _api_status_with_server_version(37)
+    assert sent_params()['cluster_name'] == 'c1'
+    warning.assert_called_once()
+    assert 'ignored' in warning.call_args.args[0]
