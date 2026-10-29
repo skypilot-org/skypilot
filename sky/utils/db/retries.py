@@ -23,13 +23,12 @@ import time
 from typing import Awaitable, Callable, Optional, Set, Tuple, Type, TypeVar
 
 from sky.adaptors import common as adaptors_common
+from sky.utils import common_utils
 from sky.utils.db import sqlalchemy_deps
 
 sqlalchemy_exc = adaptors_common.LazyImport(
     'sqlalchemy.exc',
     import_error_message=sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG)
-
-from sky.utils import common_utils
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +165,8 @@ _DEFAULT_MAX_BACKOFF = 5.0
 
 def summarize(e: BaseException) -> str:
     """One-line exception summary (SQLAlchemy errors are multi-line)."""
-    return f'{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ""}'
+    first_line = str(e).splitlines()[0] if str(e) else ''
+    return f'{type(e).__name__}: {first_line}'
 
 
 def _new_backoff(initial_backoff: float,
@@ -313,7 +313,7 @@ def retry_async(coro_fn):
     return wrapper
 
 
-def __getattr__(name: str):
+def __getattr__(name: str):  # pylint: disable=invalid-name
     if name == 'RETRYABLE_EXCEPTIONS':
         return retryable_exceptions()
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

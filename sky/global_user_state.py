@@ -6,6 +6,10 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+# Indent under sqlalchemy_available() pushes many schema lines over 80.
+# pylint: disable=line-too-long
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import enum
@@ -26,7 +30,8 @@ from sky import skypilot_config
 from sky.metrics import launch_phases
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
-from sky.utils import annotations
+# Alias: ``from __future__ import annotations`` binds the name ``annotations``.
+from sky.utils import annotations as annotation_utils
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -607,7 +612,7 @@ if sqlalchemy_deps.sqlalchemy_available():
             engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
             migration_utils.GLOBAL_USER_STATE_VERSION)
 
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotation_utils.lru_cache(scope='global', maxsize=1)
     def _sqlite_supports_returning() -> bool:
         """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
 
@@ -633,7 +638,7 @@ if sqlalchemy_deps.sqlalchemy_available():
             major, minor = int(version_parts[0]), int(version_parts[1])
             return (major > 3) or (major == 3 and minor >= 35)
 
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotation_utils.lru_cache(scope='global', maxsize=1)
     def _supports_returning() -> bool:
         """Whether this backend can return the rows a statement just changed.
 

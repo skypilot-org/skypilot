@@ -26,7 +26,7 @@ else:
     sqlalchemy_adapter = adaptors_common.LazyImport(
         'sqlalchemy_adapter', import_error_message=_SA_MSG)
 
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging

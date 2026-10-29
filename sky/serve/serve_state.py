@@ -1,4 +1,6 @@
 """The database for services information."""
+# Indent under sqlalchemy_available() pushes many schema lines over 80.
+# pylint: disable=line-too-long
 from __future__ import annotations
 
 import collections

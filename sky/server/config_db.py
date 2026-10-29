@@ -37,7 +37,7 @@ else:
     declarative = adaptors_common.LazyImport('sqlalchemy.ext.declarative',
                                              import_error_message=_SA_MSG)
 
-Base: Any = None
+Base: Any = None  # pylint: disable=invalid-name
 config_yaml_table: Any = None
 _db_manager: Optional[db_utils.DatabaseManager] = None
 
@@ -47,12 +47,13 @@ def ensure_config_db_schema() -> None:
 
     Safe to call from Alembic migrations and from API server config load/save.
     """
-    global Base, config_yaml_table, _db_manager
+    # Base is the SQLAlchemy declarative base (conventional name).
+    global Base, config_yaml_table, _db_manager  # pylint: disable=invalid-name
     if _db_manager is not None:
         return
     sqlalchemy_deps.require_sqlalchemy()
 
-    Base = declarative.declarative_base()  # pylint: disable=invalid-name
+    Base = declarative.declarative_base()
     config_yaml_table = sqlalchemy.Table(
         'config_yaml',
         Base.metadata,

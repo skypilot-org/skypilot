@@ -32,7 +32,7 @@ _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
 sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
                                         import_error_message=_SA_MSG)
 
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky.utils import locks
 from sky.utils.db import db_utils
