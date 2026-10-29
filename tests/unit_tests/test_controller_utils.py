@@ -1256,6 +1256,29 @@ def test_download_and_stream_job_log_does_not_split_on_carriage_return(
     assert 'prog-a\rprog-b\rprog-c\n' in out
 
 
+def test_download_and_stream_job_log_stream_to_console_false(tmp_path):
+    """With stream_to_console=False the log is synced and persisted but not
+    copied into the controller log."""
+    run_log = (_MARKER.encode() + b'1 nodes.\n'
+               b'REPRINT-CONTENT-SENTINEL\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    called = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        result = controller_utils.download_and_stream_job_log(
+            backend,
+            handle,
+            local_dir,
+            on_downloaded=called.append,
+            stream_to_console=False)
+
+    assert result is not None
+    assert result.endswith(os.path.join('synced', 'run.log'))
+    assert called == [result]
+    assert 'REPRINT-CONTENT-SENTINEL' not in captured.getvalue()
+
+
 def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
     """When sync_down_logs finds nothing, return None and never call back."""
     backend = mock.MagicMock()

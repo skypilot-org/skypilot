@@ -1603,6 +1603,63 @@ class TestDownloadLogAndStreamLoggingAgentGate:
         mock_cutils.download_and_stream_job_log.assert_not_called()
 
 
+class TestDownloadLogAndStreamControllerLogCopy:
+    """jobs.controller.stream_task_logs_to_controller_log gates the copy of
+    the task log into the controller log; the download itself still runs."""
+
+    def _run(self, config_value):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = (
+            JobController.download_log_and_stream.__get__(
+                controller, JobController))
+
+        def get_nested(keys, default_value=None, **_):
+            if keys == ('jobs', 'controller',
+                        'stream_task_logs_to_controller_log'):
+                return (default_value if config_value is None else config_value)
+            return default_value
+
+        with patch('sky.jobs.utils.logs.is_logging_agent_configured',
+                   return_value=False), \
+             patch('sky.jobs.controller.skypilot_config.get_nested',
+                   side_effect=get_nested), \
+             patch('sky.jobs.controller.managed_job_state'), \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            mock_cutils.download_and_stream_job_log.return_value = (
+                '/tmp/run.log')
+            controller.download_log_and_stream(0, MagicMock(), None)
+        return mock_cutils.download_and_stream_job_log
+
+    def test_streams_by_default(self):
+        download = self._run(config_value=None)
+        download.assert_called_once()
+        assert download.call_args.kwargs['stream_to_console'] is True
+
+    def test_skips_stream_when_disabled(self):
+        download = self._run(config_value=False)
+        download.assert_called_once()
+        assert download.call_args.kwargs['stream_to_console'] is False
+
+    @pytest.mark.parametrize('config_value,expected', [
+        (None, 'sky jobs logs --controller 42'),
+        (True, 'sky jobs logs --controller 42'),
+        (False, 'sky jobs logs 42'),
+    ])
+    def test_user_job_failure_reason_points_at_task_output(
+            self, config_value, expected):
+        # With the copy disabled the controller log holds no task output, so
+        # a failed user job must point at the task log instead.
+        with patch('sky.jobs.controller.skypilot_config.get_nested',
+                   side_effect=lambda keys, default_value=None, **_:
+                   (default_value if config_value is None else config_value)):
+            reason = controller_module._user_job_failure_reason(42)
+        assert reason == f'To see the details, run: {expected}'
+
+
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
 
