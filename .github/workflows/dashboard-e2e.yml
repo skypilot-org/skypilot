@@ -1,0 +1,132 @@
+name: Dashboard E2E
+
+# Browser tests for the dashboard against one real API server seeded through
+# its DB. Nothing launches on a cloud. See tests/dashboard_e2e/README.md.
+
+# Only changes that can affect what the dashboard renders: the server and
+# dashboard code under sky/, the suite itself, and this workflow. Not run in
+# the merge queue (merge_group has no paths filter); the push to master runs
+# it after merge. If this check is made required, add merge_group back with a
+# job that passes when the filter skips the suite.
+on:
+  push:
+    branches:
+      - master
+      - 'releases/**'
+    paths:
+      - 'sky/**'
+      - 'tests/dashboard_e2e/**'
+      - '.github/workflows/dashboard-e2e.yml'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+    paths:
+      - 'sky/**'
+      - 'tests/dashboard_e2e/**'
+      - '.github/workflows/dashboard-e2e.yml'
+
+concurrency:
+  group: dashboard-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard-e2e:
+    # The suite runs in 5 shards and the source twists in 2, each shard on
+    # its own runner with its own API server, so every job stays near 10 min.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {mode: tests, shard: 1, of: 5}
+          - {mode: tests, shard: 2, of: 5}
+          - {mode: tests, shard: 3, of: 5}
+          - {mode: tests, shard: 4, of: 5}
+          - {mode: tests, shard: 5, of: 5}
+          - {mode: source-twists, shard: 1, of: 2}
+          - {mode: source-twists, shard: 2, of: 2}
+    name: dashboard-e2e (${{ matrix.mode }} ${{ matrix.shard }}/${{ matrix.of }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # One version for the pip pin and the browser cache key.
+      PLAYWRIGHT_VERSION: '1.64.0'
+      # Traces and screenshots of failing tests, uploaded below.
+      E2E_RESULTS_DIR: ${{ github.workspace }}/e2e-results
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: latest
+          python-version: '3.11'
+      # Chromium's system libraries come from apt, whose mirror can crawl
+      # (24.9 MB once took 7 min). Keep the downloaded .debs and browsers.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/apt-debs
+            ~/.cache/ms-playwright
+          key: playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Install server and test dependencies
+        run: |
+          uv venv --seed ~/e2e-env
+          source ~/e2e-env/bin/activate
+          uv pip install -e ".[kubernetes]"
+          uv pip install pytest pytest-xdist pytest-playwright "playwright==$PLAYWRIGHT_VERSION"
+          mkdir -p ~/apt-debs
+          sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          python -m playwright install --with-deps chromium
+          cp /var/cache/apt/archives/*.deb ~/apt-debs/ 2>/dev/null || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: sky/dashboard/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: sky/dashboard/.next/cache
+          key: next-${{ hashFiles('sky/dashboard/package-lock.json') }}-${{ hashFiles('sky/dashboard/src/**') }}
+          restore-keys: next-${{ hashFiles('sky/dashboard/package-lock.json') }}-
+      - name: Build dashboard
+        run: |
+          npm --prefix sky/dashboard ci --no-audit --no-fund
+          npm --prefix sky/dashboard run build
+
+      - name: Start API server
+        if: matrix.mode == 'tests'
+        run: |
+          source ~/e2e-env/bin/activate
+          E2E_RUNTIME_DIR=$RUNNER_TEMP/sky-e2e \
+            tests/dashboard_e2e/framework/run_server.sh start > $RUNNER_TEMP/e2e-env.sh
+
+      # Parallel tests first, then exclusive ones (global totals) alone. Covers
+      # the baseline runs and the req/res/dom/srv twists.
+      - name: Baseline and runtime twists
+        if: matrix.mode == 'tests'
+        run: |
+          source ~/e2e-env/bin/activate
+          source $RUNNER_TEMP/e2e-env.sh
+          E2E_SHARD=${{ matrix.shard }}/${{ matrix.of }} E2E_WORKERS=4 \
+            tests/dashboard_e2e/framework/run_tests.sh
+
+      - name: Source twists
+        if: matrix.mode == 'source-twists'
+        run: |
+          source ~/e2e-env/bin/activate
+          E2E_SRC_SHARD=${{ matrix.shard }}/${{ matrix.of }} \
+          E2E_RUNTIME_DIR=$RUNNER_TEMP/sky-e2e-src \
+            tests/dashboard_e2e/framework/run_src_twists.sh
+
+      - name: Upload traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-e2e-results-${{ matrix.mode }}-${{ matrix.shard }}
+          path: |
+            e2e-results/
+            ${{ runner.temp }}/sky-e2e*/.sky/api_server/server.log
+          # The server log lives under .sky/, which is skipped by default.
+          include-hidden-files: true
+          if-no-files-found: warn
