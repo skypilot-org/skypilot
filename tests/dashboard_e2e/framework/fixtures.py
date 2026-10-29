@@ -212,6 +212,37 @@ class Recorder:
             self.page.wait_for_timeout(200)
         raise AssertionError(f'{message} (no result within {timeout_s:.0f}s)')
 
+    def wait_for_response(self,
+                          path_suffix: str,
+                          message: str,
+                          timeout_s: float = 60) -> None:
+        """Wait until every request the page has sent to ``*path_suffix`` is
+        answered, and the page has rendered what it read.
+
+        For a check that something is absent: it passes at once on a page
+        that has not loaded the data yet, so a regression that would show the
+        thing goes unnoticed. Every request, not the first: several
+        components may fetch the same path.
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            sent = [
+                r for r in self.requests
+                if r.url.split('?')[0].endswith(path_suffix)
+            ]
+            if sent:
+                for req in sent:
+                    resp = req.response()
+                    if resp is not None:
+                        resp.finished()
+                # Two frames: React has committed the state set from it.
+                self.page.evaluate(
+                    '() => new Promise(r => requestAnimationFrame('
+                    '() => requestAnimationFrame(r)))')
+                return
+            self.page.wait_for_timeout(200)
+        raise AssertionError(f'{message} (no response within {timeout_s:.0f}s)')
+
     def posts(self, path_suffix: str, since: int = 0) -> List[Dict[str, Any]]:
         """JSON bodies of POSTs to ``*path_suffix`` since ``mark()``."""
         out = []
