@@ -83,15 +83,28 @@ def get_job_env_content(job_id: int) -> Optional[str]:
 
 
 def restore_job_config_file(job_id: int) -> None:
-    """Restore config file from database if SKYPILOT_CONFIG is set.
+    """Restore the config file from the database if SKYPILOT_CONFIG is set.
 
-    This reads the config file content from the database and writes it to the
-    path specified in the SKYPILOT_CONFIG environment variable. This ensures
-    that jobs can run on any controller, even if the original config file
-    doesn't exist on disk.
+    The file named by the SKYPILOT_CONFIG environment variable is written at
+    submission. Its content is also stored in the database, so that a job
+    can run on a controller whose disk no longer has the file. This function
+    writes the file from the database only when it is missing; an existing
+    file is left untouched.
 
-    For backward compatibility with jobs submitted before config persistence was
-    implemented, we fall back to using the file if it already exists on disk.
+    Replacing an existing file would be unsafe. Jobs submitted as one
+    ``--num-jobs`` batch share a single config path, and every job's
+    controller runs this restore when its job loop starts. The API server
+    reloads the file at the start of every request those jobs send. When the
+    file lives on a shared filesystem (several API server replicas on NFS),
+    replacing it from one host, even atomically with a rename, makes a reader
+    on another host fail: it holds a handle to the old file (``ESTALE``), or
+    its stat of the path fails and the file looks missing. Never replacing an
+    existing file removes that failure. The file was written from the same
+    content the database holds, so nothing is lost by keeping it.
+
+    For backward compatibility with jobs submitted before config persistence
+    was implemented, a file that exists on disk is used even when the
+    database has no content.
 
     Args:
         job_id: The job ID
@@ -101,30 +114,32 @@ def restore_job_config_file(job_id: int) -> None:
         # No config file for this job
         return
 
-    file_info = managed_job_state.get_job_file_contents(job_id)
-    config_content = file_info['config_file_content']
-
     # Expand ~ in config path
     config_path_expanded = os.path.expanduser(config_path)
+
+    if os.path.exists(config_path_expanded):
+        # The file is already on disk (written at submission, or restored by
+        # another job of the same batch). Do not replace it; see the
+        # docstring.
+        logger.debug(f'Config file for job {job_id} already exists at '
+                     f'{config_path_expanded}; not restoring it')
+        return
+
+    file_info = managed_job_state.get_job_file_contents(job_id)
+    config_content = file_info['config_file_content']
 
     if config_content is not None:
         # Config content is in database - restore it
         # Ensure the directory exists
         os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
-        # Jobs submitted in one batch (`--num-jobs`) share a single config
-        # path, and every job's controller restores it concurrently. The
-        # write must be atomic: an O_TRUNC rewrite lets a concurrent reader
-        # load a zero-byte file as an empty config.
+        # Several jobs of one batch can restore the same missing path at
+        # once. The write must be atomic: an O_TRUNC write lets a concurrent
+        # reader load a zero-byte file as an empty config.
         common_utils.atomic_write_text(config_path_expanded,
                                        config_content,
                                        mode=0o600)
         logger.info(f'Restored config file for job {job_id} to '
                     f'{config_path_expanded} ({len(config_content)} bytes)')
-    elif os.path.exists(config_path_expanded):
-        # Backward compatibility: config not in DB but file exists on disk
-        # This can happen for jobs submitted before config persistence
-        logger.debug(f'Config file for job {job_id} not in database, but '
-                     f'found on disk at {config_path_expanded}')
     else:
         # Config should exist but doesn't - warn about it
         logger.warning(

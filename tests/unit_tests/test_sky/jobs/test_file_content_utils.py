@@ -1,8 +1,10 @@
 """Unit tests for database-backed managed job file storage."""
 
 import contextlib
+import logging
 import os
 from typing import Dict, Optional
+from unittest import mock
 
 import filelock
 import pytest
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sky import skypilot_config
 from sky.jobs import file_content_utils
 from sky.jobs import state
+from sky.utils import common_utils
 
 
 @pytest.fixture
@@ -185,20 +188,46 @@ def test_restore_job_config_file_writes_content(_mock_managed_jobs_db_conn,
     assert (config_path.stat().st_mode & 0o777) == 0o600
 
 
-def test_restore_job_config_file_replaces_atomically(_mock_managed_jobs_db_conn,
-                                                     tmp_path, monkeypatch):
-    """A concurrent reader must never observe a truncated config.
+def test_restore_job_config_file_writes_missing_file_atomically(
+        _mock_managed_jobs_db_conn, tmp_path, monkeypatch):
+    """A missing file is written whole: no tmp fragments, no partial file.
 
-    Jobs submitted as one ``--num-jobs`` batch share a single config path
-    and every job's controller restores it. An O_TRUNC rewrite empties the
-    path in place, so another job reading it mid-write loads ``{}`` and
-    silently runs with no config -- which collapses
-    ``allowed_contexts`` and fails the job's prechecks. Restoring must
-    swap in a fully-written file instead.
+    Several jobs of one ``--num-jobs`` batch can restore the same missing
+    path at once, so the write must stage to a tmp file and rename.
     """
     config_path = tmp_path / 'shared.config_yaml'
-    stale_content = 'kubernetes:\n  allowed_contexts:\n  - ctx-stale\n'
-    config_path.write_text(stale_content, encoding='utf-8')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    job_info = _create_basic_job(tmp_path,
+                                 name='shared-config-job',
+                                 config_content=_CONFIG_CONTENT)
+
+    with mock.patch.object(common_utils,
+                           'atomic_write_text',
+                           wraps=common_utils.atomic_write_text) as write:
+        file_content_utils.restore_job_config_file(job_info['job_id'])
+
+    write.assert_called_once()
+    assert config_path.read_text(encoding='utf-8') == _CONFIG_CONTENT
+    # No tmp fragments left next to the destination.
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith('.tmp')]
+
+
+def test_restore_job_config_file_keeps_existing_file(_mock_managed_jobs_db_conn,
+                                                     tmp_path, monkeypatch):
+    """An existing config file is never replaced.
+
+    Jobs submitted as one ``--num-jobs`` batch share a single config path,
+    every job's controller restores it when its job loop starts, and the
+    API server reloads it at the start of every request those jobs send.
+    On a shared filesystem, replacing the file from one host (even by
+    rename) fails a reader on another host with a stale handle or a
+    missing-file error. So the restore must leave an existing file alone,
+    whatever the database holds.
+    """
+    config_path = tmp_path / 'shared.config_yaml'
+    on_disk_content = 'kubernetes:\n  allowed_contexts:\n  - ctx-on-disk\n'
+    config_path.write_text(on_disk_content, encoding='utf-8')
     original_inode = config_path.stat().st_ino
 
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
@@ -206,17 +235,33 @@ def test_restore_job_config_file_replaces_atomically(_mock_managed_jobs_db_conn,
     job_info = _create_basic_job(tmp_path,
                                  name='shared-config-job',
                                  config_content=_CONFIG_CONTENT)
+    assert _CONFIG_CONTENT != on_disk_content
 
-    # Stand in for another job's controller that opened the shared path
-    # just before this restore starts.
-    with open(config_path, 'r', encoding='utf-8') as concurrent_reader:
+    with mock.patch.object(common_utils, 'atomic_write_text') as write, \
+            mock.patch.object(state,
+                              'get_job_file_contents',
+                              wraps=state.get_job_file_contents
+                             ) as db_read:
         file_content_utils.restore_job_config_file(job_info['job_id'])
 
-        # The reader holds the pre-restore inode and still sees a whole
-        # file. Under an in-place rewrite it would read '' or a fragment.
-        assert concurrent_reader.read() == stale_content
+    # Nothing written, the database not even consulted.
+    write.assert_not_called()
+    db_read.assert_not_called()
+    assert config_path.read_text(encoding='utf-8') == on_disk_content
+    assert config_path.stat().st_ino == original_inode
 
-    assert config_path.read_text(encoding='utf-8') == _CONFIG_CONTENT
-    assert config_path.stat().st_ino != original_inode
-    # No tmp fragments left next to the destination.
-    assert not [p for p in tmp_path.iterdir() if p.name.endswith('.tmp')]
+
+def test_restore_job_config_file_missing_everywhere_writes_nothing(
+        _mock_managed_jobs_db_conn, tmp_path, monkeypatch, caplog):
+    """No file on disk and no content in the database: warn, write nothing."""
+    config_path = tmp_path / 'absent.config_yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    job_info = _create_basic_job(tmp_path, name='no-config-job')
+
+    with caplog.at_level(logging.WARNING):
+        file_content_utils.restore_job_config_file(job_info['job_id'])
+
+    assert not config_path.exists()
+    assert any('config content not found' in record.getMessage()
+               for record in caplog.records)
