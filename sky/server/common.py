@@ -48,6 +48,7 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
     import aiohttp
@@ -495,6 +496,11 @@ def get_server_url(host: Optional[str] = None) -> str:
         endpoint = (f'http://{_host_to_url_host(host)}:'
                     f'{get_local_api_server_port()}')
 
+    # A jobs/serve controller always calls the API server on its own host, so
+    # its requests reach the server from loopback, never a configured remote
+    # endpoint.
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return endpoint.rstrip('/')
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
@@ -760,6 +766,19 @@ def handle_request_error(response: 'requests.Response') -> None:
                 # programmatically; the CLI already renders this cleanly.
                 raise exceptions.PermissionDeniedError(
                     detail if isinstance(detail, str) else str(detail))
+    # A 404 that hides an infra target outside the caller's workspaces. Keyed on
+    # the error code so FastAPI's own 404 (a route an old server lacks) still
+    # raises HTTPError below.
+    if response.status_code == 404:
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            detail = None
+        if (isinstance(detail, dict) and detail.get('error')
+                == workspace_constants.INFRA_TARGET_NOT_FOUND):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InfraTargetNotFoundError(
+                    str(detail.get('message', 'Not found.')))
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
 
@@ -1231,6 +1250,46 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
         return False
 
 
+def _source_needs_local_path(source: Any) -> bool:
+    """True when *source* is a path on this machine, not an object-store URL."""
+    if source is None or isinstance(source, bool):
+        return False
+    if isinstance(source, str):
+        return not data_utils.is_cloud_store_url(source)
+    if isinstance(source, dict):
+        # A git workdir is ``{url, ref}`` and has no ``source``.
+        if 'source' not in source:
+            return False
+        return _source_needs_local_path(source['source'])
+    if isinstance(source, (list, tuple)):
+        return any(_source_needs_local_path(item) for item in source)
+    return False
+
+
+def local_file_mounts_required(task_config: Dict[str, Any]) -> bool:
+    """True if the task still has a workdir or file mount on local disk.
+
+    Managed-job submit copies those paths into ``jobs.bucket`` and rewrites
+    the saved task to the resulting ``gs://`` / ``s3://`` (or other store)
+    URLs. A retry of that task does not read the API server's blob.
+    """
+    if _source_needs_local_path(task_config.get('workdir')):
+        return True
+    for src in (task_config.get('file_mounts') or {}).values():
+        if _source_needs_local_path(src):
+            return True
+    tls = (task_config.get('service') or {}).get('tls') or {}
+    return any(
+        _source_needs_local_path(tls.get(key))
+        for key in ('keyfile', 'certfile'))
+
+
+def dag_requires_local_file_mounts(dag: 'dag_lib.Dag') -> bool:
+    """True if any task in *dag* still points at a local file mount."""
+    return any(
+        local_file_mounts_required(task.to_yaml_config()) for task in dag.tasks)
+
+
 def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
@@ -1271,8 +1330,13 @@ def process_mounts_in_task_on_api_server(
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use the blob directory for file mounts, if a blob ID is provided.
-    if file_mounts_blob_id is not None:
+    task_configs = list(yaml_utils.read_yaml_all_str(task))
+    # A blob id is also sent for a task whose mounts were already rewritten
+    # to cloud URLs. Resolving it would require the local blob, which is
+    # gone after the API server's disk is replaced.
+    if file_mounts_blob_id is not None and any(
+            config is not None and local_file_mounts_required(config)
+            for config in task_configs):
         file_mounts_base = pathlib.Path(
             resolve_blob_dir(file_mounts_blob_id, user_hash))
     else:
@@ -1344,7 +1408,6 @@ def process_mounts_in_task_on_api_server(
                     if key in tls:
                         tls[key] = apply(tls[key])
 
-    task_configs = yaml_utils.read_yaml_all_str(task)
     for task_config in task_configs:
         if task_config is None:
             continue

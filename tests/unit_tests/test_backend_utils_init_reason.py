@@ -381,7 +381,9 @@ class TestUpdateClusterStatusBareHandle:
             'ssh: connect to host 1.2.3.4 port 22: Connection timed out')
         handle.get_command_runners.return_value = [head_runner]
 
-        with mock.patch.object(backend_utils.logger, 'warning') as warning:
+        with mock.patch.object(backend_utils.logger, 'warning') as warning, \
+             mock.patch.object(backend_utils,
+                               'DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS', 0):
             add_or_update, events = self._refresh(handle)
 
         head_runner.run.assert_called_once()

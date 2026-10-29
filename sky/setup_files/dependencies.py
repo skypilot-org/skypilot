@@ -232,11 +232,10 @@ cloud_dependencies: Dict[str, List[str]] = {
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,
-    # For the container registry auth api. Reference:
-    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': [
-        # For the container registry auth api. Reference:
-        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        # Pods, templates and registry credentials go through the REST API v2
+        # in sky/adaptors/runpod.py. The SDK reads the API key from
+        # ~/.runpod/config.toml and serves the spot pod GraphQL mutation.
         'runpod>=1.6.1',
         # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
         # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli

@@ -1,0 +1,470 @@
+"""Tests for sky.utils.db.migrate_sqlite_to_postgres."""
+import contextlib
+import os
+import sqlite3
+import stat
+from unittest import mock
+
+import pytest
+import yaml
+
+from sky.utils.db import migrate_sqlite_to_postgres as migrate
+
+_RECIPES_DDL = ('CREATE TABLE recipes (name TEXT PRIMARY KEY, '
+                'description TEXT, content TEXT, recipe_type TEXT, '
+                'pinned INTEGER, user_id TEXT, user_name TEXT, '
+                'created_at REAL, is_editable INTEGER, is_pinnable INTEGER)')
+
+
+@pytest.fixture()
+def recipes(tmp_path):
+    """A recipes table holding exactly the seeded default recipes."""
+    connection = sqlite3.connect(tmp_path / 'recipes.db')
+    connection.execute(_RECIPES_DDL)
+    expected = migrate.default_recipes()
+    for row in expected:
+        connection.execute(
+            f'INSERT INTO recipes ({", ".join(row)}, created_at) '
+            f'VALUES ({", ".join("?" * len(row))}, 1.0)', list(row.values()))
+    connection.commit()
+    yield connection, expected
+    connection.close()
+
+
+def _count(connection):
+    return connection.execute('SELECT count(*) FROM recipes').fetchone()[0]
+
+
+def test_remove_default_recipes(recipes):
+    connection, expected = recipes
+    removed = migrate.remove_default_recipes(connection, '?', expected)
+    assert removed == sorted(row['name'] for row in expected)
+    assert _count(connection) == 0
+
+
+def test_remove_default_recipes_after_failed_copy(recipes):
+    connection, expected = recipes
+    migrate.remove_default_recipes(connection, '?', expected)
+    assert migrate.remove_default_recipes(connection, '?', expected) == []
+
+
+def test_remove_default_recipes_aborts_on_extra_row(recipes):
+    connection, expected = recipes
+    connection.execute('INSERT INTO recipes (name) VALUES (\'mine\')')
+    connection.commit()
+    with pytest.raises(ValueError, match='differs'):
+        migrate.remove_default_recipes(connection, '?', expected)
+    assert _count(connection) == len(expected) + 1
+
+
+def test_remove_default_recipes_aborts_on_changed_row(recipes):
+    connection, expected = recipes
+    connection.execute('UPDATE recipes SET content = \'x\' WHERE name = ?',
+                       (expected[0]['name'],))
+    connection.commit()
+    with pytest.raises(ValueError, match='differs'):
+        migrate.remove_default_recipes(connection, '?', expected)
+    assert _count(connection) == len(expected)
+
+
+def test_remove_default_recipes_aborts_on_missing_row(recipes):
+    connection, expected = recipes
+    connection.execute('DELETE FROM recipes WHERE name = ?',
+                       (expected[0]['name'],))
+    connection.commit()
+    with pytest.raises(ValueError, match='differs'):
+        migrate.remove_default_recipes(connection, '?', expected)
+
+
+_SSH_KEY_DDL = ('CREATE TABLE ssh_key (user_hash TEXT PRIMARY KEY, '
+                'ssh_public_key TEXT, ssh_private_key TEXT)')
+_SSH_KEYS = {'abc123': ('ssh-ed25519 AAAA', 'PRIVATE')}
+
+
+@pytest.fixture()
+def seeded_ssh_keys(tmp_path):
+    """An ssh_key table holding the keys found under ~/.sky/clients."""
+    connection = sqlite3.connect(tmp_path / 'target.db')
+    connection.execute(_SSH_KEY_DDL)
+    connection.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+    connection.commit()
+    yield connection
+    connection.close()
+
+
+def _ssh_key_count(connection):
+    return connection.execute('SELECT count(*) FROM ssh_key').fetchone()[0]
+
+
+def test_source_ssh_keys(tmp_path):
+    with contextlib.closing(sqlite3.connect(tmp_path / 'state.db')) as source:
+        source.execute(_SSH_KEY_DDL)
+        source.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+        source.commit()
+    assert migrate.source_ssh_keys(tmp_path) == _SSH_KEYS
+
+
+def test_source_ssh_keys_without_table(tmp_path):
+    sqlite3.connect(tmp_path / 'state.db').close()
+    assert migrate.source_ssh_keys(tmp_path) == {}
+
+
+def test_remove_seeded_ssh_keys(seeded_ssh_keys):
+    removed = migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS)
+    assert removed == ['abc123']
+    assert _ssh_key_count(seeded_ssh_keys) == 0
+
+
+def test_remove_seeded_ssh_keys_after_failed_copy(seeded_ssh_keys):
+    migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS)
+    assert migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', _SSH_KEYS) == []
+
+
+def test_remove_seeded_ssh_keys_aborts_on_key_missing_from_source(
+        seeded_ssh_keys):
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?', {})
+    assert _ssh_key_count(seeded_ssh_keys) == 0
+
+
+def test_remove_seeded_ssh_keys_aborts_on_changed_key(seeded_ssh_keys):
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.remove_seeded_ssh_keys(seeded_ssh_keys, '?',
+                                       {'abc123': ('ssh-ed25519 BBBB', 'X')})
+    assert _ssh_key_count(seeded_ssh_keys) == 0
+
+
+@pytest.mark.parametrize('dialect', ['sqlite', 'mysql'])
+def test_require_postgres_rejects_other_dialects(dialect):
+    engine = mock.Mock()
+    engine.dialect.name = dialect
+    with pytest.raises(ValueError, match='not PostgreSQL'):
+        migrate.require_postgres(engine)
+
+
+def test_require_postgres_accepts_postgres():
+    engine = mock.Mock()
+    engine.dialect.name = 'postgresql'
+    migrate.require_postgres(engine)
+
+
+@pytest.fixture()
+def sky_dir(tmp_path):
+    """SQLite stores whose committed rows are still only in the WAL."""
+    root = tmp_path / 'sky'
+    connections = []
+    for relative in migrate.STORES:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(path)
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)')
+        connection.execute('INSERT INTO t (v) VALUES (?)', (relative,))
+        connection.commit()
+        connections.append(connection)
+    yield root
+    for connection in connections:
+        connection.close()
+
+
+def test_freeze(sky_dir, tmp_path):
+    frozen = tmp_path / 'frozen'
+    migrate.freeze(sky_dir, frozen)
+    for relative in migrate.STORES:
+        path = frozen / relative
+        assert stat.S_IMODE(path.stat().st_mode) == 0o444
+        assert not list(path.parent.glob(path.name + '-*'))
+        with contextlib.closing(migrate._readonly(path)) as connection:
+            assert connection.execute(
+                'PRAGMA journal_mode').fetchone()[0] == 'delete'
+            assert connection.execute('SELECT v FROM t').fetchall() == [
+                (relative,)
+            ]
+
+
+def test_freeze_missing_optional_store(sky_dir, tmp_path):
+    (sky_dir / 'recipes.db').unlink()
+    frozen = tmp_path / 'frozen'
+    migrate.freeze(sky_dir, frozen)
+    assert not (frozen / 'recipes.db').exists()
+
+
+def test_freeze_missing_required_store(sky_dir, tmp_path):
+    (sky_dir / 'state.db').unlink()
+    with pytest.raises(FileNotFoundError):
+        migrate.freeze(sky_dir, tmp_path / 'frozen')
+
+
+def test_source_tables_rejects_duplicate_table(sky_dir):
+    # Every store in the fixture has table t.
+    with pytest.raises(ValueError, match='two databases'):
+        migrate.source_tables(sky_dir)
+
+
+def test_source_tables_requires_core_store(sky_dir):
+    (sky_dir / 'state.db').unlink()
+    with pytest.raises(FileNotFoundError, match='state.db'):
+        migrate.source_tables(sky_dir)
+
+
+# --- Copy into a real PostgreSQL (opt-in via SKYPILOT_TEST_PG_URL) ----------
+#
+# The copy, the empty-target check and the sequence handling are PostgreSQL
+# SQL, so they run against a throwaway server and are skipped otherwise. The
+# URL's database is reset by these tests.
+
+_PG_URL = os.environ.get('SKYPILOT_TEST_PG_URL')
+pg_only = pytest.mark.skipif(not _PG_URL,
+                             reason='SKYPILOT_TEST_PG_URL is not set')
+
+# Serial IDs, boolean/json/timestamptz columns and a cross-store foreign key.
+_PG_DDL = """
+CREATE TABLE config_yaml (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE recipes (name TEXT PRIMARY KEY, pinned BOOLEAN);
+CREATE TABLE clusters (id SERIAL PRIMARY KEY, name TEXT, links JSON);
+CREATE TABLE job_events (id SERIAL PRIMARY KEY,
+                         cluster_id INTEGER REFERENCES clusters(id),
+                         is_batch BOOLEAN, timestamp TIMESTAMPTZ, blob BYTEA);
+CREATE TABLE services (name TEXT PRIMARY KEY, version INTEGER);
+CREATE TABLE kv_cache (key TEXT PRIMARY KEY, value TEXT);
+"""
+_SQLITE_DDL = {
+    # job_events comes before its foreign-key parent on purpose.
+    'spot_jobs.db': ('CREATE TABLE job_events (id INTEGER PRIMARY KEY, '
+                     'cluster_id INTEGER, is_batch INTEGER, timestamp TEXT, '
+                     'blob BLOB)'),
+    'state.db': ('CREATE TABLE clusters (id INTEGER PRIMARY KEY, name TEXT, '
+                 'links TEXT)'),
+    'serve/services.db': ('CREATE TABLE services (name TEXT PRIMARY KEY, '
+                          'version INTEGER)'),
+    'recipes.db': 'CREATE TABLE recipes (name TEXT PRIMARY KEY, pinned INT)',
+    'kv_cache.db': 'CREATE TABLE kv_cache (key TEXT PRIMARY KEY, value TEXT)',
+}
+_CONFIG = {'allowed_clouds': ['kubernetes']}
+
+
+def _sql(statement, *args):
+    import psycopg2  # pylint: disable=import-outside-toplevel
+    with contextlib.closing(psycopg2.connect(_PG_URL)) as target:
+        with target, target.cursor() as cursor:
+            cursor.execute(statement, args or None)
+            return cursor.fetchall() if cursor.description else []
+
+
+@pytest.fixture()
+def pg_source(tmp_path):
+    """SQLite stores with data, and a target with the matching schema."""
+    root = tmp_path / 'sky'
+    (root / 'serve').mkdir(parents=True)
+    for relative, ddl in _SQLITE_DDL.items():
+        with contextlib.closing(sqlite3.connect(root / relative)) as source:
+            source.execute(ddl)
+            source.execute('CREATE TABLE alembic_version_x (version_num TEXT)')
+            source.commit()
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.executemany('INSERT INTO clusters VALUES (?, ?, ?)',
+                           [(3, 'a', '{"k": [1]}'), (8, 'b', None)])
+        source.commit()
+    with contextlib.closing(sqlite3.connect(root / 'spot_jobs.db')) as source:
+        source.execute(
+            'INSERT INTO job_events VALUES '
+            '(5, 8, 1, \'2026-01-02 12:00:00\', ?)', (b'\x00\xff',))
+        source.commit()
+    _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;' + _PG_DDL)
+    with mock.patch.object(migrate, 'init_target', return_value=[]) as init:
+        yield root, init
+    _sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_copies_and_advances_sequences(pg_source):
+    root, init = pg_source
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['rows'] == {
+        'clusters': 2,
+        'job_events': 1,
+        'kv_cache': 0,
+        'recipes': 0,
+        'services': 0,
+    }
+    (row,) = _sql('SELECT is_batch, timestamp AT TIME ZONE \'UTC\', blob '
+                  'FROM job_events')
+    assert row[0] is True
+    assert str(row[1]) == '2026-01-02 12:00:00'
+    assert bytes(row[2]) == b'\x00\xff'
+    assert _sql('SELECT links FROM clusters WHERE id = 3') == [({'k': [1]},)]
+    assert _sql('INSERT INTO clusters (name) VALUES (\'new\') '
+                'RETURNING id') == [(9,)]
+    assert yaml.safe_load(
+        _sql('SELECT value FROM config_yaml')[0][0]) == (_CONFIG)
+    init.assert_called_once()
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_refuses_non_empty_target(pg_source):
+    root, init = pg_source
+    _sql('INSERT INTO services VALUES (\'left-over\', 1)')
+    with pytest.raises(ValueError, match='not empty'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+    init.assert_not_called()
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_refuses_rerun(pg_source):
+    root, _ = pg_source
+    migrate.migrate(root, _CONFIG, _PG_URL)
+    with pytest.raises(ValueError, match='not empty'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_failed_copy_rolls_back(pg_source):
+    root, _ = pg_source
+    with mock.patch.object(migrate, '_convert', side_effect=ValueError('boom')):
+        with pytest.raises(ValueError, match='boom'):
+            migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_missing_optional_stores_migrate_as_empty(pg_source):
+    root, _ = pg_source
+    (root / 'recipes.db').unlink()
+    (root / 'kv_cache.db').unlink()
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['rows']['clusters'] == 2
+    assert _sql('SELECT count(*) FROM recipes') == [(0,)]
+    assert _sql('SELECT count(*) FROM kv_cache') == [(0,)]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_missing_optional_source_rejects_nonempty_target(pg_source):
+    root, init = pg_source
+    (root / 'kv_cache.db').unlink()
+    _sql('INSERT INTO kv_cache VALUES (\'left-over\', \'value\')')
+    with pytest.raises(ValueError, match='kv_cache.*not empty'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+    init.assert_not_called()
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_source_config_is_updated_with_migrated_config(pg_source):
+    root, _ = pg_source
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.execute('CREATE TABLE config_yaml (key TEXT PRIMARY KEY, '
+                       'value TEXT)')
+        source.execute('INSERT INTO config_yaml VALUES (?, ?)',
+                       ('api_server_config', 'old: true'))
+        source.commit()
+    migrate.migrate(root, _CONFIG, _PG_URL)
+    assert yaml.safe_load(
+        _sql('SELECT value FROM config_yaml')[0][0]) == _CONFIG
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_failed_config_write_rolls_back_copy(pg_source):
+    root, _ = pg_source
+    real_seed = migrate.seed_config
+
+    def fail_after_seed(cursor, config):
+        real_seed(cursor, config)
+        raise RuntimeError('lost config acknowledgement')
+
+    with mock.patch.object(migrate, 'seed_config', fail_after_seed):
+        with pytest.raises(RuntimeError, match='lost config acknowledgement'):
+            migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    assert _sql('SELECT count(*) FROM config_yaml') == [(0,)]
+    migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_missing_target_table_fails(pg_source):
+    root, _ = pg_source
+    _sql('DROP TABLE kv_cache')
+    with pytest.raises(ValueError, match='does not exist in PostgreSQL'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+
+
+@pytest.fixture()
+def pg_source_with_ssh_key(pg_source):
+    """A source with an SSH key that schema init also seeds into the target.
+
+    The global_user_state migration that adds ssh_key copies the keys under
+    ~/.sky/clients into the new table, so on a server whose users have
+    launched clusters the target already holds the key before the copy.
+    """
+    root, init = pg_source
+    with contextlib.closing(sqlite3.connect(root / 'state.db')) as source:
+        source.execute(_SSH_KEY_DDL)
+        source.executemany('INSERT INTO ssh_key VALUES (?, ?, ?)',
+                           [(k, *v) for k, v in _SSH_KEYS.items()])
+        source.commit()
+    _sql(_SSH_KEY_DDL)
+
+    def seed_ssh_keys():
+        for user_hash, (public_key, private_key) in _SSH_KEYS.items():
+            _sql(
+                'INSERT INTO ssh_key VALUES (%s, %s, %s) '
+                'ON CONFLICT DO NOTHING', user_hash, public_key, private_key)
+        return []
+
+    init.side_effect = seed_ssh_keys
+    yield root, init
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_migrate_with_ssh_key_seeded_by_schema_init(pg_source_with_ssh_key):
+    root, _ = pg_source_with_ssh_key
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['removed_seeded_ssh_keys'] == ['abc123']
+    assert result['rows']['ssh_key'] == 1
+    assert _sql('SELECT user_hash, ssh_public_key, ssh_private_key '
+                'FROM ssh_key') == [('abc123', *_SSH_KEYS['abc123'])]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_failed_copy_with_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
+    root, _ = pg_source_with_ssh_key
+    with mock.patch.object(migrate, '_convert', side_effect=ValueError('boom')):
+        with pytest.raises(ValueError, match='boom'):
+            migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(0,)]
+    migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(1,)]
+
+
+@pg_only
+@pytest.mark.xdist_group('migrate_sqlite_to_postgres')
+def test_differing_seeded_ssh_key_can_be_retried(pg_source_with_ssh_key):
+    root, init = pg_source_with_ssh_key
+    seed_matching_keys = init.side_effect
+
+    def seed_stale_key():
+        _sql('INSERT INTO ssh_key VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
+             'abc123', 'ssh-ed25519 STALE', 'STALE')
+        return []
+
+    init.side_effect = seed_stale_key
+    with pytest.raises(ValueError, match='differ from the SQLite state'):
+        migrate.migrate(root, _CONFIG, _PG_URL)
+    assert _sql('SELECT count(*) FROM ssh_key') == [(0,)]
+    assert _sql('SELECT count(*) FROM clusters') == [(0,)]
+    # Once the key on disk matches the SQLite state, the same target works.
+    init.side_effect = seed_matching_keys
+    result = migrate.migrate(root, _CONFIG, _PG_URL)
+    assert result['rows']['ssh_key'] == 1

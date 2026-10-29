@@ -1,0 +1,9 @@
+diff --git a/sky/jobs/server/core.py b/sky/jobs/server/core.py
+index a4ff93a29..74b3be785 100644
+--- a/sky/jobs/server/core.py
++++ b/sky/jobs/server/core.py
+@@ -1946,3 +1946,3 @@ def queue_v2(
+         user_hashes=user_hashes,
+-        statuses=statuses,
++        statuses=None,  # TWIST: ignore the status filter
+         fields=fields,

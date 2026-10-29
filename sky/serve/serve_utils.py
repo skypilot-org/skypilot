@@ -94,8 +94,8 @@ def _get_controller_url(service_name: str, controller_port: int) -> str:
 
     In single-pod (or daemon == controller pod) deployments the IP read from
     DB either matches our own POD_IP or is None — in both cases we fall back
-    to localhost. In HA where the request handler runs on a different pod
-    than the controller process, we route via the controller's pod IP from DB.
+    to localhost. When the request handler runs on a different pod than the
+    controller process, we route via the controller's pod IP from DB.
     """
     self_ip = os.environ.get('POD_IP')
     record = serve_state.get_service_from_name(service_name)

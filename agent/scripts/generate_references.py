@@ -598,6 +598,7 @@ def generate_python_sdk():
         'Job Operations': [
             'queue',
             'job_status',
+            'cluster_job_spec',
             'cancel',
             'tail_logs',
             'tail_provision_logs',

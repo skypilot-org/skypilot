@@ -6,14 +6,12 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 
 	"github.com/pfnet-research/meta-fuse-csi-plugin/pkg/util"
 	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/client"
 	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/common"
-	flag "github.com/spf13/pflag"
 	log "k8s.io/klog/v2"
 )
 
@@ -26,59 +24,63 @@ const (
 	optionsDescription = "mount options"
 )
 
-var (
-	printHelp    = flag.BoolP("help", "h", false, helpDescription)
-	printVersion = flag.BoolP("version", "V", false, versionDescription)
-	// Parse unmount flag to determine if the operation is a mount or unmount
-	unmount = flag.BoolP("unmount", "u", false, unmountDescription)
-	// Unused flags, to make pflag parse flags like -uz correctly
-	_ = flag.BoolP("quiet", "q", false, quietDescription)
-	_ = flag.BoolP("lazy", "z", false, lazyDescription)
-	_ = flag.StringP("options", "o", "", optionsDescription)
-)
-
 func usage() {
-	// Same flag set as fusermount(1) so callers can use the shim as a
-	// drop-in replacement.
-	fmt.Printf(`Usage: %s [options] <mountpoint>
-
+	// Usage copied from libfuse:
+	// https://github.com/libfuse/libfuse/blob/1b86fe4c4de96daa4e766425193595f1c6b88a73/util/fusermount.c#L1435
+	fmt.Printf(`%s: [options] mountpoint
 Options:
-  -h, --help              %s
-  -V, --version           %s
-  -o, --options <opts>    %s
-  -u, --unmount           %s
-  -q, --quiet             %s
-  -z, --lazy              %s
+ -h		    %s
+ -V		    %s
+ -o opt[,opt...]    %s
+ -u		    %s
+ -q		    %s
+ -z		    %s
 `, os.Args[0], helpDescription, versionDescription, optionsDescription, unmountDescription, quietDescription, lazyDescription)
 }
 
 func main() {
 	log.InitFlags(nil)
-	// Set custom error handling to ignore unknown flags
-	flag.CommandLine.Init(os.Args[0], flag.ContinueOnError)
-	flag.CommandLine.Usage = usage
-	flag.CommandLine.SetOutput(io.Discard)
-	flag.Parse()
-	if *printHelp {
+
+	args, err := common.ParseFusermountArgs(os.Args[1:])
+	if err != nil {
+		fmt.Println(err)
+		usage()
+		os.Exit(1)
+	}
+	if args.Help {
 		usage()
 		os.Exit(0)
 	}
-	if *printVersion {
+	if args.Version {
 		// TODO(aylei): use git tag as version
 		fmt.Println("fusermount3-shim version: 0.1.0")
 		os.Exit(0)
 	}
-	if len(flag.Args()) == 0 {
+	if args.Mountpoint == "" {
 		fmt.Println("mountpoint must be specified.")
 		usage()
 		os.Exit(1)
 	}
-	isMount := !*unmount
+
+	isMount := !args.Unmount
 	var commFd int
 	if isMount {
 		// Caller must set _FUSE_COMMFD for mount operation
 		commFd = common.MustGetFuseCommFD()
 	}
+
+	// Args is kept for servers that only parse the command line.
+	req := &common.Request{
+		Args:       os.Args[1:],
+		Op:         common.OpMount,
+		Mountpoint: args.Mountpoint,
+		Options:    args.Options,
+	}
+	if args.Unmount {
+		req.Op = common.OpUmount
+		req.Lazy = args.Lazy
+	}
+
 	socketPath := common.MustGetServerSocketPath()
 	// Forward the fusermount request to the server and receive the mounted fd
 	c, err := client.NewClient(socketPath)
@@ -86,7 +88,7 @@ func main() {
 		log.Fatalf("Failed to connect to fusermount server at %s: %v", socketPath, err)
 	}
 	defer c.Close()
-	fd, err := c.Fusermount(os.Args[1:])
+	fd, err := c.Fusermount(req)
 	if err != nil {
 		log.Fatalf("An error occurred when calling fusermount server: %v", err)
 	}
@@ -95,10 +97,12 @@ func main() {
 		f := os.NewFile(uintptr(commFd), "unix_socket")
 		defer f.Close()
 		conn, err := net.FileConn(f)
-		defer conn.Close()
 		if err != nil {
 			log.Fatalf("Failed to connect to _FUSE_COMMFD %d: %v", commFd, err)
 		}
-		util.SendMsg(conn, fd, []byte{})
+		defer conn.Close()
+		if err := util.SendMsg(conn, fd, []byte{}); err != nil {
+			log.Fatalf("Failed to hand the mounted fd to the caller: %v", err)
+		}
 	}
 }

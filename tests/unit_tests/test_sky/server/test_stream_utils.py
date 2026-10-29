@@ -1,6 +1,10 @@
 """Tests for request log streaming."""
+import asyncio
+import collections
 import gzip
 import json
+import random
+import types
 
 import aiofiles
 import fastapi
@@ -167,6 +171,341 @@ async def test_parked_message_repeats_after_any_status_change(
 
     inits = [m for c, m in controls if c is rich_utils.Control.INIT]
     assert inits == [f'[dim]{msg}[/dim]'] * 2, inits
+
+
+# --- Status checks of a parked request -------------------------------------
+
+_WAITING = requests_lib.RequestStatus.WAITING
+_RUNNING = requests_lib.RequestStatus.RUNNING
+_SUCCEEDED = requests_lib.RequestStatus.SUCCEEDED
+_CANCELLED = requests_lib.RequestStatus.CANCELLED
+_CAP = stream_utils._WAITING_STATUS_CHECK_MAX_INTERVAL
+_LOW = 1 - stream_utils._WAITING_STATUS_CHECK_JITTER
+# The loop sleeps at least this long, so a check can land this much after it
+# is due.
+_TICK = stream_utils._IDLE_READ_INTERVAL
+_EPS = 1e-6
+
+
+class _VirtualTime:
+    """A clock that the tail loop's sleeps advance instantly.
+
+    Lets a test run an hour-long park in milliseconds and see exactly when
+    each status check happened.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps = []
+        self._events = []
+
+    def time(self) -> float:
+        return self.now
+
+    def get_event_loop(self) -> '_VirtualTime':
+        return self
+
+    def at(self, when, callback) -> None:
+        """Run ``callback`` once the clock reaches ``when``."""
+        self._events.append((when, callback))
+
+    async def sleep(self, delay) -> None:
+        self.sleeps.append(delay)
+        self.now += delay
+        assert self.now < 3600, 'the stream did not end'
+        for event in [e for e in self._events if e[0] <= self.now]:
+            self._events.remove(event)
+            event[1]()
+        await _REAL_SLEEP(0)
+
+
+_REAL_SLEEP = asyncio.sleep
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    clock = _VirtualTime()
+    monkeypatch.setattr(
+        stream_utils, 'asyncio',
+        types.SimpleNamespace(sleep=clock.sleep,
+                              get_event_loop=clock.get_event_loop))
+    monkeypatch.setattr(stream_utils, 'random', random.Random(0))
+    return clock
+
+
+def _status_timeline(monkeypatch, clock, timeline, should_retry=False):
+    """Serve the status that ``timeline`` holds at the current time.
+
+    ``timeline`` is a list of (start time, status, status_msg); a None status
+    means the request record is gone. Returns the times of the status checks.
+    """
+    checks = []
+
+    async def get_request_status_async(request_id, include_msg=False):
+        del request_id, include_msg
+        checks.append(clock.now)
+        current = [entry for entry in timeline if entry[0] <= clock.now][-1]
+        _, status, msg = current
+        if status is None:
+            return None
+        return requests_lib.StatusWithMsg(status, msg)
+
+    async def get_request_async(request_id, fields=None):
+        del fields
+        return types.SimpleNamespace(name='sky.launch',
+                                     request_id=request_id,
+                                     should_retry=should_retry)
+
+    monkeypatch.setattr(requests_lib, 'get_request_status_async',
+                        get_request_status_async)
+    monkeypatch.setattr(requests_lib, 'get_request_async', get_request_async)
+    return checks
+
+
+async def _collect_timed(clock, log_path, polling_interval=1):
+    """(time, chunk) for every chunk the tail yields."""
+    out = []
+    async with aiofiles.open(log_path, 'rb') as f:
+        async for chunk in stream_utils._tail_log_file(
+                f, request_id='rid', follow=True,
+                polling_interval=polling_interval):
+            out.append((clock.now, chunk))
+    return out
+
+
+def _intervals(times):
+    return [b - a for a, b in zip(times, times[1:])]
+
+
+def test_the_check_interval_doubles_to_the_cap_while_waiting(monkeypatch):
+    monkeypatch.setattr(stream_utils, 'random', random.Random(0))
+    interval = stream_utils._StatusCheckInterval(1)
+    assert interval.current == 1 and not interval.parked
+
+    for nominal in [2, 4, 8, _CAP, _CAP, _CAP]:
+        interval.on_waiting()
+        assert interval.parked
+        # Jittered after the cap, and only downwards.
+        assert nominal * _LOW - _EPS <= interval.current <= nominal + _EPS
+
+
+def test_the_check_interval_resets_to_the_base(monkeypatch):
+    monkeypatch.setattr(stream_utils, 'random', random.Random(0))
+    interval = stream_utils._StatusCheckInterval(1)
+    for _ in range(6):
+        interval.on_waiting()
+
+    interval.reset()
+
+    assert interval.current == 1 and not interval.parked
+    # The next park backs off from the start again.
+    interval.on_waiting()
+    assert interval.current <= 2
+
+
+@pytest.mark.parametrize('base', [0, 0.1, 30])
+def test_the_check_interval_is_never_below_the_base(monkeypatch, base):
+    monkeypatch.setattr(stream_utils, 'random', random.Random(0))
+    interval = stream_utils._StatusCheckInterval(base)
+    for _ in range(20):
+        interval.on_waiting()
+        assert interval.current >= base
+        assert interval.current <= max(base, _CAP)
+
+
+def test_streams_that_park_together_do_not_check_in_step(monkeypatch):
+    """Jitter at the cap spreads the checks of streams parked together.
+
+    With the jitter applied before the cap, most intervals come out at
+    exactly the cap, and streams that park at the same moment keep reading
+    the DB in the same instant. Here 200 streams park at once.
+    """
+    monkeypatch.setattr(stream_utils, 'random', random.Random(0))
+    streams = 200
+    per_second = collections.Counter()
+    at_cap = 0
+    total = 0
+    for _ in range(streams):
+        interval = stream_utils._StatusCheckInterval(1)
+        now = 1.0
+        while now < 600:
+            interval.on_waiting()
+            now += interval.current
+            total += 1
+            at_cap += abs(interval.current - _CAP) < 0.05
+            if now >= 120:
+                per_second[int(now)] += 1
+
+    assert at_cap / total < 0.05
+    # About streams / 8 checks land in an average second; in lock-step, a
+    # second would hold most of the streams.
+    mean = sum(per_second.values()) / len(per_second)
+    assert max(per_second.values()) < 2 * mean, (max(per_second.values()), mean)
+
+
+@pytest.mark.asyncio
+async def test_a_parked_stream_backs_off_its_status_checks(
+        monkeypatch, tmp_path, clock):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    checks = _status_timeline(monkeypatch, clock, [
+        (0, _WAITING, 'Waiting for the cluster lock'),
+        (600, _SUCCEEDED, None),
+    ])
+    planned = []
+    on_waiting = stream_utils._StatusCheckInterval.on_waiting
+
+    def record_planned(self):
+        on_waiting(self)
+        planned.append(self.current)
+
+    monkeypatch.setattr(stream_utils._StatusCheckInterval, 'on_waiting',
+                        record_planned)
+
+    await _collect_timed(clock, log_path)
+
+    waiting_checks = [t for t in checks if t < 600]
+    gaps = _intervals(waiting_checks)
+    # Each check happens when it is due. Waking only on a coarse tick would
+    # round the jittered intervals and line the streams up again.
+    for gap, due in zip(gaps, planned):
+        assert due - _EPS <= gap <= due + _TICK + _EPS, (gap, due)
+    # Was one check per second: about 600 here.
+    assert 600 / (_CAP + _TICK) <= len(waiting_checks) <= 600 / (_CAP * _LOW)
+    assert max(gaps) <= _CAP + _TICK + _EPS
+    # Past the ramp (1 + 2 + 4 + 8 s), every gap is a jittered cap.
+    assert min(g for t, g in zip(waiting_checks, gaps) if t > 20) >= (
+        _CAP * _LOW - _EPS)
+    # The log is read about once a second rather than ten times.
+    assert len([s for s in clock.sleeps if s > 0]) < 1.5 * 600
+    # The terminal status is still seen within one capped interval.
+    assert checks[-1] <= 600 + _CAP + _TICK
+
+
+@pytest.mark.asyncio
+async def test_a_running_stream_keeps_its_check_interval(
+        monkeypatch, tmp_path, clock):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    checks = _status_timeline(monkeypatch, clock, [
+        (0, _RUNNING, None),
+        (60, _SUCCEEDED, None),
+    ])
+
+    await _collect_timed(clock, log_path)
+
+    assert all(1 - _EPS <= gap <= 1 + _TICK + _EPS
+               for gap in _intervals(checks)), _intervals(checks)
+    assert max(clock.sleeps) == _TICK
+    assert checks[-1] <= 60 + 1 + _TICK + _EPS
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_request_is_checked_at_the_base_interval_again(
+        monkeypatch, tmp_path, clock):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    checks = _status_timeline(monkeypatch, clock, [
+        (0, _WAITING, 'Waiting for the cluster lock'),
+        (300, _RUNNING, None),
+        (400, _SUCCEEDED, None),
+    ])
+
+    await _collect_timed(clock, log_path)
+
+    running_checks = [t for t in checks if 300 <= t < 400]
+    # Seen within one capped interval, then checked every second.
+    assert running_checks[0] <= 300 + _CAP + _TICK + _EPS
+    assert max(_intervals(running_checks)) <= 1 + _TICK + _EPS
+
+
+@pytest.mark.asyncio
+async def test_new_log_bytes_end_the_backoff(monkeypatch, tmp_path, clock):
+    """A resume writes to the log: the bytes, and a status check, follow.
+
+    Status checks are backed off while parked, so it is the log that tells
+    the tail first that the request runs again.
+    """
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    checks = _status_timeline(monkeypatch, clock, [
+        (0, _WAITING, 'Waiting for the cluster lock'),
+        (300, _RUNNING, None),
+        (400, _SUCCEEDED, None),
+    ])
+
+    def resume():
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write('resumed\n')
+
+    clock.at(300, resume)
+
+    chunks = await _collect_timed(clock, log_path)
+
+    delivered = [t for t, chunk in chunks if 'resumed' in chunk]
+    # The quiet log is read about once a second while parked.
+    assert delivered and delivered[0] <= 300 + 1 + _TICK + _EPS
+    # The next check is due at once rather than after the backed-off interval.
+    first_check_after = min(t for t in checks if t >= 300)
+    assert first_check_after <= delivered[0] + _TICK + _EPS
+
+
+@pytest.mark.asyncio
+async def test_a_new_parked_message_is_pushed_within_the_cap(
+        monkeypatch, tmp_path, clock):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    _status_timeline(monkeypatch, clock, [
+        (0, _WAITING, 'Pending (Queue: q, Position: 3)'),
+        (200, _WAITING, 'Pending (Queue: q, Position: 1)'),
+        (300, _SUCCEEDED, None),
+    ])
+
+    chunks = await _collect_timed(clock, log_path)
+
+    pushed = [
+        t for t, chunk in chunks
+        if 'Position: 1' in chunk and _decoded_controls([chunk])
+    ]
+    assert pushed and 200 <= pushed[0] <= 200 + _CAP + 2 * _TICK + _EPS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('should_retry', [False, True])
+async def test_a_cancel_while_parked_ends_the_stream(monkeypatch, tmp_path,
+                                                     clock, should_retry):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    _status_timeline(monkeypatch,
+                     clock, [
+                         (0, _WAITING, 'Waiting for the cluster lock'),
+                         (200, _CANCELLED, None),
+                     ],
+                     should_retry=should_retry)
+
+    chunks = await _collect_timed(clock, log_path)
+
+    end, last = chunks[-1]
+    assert 200 <= end <= 200 + _CAP + _TICK + _EPS
+    if should_retry:
+        assert (rich_utils.Control.RETRY, '') in _decoded_controls([last])
+    else:
+        assert 'request rid cancelled' in last
+
+
+@pytest.mark.asyncio
+async def test_a_parked_request_that_vanishes_ends_the_stream(
+        monkeypatch, tmp_path, clock):
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    checks = _status_timeline(monkeypatch, clock, [
+        (0, _WAITING, 'Waiting for the cluster lock'),
+        (200, None, None),
+    ])
+
+    await _collect_timed(clock, log_path)
+
+    assert 200 <= checks[-1] <= 200 + _CAP + _TICK + _EPS
 
 
 class _RecordingLogProvider(log_provider.LocalLogProvider):

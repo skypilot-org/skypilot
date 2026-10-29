@@ -9,7 +9,7 @@ import {
 // GPU total on the Users page. The critical regression it guards against:
 // jobs that are STARTING/PENDING (cluster still provisioning, e.g. a k8s pod
 // sitting Pending) must NOT be counted, otherwise per-user GPU totals can
-// exceed the physical cluster capacity (SKY-5730).
+// exceed the physical cluster capacity.
 describe('getJobGpuCount', () => {
   const makeJob = (overrides) => ({
     status: 'RUNNING',

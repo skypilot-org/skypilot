@@ -22,6 +22,7 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
+from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import token_service
 from sky.utils import common_utils
@@ -122,27 +123,34 @@ async def test_validate():
     mock_validate_body = mock.MagicMock()
     mock_validate_body.dag = 'test_dag_yaml'
     mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate') as mock_validate:
         # Call validate endpoint
-        await server.validate(mock_validate_body)
+        await server.validate(mock_validate_body, mock_request)
         # Verify validate was called with correct args
         mock_validate.assert_called_once_with(skip_file_mounts=True,
                                               skip_workdir=True)
 
     error_msg = 'Invalid DAG'
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=ValueError(error_msg)):
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.validate(mock_validate_body)
+            await server.validate(mock_validate_body, mock_request)
         assert exc_info.value.status_code == 400
         assert error_msg in str(exc_info.value.detail)
 
@@ -154,7 +162,9 @@ async def test_validate():
         time.sleep(0.1)
         validation_complete.set()
 
-    with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()), \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
                    return_value=(mock_dag, config_utils.Config())), \
@@ -162,7 +172,7 @@ async def test_validate():
                           side_effect=slow_validate):
         # Start validation in background
         validation_task = asyncio.create_task(
-            server.validate(mock_validate_body))
+            server.validate(mock_validate_body, mock_request))
 
         # Check that validation hasn't completed immediately
         assert not validation_complete.is_set()
@@ -480,8 +490,6 @@ async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_launch_endpoint_passes_auth_user():
     """Test that launch endpoint passes auth_user to schedule_request_async."""
-    from sky.server.requests import payloads
-
     auth_user = models.User(id='launch-user-id', name='Launch User')
     request = mock.MagicMock()
     request.state = mock.MagicMock()
@@ -501,6 +509,81 @@ async def test_launch_endpoint_passes_auth_user():
         assert kwargs['auth_user'] == auth_user
         # request_id is passed as first positional argument
         assert args[0] == 'launch-request-id'
+
+
+def _launch_request(client_host, headers=None):
+    """A real request, so the loopback check runs unmocked."""
+    request = fastapi.Request({
+        'type': 'http',
+        'client': (client_host, 12345),
+        'headers': [(k.lower().encode(), v.encode())
+                    for k, v in (headers or {}).items()],
+    })
+    request.state.request_id = 'launch-request-id'
+    request.state.auth_user = None
+    return request
+
+
+_CONTROLLER_FIELDS = [
+    {
+        'is_launched_by_jobs_controller': True
+    },
+    {
+        'is_launched_by_sky_serve_controller': True
+    },
+    {
+        'extra_launch_context': {
+            'managed_job_v1': {
+                'min_nodes': 1
+            }
+        }
+    },
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fields', _CONTROLLER_FIELDS)
+@pytest.mark.parametrize('client_host,headers', [
+    ('10.0.0.5', None),
+    ('127.0.0.1', {
+        'X-Forwarded-For': '203.0.113.7'
+    }),
+])
+async def test_launch_rejects_controller_fields_from_remote(
+        fields, client_host, headers):
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c', **fields)
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.launch(launch_body,
+                                _launch_request(client_host, headers))
+    assert exc_info.value.status_code == 403
+    mock_schedule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_controller_fields_from_loopback():
+    launch_body = payloads.LaunchBody(task='t',
+                                      cluster_name='c',
+                                      is_launched_by_jobs_controller=True,
+                                      is_launched_by_sky_serve_controller=True,
+                                      extra_launch_context={'k': 'v'})
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('127.0.0.1'))
+    body = mock_schedule.call_args.kwargs['request_body']
+    assert body.is_launched_by_jobs_controller
+    assert body.is_launched_by_sky_serve_controller
+    assert body.extra_launch_context == {'k': 'v'}
+
+
+@pytest.mark.asyncio
+async def test_launch_accepts_plain_remote_launch():
+    launch_body = payloads.LaunchBody(task='t', cluster_name='c')
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, _launch_request('10.0.0.5'))
+    mock_schedule.assert_awaited_once()
 
 
 # --- Tests for cleanup_unreferenced_file_mounts ---
@@ -540,7 +623,7 @@ def _mock_sleep_cancel():
         call_count += 1
         if call_count == 1:
             # First call: the sleep *before* the first cleanup iteration.
-            # Return immediately so we proceed to _do_cleanup.
+            # Return immediately so we proceed to the GC pass.
             return
         # Second call (next iteration) – break out.
         raise asyncio.CancelledError
@@ -630,6 +713,31 @@ async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
 
     assert blob_path.exists(), (
         'Unreferenced but recent blob should not be deleted')
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_blob_of_live_service_not_deleted(tmp_path):
+    """A blob that a service or pool still launches replicas from must NOT be
+    deleted once the request that created the service has finished."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.jobs.state.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('sky.serve.serve_state.get_active_file_mounts_blob_ids',
+                    return_value={_BLOB_HEX}), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), 'Blob of a live service should not be deleted'
 
 
 # --- Tests for _resolve_dynamic_route ---
@@ -1476,7 +1584,7 @@ async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
     assert exc.value.status_code == 400
 
 
-# --- SKY-6429: cross-user request-API access control (integration) ----------
+# --- Cross-user request-API access control (integration) --------------------
 
 
 def _seed_request(rid, user_id, status=None):
@@ -1576,6 +1684,43 @@ def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
         }).json()
     }
     assert {'alice-req-1', 'bob-req-1'} <= ids
+
+
+def test_api_status_does_not_read_stored_results(_request_authz_env,
+                                                 monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    _scope_as(monkeypatch, None)
+
+    requested_fields = []
+    list_tasks = server.requests_lib.get_request_tasks_async
+    prefix_tasks = server.requests_lib.get_requests_async_with_prefix
+
+    async def _list_tasks(req_filter):
+        requested_fields.append(req_filter.fields)
+        return await list_tasks(req_filter)
+
+    async def _prefix_tasks(request_id_prefix, fields=None):
+        requested_fields.append(fields)
+        return await prefix_tasks(request_id_prefix, fields)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_tasks_async',
+                        _list_tasks)
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        _prefix_tasks)
+
+    listed = client.get('/api/status', params={'all_status': True})
+    by_id = client.get('/api/status', params={'request_ids': ['alice-req-1']})
+
+    assert listed.status_code == 200
+    listed_ids = {r['request_id'] for r in listed.json()}
+    assert {'alice-req-1', 'bob-req-1'} <= listed_ids
+    assert [r['request_id'] for r in by_id.json()] == ['alice-req-1']
+    assert len(requested_fields) == 2
+    for fields in requested_fields:
+        assert 'return_value' not in fields
+        assert 'error' not in fields
+        assert 'request_body' in fields
 
 
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):

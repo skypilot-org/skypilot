@@ -108,6 +108,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_env_ignored_when_global_allowed_contexts_is_set(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -367,6 +384,36 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
+    """A bad context name must not reveal contexts outside allowed_contexts."""
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        patches = [
+            patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                  return_value=['ctx-a', 'ctx-b']),
+            patch('sky.skypilot_config.get_workspace_cloud',
+                  return_value={'allowed_contexts': ['ctx-a']}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_unknown_context_lists_only_allowed(self):
+        with self.assertRaises(ValueError) as ctx:
+            kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
+        msg = str(ctx.exception)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
+
+    def test_existing_context_outside_allowed_still_validates(self):
+        # Existing clusters on a context later removed from allowed_contexts
+        # must still load, so existence is checked against the kubeconfig.
+        self.assertEqual(
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):
@@ -1059,14 +1106,17 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
 
         k8s_env_vars = deploy_vars['k8s_env_vars']
-        # The probe is runtime-gated on these env vars (see
-        # instance_setup._host_network_probe_cmd); they must be wired for
-        # OCI RoCE so the probe actually runs.
+        # The port check is runtime-gated on this one env var (see
+        # instance_setup._host_network_probe_cmd); it must be wired for OCI
+        # RoCE so the check actually runs.
         self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'],
-                         'test-oci-cluster-ray-ports')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'],
-                         'default')
+        # And on nothing else. The gate used to also require a ConfigMap name,
+        # with the sshd_config rewrite inside the same shell branch, so a
+        # lingering export would keep a dead requirement alive and a lingering
+        # requirement would silently skip moving sshd off port 22.
+        for stale in ('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                      'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'):
+            self.assertNotIn(stale, k8s_env_vars)
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
         self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
@@ -1278,16 +1328,12 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
 
-        # The pod patches Ray from a payload carried in its own spec, because
-        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
-        # the node is whatever `pip install skypilot` resolved to. Assert the
-        # variable is actually produced -- without this, dropping it from
-        # make_deploy_resources_variables leaves the payload tests green while
-        # the template renders an empty command.
-        self.assertIn('ray_patches_cmd', deploy_vars)
-        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
-        self.assertNotIn('from sky.skylet.ray_patches',
-                         deploy_vars['ray_patches_cmd'])
+        # 'ray_patches_cmd' and 'ray_installation_commands' are deliberately
+        # NOT here: both depend on the Ray version this cluster is pinned to,
+        # which only write_cluster_config knows. That they are still produced
+        # is asserted in tests/unit_tests/test_sky/test_ray_version_per_cluster.
+        self.assertNotIn('ray_patches_cmd', deploy_vars)
+        self.assertNotIn('ray_installation_commands', deploy_vars)
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -4707,6 +4753,8 @@ class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
 
 _UNSET = object()
 
+_OCI_SHAPE_BY_GPU = {'GB300': 'BM.GPU.GB300.4', 'GB200': 'BM.GPU.GB200.4'}
+
 
 class TestKubernetesRdmaMode(unittest.TestCase):
     """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
@@ -4759,6 +4807,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
             alloc.setdefault('memory', '32Gi')
             node = mock.MagicMock()
             node.metadata.labels = {'accelerator': label_value}
+            if label_value in _OCI_SHAPE_BY_GPU:
+                node.metadata.labels['node.kubernetes.io/instance-type'] = (
+                    _OCI_SHAPE_BY_GPU[label_value])
             node.status.allocatable = alloc
             # adjust_resources_to_allocatable() reads capacity as well.
             node.status.capacity = dict(alloc)
@@ -4793,7 +4844,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
              patch('sky.catalog.get_image_id_from_tag',
                    return_value='img:latest'), \
              patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
-                   return_value=(network_type or N.OCI_ROCE, None)):
+                   return_value=(network_type or N.OCI_ROCE, None)), \
+             patch('sky.provision.kubernetes.oci_nccl._read_configmap',
+                   return_value=None) as self.mock_read_cm:
             mock_ws.return_value.get.return_value = None
             mock_pm.return_value.value = 'portforward'
             k8s_cloud = kubernetes.Kubernetes()
@@ -4897,6 +4950,19 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         deploy_vars = self._deploy_vars()
         self.assertTrue(
             deploy_vars['k8s_env_vars']['NCCL_IB_HCA'].startswith('=mlx5_0'))
+
+    def test_node_shape_selects_the_profile(self):
+        # The GB300 node is labelled BM.GPU.GB300.4, so its Oracle set plus
+        # SkyPilot's GDR level, not the generic RoCE profile.
+        env = self._deploy_vars()['k8s_env_vars']
+        self.assertEqual(env['NCCL_NET_PLUGIN'], 'none')
+        self.assertEqual(env['NCCL_NET_GDR_LEVEL'], 'PHB')
+        self.mock_read_cm.assert_called_once()
+
+    def test_non_oci_never_reads_a_configmap(self):
+        self._deploy_vars(network_type=kubernetes_utils.
+                          KubernetesHighPerformanceNetworkType.COREWEAVE)
+        self.mock_read_cm.assert_not_called()
 
     def test_cpu_only_task_needs_no_virtual_functions(self):
         """OCI RoCE is detected from node labels, with no GPU request implied.
@@ -5171,10 +5237,17 @@ class TestKubernetesSpotLabelContext(unittest.TestCase):
         self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
         for call_args in mock_get_spot_label.call_args_list:
             self.assertEqual(call_args, mock.call('test-context'))
-        # ...and the resolved label must flow into the pod template vars.
-        self.assertEqual(deploy_vars['k8s_spot_label_key'],
-                         'karpenter.sh/capacity-type')
-        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':
