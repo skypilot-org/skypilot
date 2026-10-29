@@ -207,11 +207,14 @@ def will_log(logger: logging.Logger, level: int) -> bool:
     ``_setup_logger`` keeps the loggers at DEBUG and sets the level on the
     handlers, so check those, the way ``Logger.callHandlers`` walks them.
     """
+    if not isinstance(logger, logging.Logger):
+        # A stand-in (e.g. a test double) has no real handler chain to walk.
+        return logging_enabled(logger, level)
     if not logger.isEnabledFor(level):
         return False
     current: Optional[logging.Logger] = logger
     found = False
-    while current is not None:
+    while isinstance(current, logging.Logger):
         for handler in current.handlers:
             found = True
             if level >= handler.level:
