@@ -592,8 +592,47 @@ def test_restart_and_temporary_storage(persistent, allowed):
             _launched_dag(_restart([_record()]))
         else:
             with pytest.raises(exceptions.NotSupportedError,
-                               match='temporary bucket'):
+                               match='copied for that run only'):
                 _restart([_record()])
+
+
+def _restart_with(mutate):
+    """Restarts a job whose stored DAG has been changed by `mutate`."""
+    dag = dag_utils.load_dag_from_yaml_str(_dag_yaml(_train_task()))
+    mutate(dag.tasks[0])
+    with mock.patch.object(jobs_core.dag_utils,
+                           'load_dag_from_yaml_str',
+                           return_value=dag):
+        return _restart([_record()])
+
+
+@pytest.mark.parametrize(
+    'mutate',
+    [
+        # Two-hop staging on a separate controller (no storage cloud): the
+        # workdir became a file mount from a controller path.
+        lambda t: t.set_file_mounts(
+            {'~/sky_workdir': '~/.sky/tmp/file-mounts-abc/0'}),
+        # Consolidation mode: the workdir stays a local path on the server.
+        lambda t: setattr(t, 'workdir', '/tmp/blobs/abc/workdir'),
+    ],
+    ids=['two_hop_file_mount', 'consolidation_local_workdir'])
+def test_restart_rejects_staged_local_files(mutate):
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='copied for that run only'):
+        _restart_with(mutate)
+
+
+@pytest.mark.parametrize('mutate', [
+    lambda t: t.set_file_mounts({'/data': 's3://my-bucket/data'}),
+    lambda t: setattr(t, 'workdir', {
+        'url': 'https://github.com/org/repo.git',
+        'ref': 'abc123'
+    }),
+],
+                         ids=['bucket_file_mount', 'git_workdir'])
+def test_restart_allows_files_that_outlive_the_job(mutate):
+    _launched_dag(_restart_with(mutate))
 
 
 def test_restart_runs_in_the_original_workspace():

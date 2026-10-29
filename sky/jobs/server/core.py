@@ -2107,23 +2107,43 @@ def _resolve_job_to_restart(
 def _assert_restartable(dag: 'sky.Dag', job_id: int) -> None:
     """Rejects jobs whose local files can no longer be re-mounted.
 
-    A restart re-submits the compiled DAG, which points at the storage the
-    original launch uploaded the local workdir and file_mounts to. Unless
-    `jobs.bucket` is set, that storage is a temporary bucket deleted once the
-    job finishes, so the new job would fail to mount it. Jobs that use a git
-    workdir or persistent/remote storage restart cleanly.
+    A restart re-submits the compiled DAG. A local workdir or local
+    file_mounts were copied for that one run, and the copy is removed when
+    the job finishes, so the DAG points at files that are gone:
+
+    - Uploaded to cloud storage (a temporary bucket, or a per-run path under
+      `jobs.bucket`): a non-persistent storage mount.
+    - Staged on a separate jobs controller when no storage cloud is enabled
+      (two-hop): a file mount from a controller path.
+    - Kept on the API server in consolidation mode: a local workdir or file
+      mount from the uploaded blob, which is reclaimed once the job is done.
+
+    Jobs that use a git workdir, cloud bucket file mounts or persistent
+    storage restart cleanly.
     """
     for task in dag.tasks:
-        for mount_path, storage in (task.storage_mounts or {}).items():
-            if storage is not None and not storage.persistent:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'Managed job {job_id} cannot be restarted: it '
-                        f'mounted local files at {mount_path!r} from a '
-                        'temporary bucket that was deleted when the job '
-                        'finished. Restart works for jobs that use a git '
-                        'workdir or persistent storage. Launch the job again '
-                        'from its source directory with `sky jobs launch`.')
+        staged = []
+        if isinstance(task.workdir, str):
+            staged.append('the workdir')
+        staged += [
+            repr(dst)
+            for dst, src in (task.file_mounts or {}).items()
+            if not data_utils.is_cloud_store_url(src)
+        ]
+        staged += [
+            repr(dst)
+            for dst, storage in (task.storage_mounts or {}).items()
+            if storage is not None and not storage.persistent
+        ]
+        if staged:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Managed job {job_id} cannot be restarted: its local '
+                    f'files (mounted at {", ".join(staged)}) were copied for '
+                    'that run only and removed when it finished. Restart '
+                    'works for jobs that use a git workdir, cloud bucket file '
+                    'mounts or persistent storage. Launch the job again from '
+                    'its source directory with `sky jobs launch`.')
 
 
 def _resources_override_from_wire(
