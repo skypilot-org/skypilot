@@ -1,7 +1,6 @@
 """Unit tests for database-backed managed job file storage."""
 
 import contextlib
-import logging
 import os
 from typing import Dict, Optional
 from unittest import mock
@@ -252,16 +251,18 @@ def test_restore_job_config_file_keeps_existing_file(_mock_managed_jobs_db_conn,
 
 
 def test_restore_job_config_file_missing_everywhere_writes_nothing(
-        _mock_managed_jobs_db_conn, tmp_path, monkeypatch, caplog):
+        _mock_managed_jobs_db_conn, tmp_path, monkeypatch):
     """No file on disk and no content in the database: warn, write nothing."""
     config_path = tmp_path / 'absent.config_yaml'
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                        str(config_path))
     job_info = _create_basic_job(tmp_path, name='no-config-job')
 
-    with caplog.at_level(logging.WARNING):
+    # Assert on the module logger directly: whether its records propagate to
+    # the root logger depends on which test initialized sky's logging first.
+    with mock.patch.object(file_content_utils.logger, 'warning') as warning:
         file_content_utils.restore_job_config_file(job_info['job_id'])
 
     assert not config_path.exists()
-    assert any('config content not found' in record.getMessage()
-               for record in caplog.records)
+    warning.assert_called_once()
+    assert 'config content not found' in warning.call_args.args[0]
