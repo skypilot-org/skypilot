@@ -251,7 +251,10 @@ def test_typing_in_job_filter_does_not_refetch(make_user, seed_job, open_as,
     box.press_sequentially(f'{uid}-train', delay=450)
     page.wait_for_timeout(1500)
 
-    refetches = page.recorder.posts(JOBS_QUEUE, since)
+    # Only the table's own (paged) query: the dashboard's background cache
+    # preload also posts to the queue, unpaged, once the page's first load
+    # finishes, which on a slow server can land while we type.
+    refetches = _table_requests(page, since)
     assert not refetches, ('the jobs table must not refetch while typing, '
                            f'got {len(refetches)} requests')
     expect(page.get_by_text('No active jobs'),
