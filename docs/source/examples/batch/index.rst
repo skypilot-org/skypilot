@@ -229,6 +229,22 @@ Start the pool with:
 The pool stays running after your job finishes, so subsequent jobs skip the setup time entirely. See :ref:`pool` for more details on pool management, scaling, and autoscaling.
 
 
+Waiting for cold workers
+------------------------
+
+When a pool scales from zero, Sky Batch waits for at least one worker to report ``READY`` before dispatching batches. By default, it waits up to 5 minutes for a new job or 10 minutes when resuming after a controller restart. A cold worker may need longer to provision, pull a large container image, download model weights, and finish the pool setup command.
+
+For these workloads, increase the :ref:`worker discovery timeouts <config-yaml-batch>` in your SkyPilot configuration before submitting the job (on the API server when using a remote server):
+
+.. code-block:: yaml
+
+  batch:
+    worker_discovery_timeout_seconds: 1800
+    worker_discovery_resume_timeout_seconds: 1800
+
+A pool worker is ready once the pool setup command and SkyPilot's setup marker job have completed successfully. If setup starts a model server and waits for its health check, model startup is included in the wait for a ready worker. If your mapper initializes a model itself, that initialization happens later and is outside the discovery timeout. These settings do not change client HTTP timeouts or the time allowed for mapper execution.
+
+
 .. _batch-processing-mapper:
 
 Writing a mapper function
