@@ -16,11 +16,11 @@ from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
+
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.utils.db import sqlalchemy_deps
 from sky.dag import DagExecution
 from sky.jobs import runtime as managed_job_runtime
 from sky.provision import observation as provision_observation
@@ -31,6 +31,7 @@ from sky.utils import infra_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import retries as db_retries
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.plugin_extensions import ExternalClusterFailure
 
 if typing.TYPE_CHECKING:

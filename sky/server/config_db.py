@@ -52,7 +52,7 @@ def ensure_config_db_schema() -> None:
         return
     sqlalchemy_deps.require_sqlalchemy()
 
-    Base = declarative.declarative_base()
+    Base = declarative.declarative_base()  # pylint: disable=invalid-name
     config_yaml_table = sqlalchemy.Table(
         'config_yaml',
         Base.metadata,

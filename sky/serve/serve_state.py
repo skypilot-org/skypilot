@@ -10,11 +10,12 @@ from typing import Any, Dict, List, Optional, Set
 import uuid
 
 import colorama
-from sky.utils.db import sqlalchemy_deps
+
 from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -28,7 +29,6 @@ if sqlalchemy_deps.sqlalchemy_available():
     from sqlalchemy import orm
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.dialects import sqlite
-    from sqlalchemy.ext import asyncio as sql_async
     from sqlalchemy.ext import declarative
 
     Base = declarative.declarative_base()
@@ -149,7 +149,6 @@ else:
     orm = None  # type: ignore
     postgresql = None  # type: ignore
     sqlite = None  # type: ignore
-    sql_async = None  # type: ignore
     declarative = None  # type: ignore
     Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore

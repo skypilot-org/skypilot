@@ -38,19 +38,20 @@ import dataclasses
 import math
 import os
 import time
+import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
-import typing
 
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
 if typing.TYPE_CHECKING:
     import sqlalchemy
 else:
-    sqlalchemy = adaptors_common.LazyImport("sqlalchemy",
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
                                             import_error_message=_SA_MSG)
 
+# pylint: disable=wrong-import-position
 from sky import global_user_state
 from sky import sky_logging
 from sky.jobs import state as managed_job_state

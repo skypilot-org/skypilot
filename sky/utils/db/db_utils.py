@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import contextlib
 import enum
+import functools
 import math
 import os
 import pathlib
@@ -18,8 +18,8 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import runtime_utils
-from sky.utils.db import sqlalchemy_deps
 from sky.utils.db import sql_metrics
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
 

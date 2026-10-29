@@ -44,6 +44,6 @@ def sqlalchemy_available() -> bool:
 
 
 def require_sqlalchemy() -> None:
-    """Raise ImportError with install hint when SQLAlchemy is missing/too old."""
+    """Raise ImportError when SQLAlchemy is missing or too old."""
     if not sqlalchemy_available():
         raise ImportError(SQLALCHEMY_INSTALL_MSG)

@@ -12,7 +12,6 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Union
 
-from sky.utils.db import sqlalchemy_deps
 from sky import exceptions
 from sky import sky_logging
 from sky.recipes.utils import recipe_type_to_str
@@ -20,17 +19,14 @@ from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
 
 # SQLAlchemy Base
 if sqlalchemy_deps.sqlalchemy_available():
     import sqlalchemy
-    from sqlalchemy import exc as sqlalchemy_exc
     from sqlalchemy import orm
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.dialects import sqlite
-    from sqlalchemy.ext import asyncio as sql_async
     from sqlalchemy.ext import declarative
 
     Base = declarative.declarative_base()
@@ -171,13 +167,9 @@ else:
     # Client-only install: enums/helpers below still import. DB APIs
     # fail with a clear install hint when first used.
     sqlalchemy = None  # type: ignore
-    sqlalchemy_exc = None  # type: ignore
     orm = None  # type: ignore
-    postgresql = None  # type: ignore
-    sqlite = None  # type: ignore
-    sql_async = None  # type: ignore
     declarative = None  # type: ignore
-    Base = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore
 
 # =============================================================================

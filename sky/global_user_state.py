@@ -6,8 +6,6 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import enum
@@ -22,7 +20,6 @@ from typing import (Any, Dict, Iterator, List, Literal, Optional, Set, Tuple,
                     Union)
 import uuid
 
-from sky.utils.db import sqlalchemy_deps
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -40,6 +37,7 @@ from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import retries as db_retries
+from sky.utils.db import sqlalchemy_deps
 
 if typing.TYPE_CHECKING:
     from sky import backends

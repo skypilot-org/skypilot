@@ -35,8 +35,9 @@ if sqlalchemy_deps.sqlalchemy_available():
         # Enable WAL mode to avoid locking issues.
         # See: issue #1441 and PR #1509
         # https://github.com/microsoft/WSL/issues/2395
-        # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
-        #  This may cause the database locked problem from WSL issue #1441.
+        # TODO(romilb): We do not enable WAL for WSL because of known issue
+        #  in WSL. This may cause the database locked problem from WSL
+        #  issue #1441.
         if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
                 not common_utils.is_wsl()):
             try:
@@ -46,8 +47,9 @@ if sqlalchemy_deps.sqlalchemy_available():
             except sqlalchemy_exc.OperationalError as e:
                 if 'database is locked' not in str(e):
                     raise
-                # If the database is locked, it is OK to continue, as the WAL mode
-                # is not critical and is likely to be enabled by other processes.
+                # If the database is locked, it is OK to continue, as the
+                # WAL mode is not critical and is likely to be enabled by
+                # other processes.
 
         migration_utils.safe_alembic_upgrade(engine,
                                              migration_utils.KV_CACHE_DB_NAME,
@@ -60,7 +62,7 @@ else:
     orm = None  # type: ignore
     postgresql = None  # type: ignore
     sqlite = None  # type: ignore
-    Base = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
     kv_cache_table = None  # type: ignore
     _db_manager = None  # type: ignore
 

@@ -8,12 +8,11 @@ import os
 import queue
 import threading
 import time
+import typing
 from typing import Dict, Generator, List, Optional, Set, Tuple
 
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
-
-import typing
 
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
 if typing.TYPE_CHECKING:
@@ -27,6 +26,7 @@ else:
     sqlalchemy_adapter = adaptors_common.LazyImport(
         'sqlalchemy_adapter', import_error_message=_SA_MSG)
 
+# pylint: disable=wrong-import-position
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
