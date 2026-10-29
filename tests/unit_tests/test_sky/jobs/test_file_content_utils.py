@@ -192,7 +192,8 @@ def test_restore_job_config_file_writes_missing_file_atomically(
     """A missing file is written whole: no tmp fragments, no partial file.
 
     Several jobs of one ``--num-jobs`` batch can restore the same missing
-    path at once, so the write must stage to a tmp file and rename.
+    path at once, so the write stages to a tmp file and links it into place
+    (see ``common_utils.atomic_create_text``).
     """
     config_path = tmp_path / 'shared.config_yaml'
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
@@ -202,12 +203,13 @@ def test_restore_job_config_file_writes_missing_file_atomically(
                                  config_content=_CONFIG_CONTENT)
 
     with mock.patch.object(common_utils,
-                           'atomic_write_text',
-                           wraps=common_utils.atomic_write_text) as write:
+                           'atomic_create_text',
+                           wraps=common_utils.atomic_create_text) as create:
         file_content_utils.restore_job_config_file(job_info['job_id'])
 
-    write.assert_called_once()
+    create.assert_called_once()
     assert config_path.read_text(encoding='utf-8') == _CONFIG_CONTENT
+    assert (config_path.stat().st_mode & 0o777) == 0o600
     # No tmp fragments left next to the destination.
     assert not [p for p in tmp_path.iterdir() if p.name.endswith('.tmp')]
 
@@ -236,7 +238,7 @@ def test_restore_job_config_file_keeps_existing_file(_mock_managed_jobs_db_conn,
                                  config_content=_CONFIG_CONTENT)
     assert _CONFIG_CONTENT != on_disk_content
 
-    with mock.patch.object(common_utils, 'atomic_write_text') as write, \
+    with mock.patch.object(common_utils, 'atomic_create_text') as write, \
             mock.patch.object(state,
                               'get_job_file_contents',
                               wraps=state.get_job_file_contents

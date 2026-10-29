@@ -100,7 +100,9 @@ def restore_job_config_file(job_id: int) -> None:
     on another host fail: it holds a handle to the old file (``ESTALE``), or
     its stat of the path fails and the file looks missing. Never replacing an
     existing file removes that failure. The file was written from the same
-    content the database holds, so nothing is lost by keeping it.
+    content the database holds, so nothing is lost by keeping it. A missing
+    file is created exclusively, so several jobs recreating it at once
+    cannot replace each other's copy either.
 
     For backward compatibility with jobs submitted before config persistence
     was implemented, a file that exists on disk is used even when the
@@ -133,13 +135,21 @@ def restore_job_config_file(job_id: int) -> None:
         # Ensure the directory exists
         os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
         # Several jobs of one batch can restore the same missing path at
-        # once. The write must be atomic: an O_TRUNC write lets a concurrent
-        # reader load a zero-byte file as an empty config.
-        common_utils.atomic_write_text(config_path_expanded,
-                                       config_content,
-                                       mode=0o600)
-        logger.info(f'Restored config file for job {job_id} to '
-                    f'{config_path_expanded} ({len(config_content)} bytes)')
+        # once, and all of them can pass the check above. The write must be
+        # atomic (an O_TRUNC write lets a concurrent reader load a zero-byte
+        # file as an empty config) and must not replace a file another job
+        # created in between (see the docstring), so it creates the file
+        # exclusively: the first job's write wins, the others leave it.
+        created = common_utils.atomic_create_text(config_path_expanded,
+                                                  config_content,
+                                                  mode=0o600)
+        if created:
+            logger.info(f'Restored config file for job {job_id} to '
+                        f'{config_path_expanded} ({len(config_content)} '
+                        'bytes)')
+        else:
+            logger.debug(f'Config file for job {job_id} was restored to '
+                         f'{config_path_expanded} by another job meanwhile')
     else:
         # Config should exist but doesn't - warn about it
         logger.warning(
