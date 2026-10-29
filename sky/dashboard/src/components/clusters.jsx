@@ -44,6 +44,7 @@ import {
   getClusters,
   getClusterHistory,
   getOtherUsersClustersCount,
+  terminateCluster,
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -51,12 +52,19 @@ import {
   getWorkspaceName,
   useWorkspacesConfig,
 } from '@/hooks/useWorkspacesConfig';
-import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
+import { isController, sortData } from '@/data/utils';
+import {
+  SquareCode,
+  Terminal,
+  RotateCwIcon,
+  Brackets,
+  Trash2Icon,
+} from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
+  ConfirmationModal,
   SSHInstructionsModal,
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
@@ -1337,6 +1345,9 @@ export function ClusterTable({
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
               writable={isWorkspaceWritable(item.workspace)}
+              workspace={item.workspace}
+              managed={item.is_managed}
+              onTerminated={refresh}
             />
           )}
         </TableCell>
@@ -1517,7 +1528,12 @@ const handleConnect = (cluster, onOpenSSHModal) => {
 export const enabledActions = (status) => {
   switch (status) {
     case 'RUNNING':
-      return ['connect', 'VSCode'];
+      return ['connect', 'VSCode', 'terminate'];
+    // LAUNCHING and UNHEALTHY are both INIT on the server.
+    case 'LAUNCHING':
+    case 'UNHEALTHY':
+    case 'STOPPED':
+      return ['terminate'];
     default:
       return [];
   }
@@ -1526,6 +1542,7 @@ export const enabledActions = (status) => {
 const actionIcons = {
   connect: <Terminal className="w-4 h-4 text-gray-500 inline-block" />,
   VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
+  terminate: <Trash2Icon className="w-4 h-4 text-gray-500 inline-block" />,
 };
 
 export function Status2Actions({
@@ -1539,13 +1556,23 @@ export function Status2Actions({
   // VSCode both open an interactive shell, so they are write operations and
   // must be disabled for non-members.
   writable = true,
+  workspace,
+  // Clusters backing managed jobs/services and the controllers themselves are
+  // not terminated from here.
+  managed = false,
+  onTerminated,
 }) {
   const actions = enabledActions(status);
   const isMobile = useMobile();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const canTerminate = !managed && !isController(cluster);
 
   const handleActionClick = (actionName) => {
     trackClusterAction(actionName, { status });
     switch (actionName) {
+      case 'terminate':
+        setConfirmOpen(true);
+        break;
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
         break;
@@ -1561,6 +1588,9 @@ export function Status2Actions({
     <>
       <div className="flex items-center space-x-4">
         {Object.entries(actionIcons).map(([actionName, actionIcon]) => {
+          if (actionName === 'terminate' && !canTerminate) {
+            return null;
+          }
           let label, tooltipText;
           switch (actionName) {
             case 'connect':
@@ -1570,6 +1600,10 @@ export function Status2Actions({
             case 'VSCode':
               label = 'VSCode';
               tooltipText = 'Open in VS Code';
+              break;
+            case 'terminate':
+              label = 'Terminate';
+              tooltipText = 'Terminate cluster';
               break;
             default:
               break;
@@ -1618,6 +1652,18 @@ export function Status2Actions({
           );
         })}
       </div>
+      <ConfirmationModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={async () => {
+          if (await terminateCluster({ clusterName: cluster, workspace })) {
+            onTerminated?.();
+          }
+        }}
+        title="Terminate cluster"
+        message={`Terminate ${cluster}? This deletes the cluster and its local disk. Running jobs are killed.`}
+        confirmText="Terminate"
+      />
     </>
   );
 }

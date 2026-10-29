@@ -63,6 +63,7 @@ import {
   CheckIcon,
   InfoIcon,
   Layers,
+  XCircleIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -734,7 +735,7 @@ export function ManagedJobsTable({
   // forwarded to the data provider verbatim as {property: key, value}.
   const pluginFilterProps = usePluginTableFilters('jobs');
   // Records carry `workspace_name`; the config covers rows without it.
-  const { workspacesConfig } = useWorkspacesConfig();
+  const { workspacesConfig, isWorkspaceWritable } = useWorkspacesConfig();
   const workspaceLabel = React.useCallback(
     (job) =>
       job.workspace_name || getWorkspaceName(workspacesConfig, job.workspace),
@@ -2324,6 +2325,16 @@ export function ManagedJobsTable({
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
 
+          // A group is cancelled through its parent row, not per task.
+          const rowStatus =
+            renderMode === 'groupParent'
+              ? ctx.aggregates?.aggregatedStatus
+              : item.status;
+          const cancellable =
+            renderMode !== 'groupChild' &&
+            rowStatus !== 'CANCELLING' &&
+            !statusGroups.finished.includes(rowStatus);
+
           return (
             <TableCell>
               <Status2Actions
@@ -2331,6 +2342,20 @@ export function ManagedJobsTable({
                 jobId={logJobId}
                 managed={true}
                 workspace={item.workspace}
+                cancel={
+                  cancellable
+                    ? {
+                        name: item.name,
+                        user: item.user,
+                        currentUser,
+                        writable: isWorkspaceWritable(item.workspace),
+                        onCancelled: () => {
+                          jobsCacheManager.invalidateCache();
+                          fetchData();
+                        },
+                      }
+                    : null
+                }
               />
             </TableCell>
           );
@@ -2347,6 +2372,9 @@ export function ManagedJobsTable({
       poolsData,
       onUserFilter,
       workspaceLabel,
+      currentUser,
+      isWorkspaceWritable,
+      fetchData,
     ]
   );
 
@@ -3108,8 +3136,27 @@ export function Status2Actions({
   jobId,
   managed,
   workspace = 'default',
+  // Set for a managed job that can still be cancelled:
+  // {name, user, currentUser, writable, onCancelled}.
+  cancel = null,
 }) {
   const router = useRouter();
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  // The job stays RUNNING for a few seconds after the request succeeds.
+  const [cancelRequested, setCancelRequested] = useState(false);
+
+  const handleCancel = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    trackJobAction('cancel', { jobId });
+    setConfirmCancel(true);
+  };
+
+  const launchedByOther =
+    cancel?.currentUser &&
+    cancel.user &&
+    cancel.user !== cancel.currentUser.name &&
+    cancel.user !== cancel.currentUser.id;
 
   const handleLogsClick = (e, type) => {
     e.preventDefault();
@@ -3175,6 +3222,53 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Download</span>}
         </button>
       </Tooltip>
+      {cancel &&
+        !cancelRequested &&
+        (cancel.writable ? (
+          <Tooltip
+            key="cancel"
+            content="Cancel Job"
+            className="capitalize text-sm text-muted-foreground"
+          >
+            <button
+              onClick={handleCancel}
+              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+              title="Cancel job"
+            >
+              <XCircleIcon className="w-4 h-4" />
+              {withLabel && <span className="ml-1.5">Cancel</span>}
+            </button>
+          </Tooltip>
+        ) : (
+          <NonCapitalizedTooltip
+            key="cancel"
+            content="Read-only: you are not a member of this job’s workspace"
+            className="text-sm text-muted-foreground"
+          >
+            <span
+              className="opacity-30 inline-flex items-center h-8 cursor-not-allowed"
+              title="Cancel job"
+            >
+              <XCircleIcon className="w-4 h-4" />
+              {withLabel && <span className="ml-1.5">Cancel</span>}
+            </span>
+          </NonCapitalizedTooltip>
+        ))}
+      <ConfirmationModal
+        isOpen={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={async () => {
+          if (await handleJobAction('cancel', jobId, null, workspace)) {
+            setCancelRequested(true);
+            cancel?.onCancelled?.();
+          }
+        }}
+        title="Cancel managed job"
+        message={`Cancel managed job ${jobId} (${cancel?.name})? Its cluster is torn down and the job is not recovered.${
+          launchedByOther ? ` This job was launched by ${cancel.user}.` : ''
+        }`}
+        confirmText="Yes, cancel job"
+      />
     </div>
   );
 }
