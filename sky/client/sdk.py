@@ -2777,12 +2777,15 @@ def api_status(
     if server_common.is_api_server_local() and not _local_api_server_running():
         logger.info('SkyPilot API server is not running.')
         return []
+    # The health check the other SDK calls get from the
+    # check_server_healthy_or_start decorator, without starting a server (see
+    # the early return above). It also records the server's API version, which
+    # the check below reads.
+    server_common.check_server_healthy()
 
-    # Backward compatibility check for the new flag cluster_name. An unknown
-    # version (None, e.g. no health check has run in this process yet) is not
-    # an old one: do not warn then, since the flag is sent either way.
+    # Backward compatibility check for the new flag cluster_name
     version = versions.get_remote_api_version()
-    if (cluster_name is not None) and (version is not None and version < 38):
+    if (cluster_name is not None) and (version is None or version < 38):
         logger.warning(
             'The flag is ignored because the server does not support it yet.')
 
