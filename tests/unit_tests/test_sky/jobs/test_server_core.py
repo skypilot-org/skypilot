@@ -412,7 +412,8 @@ def _record(status=ManagedJobStatus.FAILED,
             job_id=5,
             name='train',
             pool=None,
-            workspace='default'):
+            workspace='default',
+            user_hash='me'):
     """A stand-in for one task row of responses.ManagedJobRecord."""
     return SimpleNamespace(job_id=job_id,
                            task_id=0,
@@ -421,13 +422,22 @@ def _record(status=ManagedJobStatus.FAILED,
                            dag_yaml=(dag_yaml if dag_yaml is not None else
                                      _dag_yaml(_train_task())),
                            pool=pool,
-                           workspace=workspace)
+                           workspace=workspace,
+                           user_hash=user_hash)
 
 
-def _restart(records, *, active_workspace='default', **kwargs):
+def _restart(records,
+             *,
+             active_workspace='default',
+             caller='me',
+             queue_mock=None,
+             **kwargs):
     """Runs jobs_core.restart over `records`; returns the launch() mock."""
-    with mock.patch.object(jobs_core, 'queue_v2_api',
-                           return_value=(records, len(records), {}, 0, [])), \
+    queue_mock = queue_mock or mock.MagicMock()
+    queue_mock.return_value = (records, len(records), {}, 0, [])
+    with mock.patch.object(jobs_core, 'queue_v2_api', queue_mock), \
+         mock.patch.object(jobs_core.common_utils, 'get_user_hash',
+                           return_value=caller), \
          mock.patch.object(jobs_core.skypilot_config,
                            'get_active_workspace',
                            return_value=active_workspace), \
@@ -633,6 +643,37 @@ def test_restart_rejects_staged_local_files(mutate):
                          ids=['bucket_file_mount', 'git_workdir'])
 def test_restart_allows_files_that_outlive_the_job(mutate):
     _launched_dag(_restart_with(mutate))
+
+
+def test_restart_of_another_users_job_with_secrets_is_refused():
+    # A viewer of the job's workspace must not run with its owner's secrets,
+    # even into a workspace the viewer can write to.
+    with mock.patch.object(jobs_core, '_client_set_workspace',
+                           return_value=True), \
+         mock.patch.object(jobs_core, 'launch') as launch:
+        with pytest.raises(exceptions.PermissionDeniedError,
+                           match='only its owner'):
+            _restart([_record(user_hash='alice', workspace='team-a')],
+                     caller='bob',
+                     active_workspace='bob-ws')
+    launch.assert_not_called()
+
+
+def test_restart_of_another_users_job_without_secrets_is_allowed():
+    # Nothing secret to reuse: the spec is what a viewer can already read.
+    yaml_str = _dag_yaml(task_lib.Task(name='train', run='python train.py'))
+    dag = _launched_dag(
+        _restart([_record(dag_yaml=yaml_str, user_hash='alice')],
+                 caller='bob',
+                 secrets_overrides=[('HF_TOKEN', 'bobs')]))
+    # The caller's own secrets still apply.
+    assert dag.tasks[0].secrets['HF_TOKEN'].get_secret_value() == 'bobs'
+
+
+def test_restart_by_name_only_looks_at_the_callers_jobs():
+    queue = mock.MagicMock()
+    _restart([_record()], job_id=None, job_name='train', queue_mock=queue)
+    assert queue.call_args.kwargs['all_users'] is False
 
 
 def test_restart_runs_in_the_original_workspace():

@@ -2071,7 +2071,7 @@ def _resolve_job_to_restart(
     """Returns the task records of the single job named by id or name."""
     fields = [
         'job_id', 'task_id', 'job_name', 'status', 'dag_yaml', 'pool',
-        'workspace'
+        'workspace', 'user_hash'
     ]
     if job_id is not None:
         # All users: the caller may restart a job they can see but did not
@@ -2086,8 +2086,10 @@ def _resolve_job_to_restart(
                 raise ValueError(f'Managed job {job_id} not found.')
         return records
     assert job_name is not None
+    # By name, only the caller's own jobs: another user's job of the same
+    # name must not be picked, nor make the name ambiguous.
     records, _, _, _, _ = queue_v2_api(refresh=False,
-                                       all_users=True,
+                                       all_users=False,
                                        name_match=job_name,
                                        fields=fields)
     # name_match is a substring match; restart needs the exact name.
@@ -2235,6 +2237,20 @@ def restart(
         # when the job finished; drop it so launch() mints a fresh one.
         task_._secrets.pop(  # pylint: disable=protected-access
             skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR, None)
+    # The stored secrets belong to the job's owner. Seeing a job (a viewer of
+    # its workspace) must not let anyone else run with them, in whichever
+    # workspace the new job goes. Jobs without secrets carry nothing a viewer
+    # cannot already read from the job's YAML.
+    owner = records[0].user_hash
+    if (owner != common_utils.get_user_hash() and
+            any(task_.secrets for task_ in dag.tasks)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.PermissionDeniedError(
+                f'Managed job {job_id} has secrets that belong to its owner, '
+                'so only its owner can restart it. Launch it yourself with '
+                '`sky jobs launch` and your own secrets instead.')
+
+    for task_ in dag.tasks:
         task_.update_envs(env_overrides or [])
         task_.update_secrets(secrets_overrides or [])
 
