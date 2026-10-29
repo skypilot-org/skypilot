@@ -148,11 +148,21 @@ false
 
 {{/* API server start arguments */}}
 {{- define "skypilot.apiArgs" -}}
---deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
+--deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}{{ if .Values.apiService.host }} --host={{ .Values.apiService.host }}{{ end }}
 {{- end -}}
 
 {{- define "skypilot.oauth2ProxyURL" -}}
 http://{{ include "skypilot.fullname" . }}-oauth2-proxy:4180
+{{- end -}}
+
+{{/* oauth2-proxy HTTP bind address; mirrors apiService.host address family so an
+     IPv6 (e.g. "::") deployment binds a wildcard the pod's IPv6 network can reach. */}}
+{{- define "skypilot.oauth2HttpAddress" -}}
+{{- if and .Values.apiService.host (contains ":" .Values.apiService.host) -}}
+[::]:4180
+{{- else -}}
+0.0.0.0:4180
+{{- end -}}
 {{- end -}}
 
 {{- define "skypilot.ingressBasicAuthEnabled" -}}

@@ -85,7 +85,7 @@ def get_data_disk_tier_mapping(
         num_cpus = int(instance_type.split('-')[2])  # type: ignore
         if num_cpus < 88:
             tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
-    elif series in ['n4']:
+    elif series in ['n4', 'g4']:
         tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'

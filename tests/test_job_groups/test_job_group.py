@@ -953,7 +953,7 @@ class TestControllerAsyncPatterns:
     """
 
     def test_download_log_uses_to_thread_in_monitor_job_group_task(self):
-        """Verify _download_log_and_stream is called via to_thread.
+        """Verify download_log_and_stream is called via to_thread.
 
         This test ensures the async blocking bug fix is in place by
         checking that the code structure properly awaits to_thread.
@@ -968,26 +968,26 @@ class TestControllerAsyncPatterns:
 
         # Parse the source to check for the pattern
         # We're looking for:
-        #   await context_utils.to_thread(..._download_log_and_stream...)
+        #   await context_utils.to_thread(...download_log_and_stream...)
         tree = ast.parse(source)
 
         # Find all function definitions
         async_methods_with_download = []
         for node in ast.walk(tree):
             if isinstance(node, ast.AsyncFunctionDef):
-                # Check if this async method contains _download_log_and_stream
+                # Check if this async method contains download_log_and_stream
                 method_source = ast.unparse(node)
-                if '_download_log_and_stream' in method_source:
+                if 'download_log_and_stream' in method_source:
                     async_methods_with_download.append(node.name)
                     # Verify it's called via to_thread
                     assert 'to_thread' in method_source, (
                         f'Async method {node.name} calls '
-                        f'_download_log_and_stream but does not use '
+                        f'download_log_and_stream but does not use '
                         f'to_thread - this will block the event loop!')
 
         # Ensure we found the relevant methods
         assert len(async_methods_with_download) > 0, (
-            'No async methods found that call _download_log_and_stream')
+            'No async methods found that call download_log_and_stream')
 
 
 class TestDocstringQuality:
@@ -1351,3 +1351,47 @@ class TestPrimaryAuxiliaryDagMethods:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestAdminPolicyPreservesJobGroupHeader:
+    """admin_policy_utils.apply builds a fresh Dag for the mutated
+    request; JobGroup header fields live on the Dag (not the tasks the
+    policy mutates), so they must be copied over explicitly. Without
+    this, an explicit `inter_connection: false` silently reverts to
+    unset -- which behaves as enabled -- once any admin policy is
+    registered (and primary_tasks/termination_delay are dropped too).
+    """
+
+    def test_apply_preserves_job_group_header_fields(self, monkeypatch):
+        from sky import admin_policy
+        from sky import dag as dag_lib
+        from sky import task as task_lib
+        from sky.server.requests import request_names
+        from sky.utils import admin_policy_utils
+
+        dag = dag_lib.Dag()
+        dag.name = 'group'
+        dag.add(task_lib.Task(name='job-a', run='echo hi'))
+        dag.set_execution(dag_lib.DagExecution.PARALLEL)
+        dag.inter_connection = False
+        dag.primary_tasks = ['job-a']
+        dag.termination_delay = '30s'
+
+        class _IdentityPolicy:
+
+            def apply(self, user_request):
+                return admin_policy.MutatedUserRequest(
+                    task=user_request.task,
+                    skypilot_config=user_request.skypilot_config)
+
+        monkeypatch.setattr(admin_policy_utils, '_get_policy_impl',
+                            lambda location: _IdentityPolicy())
+
+        mutated_dag, _ = admin_policy_utils.apply(
+            dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+
+        assert mutated_dag is not dag
+        assert mutated_dag.is_job_group()
+        assert mutated_dag.inter_connection is False
+        assert mutated_dag.primary_tasks == ['job-a']
+        assert mutated_dag.termination_delay == '30s'

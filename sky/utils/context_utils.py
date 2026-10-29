@@ -180,6 +180,21 @@ def wait_process(ctx: context.SkyPilotContext,
             break
 
 
+def raise_if_canceled() -> None:
+    """Raise asyncio.CancelledError if the current context is cancelled.
+
+    For polling loops that run in a worker thread: ``time.sleep()`` cannot
+    observe ``ctx.cancel()``, so a loop that only exits on its own condition
+    keeps its thread long after the client that asked for the work went away.
+    Calling this once per iteration bounds that to one iteration.
+
+    No-op outside a context (the CLI, or code running on a cluster).
+    """
+    ctx = context.get()
+    if ctx is not None and ctx.is_canceled():
+        raise asyncio.CancelledError()
+
+
 F = TypeVar('F', bound=Callable[..., Any])
 
 

@@ -1,4 +1,5 @@
 """Tests for schemas.py"""
+import os
 import unittest
 from unittest import mock
 
@@ -167,6 +168,40 @@ class TestResourcesSchema(unittest.TestCase):
                     jsonschema.exceptions.ValidationError,
                     msg=f"Expected priority config {config} to be rejected"):
                 jsonschema.validate(instance=config, schema=resources_schema)
+
+
+class TestRbacSchema(unittest.TestCase):
+    """Tests for rbac.restrict_config_to_admins in the config schema."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so additionalProperties is enforced.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
+        self.config_schema = schemas.get_config_schema()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    def test_restrict_config_to_admins_accepts_bool(self):
+        for value in (True, False):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': value
+                }},
+                schema=self.config_schema)
+
+    def test_restrict_config_to_admins_rejects_non_bool(self):
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': 'yes'
+                }},
+                schema=self.config_schema)
 
 
 class TestWorkspaceSchema(unittest.TestCase):
@@ -569,6 +604,145 @@ class TestWorkspaceSchema(unittest.TestCase):
                     jsonschema.exceptions.ValidationError,
                     msg=f'Invalid workspace namespace {config!r} should be '
                     'rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
+    def test_workspace_slurm_sbatch_options(self):
+        config = {
+            'my-workspace': {
+                'slurm': {
+                    'disabled': False,
+                    'allowed_clusters': ['my-cluster'],
+                    'sbatch_options': {
+                        'account': 'workspace-account',
+                    },
+                    'quota': {
+                        'queue': 'workspace-qos',
+                        'account': 'workspace-account',
+                    },
+                    'cluster_configs': {
+                        'my-cluster': {
+                            'sbatch_options': {
+                                'qos': 'workspace-qos',
+                            },
+                            'quota': {
+                                'queue': 'cluster-qos',
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'constraint': 'h100',
+                                    },
+                                    'quota': {
+                                        'queue': 'partition-qos',
+                                        'account': 'partition-account',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=config, schema=self.workspaces_schema)
+
+    def test_slurm_sbatch_time_follows_slurm_grammar(self):
+
+        def workspace(time):
+            return {'ws': {'slurm': {'sbatch_options': {'time': time}}}}
+
+        for time in ('UNLIMITED', 'infinite', '-1', '0', '2-00:00:00', 30, None,
+                     False):
+            jsonschema.validate(instance=workspace(time),
+                                schema=self.workspaces_schema)
+        for time in ('2h', '1.5', '-2', -2, '5\n', True, 'ınfinite', '٣٠'):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'time={time!r} should be rejected'):
+                jsonschema.validate(instance=workspace(time),
+                                    schema=self.workspaces_schema)
+
+    def test_slurm_quota_rejects_empty_values(self):
+        """An empty queue/account would become a bare `--qos=` / `--account=`."""
+        for cloud_config in (
+            {
+                'quota': {
+                    'queue': ''
+                }
+            },
+            {
+                'quota': {
+                    'account': ''
+                }
+            },
+            {
+                'cluster_configs': {
+                    'c': {
+                        'partition_configs': {
+                            'p': {
+                                'quota': {
+                                    'queue': ''
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(instance={'slurm': cloud_config},
+                                    schema=schemas.get_config_schema())
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(
+                    instance={'my-workspace': {
+                        'slurm': cloud_config
+                    }},
+                    schema=self.workspaces_schema)
+
+    def test_workspace_slurm_rejects_global_only_properties(self):
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'provision_timeout': 600,
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'workdir': '/shared/workspace',
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'partition_configs': {
+                                    'gpu': {
+                                        'pricing': {
+                                            'on_demand': 1.0,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Unsupported workspace Slurm config {config!r} '
+                    'should be rejected'):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
@@ -1100,24 +1274,64 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
 
     def test_client_allows_unknown_k8s_root_property(self):
         """On the client, unknown kubernetes fields pass validation."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         k8s_schema = self._get_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=k8s_schema)
 
     def test_client_allows_unknown_k8s_context_config_property(self):
         """On the client, unknown fields in context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ctx_schema = self._get_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ctx_schema)
 
     def test_client_allows_unknown_workspace_k8s_property(self):
         """On the client, unknown workspace kubernetes fields pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_k8s_schema = self._get_workspace_k8s_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_k8s_schema)
 
     def test_client_allows_unknown_workspace_k8s_context_config_property(self):
         """On the client, unknown fields in workspace context_configs pass."""
+        # These cases are *defined* by the variable being unset, so
+        # establish that rather than assume it. Another test in the
+        # same worker can leave it set, and then the server's strict
+        # schema is what gets validated against -- a failure that
+        # depends on how the suite happens to shard, in a test whose
+        # name says "client".
+        monkeypatch = mock.patch.dict(os.environ)
+        monkeypatch.start()
+        self.addCleanup(monkeypatch.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
         ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
         config = {'unknown_plugin_field': 'value'}
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
@@ -1243,6 +1457,106 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
+class TestRegisterWorkspaceProperty(unittest.TestCase):
+    """Tests for register_workspace_property and schema validation."""
+
+    def setUp(self):
+        self._saved_extra = schemas._extra_workspace_properties.copy()
+        self._saved_access = set(schemas._access_only_workspace_properties)
+        self._saved_plugins_loaded = plugins._plugins_loaded
+
+    def tearDown(self):
+        schemas._extra_workspace_properties.clear()
+        schemas._extra_workspace_properties.update(self._saved_extra)
+        schemas._access_only_workspace_properties.clear()
+        schemas._access_only_workspace_properties.update(self._saved_access)
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    # One environment patch per test, undone by addCleanup, so no test can
+    # leak the server flag into later tests on the same worker.
+    def _on_server(self, plugins_loaded: bool):
+        patcher = mock.patch.dict(
+            os.environ, {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plugins._plugins_loaded = plugins_loaded
+
+    def _on_client(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
+        plugins._plugins_loaded = True
+
+    def _get_workspace_entry_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['workspaces']['additionalProperties']
+
+    def test_server_registered_property_passes(self):
+        """On the server, a registered property validates like a built-in."""
+        self._on_server(plugins_loaded=True)
+        schemas.register_workspace_property('leads', {
+            'type': 'array',
+            'items': {
+                'type': 'string'
+            }
+        })
+        config = {'private': True, 'allowed_users': ['a'], 'leads': ['a']}
+        jsonschema.validate(instance=config,
+                            schema=self._get_workspace_entry_schema())
+        # The registered schema itself is enforced.
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': 'a'},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_unregistered_property_rejected(self):
+        """On the server, an unregistered workspace property fails."""
+        self._on_server(plugins_loaded=True)
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'leads': ['a']},
+                                schema=self._get_workspace_entry_schema())
+
+    def test_server_before_plugins_loaded_allows_unknown_property(self):
+        """Before plugins load, the server lets unknown properties through.
+
+        The server reads its config file before plugins register their
+        properties; a strict schema then would reject a plugin's field at
+        startup.
+        """
+        self._on_server(plugins_loaded=False)
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_client_allows_unknown_property(self):
+        """On the client, unknown workspace properties pass through."""
+        self._on_client()
+        jsonschema.validate(instance={'leads': ['a']},
+                            schema=self._get_workspace_entry_schema())
+
+    def test_builtin_and_cloud_names_are_reserved(self):
+        """A plugin can't take over a built-in key or a cloud section."""
+        for name in ('private', 'allowed_users', 'read_access', 'gcp',
+                     'kubernetes', 'azure', 'runpod', 'slurm', 'cloudflare',
+                     'Azure', 'KUBERNETES', 'Private'):
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'string'})
+            with self.assertRaises(ValueError):
+                schemas.register_workspace_property(name, {'type': 'object'},
+                                                    access_only=True)
+        self.assertNotIn('gcp', schemas.access_only_workspace_properties())
+        self.assertNotIn('azure', schemas._extra_workspace_properties)
+
+    def test_access_only_flag(self):
+        """access_only is recorded per property and re-registration resets."""
+        schemas.register_workspace_property('leads', {'type': 'array'},
+                                            access_only=True)
+        schemas.register_workspace_property('tier', {'type': 'string'})
+        self.assertIn('leads', schemas.access_only_workspace_properties())
+        self.assertNotIn('tier', schemas.access_only_workspace_properties())
+        schemas.register_workspace_property('leads', {'type': 'array'})
+        self.assertNotIn('leads', schemas.access_only_workspace_properties())
+
+
 class TestDashboardSchema(unittest.TestCase):
     """Tests for the top-level dashboard config schema."""
 
@@ -1342,6 +1656,135 @@ class TestDashboardSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_url_template_entry(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_mixed_regex_and_url_entries(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                    },
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_entry_with_both_regex_and_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'regex': r'https://example\.com/.*',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': '',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_valid_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                        'scope': ['cluster'],
+                    },
+                    {
+                        'label': 'Experiment Platform',
+                        'url': 'https://exp.internal.example.com/jobs/${job_id}',
+                        'scope': ['jobs'],
+                    },
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                        'scope': ['cluster', 'jobs'],
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_unknown_scope_value(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['clusters'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': [],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_non_array_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': 'cluster',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_duplicate_scope_values(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['cluster', 'cluster'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
 
 class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""
@@ -1370,6 +1813,61 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
                 'external_links': [{
                     'label': 'Good',
                     'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+
+class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
+    """Tests for the url-template validation in skypilot_config."""
+
+    def test_unknown_template_variable_raises_value_error(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${clustername}',
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+                config, 'test_config')
+        self.assertIn('dashboard.external_links[0].url', str(ctx.exception))
+        self.assertIn('clustername', str(ctx.exception))
+        self.assertIn('cluster_name', str(ctx.exception))
+
+    def test_known_template_variables_pass(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        variables = '/'.join(
+            f'${{{v}}}'
+            for v in sorted(skypilot_config.DASHBOARD_LINK_TEMPLATE_VARIABLES))
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'All variables',
+                    'url': f'https://example.com/{variables}',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+    def test_static_url_without_variables_passes(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Static',
+                    'url': 'https://example.com/dashboard',
                 }],
             },
         }

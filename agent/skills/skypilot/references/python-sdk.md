@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, resize: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
@@ -82,6 +82,11 @@ task; support for pipelines/general DAGs are in experimental branches.
       different availability zone or region.
     fast: [Experimental] If the cluster is already up and available,
       skip provisioning and setup steps.
+    resize: if True, resize the existing cluster to the ``num_nodes``
+      specified in the task. Supports both scaling up (adding workers)
+      and scaling down (removing workers). Scale-down requires no
+      running jobs on the cluster. If True, requires ``cluster_name``
+      to be set.
     _need_confirmation: (Internal only) If True, show the confirmation
         prompt.
 
@@ -626,6 +631,33 @@ Gets the status of jobs on a cluster.
     sky.exceptions.CloudUserIdentityError: if we fail to get the current
         user identity.
 
+### `sky.cluster_job_spec`
+
+```python
+sky.cluster_job_spec(cluster_name: str, job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]
+```
+
+Gets the task YAML and entrypoint a cluster job was submitted with.
+
+**Args:**
+    cluster_name: name of the cluster.
+    job_id: id of the job on the cluster.
+
+**Returns:**
+    The request ID of the cluster job spec request.
+
+**Request Returns:**
+    spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+        the job's spec was not recorded (e.g. it was submitted by an older
+        API server version), otherwise:
+
+        ```python
+
+            {
+                'task_yaml': (str) the task YAML, with secrets redacted,
+                'entrypoint': (str) the command that submitted the job,
+            }
+
 ### `sky.cancel`
 
 ```python
@@ -903,7 +935,7 @@ Finds the best execution plan for the given DAG.
 ### `sky.validate`
 
 ```python
-sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None) -> None
+sky.validate(dag: 'sky.Dag', workdir_only: bool = False, admin_policy_request_options: Optional[admin_policy.RequestOptions] = None, _skip_local_paths: bool = False) -> None
 ```
 
 Validates the tasks.
@@ -920,6 +952,10 @@ Raises exceptions if the DAG is invalid.
     admin_policy_request_options: Request options used for admin policy
         validation. This is only required when a admin policy is in use,
         see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+    _skip_local_paths: Do not check the workdir and file mount sources on
+        this machine. For callers whose sources are API server paths
+        inside an upload blob; the server resolves the blob and checks
+        the paths when it runs the request.
 
 ### `sky.reload_config`
 
@@ -971,7 +1007,7 @@ Deletes a storage.
 ### `sky.api_start`
 
 ```python
-sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False) -> None
+sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False, port: Optional[int] = None) -> None
 ```
 
 Starts the API server.
@@ -982,14 +1018,20 @@ exist.
 **Args:**
     deploy: Whether to deploy the API server, i.e. fully utilize the
         resources of the machine.
-    host: The host to deploy the API server. It will be set to 0.0.0.0
-        if deploy is True, to allow remote access.
+    host: The host to bind the API server to. Under deploy, the server
+        always binds a wildcard address for remote access: ``::`` when an
+        IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+        is used as-is.
     foreground: Whether to run the API server in the foreground (run in
         the current process).
     metrics: Whether to export metrics of the API server.
     metrics_port: The port to export metrics of the API server.
     enable_basic_auth: Whether to enable basic authentication
         in the API server.
+    port: The port to bind the API server to. Defaults to the
+        SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+        Other client commands only find a server on a non-default port
+        if the same environment variable is exported.
 **Returns:**
     None
 
@@ -1020,7 +1062,9 @@ Lists all requests.
     all_status: Whether to list all finished requests as well. This argument
         is ignored if request_ids is not None.
     limit: The number of requests to show. If None, show all requests.
-    fields: The fields to get. If None, get all fields.
+    fields: The fields to get. If None, get all fields except
+        return_value and error. This argument is ignored if request_ids
+        is not None.
     cluster_name: Filter requests by cluster name.
         If None, show all requests.
 
@@ -1062,10 +1106,17 @@ sky.api_cancel(request_ids: Optional[Union[server_common.RequestId[T], List[serv
 
 Aborts a request or all requests.
 
+With neither request_ids nor all_users, aborts all of the caller's own
+requests.
+
 **Args:**
     request_ids: The request ID(s) to abort. Can be a single string or a
-        list of strings.
-    all_users: Whether to abort all requests from all users.
+        list of strings. On a server with per-user auth, an admin can
+        abort any request by id and other users only their own; on a
+        server without it, anyone can abort any request by id.
+    all_users: Whether to abort all requests from all users. On a server
+        with per-user auth, a non-admin aborts only their own. Cannot be
+        combined with request_ids.
     silent: Whether to suppress the output.
 
 **Returns:**
@@ -1075,8 +1126,7 @@ Aborts a request or all requests.
     A list of request IDs that were cancelled.
 
 **Raises:**
-    click.BadParameter: If no request ID is specified and not all or
-        all_users is not set.
+    ValueError: If both request_ids and all_users are given.
 
 ### `sky.api_server_logs`
 
@@ -1368,7 +1418,7 @@ Tears down the Kubernetes cluster started by local_up.
 ### `sky.local_up`
 
 ```python
-sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None) -> server_common.RequestId[None]
+sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None, num_nodes: int = 1) -> server_common.RequestId[None]
 ```
 
 Launches a Kubernetes cluster on local machines.

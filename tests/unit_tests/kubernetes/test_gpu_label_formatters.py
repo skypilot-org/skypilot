@@ -4,6 +4,8 @@ Tests verify correct GPU detection from Kubernetes labels.
 """
 from sky.provision.kubernetes.utils import _accelerator_name_matches
 from sky.provision.kubernetes.utils import GFDLabelFormatter
+from sky.provision.kubernetes.utils import is_neuron_accelerator
+from sky.provision.kubernetes.utils import KarpenterLabelFormatter
 from sky.utils import gpu_names
 
 
@@ -347,6 +349,16 @@ class TestAcceleratorNameMatches:
         # A10 should not match A100
         assert not _accelerator_name_matches('A10', ['a100'])
 
+    def test_rtx_pro_6000_aliases(self):
+        """Test RTXPRO6000 (GCP catalog) matches RTX-PRO-6000 (GKE label)."""
+        gke_viable = ['nvidia-rtx-pro-6000', 'rtx-pro-6000']
+        assert _accelerator_name_matches('RTXPRO6000', gke_viable)
+        assert _accelerator_name_matches('rtxpro6000', gke_viable)
+        assert _accelerator_name_matches('RTX-PRO-6000', gke_viable)
+        assert _accelerator_name_matches('RTX-PRO-6000', ['rtxpro6000'])
+        assert not _accelerator_name_matches('RTX6000', gke_viable)
+        assert not _accelerator_name_matches('RTXPRO6000', ['rtx6000'])
+
     def test_case_insensitive(self):
         """Test case-insensitive matching."""
         assert _accelerator_name_matches('H200', ['H200'])
@@ -440,3 +452,50 @@ class TestAcceleratorNameMatches:
         # But ensure unrelated GPUs don't match
         assert not _accelerator_name_matches('H200', ['h100-mega'])
         assert not _accelerator_name_matches('A100', ['h100-mega'])
+
+
+class TestKarpenterNeuronLabelFormatter:
+    """KarpenterLabelFormatter handles both GPU and AWS Neuron labels.
+
+    Karpenter labels Neuron (Trainium/Inferentia) nodes with
+    karpenter.k8s.aws/instance-accelerator-name and GPU nodes with
+    karpenter.k8s.aws/instance-gpu-name; the formatter must recognize both.
+    """
+
+    def test_neuron_label_value_to_accelerator(self):
+        # instance-accelerator-name values -> SkyPilot canonical names.
+        test_cases = [
+            ('trainium', 'Trainium'),
+            ('trainium2', 'Trainium2'),
+            ('inferentia', 'Inferentia'),
+            ('inferentia2', 'Inferentia2'),
+        ]
+        for value, expected in test_cases:
+            result = KarpenterLabelFormatter.get_accelerator_from_label_value(
+                value)
+            assert result == expected, f'Failed for {value}'
+
+    def test_gpu_label_value_still_upper(self):
+        # GPU nodes (instance-gpu-name) keep the inherited value.upper().
+        assert (KarpenterLabelFormatter.get_accelerator_from_label_value('h100')
+                == 'H100')
+
+    def test_label_keys_include_both(self):
+        keys = KarpenterLabelFormatter.get_label_keys()
+        assert 'karpenter.k8s.aws/instance-gpu-name' in keys
+        assert 'karpenter.k8s.aws/instance-accelerator-name' in keys
+        assert KarpenterLabelFormatter.match_label_key(
+            'karpenter.k8s.aws/instance-accelerator-name')
+
+    def test_label_key_branches_on_accelerator(self):
+        # Neuron -> accelerator-name label; GPU -> gpu-name label.
+        assert (KarpenterLabelFormatter.get_label_key('Trainium') ==
+                'karpenter.k8s.aws/instance-accelerator-name')
+        assert (KarpenterLabelFormatter.get_label_key('H100') ==
+                'karpenter.k8s.aws/instance-gpu-name')
+
+    def test_is_neuron_accelerator(self):
+        for name in ('Trainium', 'trainium', 'Inferentia2', 'inferentia2'):
+            assert is_neuron_accelerator(name), name
+        for name in ('H100', 'A100', 'tpu-v4-podslice', '', None):
+            assert not is_neuron_accelerator(name), name

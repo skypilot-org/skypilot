@@ -4,7 +4,7 @@ import enum
 import json
 import pickle
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 import uuid
 
 import colorama
@@ -68,6 +68,17 @@ services_table = sqlalchemy.Table(
     # Pod IP where the controller process is running.
     # Written by the sky.serve.service process at startup.
     sqlalchemy.Column('controller_ip', sqlalchemy.Text, server_default=None),
+    # User hash of the user that created the service/pool. Passed in from the
+    # API server, since the controller itself may be shared among users.
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    # Blob holding the uploaded workdir/file mounts that the service's task
+    # still points at (consolidation mode without a cloud bucket). Each replica
+    # launch passes it on so the API server re-extracts the blob on whichever
+    # host handles the launch. It also keeps the blob from being GC'd while
+    # the service exists.
+    sqlalchemy.Column('file_mounts_blob_id',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 replicas_table = sqlalchemy.Table(
@@ -174,7 +185,9 @@ class ReplicaStatus(enum.Enum):
     # we should guarantee no resource leakage like regular sky.
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
-    # The replica is a spot VM and it is preempted by the cloud provider.
+    # The replica's cluster was terminated from the outside: a spot VM
+    # preempted by the cloud provider, a pod evicted by Kueue for a
+    # higher-priority workload, etc. The replica is recycled and replaced.
     PREEMPTED = 'PREEMPTED'
 
     # Unknown. This should never happen (used only for unexpected errors).
@@ -305,7 +318,9 @@ def add_service(name: str,
                 pool: bool,
                 controller_pid: int,
                 entrypoint: str,
-                controller_ip: Optional[str] = None) -> bool:
+                controller_ip: Optional[str] = None,
+                user_hash: Optional[str] = None,
+                file_mounts_blob_id: Optional[str] = None) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -335,7 +350,9 @@ def add_service(name: str,
                 controller_pid=controller_pid,
                 controller_ip=controller_ip,
                 hash=str(uuid.uuid4()),
-                entrypoint=entrypoint)
+                entrypoint=entrypoint,
+                user_hash=user_hash,
+                file_mounts_blob_id=file_mounts_blob_id)
             session.execute(insert_stmt)
             session.commit()
 
@@ -514,6 +531,7 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'controller_ip': r['controller_ip'],
         'hash': r['hash'],
         'entrypoint': r['entrypoint'],
+        'user_hash': r['user_hash'],
         'yaml_content': r.get('yaml_content'),
     }
     latest_spec = get_spec(r['name'], current_version)
@@ -599,6 +617,32 @@ def get_service_hash(service_name: str) -> Optional[str]:
             sqlalchemy.select(services_table.c.hash).where(
                 services_table.c.name == service_name)).fetchone()
     return result[0] if result else None
+
+
+def get_service_file_mounts_blob_id(service_name: str) -> Optional[str]:
+    """Get the file mounts blob id recorded for a service, if any."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(services_table.c.file_mounts_blob_id).where(
+                services_table.c.name == service_name)).fetchone()
+    return result[0] if result else None
+
+
+def get_active_file_mounts_blob_ids() -> Set[str]:
+    """Get the file mounts blob ids of every service still in the database.
+
+    A service keeps launching replicas from its blob until it is removed, so
+    every recorded service counts, whatever its status.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                services_table.c.file_mounts_blob_id.distinct()).where(
+                    services_table.c.file_mounts_blob_id.is_not(
+                        None))).fetchall()
+    return {row[0] for row in rows}
 
 
 def get_service_versions(service_name: str) -> List[int]:

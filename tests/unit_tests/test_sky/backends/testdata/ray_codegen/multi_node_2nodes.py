@@ -411,11 +411,23 @@ def make_task_bash_script(codegen: str,
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
-            source ~/.bashrc
+            [ -f ~/.bashrc ] && source ~/.bashrc
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
+            # Activate the default user environment (replaces conda base) so
+            # user commands get a writable python/pip. DEACTIVATE above unsets
+            # VIRTUAL_ENV, so re-activate here to keep it consistent (a venv
+            # uses VIRTUAL_ENV, unlike conda which uses CONDA_PREFIX).
+            # Use getattr with a fallback: this function is embedded into the
+            # on-cluster job program via inspect.getsource (see
+            # sky/backends/task_codegen.py) and evaluated at runtime against the
+            # cluster's own sky.skylet.constants. Older clusters predate
+            # ACTIVATE_SKY_USER_ENV, so referencing it directly would raise
+            # AttributeError; those clusters have no ~/sky-user-env anyway, so an
+            # empty string is the correct no-op.
+            {getattr(constants, 'ACTIVATE_SKY_USER_ENV', '')}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
@@ -514,7 +526,11 @@ gang_scheduling_id_to_ip = ray.get([
 ])
 
 cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])}
-job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+# Unmapped IPs (multi-NIC: Ray reports a NIC SkyPilot didn't record)
+# sort last, deterministically, instead of crashing the whole job.
+job_ip_rank_list = sorted(
+    gang_scheduling_id_to_ip,
+    key=lambda ip: (cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id)), ip))
 job_ip_rank_map = {ip: i for i, ip in enumerate(job_ip_rank_list)}
 job_ip_list_str = '\n'.join(job_ip_rank_list)
 
@@ -535,8 +551,8 @@ if script is not None:
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
         log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
     else: # Single-node or multi-node task on multi-node cluster
-        idx_in_cluster = cluster_ips_to_node_id[ip]
-        if cluster_ips_to_node_id[ip] == 0:
+        idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + 0)
+        if idx_in_cluster == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'
@@ -572,8 +588,8 @@ if script is not None:
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
         log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
     else: # Single-node or multi-node task on multi-node cluster
-        idx_in_cluster = cluster_ips_to_node_id[ip]
-        if cluster_ips_to_node_id[ip] == 0:
+        idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + 1)
+        if idx_in_cluster == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'

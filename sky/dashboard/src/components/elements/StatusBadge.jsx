@@ -18,6 +18,8 @@ export const getStatusStyle = (status) => {
     // Cluster specific statuses
     case 'LAUNCHING':
       return 'bg-blue-100 text-sky-blue';
+    case 'UNHEALTHY':
+      return 'bg-red-50 text-red-700';
     case 'RUNNING':
     case 'IN_USE':
       return 'bg-green-50 text-green-700';
@@ -115,6 +117,8 @@ export const getStatusIcon = (status) => {
       return <SquareIcon className="w-3 h-3 mr-1" />;
     case 'SUCCEEDED':
       return <TickIcon className="w-3 h-3 mr-1" />;
+    case 'UNHEALTHY':
+      return <FilledCircleIcon className="w-3 h-3 mr-1" />;
     case 'PENDING':
     case 'RECOVERING':
     case 'SUBMITTED':

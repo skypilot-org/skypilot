@@ -90,7 +90,7 @@ def create_table(cursor, conn):
     #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
-    # TODO(SKY-1213): username is actually user hash, should rename.
+    # TODO: username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -442,6 +442,42 @@ def get_log_dir_for_job(job_id: int) -> Optional[str]:
     for row in rows:
         return row[0]
     return None
+
+
+@init_db
+def update_job_metadata(job_id: int, updates: Dict[str, Any]) -> None:
+    """Merge ``updates`` into the job's ``metadata`` JSON.
+
+    Read-modify-write under the per-job lock so concurrent writers (e.g. the
+    log-link scan event and a status update) do not clobber each other. No-op if
+    the job row does not exist, so this is safe to call from any node -- a
+    worker node's local DB has no row for the job.
+    """
+    assert _DB is not None
+    if not updates:
+        return
+    with filelock.FileLock(_get_lock_path(job_id)):
+        row = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
+                                 (job_id,)).fetchone()
+        if row is None:
+            return
+        metadata = json.loads(row[0]) if row[0] else {}
+        metadata.update(updates)
+        _DB.cursor.execute('UPDATE jobs SET metadata=(?) WHERE job_id=(?)',
+                           (json.dumps(metadata), job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_nonterminal_job_log_dirs() -> Dict[int, Optional[str]]:
+    """Return a ``{job_id: log_dir}`` map for all non-terminal jobs.
+
+    Used by the skylet log-link scan event to find each running job's run.log.
+    """
+    assert _DB is not None
+    jobs = _get_jobs(user_hash=None,
+                     status_list=JobStatus.nonterminal_statuses())
+    return {job['job_id']: get_log_dir_for_job(job['job_id']) for job in jobs}
 
 
 @init_db
@@ -1312,7 +1348,7 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
-        # TODO(SKY-1214): combine get_job_queue with get_job_statuses.
+        # TODO: combine get_job_queue with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
             f'{user_hash!r}, {all_jobs})',
@@ -1371,7 +1407,12 @@ class JobLibCodeGen:
                 f'\nelse:'
                 f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
             )
-        code = [
+        code = []
+        if follow:
+            # getattr: clusters whose runtime predates the watchdog lack it.
+            code.append(
+                'getattr(log_lib, "start_orphan_watchdog", lambda: None)()')
+        code += [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',

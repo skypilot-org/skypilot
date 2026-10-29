@@ -12,6 +12,7 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
@@ -149,6 +150,95 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
     return ret
 
 
+# Matches the resource AWS names in an UnauthorizedOperation message, e.g.
+#   ... not authorized to perform: ec2:CreateTags on resource:
+#   arn:aws:ec2:us-east-2:123456789012:volume/*  because ...
+_DENIED_RESOURCE_PATTERN = re.compile(
+    r'not authorized to perform:\s*(?P<action>[\w:]+)\s+on resource:\s*'
+    r'(?P<resource>\S+)')
+
+
+def _is_volume_tag_denial(e: Any) -> bool:
+    """Whether RunInstances was refused specifically for tagging volumes.
+
+    Both the code and the action are too coarse to decide this. Credentials
+    that may not launch at all are refused with the same
+    `UnauthorizedOperation`, and credentials that may not tag *instances* are
+    refused for the same `ec2:CreateTags` -- and dropping the volume tags
+    cannot help there, so treating it as a volume problem would report the
+    wrong cause and then fail again anyway. Require the denied resource to be
+    a volume as well.
+    """
+    error = e.response.get('Error', {})
+    if error.get('Code') != 'UnauthorizedOperation':
+        return False
+    match = _DENIED_RESOURCE_PATTERN.search(error.get('Message', ''))
+    if match is None:
+        return False
+    return (match.group('action') == 'ec2:CreateTags' and
+            ':volume/' in match.group('resource'))
+
+
+def _without_volume_tag_specs(
+        tag_specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [spec for spec in tag_specs if spec.get('ResourceType') != 'volume']
+
+
+_VOLUME_TAGGING_DENIED = (
+    'the credentials in use are not allowed to tag EBS volumes. Grant '
+    'ec2:CreateTags on "arn:aws:ec2:*:<account-ID>:volume/*" to tag them')
+
+
+def _warn_volume_tagging_denied(region: str) -> None:
+    logger.warning(f'Volumes will not be tagged in {region}: '
+                   f'{_VOLUME_TAGGING_DENIED}. Instances are still tagged and '
+                   'the cluster is unaffected.')
+
+
+def _volume_tagging_enforced_error(region: str) -> Exception:
+    """The failure raised when volume tagging is required but refused.
+
+    Raised as InvalidCloudCredentials so the failover loop blocks AWS outright
+    instead of retrying every zone: the permission is missing everywhere the
+    policy says it is, and grinding through zones would bury the cause under a
+    generic "relax the task's resource requirements".
+    """
+    return exceptions.InvalidCloudCredentials(
+        f'Volume tagging is required in {region} by aws.enforce_tags, but '
+        f'{_VOLUME_TAGGING_DENIED}, or drop "volume" from aws.enforce_tags to '
+        'launch with untagged volumes instead.')
+
+
+def _tag_volumes(ec2,
+                 instances: List[Any],
+                 tags: Dict[str, str],
+                 region: str,
+                 enforce: bool = False) -> None:
+    """Tags the volumes attached to `instances`.
+
+    Best effort unless `enforce`: a cluster is usable whether or not its
+    volumes carry tags, so by default a missing permission must not fail the
+    operation that got here. Under `aws.enforce_tags` the guarantee matters
+    more than the cluster, so the refusal is raised.
+    """
+    if not tags:
+        return
+    volume_ids = _get_attached_volume_ids(instances)
+    if not volume_ids:
+        return
+    try:
+        ec2.meta.client.create_tags(Resources=volume_ids,
+                                    Tags=_format_tags(tags))
+    except aws.botocore_exceptions().ClientError as e:
+        if _is_volume_tag_denial(e):
+            if enforce:
+                raise _volume_tagging_enforced_error(region) from e
+            _warn_volume_tagging_denied(region)
+        else:
+            logger.warning('Failed to update tags for AWS volumes '
+                           f'{volume_ids}: {e}')
+
+
 def _format_tags(tags: Dict[str, str]) -> List:
     return [{'Key': k, 'Value': v} for k, v in tags.items()]
 
@@ -160,9 +250,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     node provider tag specs is modified in-place.
 
     This allows users to add tags and override values of existing
-    tags with their own, and only applies to the resource type
-    'instance'. All other resource types are appended to the list of
-    tag specs.
+    tags with their own for any resource type already present in the
+    base specs. New resource types are appended to the list of tag
+    specs.
 
     Args:
         tag_specs (List[Dict[str, Any]]): base node provider tag specs
@@ -170,18 +260,23 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     """
 
     for user_tag_spec in user_tag_specs:
-        if user_tag_spec['ResourceType'] == 'instance':
-            for user_tag in user_tag_spec['Tags']:
-                exists = False
-                for tag in tag_specs[0]['Tags']:
-                    if user_tag['Key'] == tag['Key']:
-                        exists = True
-                        tag['Value'] = user_tag['Value']
-                        break
-                if not exists:
-                    tag_specs[0]['Tags'] += [user_tag]
-        else:
-            tag_specs += [user_tag_spec]
+        resource_type = user_tag_spec['ResourceType']
+        existing_tag_spec = next((tag_spec for tag_spec in tag_specs
+                                  if tag_spec['ResourceType'] == resource_type),
+                                 None)
+        if existing_tag_spec is None:
+            tag_specs.append(copy.deepcopy(user_tag_spec))
+            continue
+
+        for user_tag in user_tag_spec['Tags']:
+            exists = False
+            for tag in existing_tag_spec['Tags']:
+                if user_tag['Key'] == tag['Key']:
+                    exists = True
+                    tag['Value'] = user_tag['Value']
+                    break
+            if not exists:
+                existing_tag_spec['Tags'].append(copy.deepcopy(user_tag))
 
 
 def _create_instances(
@@ -192,6 +287,7 @@ def _create_instances(
     count: int,
     associate_public_ip_address: bool,
     max_efa_interfaces: int,
+    enforce_volume_tags: bool = False,
 ) -> List:
     tags = {
         'Name': cluster_name,
@@ -201,11 +297,24 @@ def _create_instances(
     }
     conf = node_config.copy()
 
-    tag_specs = [{
+    region = ec2_fail_fast.meta.client.meta.region_name
+    # Every attempt asks for volume tags. Whether the credentials allow it is
+    # deliberately not remembered: caching the refusal would leave volumes
+    # untagged after someone grants the permission, until the server happened
+    # to be restarted, and it cannot be shared across regions because an IAM
+    # policy may be region-scoped. The cost is one refused call per region
+    # attempted, which is a single RunInstances round trip -- AWS refuses no
+    # more slowly than it accepts.
+    tag_volumes = True
+
+    tag_specs: List[Dict[str, Any]] = [{
         'ResourceType': 'instance',
         'Tags': _format_tags(tags),
+    }, {
+        'ResourceType': 'volume',
+        'Tags': _format_tags(tags),
     }]
-    user_tag_specs = conf.get('TagSpecifications', [])
+    user_tag_specs = conf.get('TagSpecifications') or []
     _merge_tag_specs(tag_specs, user_tag_specs)
 
     # SubnetIds is not a real config key: we must resolve to a
@@ -277,8 +386,26 @@ def _create_instances(
                     })
             conf['NetworkInterfaces'] = network_interfaces
 
-            instances = _ec2_call_with_retry_on_server_error(
-                ec2_fail_fast.create_instances, **conf)
+            try:
+                instances = _ec2_call_with_retry_on_server_error(
+                    ec2_fail_fast.create_instances, **conf)
+            except aws.botocore_exceptions().ClientError as e:
+                if not (tag_volumes and _is_volume_tag_denial(e)):
+                    raise
+                if enforce_volume_tags:
+                    # The caller asked for a guarantee, not best effort.
+                    raise _volume_tagging_enforced_error(region) from e
+                # AWS refuses the whole RunInstances call when it may not tag
+                # one of the requested resource types, so the launch cannot
+                # simply continue -- retry it without the volume tags. The
+                # cluster is fully functional either way; only the volumes go
+                # untagged.
+                _warn_volume_tagging_denied(region)
+                tag_volumes = False
+                conf['TagSpecifications'] = _without_volume_tag_specs(
+                    conf['TagSpecifications'])
+                instances = _ec2_call_with_retry_on_server_error(
+                    ec2_fail_fast.create_instances, **conf)
             return instances
         except aws.botocore_exceptions().ClientError as exc:
             echo = logger.debug
@@ -311,6 +438,19 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
+def _get_attached_volume_ids(instances: List[Any]) -> List[str]:
+    """Collect attached EBS volume IDs from instances."""
+    volume_ids: List[str] = []
+    seen: Set[str] = set()
+    for inst in instances:
+        for mapping in getattr(inst, 'block_device_mappings', []) or []:
+            volume_id = (mapping.get('Ebs') or {}).get('VolumeId')
+            if volume_id is not None and volume_id not in seen:
+                seen.add(volume_id)
+                volume_ids.append(volume_id)
+    return volume_ids
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
@@ -326,6 +466,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
     max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
+    enforce_volume_tags = 'volume' in (
+        config.provider_config.get('enforce_tags') or [])
 
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
@@ -471,6 +613,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # empty tags will result in error in the API call
             ec2.meta.client.create_tags(Resources=resumed_instance_ids,
                                         Tags=_format_tags(tags))
+            _tag_volumes(ec2,
+                         resumed_instances,
+                         tags,
+                         region,
+                         enforce=enforce_volume_tags)
             for inst in resumed_instances:
                 inst.tags = _format_tags(tags)  # sync the tags info
         placement_zone = resumed_instances[0].placement['AvailabilityZone']
@@ -542,7 +689,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     reservation_count,
                     associate_public_ip_address=(
                         not config.provider_config['use_internal_ips']),
-                    max_efa_interfaces=max_efa_interfaces)
+                    max_efa_interfaces=max_efa_interfaces,
+                    enforce_volume_tags=enforce_volume_tags)
                 created_instances.extend(created_reserved_instances)
                 to_start_count -= reservation_count
                 if to_start_count <= 0:
@@ -566,7 +714,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 to_start_count,
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']),
-                max_efa_interfaces=max_efa_interfaces)
+                max_efa_interfaces=max_efa_interfaces,
+                enforce_volume_tags=enforce_volume_tags)
 
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)

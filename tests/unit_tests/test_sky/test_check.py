@@ -270,8 +270,12 @@ def _mock_k8s_env(monkeypatch,
         'default': {},
         'ws1': {}
     })
-    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
-                        lambda: {'default', 'ws1'})
+
+    # check writes each visited workspace's cached rows, so it must visit the
+    # writable set only; 'ws-ro' is readable but not writable.
+    monkeypatch.setattr(
+        'sky.workspaces.core.get_workspace_access_sets', lambda:
+        ({'default', 'ws1', 'ws-ro'}, {'default', 'ws1'}))
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
@@ -356,6 +360,9 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
     assert 'ctx-b' not in ws1_section
+
+    # Readable but not writable, so its cached rows are not rewritten.
+    assert 'workspace: \'ws-ro\'' not in out
 
 
 def test_workspace_cloud_capabilities():
@@ -604,7 +611,9 @@ class TestCheckWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 sky_check.check(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(mock_user,
+                                           'restricted',
+                                           workspace_ref=None)
 
     @mock.patch('sky.check.check_capabilities', return_value={})
     @mock.patch('sky.workspaces.core.check_workspace_permission')

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: api_service_test
+templates:
+  - templates/api-service.yaml
+tests:
+  - it: should not set ipFamilyPolicy by default (single-stack)
+    asserts:
+      - isKind:
+          of: Service
+      - notExists:
+          path: spec.ipFamilyPolicy
+
+  - it: should not set ipFamilyPolicy for an IPv4 bind host
+    set:
+      apiService.host: "0.0.0.0"
+    asserts:
+      - notExists:
+          path: spec.ipFamilyPolicy
+
+  - it: should enable dual-stack ipFamilyPolicy for an IPv6 bind host
+    set:
+      apiService.host: "::"
+    asserts:
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: PreferDualStack

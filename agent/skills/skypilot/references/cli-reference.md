@@ -51,6 +51,7 @@ Launch a cluster or task.
 - `--no-setup` — Skip setup phase when (re-)launching cluster.
 - `--clone-disk-from`, `--clone` — [Experimental] Clone disk from an existing cluster to launch a new one. This is useful when the new cluster needs to have the same data on the boot disk as an existing cluster.
 - `--fast` — [Experimental] If the cluster is already up and available, skip provisioning and setup steps.
+- `--resize` — Resize an existing cluster to --num-nodes. Supports both scale-up (adding workers) and scale-down (removing workers). Scale-down requires no running jobs. Requires -c to specify an existing cluster.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to launch into. Shorthand for `--config active_workspace=<name>`.
@@ -302,6 +303,7 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--task` — Cancel one dynamic task of the job (a job launched from inside it), by the index shown in `sky jobs queue` or by name. A declared task cannot be cancelled alone.
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
@@ -353,9 +355,13 @@ Launch a managed job from a YAML or a command.
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
 - `--pool`, `-p` — (Experimental; optional) Pool to use for jobs submission.
 - `--num-jobs` — Number of jobs to submit.
+- `--job-group` — Attach to an existing job group, by job id or unique running job name. The job is shown under it and cancelled with it. Defaults to the surrounding job group when launched from inside one.
+- `--no-job-group` — Launch a top-level job even when running inside a job group (do not attach to it).
+- `--depends-on` — Comma-separated managed job IDs to wait for. The job starts once all of them succeed, and is cancelled if any of them ends otherwise. The launch fails if one of them has already ended without succeedi...
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
+- `--output`, `-o` — Print only the submitted job IDs, for scripts: `id` prints one per line, `json` prints {"job_ids": [...]}. Everything else goes to stderr. Implies --detach-run.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
@@ -466,6 +472,7 @@ Show statuses of managed jobs.
 - `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
 - `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
 - `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
+- `--infra` — Show only jobs running on this infrastructure. Format: cloud, cloud/region, cloud/region/zone, k8s/context-name, or ssh/node-pool-name. Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/\*/u...
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
@@ -648,8 +655,10 @@ List volumes managed by SkyPilot.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `NAMES` — text
 - `--verbose`, `-v` — Show all information in full.
 - `--refresh`, `-r` — Refresh volume state from cloud APIs before listing. Without this flag, cached data is returned which is updated periodically by the background daemon.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## API Server Commands
 
@@ -664,7 +673,7 @@ Cancel a request running on SkyPilot API server.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `REQUEST_IDS` — text
 - `--all`, `-a` — Cancel all your requests.
-- `--all-users`, `-u` — Cancel all requests from all users.
+- `--all-users`, `-u` — Cancel all requests from all users. On a server with per-user auth, a non-admin cancels only their own.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky api info`
@@ -711,10 +720,11 @@ Starts the SkyPilot API server locally.
 
 **Options:**
 
-- `--deploy` — Deploy the SkyPilot API server. When set to True, SkyPilot API server will use all resources on the host machine assuming the machine is dedicated to SkyPilot API server; host will also be set to 0.0....
-- `--host` (default: `127.0.0.1`) — The host to deploy the SkyPilot API server. To allow remote access, set this to 0.0.0.0
+- `--deploy` — Deploy the SkyPilot API server. When set to True, SkyPilot API server will use all resources on the host machine assuming the machine is dedicated to SkyPilot API server; host will also be set to a wi...
+- `--host` (default: `127.0.0.1`) — The host to bind the SkyPilot API server to. To allow remote access, set this to 0.0.0.0; use :: for IPv6 dual-stack.
 - `--foreground` — Run the SkyPilot API server in the foreground and output its logs to stdout/stderr. Allowing external systems to manage the process lifecycle and collect logs directly. This is useful when the API ser...
 - `--enable-basic-auth` — Enable basic authentication in the SkyPilot API server.
+- `--port` — The port to bind the SkyPilot API server to. Defaults to the SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580. Other client commands only find a server on a non-default port if the same e...
 
 ### `sky api status`
 

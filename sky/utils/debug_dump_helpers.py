@@ -1,7 +1,8 @@
 """Shared helpers for debug dump data serialization.
 
 These helpers are used by both sky.utils.debug_utils (API server side) and
-sky.jobs.utils (controller side) to serialize cluster records and events.
+sky.jobs.utils (controller side) to serialize cluster records and events and
+to redact credentials.
 Extracted to avoid a circular import:
   debug_utils -> jobs.server.core -> jobs.utils -> debug_utils
 """
@@ -11,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
 from sky import task as task_lib
+from sky.server import common as server_common
+from sky.skylet import constants
 from sky.utils import config_utils
 from sky.utils import yaml_utils
 
@@ -20,6 +23,23 @@ _SENSITIVE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('api_server', 'endpoint'),
     ('api_server', 'service_account_token'),
 ]
+
+# Env vars whose values are credentials.
+SENSITIVE_ENV_VARS = {
+    'SKYPILOT_DB_CONNECTION_URI',
+    'SKYPILOT_INITIAL_BASIC_AUTH',
+    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
+    'SKYPILOT_DOCKER_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_ACCESS_KEY_ID',
+    'AZURE_CLIENT_SECRET',
+}
+
+# Task/DAG YAML fields of a managed job record. dag_yaml_content carries the
+# secrets injected at launch, including the job's API server token.
+_MANAGED_JOB_YAML_FIELDS = ('user_yaml', 'original_user_yaml_content',
+                            'dag_yaml_content')
 
 
 def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,6 +54,29 @@ def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if val is not None:
             config_copy.set_nested(field_path, '<redacted>')
     return dict(**config_copy)
+
+
+def redact_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of env_vars with credential values redacted.
+
+    Values of SENSITIVE_ENV_VARS become '<redacted>', and the basic-auth
+    password in the API server endpoint is masked.
+    """
+    redacted = dict(env_vars)
+    for k, v in redacted.items():
+        if k in SENSITIVE_ENV_VARS:
+            redacted[k] = '<redacted>'
+        elif k == constants.SKY_API_SERVER_URL_ENV_VAR and isinstance(v, str):
+            redacted[k] = server_common.redact_url_password(v)
+    return redacted
+
+
+def redact_managed_job_record(record: Dict[str, Any]) -> None:
+    """Redact the task YAML fields of a managed job record in place."""
+    for field in _MANAGED_JOB_YAML_FIELDS:
+        value = record.get(field)
+        if isinstance(value, str):
+            record[field] = redact_task_yaml(value)
 
 
 def epoch_to_human(epoch: Optional[float]) -> Optional[str]:
@@ -58,8 +101,20 @@ def redact_task_yaml(yaml_str: str) -> str:
         return '<parse error, redacted>'
     for doc in docs:
         if isinstance(doc, dict):
-            task_lib.redact_task_yaml_dict(doc)
+            _redact_task_yaml_doc(doc)
     return yaml_utils.dump_yaml_str(docs)
+
+
+def _redact_task_yaml_doc(doc: Dict[str, Any]) -> None:
+    task_lib.redact_task_yaml_dict(doc)
+    # Task.to_yaml_config() embeds the raw YAML the user wrote, inline secret
+    # values included.
+    user_specified_yaml = doc.get('_user_specified_yaml')
+    if isinstance(user_specified_yaml, str):
+        doc['_user_specified_yaml'] = redact_task_yaml(user_specified_yaml)
+    envs = doc.get('envs')
+    if isinstance(envs, dict):
+        doc['envs'] = redact_env_vars(envs)
 
 
 def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,6 +169,87 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
         'last_event': cluster_record.get('last_event'),
         'handle': handle_info,
     }
+
+
+def serialize_cluster_history_record(
+        history_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a cluster history record to a JSON-friendly dict.
+
+    The input is a record returned by
+    global_user_state.get_clusters_from_history.
+    """
+    launched_at = history_record.get('launched_at')
+    resources = history_record.get('resources')
+    status = history_record.get('status')
+    return {
+        'name': history_record.get('name'),
+        'cluster_hash': history_record.get('cluster_hash'),
+        'status': str(status) if status is not None else None,
+        'launched_at': launched_at,
+        'launched_at_human': epoch_to_human(launched_at),
+        'duration': history_record.get('duration'),
+        'num_nodes': history_record.get('num_nodes'),
+        'resources': str(resources) if resources is not None else None,
+        'usage_intervals': history_record.get('usage_intervals'),
+        'user_hash': history_record.get('user_hash'),
+        'user_name': history_record.get('user_name'),
+        'workspace': history_record.get('workspace'),
+        'last_event': history_record.get('last_event'),
+        'node_names': history_record.get('node_names'),
+        'last_creation_command': history_record.get('last_creation_command'),
+        'last_creation_yaml':
+            (redact_task_yaml(history_record['last_creation_yaml'])
+             if history_record.get('last_creation_yaml') is not None else None),
+    }
+
+
+def get_cluster_dump_data(cluster_name: str) -> List[Tuple[str, Any]]:
+    """Collect JSON-serializable dump data for a cluster.
+
+    Returns (relative_filename, content) pairs covering the live cluster
+    record (if the cluster still exists), its cluster history records, and
+    cluster events. Cluster history and events outlive the cluster row, so
+    terminated clusters (e.g. a finished managed job's cluster) still
+    produce data. Shared by the API server dump (_dump_cluster_info in
+    debug_utils.py) and the controller manifest
+    (_collect_cluster_debug_manifest in jobs/utils.py).
+    """
+    data: List[Tuple[str, Any]] = []
+    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    # A single name can map to multiple history records when the name is
+    # reused across launches.
+    history_records = global_user_state.get_clusters_from_history(
+        cluster_names=[cluster_name])
+    if cluster_record is not None:
+        data.append(
+            ('cluster_info.json', serialize_cluster_record(cluster_record)))
+    if history_records:
+        data.append(('cluster_history.json', [
+            serialize_cluster_history_record(record)
+            for record in history_records
+        ]))
+
+    # Events are keyed by cluster hash. Collect from the live cluster's
+    # hash AND every history hash (deduplicated — the live cluster has a
+    # history record with the same hash): when a name has been reused, the
+    # current cluster and its terminated predecessors all have events
+    # worth dumping.
+    event_hashes = []
+    if cluster_record is not None and cluster_record.get('cluster_hash'):
+        event_hashes.append(cluster_record['cluster_hash'])
+    for record in history_records:
+        record_hash = record.get('cluster_hash')
+        if record_hash and record_hash not in event_hashes:
+            event_hashes.append(record_hash)
+    # Suffix event files with the hash only when the name maps to several
+    # clusters, so the common single-cluster case keeps stable filenames.
+    use_hash_suffix = len(event_hashes) > 1
+    for cluster_hash in event_hashes:
+        suffix = f'.{cluster_hash[:8]}' if use_hash_suffix else ''
+        for event_data in get_cluster_events_data(cluster_hash):
+            data.append((f'events_{event_data["event_type"]}{suffix}.json',
+                         event_data['events']))
+    return data
 
 
 def get_cluster_events_data(cluster_hash: str) -> List[Dict[str, Any]]:

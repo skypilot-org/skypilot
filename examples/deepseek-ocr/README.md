@@ -2,7 +2,7 @@
 
 This example demonstrates how to use [DeepSeek OCR](https://github.com/deepseek-ai/DeepSeek-OCR) with SkyPilot's pools feature to process large volumes of scanned documents in parallel.
 
-See the [blog post](https://blog.skypilot.co/skypilot-pools-deepseek-ocr) for a detailed walkthrough.
+See the [blog post](https://skypilot.ai/blog/skypilot-pools-deepseek-ocr) for a detailed walkthrough.
 
 ## Use case
 

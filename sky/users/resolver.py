@@ -127,7 +127,17 @@ class UserResolver:
                 continue
             ids = self._name_to_ids.get(entry)
             if not ids:
-                logger.warning(f'User {entry!r} not found in all users')
+                # No user record matches this entry yet. This is expected
+                # when an admin adds a user to a workspace's allowed_users
+                # before that user has logged in (the user record is created
+                # on first login). Skip it for now; the entry is re-resolved
+                # and the workspace policy is granted when the user record is
+                # created (see PermissionService.
+                # resync_workspace_policies_for_new_user).
+                logger.warning(
+                    f'allowed_users entry {entry!r} does not match any '
+                    'existing user record; skipping for now. Access will be '
+                    'granted automatically once this user logs in.')
                 continue
             if len(ids) > 1:
                 user_ids_str = ', '.join(ids)

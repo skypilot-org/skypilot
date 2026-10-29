@@ -3,33 +3,33 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+# Peak 16-bit throughput, in FLOPS.
+V100_PEAK_FLOPS = 120 * (10**12)
+T4_PEAK_FLOPS = 65 * (10**12)
+
 
 def resnet50_estimate_runtime(resources):
     """A simple runtime model for Resnet50."""
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
 
-    def _v100(num_v100s):
+    def _gpu(num_gpus, peak_flops):
         # Adds communication overheads per step (in seconds).
         communication_slack = 0.0
-        if num_v100s == 4:
+        if num_gpus == 4:
             communication_slack = 0.15
-        elif num_v100s == 8:
+        elif num_gpus == 8:
             communication_slack = 0.30
 
         max_per_device_batch_size = 256
-        effective_batch_size = max_per_device_batch_size * num_v100s
+        effective_batch_size = max_per_device_batch_size * num_gpus
 
         # 112590 steps, 1024 BS = 90 epochs.
         total_steps = 112590 * (1024.0 / effective_batch_size)
         flops_for_one_batch = flops_for_one_image * max_per_device_batch_size
 
-        # 27 TFLOPs, harmonic mean b/t 15TFLOPs (single-precision) & 120 TFLOPs
-        # (16 bit).
-        utilized_flops = 27 * (10**12)
-
-        # print('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
+        # Assume the model sustains 1/3 of the device's peak throughput.
+        utilized_flops = peak_flops / 3
 
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
           + communication_slack
@@ -38,15 +38,15 @@ def resnet50_estimate_runtime(resources):
 
     if isinstance(resources.cloud, sky.AWS):
         instance = resources.instance_type
-        if instance == 'p3.2xlarge':
-            num_v100s = 1
-        elif instance == 'p3.8xlarge':
-            num_v100s = 4
-        elif instance == 'p3.16xlarge':
-            num_v100s = 8
+        if instance == 'g4dn.xlarge':
+            num_t4s = 1
+        elif instance == 'g4dn.12xlarge':
+            num_t4s = 4
+        elif instance == 'g4dn.metal':
+            num_t4s = 8
         else:
-            assert False, 'Not supported: {}'.format(resources)
-        return _v100(num_v100s)
+            raise ValueError('Not supported: {}'.format(resources))
+        return _gpu(num_t4s, T4_PEAK_FLOPS)
 
     elif isinstance(resources.cloud, sky.GCP):
         accelerators = resources.accelerators
@@ -56,9 +56,10 @@ def resnet50_estimate_runtime(resources):
         assert len(accelerators) == 1, resources
         for acc, acc_count in accelerators.items():
             break
+        # GCP still offers V100s, unlike AWS.
         if acc == 'V100':
             assert acc_count in [1, 2, 4, 8], resources
-            return _v100(acc_count)
+            return _gpu(acc_count, V100_PEAK_FLOPS)
 
         assert acc == 'tpu-v3-8', resources
         tpu_v3_8_flops = 420 * (10**12)
@@ -96,32 +97,8 @@ def resnet50_infer_estimate_runtime(resources):
     num_images = 70 * 1e6  # TODO: vary this.
 
     instance = resources.instance_type
-    # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
 
-    if instance == 'p3.2xlarge':
-        # 120 TFLOPS TensorCore.
-        logger.debug('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
-
-        # # Max bs to keep p99 < 15ms.
-        # max_per_device_batch_size = 8
-        # max_per_device_batch_size = 8*1e3
-        # max_per_device_batch_size = 1
-
-        # num_v100s = 1
-        # effective_batch_size = max_per_device_batch_size * num_v100s
-
-        # # 112590 steps, 1024 BS = 90 epochs.
-        # total_steps = num_images // effective_batch_size
-        # flops_for_one_batch = flops_for_one_image * max_per_device_batch_size
-
-        # estimated_step_time_seconds = flops_for_one_batch / utilized_flops
-        # estimated_run_time_seconds = estimated_step_time_seconds * total_steps
-
-        # TODO: this ignores offline vs. online.  It's a huge batch.
-        estimated_run_time_seconds = \
-            flops_for_one_image * num_images / utilized_flops
-    elif instance == 'inf1.2xlarge':
+    if instance == 'inf1.2xlarge':
         # Inferentia: 1 chip = 128T[F?]OPS
         # Each AWS Inferentia chip supports up to 128 TOPS (trillions of
         # operations per second) of performance [assume 16, as it casts to
@@ -136,8 +113,7 @@ def resnet50_infer_estimate_runtime(resources):
         for acc, acc_count in accs.items():
             break
         assert acc == 'T4' and acc_count == 1, resources
-        # T4 GPU: 65 TFLOPS fp16
-        utilized_flops = 65 * (10**12) / 3
+        utilized_flops = T4_PEAK_FLOPS / 3
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     else:

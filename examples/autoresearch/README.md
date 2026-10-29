@@ -1,12 +1,12 @@
 # Parallel Autoresearch with SkyPilot
 
 <p align="center">
-  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/banner.png" alt="Parallel Autoresearch with SkyPilot" width="600"/>
+  <img src="assets/banner.png" alt="Parallel Autoresearch with SkyPilot" width="600"/>
 </p>
 
 Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up GPU clusters, submit experiments, and parallelize work across multiple clusters.
 
-For a deep dive into methodology and results, check out the **[blog post](https://blog.skypilot.co/scaling-autoresearch/)**.
+For a deep dive into methodology and results, check out the **[blog post](https://skypilot.ai/blog/scaling-autoresearch)**.
 
 ## Architecture
 
@@ -68,7 +68,7 @@ The SkyPilot skill handles installation, credential setup, and all cluster opera
 ## Results
 
 <p align="center">
-  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/results_wallclock.png" alt="Wall-clock time comparison: parallel vs sequential" width="800"/>
+  <img src="assets/results_wallclock.png" alt="Wall-clock time comparison: parallel vs sequential" width="800"/>
   <br/>
   <em>Parallel agent (16 GPUs) reaches the same best validation loss 9x faster than sequential (1 GPU).</em>
 </p>

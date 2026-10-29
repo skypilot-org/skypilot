@@ -25,7 +25,14 @@ def get_event_loop() -> asyncio.AbstractEventLoop:
     with _LOCK:
         if _EVENT_LOOP is None or _EVENT_LOOP.is_closed():
             _EVENT_LOOP = asyncio.new_event_loop()
+            # Name the loop thread and its offload pool so they are
+            # identifiable in stack dumps, and size the pool explicitly
+            # instead of inheriting asyncio's cpu-count-dependent default.
+            _EVENT_LOOP.set_default_executor(
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=32, thread_name_prefix='request-event-loop'))
             loop_thread = threading.Thread(target=_EVENT_LOOP.run_forever,
+                                           name='request-event-loop',
                                            daemon=True)
             loop_thread.start()
     return _EVENT_LOOP

@@ -450,16 +450,14 @@ FAQs
         apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
         rm -rf /var/lib/apt/lists/*
 
-    # Install conda and other python dependencies
-    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
-        bash Miniconda3-Linux-x86_64.sh -b && \
-        eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
-        grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
-        rm Miniconda3-Linux-x86_64.sh && \
-        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-        python3 -m venv ~/skypilot-runtime && \
+    # Install SkyPilot python dependencies into a dedicated runtime venv.
+    # Python 3.10, as SkyPilot's own runtime setup uses: Ray needs 3.10 or newer,
+    # and many base images ship an older python3.
+    RUN export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+        curl -LsSf https://astral.sh/uv/install.sh | sh && \
+        ~/.local/bin/uv venv --seed ~/skypilot-runtime --python 3.10 && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
         $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \

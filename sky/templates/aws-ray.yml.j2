@@ -53,6 +53,9 @@ provider:
   # leakage.
   disable_launch_config_check: true
   max_efa_interfaces: {{max_efa_interfaces}}
+  # Resource types whose tagging must not be given up silently; read back by
+  # the provisioner so a resumed cluster keeps the setting it was created with.
+  enforce_tags: {{ enforce_tags|tojson }}
 
 auth:
   ssh_user: {{ssh_user}}
@@ -144,6 +147,14 @@ available_node_types:
         {%- endif %}
       TagSpecifications:
         - ResourceType: instance
+          Tags:
+            - Key: skypilot-user
+              Value: {{ user }}
+            {%- for label_key, label_value in labels.items() %}
+            - Key: {{ label_key }}
+              Value: {{ label_value|tojson }}
+            {%- endfor %}
+        - ResourceType: volume
           Tags:
             - Key: skypilot-user
               Value: {{ user }}

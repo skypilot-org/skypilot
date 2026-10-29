@@ -111,8 +111,12 @@ def _get_port_range(name: str, port_start: Optional[int]) -> Tuple[int, int]:
     return port_start, port_end
 
 
-def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
-                         gpus: bool):
+def deploy_local_cluster(name: Optional[str],
+                         port_start: Optional[int],
+                         gpus: bool,
+                         num_nodes: int = 1):
+    if num_nodes < 1:
+        raise ValueError(f'num_nodes must be at least 1, got {num_nodes}')
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
     port_start, port_end = _get_port_range(name, port_start)
     context_name = f'kind-{name}'
@@ -140,7 +144,8 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
         # Choose random port range to use on the host machine.
         # Port range is port_start - port_start + 99 (exactly 100 ports).
         logger.debug(f'Using host port range {port_start}-{port_end}')
-        f.write(generate_kind_config(port_start, gpus=gpus))
+        f.write(generate_kind_config(port_start, num_nodes=num_nodes,
+                                     gpus=gpus))
         f.flush()
 
         path_to_package = os.path.dirname(__file__)

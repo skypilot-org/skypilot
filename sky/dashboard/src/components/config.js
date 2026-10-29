@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -16,9 +16,18 @@ import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useSidebar } from '@/components/elements/sidebar';
 import { YamlEditor } from '@/components/ui/yaml-editor';
 
 export function Config() {
+  const { userRole, restrictConfigToAdmins } = useSidebar();
+  const isAdmin = userRole === 'admin';
+  // Who can read the config: admins always; a 'user' only when the server
+  // hasn't restricted it (rbac.restrict_config_to_admins). Viewers never can
+  // (config is not on the viewer allowlist), so they get the access-denied
+  // card instead of a 403.
+  const canViewConfig =
+    isAdmin || (userRole === 'user' && !restrictConfigToAdmins);
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,30 +36,7 @@ export function Config() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const successTimeoutRef = useRef(null);
 
-  useEffect(() => {
-    loadConfig();
-
-    // Check Grafana availability
-    const checkGrafana = async () => {
-      const available = await checkGrafanaAvailability();
-      setIsGrafanaAvailable(available);
-    };
-
-    if (typeof window !== 'undefined') {
-      checkGrafana();
-    }
-  }, []);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -66,7 +52,38 @@ export function Config() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // If the caller can't read the config, it would 403, so skip the request
+    // entirely and show the access-denied card instead. The header (metrics
+    // button, version) is still rendered for everyone below.
+    if (canViewConfig) {
+      loadConfig();
+    } else {
+      setLoading(false);
+    }
+
+    // Check Grafana availability for everyone: the metrics button and version
+    // info in the header are shown regardless of config read access.
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, [canViewConfig, loadConfig]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSave = async () => {
     trackSettingsAction('save');
@@ -150,179 +167,224 @@ export function Config() {
     }
   };
 
-  return (
-    <>
-      <div className="flex items-center justify-between mb-4 h-8">
-        <div className="text-base flex items-center">
-          <span className="text-sky-blue leading-none">
-            SkyPilot API Server
-          </span>
-        </div>
+  // User role is still resolving.
+  if (userRole === null) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <CircularProgress size={20} />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
 
-        <div className="flex items-center">
-          <div className="text-sm flex items-center">
-            {(loading || saving) && (
-              <div className="flex items-center mr-4">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
-                  {saving ? 'Applying...' : 'Loading...'}
-                </span>
-              </div>
-            )}
-          </div>
-          {isGrafanaAvailable && (
-            <button
-              onClick={() => {
-                const grafanaUrl = getGrafanaUrl();
-                // Get app name from environment variable
-                const releaseName =
-                  process.env.SKYPILOT_RELEASE_NAME || 'skypilot';
-                const appName = `${releaseName}-api`;
-                window.open(
-                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${appName}`,
-                  '_blank'
-                );
-              }}
-              className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
-            >
-              <svg
-                className="w-4 h-4 mr-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              View API Server Metrics
-            </button>
-          )}
-          <NewVersionAvailable />
-          <PluginSlot
-            name="settings.version-display"
-            fallback={<VersionDisplay />}
-          />
-        </div>
+  // Top header bar (title + metrics button + version) shown to everyone,
+  // regardless of whether they can read the config below.
+  const header = (
+    <div className="flex items-center justify-between mb-4 h-8">
+      <div className="text-base flex items-center">
+        <span className="text-sky-blue leading-none">SkyPilot API Server</span>
       </div>
 
-      {/* Main Content */}
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-base font-normal flex items-center justify-between">
-            <span>Edit SkyPilot API Server Configuration</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-gray-600 mb-3">
-            Refer to the{' '}
-            <a
-              href="https://docs.skypilot.co/en/latest/reference/config.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
+      <div className="flex items-center">
+        <div className="text-sm flex items-center">
+          {(loading || saving) && (
+            <div className="flex items-center mr-4">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500">
+                {saving ? 'Applying...' : 'Loading...'}
+              </span>
+            </div>
+          )}
+        </div>
+        {isGrafanaAvailable && (
+          <button
+            onClick={() => {
+              const grafanaUrl = getGrafanaUrl();
+              // Get app name from environment variable
+              const releaseName =
+                process.env.SKYPILOT_RELEASE_NAME || 'skypilot';
+              const appName = `${releaseName}-api`;
+              window.open(
+                `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${appName}`,
+                '_blank'
+              );
+            }}
+            className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
+          >
+            <svg
+              className="w-4 h-4 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
             >
-              SkyPilot Docs
-            </a>{' '}
-            for details. The configuration should be in YAML format.
-          </p>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+              />
+            </svg>
+            View API Server Metrics
+          </button>
+        )}
+        <NewVersionAvailable />
+        <PluginSlot
+          name="settings.version-display"
+          fallback={<VersionDisplay />}
+        />
+      </div>
+    </div>
+  );
 
-          {/* Success Message */}
-          {saveSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
+  // The API server configuration exposes admin-only secrets. Anyone who can't
+  // read it (restricted non-admins, or viewers) gets an access-denied card
+  // instead of a 403 -- but the header above is still shown.
+  if (!canViewConfig) {
+    return (
+      <>
+        {header}
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-base font-normal">
+              API Server Configuration
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-600">
+              You must be an admin to view the API server configuration.
+            </p>
+          </CardContent>
+        </Card>
+      </>
+    );
+  }
+
+  // The default editor card. Plugins can replace it via the
+  // `settings.config.editor` slot below; this card renders when nothing is
+  // registered for the slot.
+  const editorCard = (
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle className="text-base font-normal flex items-center justify-between">
+          <span>Edit SkyPilot API Server Configuration</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-gray-600 mb-3">
+          Refer to the{' '}
+          <a
+            href="https://docs.skypilot.co/en/latest/reference/config.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            SkyPilot Docs
+          </a>{' '}
+          for details. The configuration should be in YAML format.
+        </p>
+
+        {/* Success Message */}
+        {saveSuccess && (
+          <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg
+                    className="h-5 w-5 text-green-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-green-800">
+                    Configuration saved successfully!
+                  </p>
+                </div>
+              </div>
+              <div className="ml-auto pl-3">
+                <div className="-mx-1.5 -my-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSuccessDismiss}
+                    className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                  >
+                    <span className="sr-only">Dismiss</span>
                     <svg
-                      className="h-5 w-5 text-green-400"
+                      className="h-5 w-5"
                       viewBox="0 0 20 20"
                       fill="currentColor"
                     >
                       <path
                         fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
                         clipRule="evenodd"
                       />
                     </svg>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-green-800">
-                      Configuration saved successfully!
-                    </p>
-                  </div>
-                </div>
-                <div className="ml-auto pl-3">
-                  <div className="-mx-1.5 -my-1.5">
-                    <button
-                      type="button"
-                      onClick={handleSuccessDismiss}
-                      className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
-                    >
-                      <span className="sr-only">Dismiss</span>
-                      <svg
-                        className="h-5 w-5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Error Display */}
-          {error && (
-            <div className="mb-6">
-              <ErrorDisplay
-                error={error}
-                title="Failed to apply new configuration"
-                onDismiss={() => setError(null)}
-              />
-            </div>
-          )}
-
-          <div className="w-full">
-            <YamlEditor
-              value={editableConfig}
-              onChange={(val) => setEditableConfig(val)}
-              minHeight="384px"
-              maxHeight="600px"
-              disabled={loading || saving}
+        {/* Error Display */}
+        {error && (
+          <div className="mb-6">
+            <ErrorDisplay
+              error={error}
+              title="Failed to apply new configuration"
+              onDismiss={() => setError(null)}
             />
           </div>
+        )}
 
-          <div className="flex justify-end space-x-3 pt-3">
-            <Button
-              onClick={handleSave}
-              disabled={loading || saving}
-              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
-            >
-              {saving ? (
-                <>
-                  <CircularProgress size={16} className="mr-2" />
-                  Applying...
-                </>
-              ) : (
-                <>
-                  <SaveIcon className="w-4 h-4 mr-1.5" />
-                  Apply
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="w-full">
+          <YamlEditor
+            value={editableConfig}
+            onChange={(val) => setEditableConfig(val)}
+            minHeight="384px"
+            maxHeight="600px"
+            disabled={loading || saving}
+          />
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-3">
+          <Button
+            onClick={handleSave}
+            disabled={loading || saving}
+            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+          >
+            {saving ? (
+              <>
+                <CircularProgress size={16} className="mr-2" />
+                Applying...
+              </>
+            ) : (
+              <>
+                <SaveIcon className="w-4 h-4 mr-1.5" />
+                Apply
+              </>
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <>
+      {header}
+
+      {/* Main Content */}
+      <PluginSlot name="settings.config.editor" fallback={editorCard} />
+      <PluginSlot name="settings.config.history" />
     </>
   );
 }

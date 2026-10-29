@@ -48,6 +48,15 @@ class ClusterStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
+# Values for the `init_kind` field that sub-classifies ClusterStatus.INIT for
+# display purposes (see StatusResponse.init_kind in sky/schemas/api/responses):
+# a cluster in INIT is either actively provisioning ('launching') or was
+# flipped to INIT by an abnormal-state refresh ('unhealthy'). The dashboard
+# compares against the same literals in
+# sky/dashboard/src/data/connectors/clusters.jsx.
+INIT_KIND_LAUNCHING = 'launching'
+INIT_KIND_UNHEALTHY = 'unhealthy'
+
 _STATUS_TO_COLOR = {
     ClusterStatus.INIT: colorama.Fore.BLUE,
     ClusterStatus.UP: colorama.Fore.GREEN,

@@ -12,13 +12,18 @@ import pytest
 from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
+from sky import skypilot_config
+from sky import task as task_lib
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import registry
+from sky.utils import yaml_utils
 
 _DEFAULT_AUTOSTOP = {
     'down': False,
@@ -45,7 +50,6 @@ _DEFAULT_AUTOSTOP = {
         }),
         ('serve', {}, {
             'cpus': '4+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('serve', {
@@ -53,7 +57,6 @@ _DEFAULT_AUTOSTOP = {
         }, {
             'cpus': '4+',
             'memory': '32+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
     ])
@@ -654,6 +657,88 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     assert 'cudoctl' in combined_commands
 
 
+def _controller_config(consolidated, user_config, monkeypatch):
+    """The config a jobs controller gets for `user_config`."""
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    monkeypatch.setattr('sky.utils.controller_utils.is_jobs_consolidation_mode',
+                        lambda: consolidated)
+    controller = controller_utils.Controllers.from_type('jobs')
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', user_config)
+    saved_config = yaml_utils.read_yaml(result['local_user_config_path'])
+    os.unlink(result['local_user_config_path'])
+    return saved_config
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_workspace_names(consolidated: bool, monkeypatch):
+    """A dedicated controller (maybe an older wheel) gets no workspace names.
+    A consolidated one (same version as the server) keeps them, so its config
+    matches the server's. Both hold the active workspace as its id."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'team-a',
+            'workspaces': {
+                'team-a': {
+                    'name': 'proj-a',
+                    'private': False
+                }
+            },
+        }, monkeypatch)
+
+    expected = {'private': False}
+    if consolidated:
+        expected['name'] = 'proj-a'
+    assert saved_config['workspaces'] == {'team-a': expected}
+    assert saved_config['active_workspace'] == 'team-a'
+    assert 'active_workspace_id' not in saved_config
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_pins_id_for_policy_set_name(consolidated: bool,
+                                                       monkeypatch):
+    """An admin policy may set `active_workspace` to a name; the controller
+    gets the id in either mode."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'proj-a',
+            'workspaces': {
+                'ws-0123456789ab': {
+                    'name': 'proj-a'
+                },
+                'team-b': {}
+            },
+        }, monkeypatch)
+
+    assert saved_config['active_workspace'] == 'ws-0123456789ab'
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_keeps_an_id_over_a_clashing_name(
+        consolidated: bool, monkeypatch):
+    """A hand edit named another workspace after the active workspace's id;
+    the replayed config still holds that id."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'team-a',
+            'workspaces': {
+                'team-a': {
+                    'name': 'archive'
+                },
+                'ws-0123456789ab': {
+                    'name': 'team-a'
+                }
+            },
+        }, monkeypatch)
+
+    assert saved_config['active_workspace'] == 'team-a'
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config(saved_config)):
+        assert skypilot_config.get_active_workspace() == 'team-a'
+
+
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     """Test that api_server config is removed from user config sent to controller."""
@@ -1184,3 +1269,149 @@ def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
 
     assert result is None
     assert not called
+
+
+def test_shared_bucket_prefix_scopes_workspace():
+    """Shared-bucket keys include the workspace so IAM can enforce RBAC."""
+    prefix = controller_utils._shared_bucket_workspace_prefix(None, 'team-a')
+    assert prefix == 'workspaces/team-a'
+
+    prefixed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'team_b1')
+    assert prefixed == 'custom/root/workspaces/team_b1'
+
+    trimmed = controller_utils._shared_bucket_workspace_prefix(
+        'custom/root/', 'default')
+    assert trimmed == 'custom/root/workspaces/default'
+
+
+def test_shared_bucket_prefix_maps_legacy_workspace_names():
+    """Workspaces that predate the name rule still get their own prefix.
+
+    The segment is a slug plus a hash of the exact name, joined by '.', which
+    no valid name contains, so it is one path segment that collides neither
+    with a valid name nor with another legacy name.
+    """
+    segment = controller_utils._workspace_bucket_segment
+    assert segment('Research') == 'research.979d6300'
+    assert segment('RESEARCH') == 'research.dd7c11fb'
+    # A path separator cannot widen the IAM prefix.
+    assert segment('ml/prod') == 'ml-prod.c0f7bb6f'
+    assert segment('ml.prod') == 'ml-prod.b348490e'
+    assert segment('///') == 'ws.732c4e97'
+    assert segment('A' * 60) == 'a' * 32 + '.' + segment('A' * 60)[-8:]
+
+    assert controller_utils._shared_bucket_workspace_prefix(
+        'custom/root', 'ml/prod') == 'custom/root/workspaces/ml-prod.c0f7bb6f'
+
+
+def test_shared_bucket_prefix_keeps_valid_workspace_names():
+    """Valid names are used as-is, so the layout for them never changes."""
+    for name in ('default', 'team-a', 'team_b1', 'a', 'x' * 60):
+        assert controller_utils._workspace_bucket_segment(name) == name
+
+
+def test_shared_bucket_upload_paths_are_scoped_per_workspace(
+        tmp_path, monkeypatch):
+    """Workdir, directory, and file uploads use the active workspace prefix.
+
+    Two workspaces sharing one bucket must not produce the same object keys.
+    """
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    (workdir / 'main.py').write_text('print(1)\n')
+    folder = tmp_path / 'folder'
+    folder.mkdir()
+    (folder / 'data.txt').write_text('data\n')
+    one_file = tmp_path / 'one.txt'
+    one_file.write_text('file\n')
+
+    blob = mock.Mock()
+    blob.file_mounts_tmp_dir.return_value = str(tmp_path / 'blob')
+    monkeypatch.setattr(controller_utils.bs, 'get_blob_storage', lambda: blob)
+    monkeypatch.setattr(controller_utils, '_generate_run_uuid',
+                        lambda: 'run12345')
+
+    def _bucket_only(keys, default_value, override_configs=None):
+        del override_configs  # patched get_nested; only the jobs bucket is stubbed
+        if keys == ('jobs', 'bucket'):
+            return 'gs://file-mounts-bucket'
+        return default_value
+
+    monkeypatch.setattr(controller_utils.skypilot_config, 'get_nested',
+                        _bucket_only)
+    monkeypatch.setattr(controller_utils.storage_lib,
+                        'get_cached_enabled_storage_cloud_names_or_refresh',
+                        lambda: ['GCP'])
+
+    class _RecordingStorage:
+        """Stand-in that records the object key and skips the cloud upload."""
+
+        def __init__(self, **kwargs):
+            self.name = kwargs['name']
+            self.source = kwargs['source']
+            self.mode = kwargs['mode']
+            self.persistent = kwargs['persistent']
+            self.force_delete = False
+            self.bucket_sub_path = kwargs['_bucket_sub_path']
+            self.stores = {
+                storage_lib.StoreType.GCS: mock.Mock(spec=storage_lib.GcsStore)
+            }
+
+    monkeypatch.setattr(controller_utils.storage_lib, 'Storage',
+                        _RecordingStorage)
+
+    paths_by_workspace = {}
+    file_urls_by_workspace = {}
+    for workspace in ('team-a', 'team-b'):
+        task = task_lib.Task(
+            workdir=str(workdir),
+            file_mounts={
+                '/remote/folder': str(folder),
+                '/remote/one.txt': str(one_file),
+            },
+        )
+        monkeypatch.setattr(task, 'sync_storage_mounts', lambda: None)
+        with skypilot_config.local_active_workspace_ctx(workspace):
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, 'jobs')
+        mounts = task.storage_mounts
+        paths_by_workspace[workspace] = {
+            path: storage.bucket_sub_path for path, storage in mounts.items()
+        }
+        file_urls_by_workspace[workspace] = task.file_mounts['/remote/one.txt']
+
+    run = 'job-run12345'
+    for workspace, paths in paths_by_workspace.items():
+        prefix = f'workspaces/{workspace}/{run}'
+        assert paths[constants.SKY_REMOTE_WORKDIR] == f'{prefix}/workdir'
+        assert paths['/remote/folder'] == f'{prefix}/local-file-mounts/0'
+        tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format('jobs')
+        assert paths[tmp_dir] == f'{prefix}/tmp-files'
+        assert file_urls_by_workspace[workspace] == (
+            f'gs://file-mounts-bucket/{prefix}/tmp-files/file-0')
+
+    assert paths_by_workspace['team-a'] != paths_by_workspace['team-b']
+
+
+@pytest.mark.parametrize('name', [
+    'sky-jobs-controller-attacker',
+    'sky-serve-controller-attacker',
+    'sky-jobs-controller-a_b',
+])
+def test_rejected_controller_name_does_not_replace_the_real_one(
+        name, monkeypatch):
+    """API-server workers are reused across requests: a rejected name must not
+    become the controller name the next `jobs launch` in that worker uses."""
+    controllers = (controller_utils.Controllers.JOBS_CONTROLLER,
+                   controller_utils.Controllers.SKY_SERVE_CONTROLLER)
+    for controller in controllers:
+        # Restored on teardown even if the guard does overwrite it.
+        monkeypatch.setattr(controller.value, '_cluster_name_from_server',
+                            controller.value._cluster_name_from_server)
+    real_names = [c.value.cluster_name for c in controllers]
+
+    with pytest.raises(exceptions.NotSupportedError, match=name):
+        controller_utils.check_cluster_name_not_controller(name)
+
+    assert [c.value.cluster_name for c in controllers] == real_names

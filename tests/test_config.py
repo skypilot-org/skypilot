@@ -1,5 +1,6 @@
 """Test skypilot_config"""
 import copy
+import json
 import os
 import pathlib
 import shutil
@@ -15,7 +16,9 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import schemas
 from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
@@ -166,6 +169,100 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
+    """A reload must never expose a transient empty config.
+
+    `reload_config` builds the new config fully and swaps it in with a single
+    assignment. A concurrent reader that hits `get_nested` while a reload is in
+    flight must observe the previously-loaded value, never the fallback. This
+    guards against the old blank-then-repopulate behavior, which let a reader
+    (e.g. `rbac.get_default_role()`) fall back to admin mid-reload.
+    """
+    config_file = tmp_path / 'config.yaml'
+    config_file.write_text('rbac:\n  default_role: user\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_file)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'does_not_exist')
+    _reload_config()
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      'admin') == 'user'
+
+    # Spy on the file read that happens in the middle of a reload; while it runs,
+    # the not-yet-swapped config must still return the old value. With the old
+    # pre-blanking this observed 'admin' (the fallback); with the atomic swap it
+    # stays 'user'.
+    observed = []
+    real_get_config_from_path = skypilot_config._get_config_from_path
+
+    def spy_get_config_from_path(path):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return real_get_config_from_path(path)
+
+    monkeypatch.setattr(skypilot_config, '_get_config_from_path',
+                        spy_get_config_from_path)
+    # Call reload_config directly (not `_reload_config`, which resets the loaded
+    # config first) so the previously-loaded config is what a mid-reload reader
+    # would see.
+    skypilot_config.reload_config()
+
+    assert observed, 'reload did not read the config file'
+    assert all(value == 'user' for value in observed), (
+        f'config was empty mid-reload (would fall back to admin): {observed}')
+
+
+class _DummyLock:
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
+    """`safe_reload_config` (a pure read) must take the lock in SHARED mode so
+    concurrent reloads don't serialize. Reverting `shared_lock=True` fails this.
+    """
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+
+    skypilot_config.safe_reload_config()
+
+    assert captured.get('shared_lock') is True
+
+
+def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
+    """Writers (the default) must take the lock EXCLUSIVELY."""
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+
+    skypilot_config.get_skypilot_config_lock()
+
+    assert captured.get('shared_lock') is False
+
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
@@ -240,6 +337,45 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
         """))
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        skypilot_config.reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
+@pytest.mark.parametrize('enforce_tags', [
+    '[]',
+    '[instance]',
+    '[volume]',
+    '[instance, volume]',
+    '[volume, instance]',
+])
+def test_aws_enforce_tags_valid(monkeypatch, tmp_path, enforce_tags) -> None:
+    config_path = tmp_path / 'valid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'enforce_tags'), None) is not None
+
+
+@pytest.mark.parametrize(('enforce_tags', 'reason'), [
+    ('[volume, volume]', 'duplicate'),
+    ('[Volume]', 'wrong case'),
+    ('[disk]', 'not a supported resource type'),
+])
+def test_aws_enforce_tags_invalid(monkeypatch, tmp_path, enforce_tags,
+                                  reason) -> None:
+    del reason  # Only for readable test ids.
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     with pytest.raises(ValueError) as e:
         skypilot_config.reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
@@ -473,6 +609,94 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
         'provision_timeout'] == PROVISION_TIMEOUT
 
 
+def test_ssh_proxy_command_override_is_dropped(monkeypatch, tmp_path) -> None:
+    """A client must not set `<cloud>.ssh_proxy_command`: it runs as a
+    server-side SSH ProxyCommand during provisioning, so it is server-owned."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            aws:
+              ssh_proxy_command: ssh -W %h:%p server-bastion
+            gcp:
+              vpc_name: test-vpc
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    # A client override of the key is ignored; the server value stands.
+    with skypilot_config.override_skypilot_config({
+            'aws': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            },
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region='us-east-1',
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p server-bastion'
+        # A cloud with no server-side value falls back to None, not the client.
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+    # A non-command override on the same cloud still applies.
+    with skypilot_config.override_skypilot_config({
+            'gcp': {
+                'ssh_proxy_command': 'touch /tmp/pwned',
+                'vpc_name': 'client-vpc'
+            }
+    }):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('vpc_name',),
+            default_value=None) == 'client-vpc'
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region='us-central1',
+            keys=('ssh_proxy_command',),
+            default_value=None) is None
+
+
+def test_ssh_proxy_command_kept_for_controller_launch(monkeypatch,
+                                                      tmp_path) -> None:
+    """A jobs/serve controller launches through its local API server with the
+    job config in SKYPILOT_CONFIG; the server loads it as its own config, so
+    the job's ssh_proxy_command survives the client-override strip."""
+    job_config = {
+        'gcp': {
+            'ssh_proxy_command': 'ssh -W %h:%p bastion'
+        },
+        # The controller's own cloud, restricted to the controller's regions.
+        'aws': {
+            'ssh_proxy_command': {
+                'us-east-1': None
+            }
+        },
+    }
+    config_path = tmp_path / 'job_config.yaml'
+    yaml_utils.dump_yaml(str(config_path), job_config)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(copy.deepcopy(job_config)):
+        assert skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None) == 'ssh -W %h:%p bastion'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == {
+                                              'us-east-1': None
+                                          }
+
+
 def test_config_with_invalid_override(monkeypatch, tmp_path,
                                       enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
@@ -586,8 +810,9 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
         # Check values are overridden
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
+        # ssh_proxy_command is server-owned, so its override is ignored.
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+                                          None) == original_proxy
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
@@ -634,8 +859,9 @@ def test_override_skypilot_config_without_original_config(
     with skypilot_config.override_skypilot_config(override_configs):
         assert skypilot_config.get_nested(('aws', 'vpc_name'),
                                           None) == 'override-vpc'
-        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
-                                          None) == 'override-command'
+        # ssh_proxy_command is server-owned; with no server value it stays None.
+        assert skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None) is None
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
@@ -643,6 +869,40 @@ def test_override_skypilot_config_without_original_config(
         ('aws', 'ssh_proxy_command'), None) is None
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
     assert not skypilot_config._get_loaded_config()
+
+
+def test_set_loaded_config_path_empty_is_not_serialized_null():
+    """An absent config path must be stored as None, not the string 'null'."""
+    original = skypilot_config.loaded_config_path_serialized()
+    try:
+        skypilot_config._set_loaded_config_path(None)
+        assert skypilot_config.loaded_config_path_serialized() is None
+        assert skypilot_config._get_loaded_config_path() == []
+    finally:
+        skypilot_config._set_loaded_config_path_serialized(original)
+
+
+def test_override_skypilot_config_with_null_config_path(monkeypatch, tmp_path):
+    """override_skypilot_config tolerates a config path serialized as 'null'.
+
+    A client with no config file (e.g. one whose config comes from the DB
+    backend) can send the JSON string 'null' as its config path. json.loads()
+    turns that into None, which used to be concatenated with a list.
+    """
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    override_configs = {'aws': {'vpc_name': 'override-vpc'}}
+    with skypilot_config.override_skypilot_config(override_configs,
+                                                  json.dumps(None)):
+        assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                          None) == 'override-vpc'
+        loaded_paths = skypilot_config._get_loaded_config_path()
+        assert isinstance(loaded_paths, list)
+        assert str(config_path) in loaded_paths
 
 
 def test_hierarchical_client_config(monkeypatch, tmp_path):
@@ -843,6 +1103,62 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
                 'your administrator.')
 
 
+def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
+    """A client override must not make private workspaces readable."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        workspaces:
+            team-b:
+                private: true
+                allowed_users: [bob]
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'workspace_config': {
+            'read_access': 'all'
+        }}):
+        assert skypilot_config.get_nested(
+            ('workspace_config', 'read_access'), None) is None
+
+
+def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
+    """A client override must not replace the server's admin policy."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        admin_policy: server_policy.ServerPolicy
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'admin_policy': 'client_policy.ClientPolicy'}):
+        # The server's admin policy is kept; the client override is ignored.
+        assert skypilot_config.get_nested(('admin_policy',),
+                                          None) == 'server_policy.ServerPolicy'
+
+
+def test_client_cannot_override_logs(monkeypatch, tmp_path):
+    """A client override must not redirect where the server ships its logs."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        logs:
+            store: gcp
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config({'logs': {'store': 'aws'}}):
+        assert skypilot_config.get_nested(('logs', 'store'), None) == 'gcp'
+
+
 def test_hierarchical_server_config(monkeypatch, tmp_path):
     """Test that hierarchical server config is loaded correctly."""
     # prepare a clean test environment
@@ -900,6 +1216,155 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-project-config'), None) is None
+
+
+def test_config_save_validator(monkeypatch, tmp_path):
+    """Validators run before persisting and can veto the config save."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    # Isolate the validator registry so the test does not leak global state.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+
+    config_path = str(tmp_path / 'server_config.yaml')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                aws:
+                    labels:
+                        original: present
+                """))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    new_config.set_nested(('aws', 'labels', 'added'), 'yes')
+
+    # A validator that vetoes by raising blocks the save.
+    calls = []
+
+    def vetoing_validator(current, incoming):
+        calls.append((copy.deepcopy(current), copy.deepcopy(incoming)))
+        raise ValueError('rejected config change')
+
+    skypilot_config.register_config_save_validator(vetoing_validator)
+
+    with pytest.raises(ValueError, match='rejected config change'):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+
+    # The validator saw the currently-persisted config and the incoming
+    # config, and the on-disk config is unchanged.
+    assert len(calls) == 1
+    seen_current, seen_incoming = calls[0]
+    assert seen_current.get_nested(('aws', 'labels', 'added'), None) is None
+    assert seen_incoming.get_nested(('aws', 'labels', 'added'), None) == 'yes'
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present'
+            }
+        }
+    }
+
+    # A validator that passes lets the save through.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    passed = []
+
+    def passing_validator(current, incoming):
+        del current, incoming
+        passed.append(True)
+
+    skypilot_config.register_config_save_validator(passing_validator)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert passed == [True]
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present',
+                'added': 'yes'
+            }
+        }
+    }
+
+    # Registration is idempotent.
+    skypilot_config.register_config_save_validator(passing_validator)
+    assert skypilot_config._CONFIG_SAVE_VALIDATORS.count(passing_validator) == 1
+
+
+def test_config_post_save_hook(monkeypatch, tmp_path):
+    """Post-save hooks receive the old config, new config, and the user."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    # Isolate the hook registries so the test does not leak global state.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_POST_SAVE_HOOKS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_UPDATE_HOOKS', [])
+
+    config_path = str(tmp_path / 'server_config.yaml')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                aws:
+                    labels:
+                        original: present
+                """))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    new_config.set_nested(('aws', 'labels', 'added'), 'yes')
+
+    calls = []
+
+    def post_save_hook(old, new, user):
+        calls.append((copy.deepcopy(old), copy.deepcopy(new), user))
+        # A raising hook must not fail the save.
+        raise RuntimeError('hook exploded')
+
+    skypilot_config.register_config_post_save_hook(post_save_hook)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+
+    # The save went through despite the raising hook.
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present',
+                'added': 'yes'
+            }
+        }
+    }
+    assert len(calls) == 1
+    seen_old, seen_new, seen_user = calls[0]
+    assert seen_old.get_nested(('aws', 'labels', 'added'), None) is None
+    assert seen_old.get_nested(('aws', 'labels', 'original'), None) == 'present'
+    assert seen_new.get_nested(('aws', 'labels', 'added'), None) == 'yes'
+    assert seen_user is not None
+    assert seen_user.id
+
+    # Each hook receives its own copies: mutating them affects neither the
+    # loaded config nor the configs seen by subsequent hooks.
+    observed = []
+
+    def mutating_hook(old, new, user):
+        del user
+        old.set_nested(('aws', 'labels', 'mutated_old'), 'yes')
+        new.set_nested(('aws', 'labels', 'mutated'), 'yes')
+
+    def observing_hook(old, new, user):
+        del user
+        observed.append((old.get_nested(('aws', 'labels', 'mutated_old'), None),
+                         new.get_nested(('aws', 'labels', 'mutated'), None)))
+
+    monkeypatch.setattr(skypilot_config, '_CONFIG_POST_SAVE_HOOKS', [])
+    skypilot_config.register_config_post_save_hook(mutating_hook)
+    skypilot_config.register_config_post_save_hook(observing_hook)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert skypilot_config.get_nested(
+        ('aws', 'labels', 'mutated'), None) is None
+    assert observed == [(None, None)]
+
+    # Registration is idempotent.
+    skypilot_config.register_config_post_save_hook(mutating_hook)
+    assert skypilot_config._CONFIG_POST_SAVE_HOOKS.count(mutating_hook) == 1
 
 
 def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
@@ -1543,7 +2008,7 @@ def test_get_effective_namespace_override_configs(monkeypatch,
         override_configs=cloud_level_override) == 'override-namespace'
 
 
-def test_get_effective_k8s_config_value_returns_none_when_unset(
+def test_get_effective_scoped_config_value_returns_none_when_unset(
         monkeypatch, tmp_path) -> None:
     """No matching key at any scope -> None."""
     with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
@@ -1552,14 +2017,14 @@ def test_get_effective_k8s_config_value_returns_none_when_unset(
                         tmp_path / 'empty.yaml')
     skypilot_config.reload_config()
 
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=[('namespace',)],
         region='contextA',
         workspace='default') is None
 
 
-def test_get_effective_k8s_config_value_property_key_priority(
+def test_get_effective_scoped_config_value_property_key_priority(
         monkeypatch, tmp_path) -> None:
     """Within a scope, ``property_keys`` order is priority (first hit wins).
 
@@ -1587,31 +2052,31 @@ def test_get_effective_k8s_config_value_property_key_priority(
     keys = [('primary',), ('secondary',)]
 
     # Cloud-level: both set, `primary` wins.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         workspace='default') == 'from-primary'
     # Per-context where only `secondary` is set: falls through to it.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextA',
         workspace='default') == 'contextA-from-secondary'
     # Per-context where both are set: `primary` wins.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextB',
         workspace='default') == 'contextB-from-primary'
     # Reversed order changes the winner.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=[('secondary',), ('primary',)],
         region='contextB',
         workspace='default') == 'contextB-from-secondary'
 
 
-def test_get_effective_k8s_config_value_full_precedence_matrix(
+def test_get_effective_scoped_config_value_full_precedence_matrix(
         monkeypatch, tmp_path) -> None:
     """Full precedence: ws per-context > ws cloud > global per-context > global cloud.
 
@@ -1645,36 +2110,36 @@ def test_get_effective_k8s_config_value_full_precedence_matrix(
     keys = [('myfield',)]
 
     # Layer 1: ws per-context wins everything.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextA',
         workspace='workspaceA') == 'ws-context'
     # Layer 2: ws cloud wins when ws has no per-context override.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextB',
         workspace='workspaceA') == 'ws-cloud'
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         workspace='workspaceB') == 'wsB-cloud'
     # Layer 3: global per-context when ws has no override at any layer.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextA',
         workspace='workspaceC') == 'global-context'
     # Layer 4: global cloud as final fallback.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextB',
         workspace='workspaceC') == 'global-cloud'
 
 
-def test_get_effective_k8s_config_value_override_configs_at_workspace_scope(
+def test_get_effective_scoped_config_value_override_configs_at_workspace_scope(
         monkeypatch, tmp_path) -> None:
     """Cloud-level ``override_configs`` apply inside the workspace scope.
 
@@ -1703,13 +2168,13 @@ def test_get_effective_k8s_config_value_override_configs_at_workspace_scope(
     cloud_override = {'kubernetes': {'myfield': 'override-value'}}
 
     # Cloud-level override replaces the workspace's cloud-level value.
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         workspace='workspaceA',
         override_configs=cloud_override) == 'override-value'
     # Per-context value at the workspace scope still wins (more specific).
-    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+    assert skypilot_config._get_effective_scoped_config_value(  # pylint: disable=protected-access
         cloud='kubernetes',
         property_keys=keys,
         region='contextA',
@@ -1788,8 +2253,8 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'quota', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
 
     def test_noop_when_no_queue_name_set(self):
         """No error when queue name keys are absent."""
@@ -1850,7 +2315,8 @@ class TestRemoveQueueNameFromConfig:
              mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
             with skypilot_config.remove_queue_name_from_config():
                 current = skypilot_config.to_dict()
-                # Both the original and extra key should be None everywhere.
+                # Both the original and extra key should be removed
+                # everywhere.
                 for keys in [
                     ('kubernetes', 'kueue', 'local_queue_name'),
                     ('kubernetes', 'custom', 'queue'),
@@ -1864,5 +2330,397 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'custom', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
+
+    def test_mutated_config_passes_schema_validation(self):
+        """Regression: removal must not leave `null` values behind.
+
+        Setting the queue keys to None instead of popping them produced a
+        mutated config that fails schema validation (`quota.queue` and
+        `kueue.local_queue_name` require strings), breaking anything that
+        reloads the config while the override is active.
+        """
+        cfg = _make_config({
+            'kubernetes': {
+                'quota': {
+                    'queue': 'root-quota-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx1-q'
+                        },
+                        'quota': {
+                            'queue': 'ctx1-quota-q'
+                        }
+                    }
+                }
+            },
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # Must not raise.
+                common_utils.validate_schema(dict(current),
+                                             schemas.get_config_schema(),
+                                             'Invalid mutated config: ',
+                                             skip_none=False)
+
+
+class _BodyError(Exception):
+    """Raised from inside a context manager body."""
+
+
+def test_replace_skypilot_config_restores_on_exception(monkeypatch, tmp_path):
+    """replace_skypilot_config undoes the replacement if the body raises."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(f'aws:\n  vpc_name: {VPC_NAME}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'non_existent.yaml')
+    _reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+    original_config = skypilot_config._get_loaded_config()
+    original_config_path = skypilot_config.loaded_config_path_serialized()
+    new_configs = _make_config({'aws': {'vpc_name': 'replacement-vpc'}})
+
+    with pytest.raises(_BodyError):
+        with skypilot_config.replace_skypilot_config(new_configs):
+            assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                              None) == 'replacement-vpc'
+            assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG].endswith(
+                '.yaml')
+            raise _BodyError()
+
+    assert skypilot_config._get_loaded_config() == original_config
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+    assert (
+        skypilot_config.loaded_config_path_serialized() == original_config_path)
+    # The env var was unset before, so it must be unset again rather than set
+    # to an empty string, which reload_config() would read as a config path.
+    assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in os.environ
+
+    # A later reload must see the original config, not the replacement.
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+
+def test_replace_skypilot_config_restores_env_var_on_exception(
+        monkeypatch, tmp_path):
+    """A pre-existing config env var is restored if the body raises."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(f'aws:\n  vpc_name: {VPC_NAME}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'non_existent.yaml')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    _reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+    original_config = skypilot_config._get_loaded_config()
+    original_config_path = skypilot_config.loaded_config_path_serialized()
+    new_configs = _make_config({'aws': {'vpc_name': 'replacement-vpc'}})
+
+    with pytest.raises(_BodyError):
+        with skypilot_config.replace_skypilot_config(new_configs):
+            assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] != str(
+                config_path)
+            raise _BodyError()
+
+    assert skypilot_config._get_loaded_config() == original_config
+    assert (
+        skypilot_config.loaded_config_path_serialized() == original_config_path)
+    assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == str(
+        config_path)
+
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+
+def test_get_effective_queue_name_slurm(monkeypatch, tmp_path) -> None:
+    """Slurm `quota.queue`: workspace > global; partition > cluster > cloud."""
+    with open(tmp_path / 'slurm_quota.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                queue: global-cloud-qos
+            cluster_configs:
+                clusterA:
+                    quota:
+                        queue: global-clusterA-qos
+                    partition_configs:
+                        gpu:
+                            quota:
+                                queue: global-clusterA-gpu-qos
+                clusterB: {}
+        workspaces:
+            workspaceA:
+                slurm:
+                    quota:
+                        queue: ws-cloud-qos
+                    cluster_configs:
+                        clusterA:
+                            quota:
+                                queue: ws-clusterA-qos
+            workspaceB: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota.yaml')
+    skypilot_config.reload_config()
+
+    # Workspace scope beats every global scope, including a more specific
+    # global partition-level value.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm',
+        region='clusterA',
+        partition='gpu',
+        workspace='workspaceA') == 'ws-clusterA-qos'
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm',
+        region='clusterB',
+        partition='gpu',
+        workspace='workspaceA') == 'ws-cloud-qos'
+    # Global: partition > cluster > cloud.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm',
+        region='clusterA',
+        partition='gpu',
+        workspace='workspaceB') == 'global-clusterA-gpu-qos'
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm',
+        region='clusterA',
+        partition='cpu',
+        workspace='workspaceB') == 'global-clusterA-qos'
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm', region='clusterB',
+        workspace='workspaceB') == 'global-cloud-qos'
+    # Task overrides merge into every scope, so a task pinned at the
+    # partition scope wins over the server's partition value.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm',
+        region='clusterA',
+        partition='gpu',
+        workspace='workspaceB',
+        override_configs={
+            'slurm': {
+                'cluster_configs': {
+                    'clusterA': {
+                        'partition_configs': {
+                            'gpu': {
+                                'quota': {
+                                    'queue': 'task-partition-qos'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }) == 'task-partition-qos'
+
+
+def test_get_effective_queue_name_slurm_ignores_sbatch_options(
+        monkeypatch, tmp_path) -> None:
+    """`sbatch_options.qos` is not a `quota.queue` spelling for Slurm.
+
+    The legacy spelling is merged by the Slurm cloud itself and only applies
+    when no `quota.queue` is set at any scope, so the resolver must not
+    surface it.
+    """
+    with open(tmp_path / 'slurm_sbatch.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            sbatch_options:
+                qos: sbatch-only-qos
+                account: sbatch-only-account
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_sbatch.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_queue_name(
+        cloud='slurm', region='clusterA', workspace='default') is None
+    assert skypilot_config.get_effective_slurm_account(
+        cluster='clusterA', workspace='default') is None
+
+
+def test_get_effective_slurm_quota_value(monkeypatch, tmp_path) -> None:
+    """An arbitrary `quota.<key>` walks the same scopes as `quota.queue`."""
+    with open(tmp_path / 'slurm_quota_value.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                borrow_queue: global-cloud-borrow
+            cluster_configs:
+                clusterA:
+                    partition_configs:
+                        gpu:
+                            quota:
+                                borrow_queue: global-clusterA-gpu-borrow
+        workspaces:
+            workspaceA:
+                slurm:
+                    quota:
+                        borrow_queue: ws-cloud-borrow
+            workspaceB: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota_value.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='gpu',
+        workspace='workspaceA') == 'ws-cloud-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='gpu',
+        workspace='workspaceB') == 'global-clusterA-gpu-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='cpu',
+        workspace='workspaceB') == 'global-cloud-borrow'
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterA',
+        partition='cpu',
+        workspace='workspaceB',
+        override_configs={'slurm': {
+            'quota': {
+                'borrow_queue': 'task-borrow'
+            }
+        }}) == 'task-borrow'
+    # A cluster with no entry of its own still inherits the cloud scope.
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'borrow_queue',
+        cluster='clusterB',
+        partition='gpu',
+        workspace='workspaceB') == 'global-cloud-borrow'
+    # A sub-field nobody set reads as absent rather than raising.
+    assert skypilot_config.get_effective_slurm_quota_value(
+        'not_a_field', cluster='clusterA', partition='gpu') is None
+
+
+def test_get_effective_slurm_quota_value_preserves_type(monkeypatch,
+                                                        tmp_path) -> None:
+    """Non-string sub-fields come back as configured, not coerced.
+
+    `slurm.quota` is `additionalProperties: True`, so a sub-field can hold
+    any JSON type. Coercing to str would mask a mis-typed config and
+    returning None would silently drop it, so the value passes through and
+    the caller validates -- which is why the getter is annotated `Any`.
+    """
+    with open(tmp_path / 'slurm_quota_types.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                a_number: 42
+                a_bool: true
+                a_list: [one, two]
+                a_mapping: {nested: value}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota_types.yaml')
+    skypilot_config.reload_config()
+
+    get = skypilot_config.get_effective_slurm_quota_value
+    assert get('a_number', cluster='clusterA') == 42
+    assert get('a_bool', cluster='clusterA') is True
+    assert get('a_list', cluster='clusterA') == ['one', 'two']
+    assert get('a_mapping', cluster='clusterA') == {'nested': 'value'}
+
+
+def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
+    """`quota.account` walks the same scopes as the Slurm `quota.queue`."""
+    with open(tmp_path / 'slurm_account.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                account: global-cloud-account
+            cluster_configs:
+                clusterA:
+                    partition_configs:
+                        gpu:
+                            quota:
+                                account: global-clusterA-gpu-account
+        workspaces:
+            workspaceA:
+                slurm:
+                    quota:
+                        account: ws-cloud-account
+            workspaceB: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_account.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_slurm_account(
+        cluster='clusterA', partition='gpu',
+        workspace='workspaceA') == 'ws-cloud-account'
+    assert skypilot_config.get_effective_slurm_account(
+        cluster='clusterA', partition='gpu',
+        workspace='workspaceB') == 'global-clusterA-gpu-account'
+    assert skypilot_config.get_effective_slurm_account(
+        cluster='clusterA', partition='cpu',
+        workspace='workspaceB') == 'global-cloud-account'
+    assert skypilot_config.get_effective_slurm_account(
+        cluster='clusterA',
+        partition='cpu',
+        workspace='workspaceB',
+        override_configs={'slurm': {
+            'quota': {
+                'account': 'task-account'
+            }
+        }}) == 'task-account'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
+                                                    from_loopback) -> None:
+    """A remote client cannot widen the infra the server allows; a loopback
+    client still layers these keys. Other overrides apply either way."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'allowed_contexts': 'all',
+                'provision_timeout': 123
+            },
+            'ssh': {
+                'allowed_node_pools': ['other-pool']
+            },
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+        },
+            from_loopback=from_loopback):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])

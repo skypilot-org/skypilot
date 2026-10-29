@@ -21,12 +21,66 @@ than a middleware so it can mutate the parsed pydantic body
 in-place; standard Starlette middlewares run before body parsing.
 """
 
+from typing import Optional
+
 import fastapi
 
 from sky.server.requests import payloads
 from sky.users import permission
 from sky.users import rbac
 from sky.utils import common as common_lib
+
+
+def request_owner_scope(request: fastapi.Request) -> Optional[str]:
+    """The user_id that request-tracking queries must be scoped to.
+
+    Returns ``None`` (meaning "no scope — see every user's requests") when:
+      * the API server has no per-user identity for the caller
+        (``auth_user`` is unset) — either a single-user/local server, or a
+        deployment where auth is terminated upstream (e.g. basic auth at the
+        ingress) so no RBAC applies; or
+      * the caller is an admin.
+    Otherwise returns the caller's own user id, so a non-admin only ever
+    sees or acts on their own requests.
+
+    This is the single place that decides request-object visibility; every
+    ``/api/{get,stream,status,cancel,completion}`` handler routes its scope
+    through here.
+    """
+    auth_user = getattr(request.state, 'auth_user', None)
+    if auth_user is None:
+        return None
+    # In-memory lookup (no DB roundtrip), matching `_is_viewer`.
+    roles = permission.permission_service.roles_in_memory(auth_user.id)
+    if rbac.RoleName.ADMIN.value in roles:
+        return None
+    return auth_user.id
+
+
+def force_caller_scope_cancel_body(
+    request: fastapi.Request,
+    request_cancel_body: payloads.RequestCancelBody,
+) -> payloads.RequestCancelBody:
+    """Bind `POST /api/cancel` to the caller unless they are an admin.
+
+    A non-admin caller may only cancel their own requests, regardless of the
+    ``user_id`` they put in the body. Admins (and no-auth servers) may cancel
+    any request they name by id, whatever ``user_id`` the client sent: older
+    clients send their own user hash along with the ids, which would hide
+    every other user's request. Without ids they keep the client-supplied
+    value, so ``--all-users`` (``user_id=None`` => every request) and
+    ``--all`` (their own) still work. The strictly-read-only viewer role may
+    not cancel anything at all.
+    """
+    if _is_viewer(request):
+        raise fastapi.HTTPException(
+            status_code=403, detail='The viewer role cannot cancel requests.')
+    scope = request_owner_scope(request)
+    if scope is not None:
+        request_cancel_body.user_id = scope
+    elif request_cancel_body.request_ids is not None:
+        request_cancel_body.user_id = None
+    return request_cancel_body
 
 
 def _is_viewer(request: fastapi.Request) -> bool:
@@ -41,8 +95,7 @@ def _is_viewer(request: fastapi.Request) -> bool:
         return False
     # Trust the in-memory grouping policy; same source the middleware
     # already consulted to gate this request to here.
-    enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
-    roles = enforcer.get_roles_for_user(auth_user.id)
+    roles = permission.permission_service.roles_in_memory(auth_user.id)
     # Admin wins over viewer when both roles are present.
     return (rbac.RoleName.VIEWER.value in roles and
             rbac.RoleName.ADMIN.value not in roles)

@@ -200,13 +200,12 @@ def _create_network_interface(
         provider_config: Dict[str,
                               Any]) -> 'azure_network_models.NetworkInterface':
     network = azure.azure_mgmt_models('network')
-    compute = azure.azure_mgmt_models('compute')
     logger.info(f'Start creating network interface for {vm_name}...')
     if provider_config.get('use_internal_ips', False):
         name = f'{vm_name}-nic-private'
         ip_config = network.IPConfiguration(
             name=f'ip-config-private-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.Subnet(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
     else:
         name = f'{vm_name}-nic-public'
@@ -223,7 +222,7 @@ def _create_network_interface(
                     f'with address {ip_poller.result().ip_address}.')
         ip_config = network.IPConfiguration(
             name=f'ip-config-public-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.Subnet(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
             public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
 
@@ -268,9 +267,17 @@ def _create_vm(
                     key_data=public_key)
             ])),
         custom_data=os_linux_custom_data)
+    shared_gallery_image_id = node_config['azure_arm_parameters'].get(
+        'sharedGalleryImageId', None)
     community_image_id = node_config['azure_arm_parameters'].get(
         'communityGalleryImageId', None)
-    if community_image_id is not None:
+    if shared_gallery_image_id is not None:
+        # Prioritize a private Shared Image Gallery image, referenced by its
+        # full resource ID.
+        image_reference = compute.ImageReference(id=shared_gallery_image_id)
+        logger.info(f'Used shared_gallery_image_id: {shared_gallery_image_id} '
+                    f'for VM {vm_name}.')
+    elif community_image_id is not None:
         # Prioritize using community gallery image if specified.
         image_reference = compute.ImageReference(
             community_gallery_image_id=community_image_id)
@@ -590,6 +597,22 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     # So we don't need to wait here.
 
 
+def _vm_user_assigned_identity(vm) -> Optional[str]:
+    """The VM's user-assigned managed identity resource ID, if unambiguous.
+
+    Returns None when the VM has no user-assigned identity or more than
+    one: callers cannot know which of several identities carries the
+    intended permissions, so disambiguation is left to the user.
+    """
+    identity = getattr(vm, 'identity', None)
+    if identity is None or not identity.user_assigned_identities:
+        return None
+    identity_ids = list(identity.user_assigned_identities.keys())
+    if len(identity_ids) != 1:
+        return None
+    return identity_ids[0]
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -610,6 +633,19 @@ def get_cluster_info(
         filters,
         status_filters=[AzureInstanceStatus.RUNNING])
     head_instance_id = _get_head_instance_id(running_instances)
+
+    # Surface the cluster's user-assigned managed identity so
+    # post-provision steps can authenticate as that exact identity (e.g.
+    # the ACR docker login in DockerInitializer). The 'msi' key is only
+    # present in the in-memory bootstrap config during creation, so on
+    # restarts it must be re-derived from the live VM.
+    if 'msi' not in provider_config:
+        for inst in running_instances:
+            if inst.name == head_instance_id:
+                msi = _vm_user_assigned_identity(inst)
+                if msi is not None:
+                    provider_config = dict(provider_config, msi=msi)
+                break
 
     instances = {}
     use_internal_ips = provider_config.get('use_internal_ips', False)

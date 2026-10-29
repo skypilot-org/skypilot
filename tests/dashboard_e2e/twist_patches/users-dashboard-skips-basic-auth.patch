@@ -1,0 +1,9 @@
+diff --git a/sky/server/server.py b/sky/server/server.py
+index 287c1e17e..6edad372b 100644
+--- a/sky/server/server.py
++++ b/sky/server/server.py
+@@ -449,3 +449,3 @@ class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
+
+-        if request.url.path.startswith('/api/health'):
++        if request.url.path.startswith(('/api/health', '/dashboard/')):  # TWIST
+             # Try to set the auth user from basic auth

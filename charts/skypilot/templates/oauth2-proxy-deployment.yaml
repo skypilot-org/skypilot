@@ -73,7 +73,7 @@ spec:
         - --oidc-issuer-url={{ index $oauth2 "oidc-issuer-url" }}
         - --email-domain={{ index $oauth2 "email-domain" | default "*" }}
         - --upstream=file:///dev/null
-        - --http-address=0.0.0.0:4180
+        - --http-address={{ include "skypilot.oauth2HttpAddress" . }}
         - --skip-provider-button=true
         - --reverse-proxy=true
         - --set-xauthrequest

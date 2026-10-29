@@ -5,7 +5,7 @@ Serving Models
 
 .. note::
 
-    `SkyPilot Endpoints <https://blog.skypilot.co/skypilot-endpoints/>`_ is the next generation of SkyServe focused on production-readiness:
+    `SkyPilot Endpoints <https://skypilot.ai/blog/skypilot-endpoints>`_ is the next generation of SkyServe focused on production-readiness:
 
     - **High-performance:** prefill–decode disaggregation, cache-aware routing, TP/DP/PP/Wide-EP, vLLM and SGlang supported
     - **Multi-cluster by design:** run replicas across all your clusters
