@@ -2608,6 +2608,122 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server  # Restarts the API server
+@pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # restart api server requires full dependency installed
+def test_managed_jobs_launch_limit_keeps_recovered_jobs():
+    """Turning on the per-user launch limit across a restart strands nothing.
+
+    Two of a user's jobs are stuck launching (an image that cannot be pulled
+    keeps them in launch backoff) and a third is running when
+    ``jobs.max_launching_jobs_per_user`` is set to 2 and the API server
+    restarts. Recovery puts all three back in the queue. The stuck jobs have
+    the lower ids, so they are claimed first and put the user at the limit.
+    The running job must still be claimed again (it has a live task): it is
+    never reported as held and it finishes as SUCCEEDED. A job submitted
+    afterwards is held, and released once a stuck job is cancelled.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: the API server restart must '
+                    'restart the jobs controllers.')
+    name = smoke_tests_utils.get_cluster_name()
+    stuck_1 = f'{name}-stuck-1'
+    stuck_2 = f'{name}-stuck-2'
+    running = f'{name}-run'
+    held = f'{name}-held'
+    bad_image = 'nonexistent-registry.invalid/sky/missing:bad-tag'
+    limit = 2
+
+    def _launch(job_name: str, *args: str) -> str:
+        # Flags go before the entrypoint that follows `--`.
+        return (f'sky jobs launch -n {job_name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {" ".join(args)}')
+
+    def _row(job_name: str) -> str:
+        # The job's row in the verbose queue, which carries DETAILS.
+        return (
+            f'QUEUE=$(sky jobs queue -v) && echo "$QUEUE" && '
+            f'ROW=$(echo "$QUEUE" | grep -E "^[0-9]+[[:space:]].*{job_name}" '
+            f'| head -n1) && echo "ROW=$ROW"')
+
+    held_text = f'user already has {limit} jobs'
+    # Add the limit to the server config the restart below loads. The config
+    # path is the merged temp file override_sky_config wrote.
+    set_limit = (
+        'python3 -c "import os, yaml; '
+        'p = os.environ[\'SKYPILOT_GLOBAL_CONFIG\']; '
+        'c = yaml.safe_load(open(p)) or {}; '
+        f'c.setdefault(\'jobs\', {{}})[\'max_launching_jobs_per_user\'] = {limit}; '
+        'open(p, \'w\').write(yaml.safe_dump(c))" && '
+        'cat "$SKYPILOT_GLOBAL_CONFIG"')
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-launch-limit-keeps-recovered-jobs',
+        [
+            # Lower ids first: the two jobs that will count toward the limit.
+            _launch(stuck_1, f'--image-id docker:{bad_image}', '-- echo hi'),
+            _launch(stuck_2, f'--image-id docker:{bad_image}', '-- echo hi'),
+            # Long enough to still be running at the restart, short enough to
+            # finish soon after it.
+            _launch(running, '-- "sleep 240"'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=running,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Both stuck jobs are claimed and not running.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=stuck_2,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.PENDING
+                ],
+                timeout=120),
+            set_limit,
+            smoke_tests_utils.SKY_API_RESTART,
+            # The recovered running job is claimed again: it is never shown as
+            # held, and it finishes.
+            ('start=$SECONDS; while true; do '
+             f'{_row(running)}; '
+             f'if echo "$ROW" | grep -q "{held_text}"; then '
+             '  echo "Recovered running job reported as held"; exit 1; fi; '
+             'if echo "$ROW" | grep -q "SUCCEEDED"; then break; fi; '
+             'if (( SECONDS - start > 420 )); then '
+             '  echo "Timeout waiting for the recovered job to finish"; exit 1; '
+             'fi; sleep 10; done'),
+            # The limit is in force: a new job of the same user is held while
+            # the two stuck jobs count...
+            _launch(held, '-- echo hi'),
+            ('start=$SECONDS; while true; do '
+             f'{_row(held)}; '
+             f'if echo "$ROW" | grep -q "{held_text}"; then break; fi; '
+             'if (( SECONDS - start > 120 )); then '
+             '  echo "Timeout waiting for the new job to be held"; exit 1; '
+             'fi; sleep 5; done'),
+            # ...and released once one of them stops counting.
+            f'sky jobs cancel -y -n {stuck_1}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=held,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING,
+                    sky.ManagedJobStatus.SUCCEEDED
+                ],
+                timeout=300),
+        ],
+        config_dict=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        # Stop the API server so that it doesn't refer to the deleted config
+        # file after the test exits.
+        teardown=(f'sky jobs cancel -y -n {stuck_1}; '
+                  f'sky jobs cancel -y -n {stuck_2}; '
+                  f'sky jobs cancel -y -n {running}; '
+                  f'sky jobs cancel -y -n {held}; sky api stop'),
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.managed_jobs
 def test_managed_jobs_exit_code_recovery(generic_cloud: str):
     """Test managed job recovery based on specific exit codes."""

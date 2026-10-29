@@ -209,7 +209,7 @@ _STORAGE_TEARDOWN_ATTEMPTS = 4
 _STORAGE_TEARDOWN_INITIAL_BACKOFF_SECONDS = 15
 
 
-async def create_background_task(coro: typing.Coroutine) -> None:
+async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     """Create a background task and add it to the set of background tasks.
 
     Main reason we do this is since tasks are only held as a weak reference in
@@ -218,12 +218,43 @@ async def create_background_task(coro: typing.Coroutine) -> None:
 
     Args:
         coro: The coroutine to create a task for.
+
+    Returns:
+        The created task.
     """
     async with _background_tasks_lock:
         task = asyncio.create_task(coro)
         _background_tasks.add(task)
         # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+def _cluster_cost_units(cluster_name: str) -> int:
+    """The cost units of a job running on this cluster, or the full cost.
+
+    Reads the cluster's handle and asks the runtime that owns it. Blocking
+    (database reads), so async callers run it in a thread.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    return _job_cost_units(managed_job_runtime.cost_units(handle))
+
+
+def _job_cost_units(units: Optional[int]) -> int:
+    """A runtime-reported job cost, or the full cost if it reported none.
+
+    A cost above the full cost, or one that is not a positive integer, is
+    ignored: a runtime can only make a job count for less than a full job.
+    """
+    if units is None:
+        return controller_utils.JOB_COST_UNITS
+    if (isinstance(units, bool) or not isinstance(units, int) or
+            not 1 <= units <= controller_utils.JOB_COST_UNITS):
+        logger.warning(f'Ignoring job cost {units!r} reported by a runtime: '
+                       'not an integer from 1 to '
+                       f'{controller_utils.JOB_COST_UNITS}.')
+        return controller_utils.JOB_COST_UNITS
+    return units
 
 
 def _get_dag(job_id: int) -> 'sky.Dag':
@@ -493,6 +524,9 @@ class JobController:
     # have been swept, so the job-group sweep and run()'s completion backstop
     # don't signal them twice. Class default for the same reason.
     _dynamic_members_swept: bool = False
+    # Shared map of job cost units (see __init__). Class default for the same
+    # reason: controllers built without __init__ count no costs.
+    _job_costs: Optional[Dict[int, int]] = None
 
     def __init__(
         self,
@@ -502,6 +536,7 @@ class JobController:
         starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
         rank: Optional[int] = None,
+        job_costs: Optional[Dict[int, int]] = None,
     ) -> None:
         """Initialize a ``JobsController``.
 
@@ -518,9 +553,14 @@ class JobController:
                 cluster.
             rank: Optional rank of the job that can be used to partition
                 workloads.
+            job_costs: Shared map from job ID to the cost units the job counts
+                for against its controller process's job cap, guarded by
+                ``starting_lock``. This job updates its entry once its cluster
+                is up. None when nothing counts costs (tests).
         """
 
         self.starting = starting
+        self._job_costs = job_costs
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         # Armed by _handle_unexpected_error; slept at the top of the next
@@ -876,6 +916,44 @@ class JobController:
             self._job_id)
         return cluster_name is None
 
+    async def _count_in_full(self) -> None:
+        """Count this job at the full cost until a launch reports another."""
+        if self._job_costs is None:
+            return
+        async with self.starting_lock:
+            if self._job_id in self._job_costs:
+                self._job_costs[self._job_id] = controller_utils.JOB_COST_UNITS
+
+    async def _update_cost_units(self, cluster_name: str) -> None:
+        """Count this job at the cost its runtime reports for its cluster.
+
+        A job counts in full while it launches, a pipeline's next task
+        launches, or a recovery relaunches it (_count_in_full); once the
+        launch brings its cluster up, or if it already had one when this
+        process claimed it, it counts at that cluster's cost. A lower cost
+        lets this process claim more jobs; a higher one holds off new claims
+        until the process is back under its cap. Pools and job groups keep
+        the full cost: their clusters are shared or several.
+        """
+        if (self._job_costs is None or self._pool is not None or
+                self._dag.is_job_group() or
+                not managed_job_runtime.is_registered()):
+            return
+        try:
+            units = await asyncio.to_thread(_cluster_cost_units, cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            # Keep the current cost; it is a capacity estimate, not a reason
+            # to fail the job.
+            logger.warning(
+                f'Failed to get the cost of job {self._job_id} on '
+                f'{cluster_name}: {common_utils.format_exception(e)}')
+            return
+        async with self.starting_lock:
+            if self._job_costs.get(self._job_id, units) != units:
+                logger.info(f'Job {self._job_id} now counts for {units} of '
+                            f'{controller_utils.JOB_COST_UNITS} cost units.')
+                self._job_costs[self._job_id] = units
+
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -1043,6 +1121,10 @@ class JobController:
         remote_job_submitted_at = time.time()
         if not is_resume:
             launch_start = time.time()
+            # A pipeline's next task has no cluster yet: until its launch
+            # brings one up, the job costs what any launching job costs, not
+            # what the previous task's cluster cost.
+            await self._count_in_full()
 
             # Run the launch in a separate thread to avoid blocking the event
             # loop. The scheduler functions used internally already have their
@@ -1102,6 +1184,8 @@ class JobController:
                 self.starting_signal.notify()
             except KeyError:
                 pass
+
+        await self._update_cost_units(cluster_name)
 
         # NOTE: if we are resuming from a controller failure, we only keep
         # monitoring if the job is in RUNNING state. For all other cases,
@@ -2118,6 +2202,9 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
+            # A relaunch launches, or waits for resources, like any launching
+            # job: count the job in full until the new cluster reports its cost.
+            await self._count_in_full()
             recovered_time = await executor.recover()
             # The relaunch may have persisted runtime observations of its own.
             runtime_cursor_stale = True
@@ -2129,6 +2216,8 @@ class JobController:
                     managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert pool_cluster_name is not None
                 cluster_name = pool_cluster_name
+            # The relaunch may have landed on a different kind of cluster.
+            await self._update_cost_units(cluster_name)
 
             if keep_starting:
                 # The task stayed STARTING (kept-starting resume). Reaching
@@ -3746,6 +3835,10 @@ class ControllerManager:
         # Global state for active jobs
         self.job_tasks: Dict[int, asyncio.Task] = {}
         self.starting: Set[int] = set()
+        # Cost units of each job this process claimed whose job loop has not
+        # finished; see _claimed_load. Must hold _job_tasks_lock when
+        # accessing (JobController receives it as starting_lock).
+        self.job_costs: Dict[int, int] = {}
 
         # Lock for synchronizing access to global state dictionary
         # Must always hold _job_tasks_lock when accessing the _starting_signal.
@@ -4133,9 +4226,13 @@ class ControllerManager:
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
         try:
-            controller = JobController(job_id, self.starting,
+            controller = JobController(job_id,
+                                       self.starting,
                                        self._job_tasks_lock,
-                                       self._starting_signal, pool, job_rank)
+                                       self._starting_signal,
+                                       pool,
+                                       job_rank,
+                                       job_costs=self.job_costs)
             await controller.load_dag()
 
             async with self._job_tasks_lock:
@@ -4308,9 +4405,15 @@ class ControllerManager:
 
         logger.info(f'Starting job {job_id} with log_file={log_file}')
 
+        cost_units = await self._claimed_cost_units(job_id, pool)
         async with self._job_tasks_lock:
             self.starting.add(job_id)
-        await create_background_task(self.run_job_loop(job_id, log_file, pool))
+            self.job_costs[job_id] = cost_units
+        task = await create_background_task(
+            self.run_job_loop(job_id, log_file, pool))
+        # Release the cost however the job loop ends, including when it fails
+        # before the job is added to job_tasks.
+        task.add_done_callback(lambda _: self.job_costs.pop(job_id, None))
 
         logger.info(f'Job {job_id} started successfully')
 
@@ -4503,6 +4606,50 @@ class ControllerManager:
                 return False
             return True
 
+    async def _claimed_cost_units(self, job_id: int,
+                                  pool: Optional[str]) -> int:
+        """The cost units a job counts for from the moment it is claimed.
+
+        A job claimed again, for example after a controller restart, may
+        already have its cluster up. It counts at that cluster's cost at once,
+        rather than in full until it resumes, so this process keeps claiming
+        while its jobs come back. Any other job counts in full until a launch
+        brings its cluster up (JobController._update_cost_units). Pool jobs
+        always count in full.
+        """
+        full = controller_utils.JOB_COST_UNITS
+        if pool is not None or not managed_job_runtime.is_registered():
+            return full
+        try:
+            task_name = await managed_job_state.get_launched_task_name_async(
+                job_id)
+            if task_name is None:
+                return full
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task_name, job_id)
+            return await asyncio.to_thread(_cluster_cost_units, cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get the cost of claimed job {job_id}: '
+                           f'{common_utils.format_exception(e)}')
+            return full
+
+    def _claimed_load(self) -> Tuple[int, int]:
+        """The (jobs, cost units) this process holds against its job cap.
+
+        Caller must hold _job_tasks_lock. Counts every job this process claimed,
+        including one claimed but not added to job_tasks yet (its loop reads
+        its env file and loads its DAG first). A job whose task is done is not
+        counted while its loop cleans up.
+        """
+        jobs = units = 0
+        for job_id in self.job_costs.keys() | self.job_tasks.keys():
+            task = self.job_tasks.get(job_id)
+            if task is not None and task.done():
+                continue
+            jobs += 1
+            units += self.job_costs.get(job_id, controller_utils.JOB_COST_UNITS)
+        return jobs, units
+
     async def monitor_loop(self):
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
@@ -4510,9 +4657,7 @@ class ControllerManager:
 
         while True:
             async with self._job_tasks_lock:
-                running_tasks = [
-                    task for task in self.job_tasks.values() if not task.done()
-                ]
+                running_jobs, running_units = self._claimed_load()
 
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
@@ -4522,7 +4667,9 @@ class ControllerManager:
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT.labels(
                     pid=pid_str).set(starting_count)
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT.labels(
-                    pid=pid_str).set(len(running_tasks))
+                    pid=pid_str).set(running_jobs)
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_COST_UNITS.labels(
+                    pid=pid_str).set(running_units)
                 metrics_lib.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER.labels(
                     pid=pid_str).set(controller_utils.LAUNCHES_PER_WORKER)
 
@@ -4535,16 +4682,24 @@ class ControllerManager:
             # Normally, 200 jobs can run on each controller. But if we have a
             # ton of controllers, we need to limit the number of jobs that can
             # run on each controller, to achieve a total of 2000 jobs across all
-            # controllers.
+            # controllers. That share is counted in cost units, so cheaper jobs
+            # can run more of them, up to 200 jobs on this controller.
             max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
                            (controller_utils.MAX_TOTAL_RUNNING_JOBS //
                             controller_utils.get_number_of_jobs_controllers()))
+            max_units = max_jobs * controller_utils.JOB_COST_UNITS
 
             if metrics_lib.METRICS_ENABLED:
                 metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS.labels(
                     pid=pid_str).set(max_jobs)
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_COST_UNITS.labels(
+                    pid=pid_str).set(max_units)
 
-            if len(running_tasks) >= max_jobs:
+            # Claim while under the cap, whatever the next job costs: the claim
+            # order stays strictly by priority, and the cap is exceeded by
+            # less than one full job.
+            if (running_jobs >= controller_utils.MAX_JOBS_PER_WORKER or
+                    running_units >= max_units):
                 logger.info('Too many jobs running, waiting for 60 seconds')
                 await asyncio.sleep(60)
                 continue
