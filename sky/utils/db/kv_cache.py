@@ -73,11 +73,16 @@ def add_or_update_cache_entry(
 ) -> None:
     """Store the mapping from user hash to user name for display purposes.
 
+    No-op when SQLAlchemy is not installed (bare client without a cloud /
+    server extra). Callers treat cache writes as best-effort.
+
     Args:
         key: The key of the cache entry.
         value: The value of the cache entry.
         expires_at: The timestamp when the cache entry expires.
     """
+    if _db_manager is None:
+        return
     engine = _db_manager.get_engine()
     if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
         insert_func = sqlite.insert
@@ -105,9 +110,13 @@ def add_or_update_cache_entry(
 def get_cache_entry(key: str) -> Optional[str]:
     """Get the value of the cache entry.
 
+    Returns None (cache miss) when SQLAlchemy is not installed.
+
     Args:
         key: The key of the cache entry.
     """
+    if _db_manager is None:
+        return None
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         result = session.execute(
@@ -139,7 +148,10 @@ def get_cache_entries_by_prefix(prefix: str) -> Dict[str, str]:
 
     Returns:
         Mapping from full key to value for every matching, unexpired entry.
+        Empty dict when SQLAlchemy is not installed.
     """
+    if _db_manager is None:
+        return {}
     escaped = _escape_like(prefix)
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -157,11 +169,13 @@ def delete_cache_entries_by_prefix(prefix: str) -> None:
     """Delete all cache entries whose key starts with the given prefix.
 
     Any SQL LIKE wildcards (%, _) in *prefix* are escaped so they are
-    matched literally.
+    matched literally. No-op when SQLAlchemy is not installed.
 
     Args:
         prefix: The literal prefix to match against cache keys.
     """
+    if _db_manager is None:
+        return
     escaped = _escape_like(prefix)
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -179,11 +193,14 @@ def delete_cache_entries_by_prefix_suffix(prefix: str, suffix: str) -> None:
 
     Both *prefix* and *suffix* are treated as literal strings — any SQL
     LIKE wildcards (%, _) they contain are escaped automatically.
+    No-op when SQLAlchemy is not installed.
 
     Args:
         prefix: Literal prefix to match against cache keys.
         suffix: Literal suffix to match against cache keys.
     """
+    if _db_manager is None:
+        return
     escaped_prefix = _escape_like(prefix)
     escaped_suffix = _escape_like(suffix)
     pattern = f'{escaped_prefix}%{escaped_suffix}'
