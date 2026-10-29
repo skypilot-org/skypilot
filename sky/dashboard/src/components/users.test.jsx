@@ -1,4 +1,10 @@
-import { getJobGpuCount, USER_FILTER_SCHEMA } from '@/components/users';
+import {
+  canCreateServiceAccountToken,
+  canManageServiceAccountToken,
+  grantableServiceAccountRoles,
+  getJobGpuCount,
+  USER_FILTER_SCHEMA,
+} from '@/components/users';
 import {
   filtersToQuery,
   legacyFiltersToQuery,
@@ -138,5 +144,73 @@ describe('USER_FILTER_SCHEMA', () => {
         chip('Name', 'bob'),
       ])
     ).toEqual({ name: 'bob' });
+  });
+});
+
+// The rotate and delete buttons on the Service Accounts tab use this both to
+// decide whether to show and whether the click is allowed. It must match the
+// server's check_service_account_token_permission, otherwise a non-admin
+// creator sees the button but is told they are not allowed to use it.
+describe('canManageServiceAccountToken', () => {
+  const token = { token_id: 't1', creator_user_hash: 'alice' };
+
+  it('allows an admin to manage any token', () => {
+    expect(
+      canManageServiceAccountToken({ role: 'admin', id: 'bob' }, token)
+    ).toBe(true);
+  });
+
+  it('allows a non-admin user to manage a token they created', () => {
+    expect(
+      canManageServiceAccountToken({ role: 'user', id: 'alice' }, token)
+    ).toBe(true);
+  });
+
+  it('denies a non-admin user a token someone else created', () => {
+    expect(
+      canManageServiceAccountToken({ role: 'user', id: 'bob' }, token)
+    ).toBe(false);
+  });
+
+  it('denies a viewer even for a token they created', () => {
+    expect(
+      canManageServiceAccountToken({ role: 'viewer', id: 'alice' }, token)
+    ).toBe(false);
+  });
+
+  it('denies when the role is not loaded yet', () => {
+    expect(canManageServiceAccountToken(null, token)).toBe(false);
+  });
+});
+
+// The server lets any non-viewer create a service account, capped at the
+// caller's own role, so the dashboard must not hide the Create button from
+// regular users or offer them the admin role.
+describe('canCreateServiceAccountToken', () => {
+  it.each([
+    ['admin', true],
+    ['user', true],
+    ['viewer', false],
+  ])('returns %s -> %s', (role, expected) => {
+    expect(canCreateServiceAccountToken({ role, id: 'alice' })).toBe(expected);
+  });
+
+  it('denies when the role is not loaded yet', () => {
+    expect(canCreateServiceAccountToken(null)).toBe(false);
+  });
+});
+
+describe('grantableServiceAccountRoles', () => {
+  it('offers every role to an admin', () => {
+    expect(grantableServiceAccountRoles('admin')).toEqual([
+      'admin',
+      'user',
+      'viewer',
+    ]);
+  });
+
+  it('never offers the admin role to a non-admin', () => {
+    expect(grantableServiceAccountRoles('user')).not.toContain('admin');
+    expect(grantableServiceAccountRoles(undefined)).not.toContain('admin');
   });
 });
