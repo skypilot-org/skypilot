@@ -744,12 +744,24 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
+    # Enforced by the jobs controllers from the server's config, so the jobs
+    # queue must explain held jobs with the same value.
+    ('jobs', 'max_launching_jobs_per_user'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
     ('slurm', 'username_map'),
+]
+
+# Also skipped when the request did not come from loopback: which
+# infrastructure a request may use is set by the server, not by a remote client.
+# A loopback client (the local API server, or a controller) still layers them.
+REMOTE_SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('kubernetes', 'allowed_contexts'),
+    ('ssh', 'allowed_node_pools'),
+    ('slurm', 'allowed_clusters'),
 ]
 
 # Constants for Azure blob storage

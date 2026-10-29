@@ -15,8 +15,8 @@ variable "vm_generation" {
 }
 
 locals {
-  date    = formatdate("YYMMDD", timestamp())
-  version = formatdate("YY.MM.DD", timestamp())
+  # UTC to the minute, so a second build on the same day gets its own version.
+  version = formatdate("YY.MMDD.hhmm", timestamp())
 }
 
 source "azure-arm" "cpu-ubuntu" {
@@ -43,7 +43,7 @@ source "azure-arm" "cpu-ubuntu" {
     subscription   = "59d8c23c-7ef5-42c7-b2f3-a919ad8026a7"
     resource_group = "skypilot-images"
     gallery_name   = "skypilot_image_gallery"
-    image_name     = "skypilot-cpu-gen${var.vm_generation}"
+    image_name     = "skypilot-cpu-gen${var.vm_generation}-ray256"
     image_version  = "${local.version}"
     replication_regions = [
       "centralus",

@@ -49,6 +49,10 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 _SLURM_HOME_DIR_CACHE_TTL_SECONDS = 30
+# Printed ahead of each Slurm login-node command whose output is returned, so
+# that whatever the login shell prints first (profile.d banners, module-system
+# notices) can be dropped.
+_SLURM_OUTPUT_START_MARKER = 'SKYPILOT_SLURM_OUTPUT_START'
 
 # Largest command, in bytes, to inline into what a runner sends rather than
 # writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
@@ -2172,7 +2176,24 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         """Run argv as the allocation owner, or shell code as the SSH user."""
         if isinstance(cmd, list):
             cmd = self.command_as_user(cmd)
-        return super().run(cmd, **kwargs)
+        # The login shell may print before the command runs (profile.d
+        # banners, module-system notices), which would be parsed as command
+        # output. Print a marker first and drop everything up to it. Only
+        # done when outputs are returned and neither streamed nor logged,
+        # since streaming and logging happen before the marker is dropped.
+        if (not kwargs.get('require_outputs', False) or
+                kwargs.get('run_in_background', False) or
+                kwargs.get('stream_logs', True) or
+                kwargs.get('log_path', os.devnull) != os.devnull):
+            return super().run(cmd, **kwargs)
+        cmd = f'echo {_SLURM_OUTPUT_START_MARKER}\n{cmd}'
+        result = super().run(cmd, **kwargs)
+        assert not isinstance(result, int)
+        rc, stdout, stderr = result
+        _, found, rest = stdout.partition(_SLURM_OUTPUT_START_MARKER + '\n')
+        if found:
+            stdout = rest
+        return rc, stdout, stderr
 
     def get_remote_home_dir(self, timeout: Optional[int] = None) -> str:
         if self.slurm_user is None:

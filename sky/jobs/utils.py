@@ -331,6 +331,16 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
         signal_file.unlink()
 
 
+def get_max_launching_jobs_per_user() -> Optional[int]:
+    """The most claimed, not yet running jobs a user may hold, or None.
+
+    Read from ``jobs.max_launching_jobs_per_user``. Unset (the default) means
+    no limit. See managed_job_state.get_waiting_job_async.
+    """
+    return skypilot_config.get_nested(('jobs', 'max_launching_jobs_per_user'),
+                                      None)
+
+
 # Whether to use consolidation mode or not. When this is enabled, the managed
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
@@ -1499,12 +1509,13 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
 def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
     """Parse a submit-job log filename's id portion into inclusive ranges.
 
-    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
-    single ids (``584``) or inclusive ranges (``580-588``), returned as
-    (start, end) tuples. Ranges are kept intact rather than expanded into a set
-    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
-    blow up memory. Raises ValueError on an unrecognized or inverted range so
-    the caller can skip the file.
+    The id portion is a single id (``584``) or the submission's inclusive id
+    span (``580-588``); logs written by older versions may hold a
+    comma-separated list of either. Returned as (start, end) tuples. Ranges
+    are kept intact rather than expanded into a set of ints -- a filename
+    like ``submit-job-1-100000000.log`` would otherwise blow up memory.
+    Raises ValueError on an unrecognized or inverted range so the caller can
+    skip the file.
     """
     ranges: List[Tuple[int, int]] = []
     for token in job_ids_str.split(','):
@@ -1529,11 +1540,13 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
     """Collect managed-job submission log file paths (submit-job-*.log).
 
     Each submission writes ``~/sky_logs/managed_jobs/submit-job-<ids>.log``
-    (see sky.jobs.server.core), where ``<ids>`` is the submission's job-id set
-    formatted as comma-separated singletons/ranges. This per-submission log
-    records the "Started N controllers" count -- the over-count signal that
-    pins leaked controllers to a specific submission -- and is not
-    reconstructable from the per-job ``<jobid>.log`` or ``job_info``.
+    (see sky.jobs.server.core), where ``<ids>`` is the span of the
+    submission's job ids. The span of an interleaved batch also covers ids
+    of concurrent submissions, so a dump may include their logs too. This
+    per-submission log records the "Started N controllers" count -- the
+    over-count signal that pins leaked controllers to a specific submission
+    -- and is not reconstructable from the per-job ``<jobid>.log`` or
+    ``job_info``.
 
     Consolidation mode only: ``submit-job-*.log`` is written solely by
     ``_consolidated_launch``. In non-consolidation mode the submission runs as a
@@ -1547,7 +1560,7 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
     TODO(ishankaul1): also collect controller.log for non-consolidation mode.
 
     Scoped to ``job_ids``: we list ``submit-job-*.log`` but only collect
-    submissions whose id-set intersects the requested jobs. Unlike
+    submissions whose id span covers a requested job. Unlike
     _collect_controller_system_log_paths -- which builds exact
     ``controller_<uuid>.log`` paths from the relevant UUID set and never lists
     the directory -- a job id cannot be mapped back to its submission filename
@@ -3385,6 +3398,10 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
     if 'details' in new_fields:
         if 'schedule_state' not in new_fields:
             new_fields.append('schedule_state')
+        # Needed to tell whether the per-user launch limit holds a WAITING
+        # job back.
+        if 'user_hash' not in new_fields:
+            new_fields.append('user_hash')
         if 'priority' not in new_fields:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
@@ -3403,6 +3420,12 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('last_recovered_at')
         if 'submitted_at' not in new_fields:
             new_fields.append('submitted_at')
+    # The queue may show created_at as submitted_at; see
+    # get_managed_job_queue.
+    if 'submitted_at' in new_fields:
+        for field in ('created_at', 'task_id', 'execution'):
+            if field not in new_fields:
+                new_fields.append(field)
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -3506,6 +3529,7 @@ def _format_job_details(
         *,
         job: Dict[str, Any],
         highest_blocking_priority: int,
+        launch_limit: Optional[int] = None,
         recovery_reason: Optional[str] = None,
         pending_reason: Optional[str] = None,
         cancel_reason: Optional[str] = None,
@@ -3513,7 +3537,10 @@ def _format_job_details(
         unfinished_dependencies: Optional[List[int]] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
     who requested a cancellation / what a launch is waiting on / which jobs it
-    depends on are still running."""
+    depends on are still running.
+
+    ``launch_limit`` is set when the per-user launch limit holds the job back
+    (see managed_job_state.get_held_job_ids)."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3535,6 +3562,10 @@ def _format_job_details(
                  if len(unfinished_dependencies) == 1 else 'Dependencies')
         state_details = (
             f'{label}: {", ".join(str(d) for d in unfinished_dependencies)}')
+    elif (job['schedule_state'] == 'WAITING' and launch_limit is not None and
+          job.get('pool') is None):
+        state_details = (f'Waiting: user already has {launch_limit} jobs '
+                         'launching or waiting for resources')
     elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
         priority = job.get('priority')
         if (priority is not None and priority < highest_blocking_priority):
@@ -3797,12 +3828,18 @@ def get_managed_job_queue(
             global_user_state.get_cluster_name_to_handle_map(is_managed=True))
 
     highest_blocking_priority = constants.MIN_PRIORITY
+    max_launching_jobs_per_user = get_max_launching_jobs_per_user()
+    held_job_ids: Set[int] = set()
     if not fields or 'details' in fields:
         # Figure out what the highest priority blocking job is. We need to know
         # in order to determine if other jobs are blocked by a higher priority
         # job, or just by the limited controller resources.
         highest_blocking_priority = (
-            managed_job_state.get_managed_jobs_highest_priority())
+            managed_job_state.get_managed_jobs_highest_priority(
+                max_launching_jobs_per_user=max_launching_jobs_per_user))
+        if max_launching_jobs_per_user is not None:
+            held_job_ids = managed_job_state.get_held_job_ids(
+                max_launching_jobs_per_user)
 
     jobs_with_handle = []
     for job in jobs:
@@ -3944,6 +3981,8 @@ def get_managed_job_queue(
             _format_job_details(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
+                launch_limit=(max_launching_jobs_per_user
+                              if job['job_id'] in held_job_ids else None),
                 recovery_reason=recovery_reasons.get(job['job_id']),
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),
@@ -3957,6 +3996,16 @@ def get_managed_job_queue(
             job.get('execution') == DagExecution.PARALLEL.value)
         if not fields or 'depends_on' in fields:
             job['depends_on'] = dependencies.get(job['job_id'])
+
+        # The submitted_at column is when the task began launching (NULL
+        # while the job waits for a controller), which the launch-reason
+        # lookup above still needs. Task 0 and every task of a job group
+        # start waiting when the user submits the job, so show that
+        # instead. A pipeline's later tasks wait on the task before them,
+        # not on a controller, so they keep their launch time.
+        if job['created_at'] is not None and (job['task_id'] == 0 or
+                                              job['is_job_group']):
+            job['submitted_at'] = job['created_at']
 
     return {
         'jobs': jobs,
