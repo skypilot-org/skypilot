@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+from typing import Optional
 
 import colorama
 
@@ -196,8 +197,31 @@ def set_sky_logging_levels(level: int):
 def logging_enabled(logger: logging.Logger, level: int) -> bool:
     # Note(cooperc): This may return true in a lot of cases where we won't
     # actually log anything, since the log level is set on the handler in
-    # _setup_logger.
+    # _setup_logger. To skip building an expensive message, use will_log.
     return logger.getEffectiveLevel() <= level
+
+
+def will_log(logger: logging.Logger, level: int) -> bool:
+    """Whether a record at ``level`` reaches a handler that would emit it.
+
+    ``_setup_logger`` keeps the loggers at DEBUG and sets the level on the
+    handlers, so check those, the way ``Logger.callHandlers`` walks them.
+    """
+    if not logger.isEnabledFor(level):
+        return False
+    current: Optional[logging.Logger] = logger
+    found = False
+    while current is not None:
+        for handler in current.handlers:
+            found = True
+            if level >= handler.level:
+                return True
+        if not current.propagate:
+            break
+        current = current.parent
+    # With no handler on the path, logging falls back to `lastResort`.
+    return (not found and logging.lastResort is not None and
+            level >= logging.lastResort.level)
 
 
 @contextlib.contextmanager
