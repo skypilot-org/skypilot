@@ -179,8 +179,10 @@ _CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS = 20
 
 # Tries at reading the file named by ENV_VAR_SKYPILOT_CONFIG when it is
 # missing or its handle is stale (see _reload_config_from_internal_file).
-# About 10 seconds in all with the backoff below (capped at 2 seconds a try):
-# on a busy shared filesystem a stale handle can outlast a couple of seconds.
+# About 10 seconds in all with the backoff below: each wait is capped at 2
+# seconds before Backoff's +/-40% jitter, so a wait can reach 2.8 seconds and
+# the total up to about 14. On a busy shared filesystem a stale handle can
+# outlast a couple of seconds.
 _INTERNAL_CONFIG_READ_ATTEMPTS = 9
 _INTERNAL_CONFIG_READ_INITIAL_BACKOFF_SECONDS = 0.25
 _INTERNAL_CONFIG_READ_MAX_BACKOFF_FACTOR = 8
@@ -903,14 +905,11 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
     return config
 
 
-def _read_internal_config_file(config_path: str) -> config_utils.Config:
+def _read_internal_config_file(
+        config_path: str) -> Optional[config_utils.Config]:
+    """Read the internal config file, or None if it does not exist."""
     if not os.path.exists(config_path):
-        with ux_utils.print_exception_no_traceback():
-            raise FileNotFoundError(
-                'Config file specified by env var '
-                f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
-                'exist. Please double check the path or unset the env var: '
-                f'unset {ENV_VAR_SKYPILOT_CONFIG}')
+        return None
     logger.debug(f'Using config path: {config_path}')
     return parse_and_validate_config_file(config_path)
 
@@ -938,14 +937,29 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
         attempt += 1
         try:
             config = _read_internal_config_file(config_path)
-            break
         except OSError as e:
             if (attempt >= _INTERNAL_CONFIG_READ_ATTEMPTS or
                     not _is_transient_file_error(e)):
                 raise
             logger.debug(f'Failed to read config file {config_path!r}; '
                          f'retrying: {e}')
-            time.sleep(backoff.current_backoff())
+        else:
+            if config is not None:
+                break
+            if attempt >= _INTERNAL_CONFIG_READ_ATTEMPTS:
+                # Only for the final error: this context leaves
+                # sys.tracebacklimit at 0 when the exception escapes it (so
+                # the error prints without a traceback), which a retried miss
+                # must not do to the rest of the process.
+                with ux_utils.print_exception_no_traceback():
+                    raise FileNotFoundError(
+                        'Config file specified by env var '
+                        f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does '
+                        'not exist. Please double check the path or unset the '
+                        f'env var: unset {ENV_VAR_SKYPILOT_CONFIG}')
+            logger.debug(f'Config file {config_path!r} does not exist; '
+                         'retrying.')
+        time.sleep(backoff.current_backoff())
     _set_loaded_config(config)
     _set_loaded_config_path(config_path)
 

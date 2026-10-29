@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import shutil
+import sys
 import textwrap
 from unittest import mock
 
@@ -19,6 +20,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import schemas
 from sky.utils import yaml_utils
 
@@ -541,9 +543,18 @@ def test_config_with_env_retries_a_stale_file_handle(monkeypatch,
 
 def test_config_with_env_waits_for_a_replaced_file(monkeypatch,
                                                    tmp_path) -> None:
-    """The file is briefly missing while it is being replaced."""
+    """The file is briefly missing while it is being replaced.
+
+    The retried miss must also leave sys.tracebacklimit alone: the
+    no-traceback context used for the final missing-file error leaves it at
+    0 once an exception escapes, which would hide the tracebacks of later,
+    unrelated errors in the process.
+    """
     config_path = tmp_path / 'config.yaml'
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    monkeypatch.delenv(env_options.Options.SHOW_DEBUG_INFO.env_key,
+                       raising=False)
+    monkeypatch.setattr(sys, 'tracebacklimit', 1000, raising=False)
     # The file appears during the first backoff.
     sleep = mock.MagicMock(
         side_effect=lambda _: _create_config_file(config_path))
@@ -553,6 +564,7 @@ def test_config_with_env_waits_for_a_replaced_file(monkeypatch,
 
     sleep.assert_called_once()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+    assert sys.tracebacklimit == 1000
 
 
 def test_config_with_env_persistent_stale_handle_raises(monkeypatch,
