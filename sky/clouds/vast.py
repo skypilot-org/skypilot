@@ -229,6 +229,7 @@ class Vast(clouds.Cloud):
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'use_spot': resources.use_spot,
             'secure_only': secure_only,
             'create_instance_kwargs': create_instance_kwargs or {},
         }

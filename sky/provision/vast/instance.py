@@ -55,7 +55,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     create_instance_kwargs = config.provider_config.get(
         'create_instance_kwargs', {})
-    logger.debug(f'provider_config: {config.provider_config}')
     logger.debug(f'create_instance_kwargs from provider_config: '
                  f'{create_instance_kwargs}')
 
@@ -72,7 +71,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             logger.warning(f'Failed to read SSH public key from '
                            f'{ssh_public_key_path}: {e}')
 
-    docker_login_config = config.docker_config.get('docker_login_config')
+    docker_login_config = config.provider_config.get('docker_login_config')
     login_args = None
     image_name = config.node_config['ImageId']
     if docker_login_config:
