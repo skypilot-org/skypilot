@@ -1,5 +1,7 @@
 import {
+  canCreateServiceAccountToken,
   canManageServiceAccountToken,
+  grantableServiceAccountRoles,
   getJobGpuCount,
   USER_FILTER_SCHEMA,
 } from '@/components/users';
@@ -178,5 +180,37 @@ describe('canManageServiceAccountToken', () => {
 
   it('denies when the role is not loaded yet', () => {
     expect(canManageServiceAccountToken(null, token)).toBe(false);
+  });
+});
+
+// The server lets any non-viewer create a service account, capped at the
+// caller's own role, so the dashboard must not hide the Create button from
+// regular users or offer them the admin role.
+describe('canCreateServiceAccountToken', () => {
+  it.each([
+    ['admin', true],
+    ['user', true],
+    ['viewer', false],
+  ])('returns %s -> %s', (role, expected) => {
+    expect(canCreateServiceAccountToken({ role, id: 'alice' })).toBe(expected);
+  });
+
+  it('denies when the role is not loaded yet', () => {
+    expect(canCreateServiceAccountToken(null)).toBe(false);
+  });
+});
+
+describe('grantableServiceAccountRoles', () => {
+  it('offers every role to an admin', () => {
+    expect(grantableServiceAccountRoles('admin')).toEqual([
+      'admin',
+      'user',
+      'viewer',
+    ]);
+  });
+
+  it('never offers the admin role to a non-admin', () => {
+    expect(grantableServiceAccountRoles('user')).not.toContain('admin');
+    expect(grantableServiceAccountRoles(undefined)).not.toContain('admin');
   });
 });

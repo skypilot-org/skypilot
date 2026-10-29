@@ -343,6 +343,22 @@ export function canManageServiceAccountToken(roleData, token) {
   return roleData.role !== 'viewer' && token.creator_user_hash === roleData.id;
 }
 
+// The server lets any non-viewer create a service account, but only admins
+// can grant the admin role (see _check_role_grantable).
+export function canCreateServiceAccountToken(roleData) {
+  return Boolean(roleData) && roleData.role !== 'viewer';
+}
+
+export function grantableServiceAccountRoles(role) {
+  return role === 'admin' ? ['admin', 'user', 'viewer'] : ['user', 'viewer'];
+}
+
+const SERVICE_ACCOUNT_ROLE_LABELS = {
+  admin: 'Admin',
+  user: 'User',
+  viewer: 'Viewer',
+};
+
 export function Users() {
   const router = useRouter();
   const { userEmail } = useSidebar();
@@ -995,7 +1011,8 @@ export function Users() {
                 'cannot create service account tokens',
                 () => {
                   setShowCreateDialog(true);
-                }
+                },
+                canCreateServiceAccountToken
               );
             }}
             className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
@@ -2901,9 +2918,11 @@ function ServiceAccountTokensView({
         }
         const data = await response.json();
         if (!cancelled) {
-          setNewToken((prev) =>
-            prev.role ? prev : { ...prev, role: data.role }
-          );
+          // `rbac.default_role` falls back to admin, which a non-admin
+          // cannot grant, so start them on user instead.
+          const grantable = grantableServiceAccountRoles(userRoleCache?.role);
+          const role = grantable.includes(data.role) ? data.role : 'user';
+          setNewToken((prev) => (prev.role ? prev : { ...prev, role }));
         }
       } catch (error) {
         console.error('Failed to get default role:', error);
@@ -2913,7 +2932,7 @@ function ServiceAccountTokensView({
     return () => {
       cancelled = true;
     };
-  }, [showCreateDialog]);
+  }, [showCreateDialog, userRoleCache?.role]);
 
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
@@ -3640,9 +3659,13 @@ function ServiceAccountTokensView({
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="viewer">Viewer</SelectItem>
+                      {grantableServiceAccountRoles(userRoleCache?.role).map(
+                        (role) => (
+                          <SelectItem key={role} value={role}>
+                            {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
