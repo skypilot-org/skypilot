@@ -514,6 +514,45 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d', 'ctx-e']
 
 
+def test_in_cluster_context_name_is_checked_on_every_call(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(
+        yaml.safe_dump({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': 'ctx-a',
+            'clusters': [{
+                'name': 'c',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'u',
+                'user': {}
+            }],
+            'contexts': [{
+                'name': 'ctx-a',
+                'context': {
+                    'cluster': 'c',
+                    'user': 'u'
+                }
+            }],
+        }))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    in_cluster = [True]
+    monkeypatch.setattr(utils, 'is_incluster_config_available',
+                        lambda: in_cluster[0])
+    monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
+                        lambda: 'in-cluster')
+    # Appended to the caller's copy: never accumulates in the cache.
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    in_cluster[0] = False
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+
+
 def test_get_all_kube_context_names():
     """Tests get_all_kube_context_names function with KUBECONFIG env var."""
     mock_contexts = [{
