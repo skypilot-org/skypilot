@@ -117,10 +117,22 @@ def make_user(admin_api: requests.Session,
 
     yield make
     for ident in created:
+        # A request the browser queued before it closed (a background
+        # refresh, say) re-creates the user row when it runs, so let those
+        # finish first.
+        seed.wait_for_user_requests(ident.user_id)
         admin_api.post(
             f'{admin_api.base_url}/users/service-account-tokens/delete',  # type: ignore[attr-defined]
             json={'token_id': ident.token_id},
             timeout=60)
+        # One that reached the server just as the browser closed can still be
+        # queued after the wait; remove the row it brings back.
+        seed.wait_for_user_requests(ident.user_id)
+        if seed.user_exists(ident.user_id):
+            admin_api.post(
+                f'{admin_api.base_url}/users/delete',  # type: ignore[attr-defined]
+                json={'user_id': ident.user_id},
+                timeout=60)
 
 
 @pytest.fixture

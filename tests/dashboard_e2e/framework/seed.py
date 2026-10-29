@@ -111,6 +111,28 @@ def is_test_name(name: Optional[str]) -> bool:
     return bool(name) and re.match(r't[0-9a-f]{6}-', name) is not None
 
 
+def wait_for_user_requests(user_id: str, timeout_s: float = 15) -> None:
+    """Wait until the server has no pending or running request from this
+    user. Returns at the deadline either way; the leftover check reports
+    what remains."""
+    from sky.server.requests import requests as requests_lib
+    live = [
+        requests_lib.RequestStatus.PENDING, requests_lib.RequestStatus.RUNNING
+    ]
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if not requests_lib.get_request_tasks(
+                requests_lib.RequestTaskFilter(
+                    status=live, user_id=user_id, fields=['request_id'])):
+            return
+        time.sleep(0.5)
+
+
+def user_exists(user_id: str) -> bool:
+    from sky import global_user_state
+    return global_user_state.get_user(user_id) is not None
+
+
 _LEFTOVER_CHECKS: List[Callable[[], List[str]]] = []
 
 
