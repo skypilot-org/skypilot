@@ -71,25 +71,17 @@ from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.db import sqlalchemy_deps
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
 
-    import sqlalchemy
-    from sqlalchemy import orm
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.dialects import sqlite
-    from sqlalchemy.engine import Engine
-
     from sky import models
-    from sky.utils.db import db_utils
-    from sky.utils.db import migration_utils
+    from sky.server import config_db as config_db_mod
 else:
     yaml = adaptors_common.LazyImport('yaml')
-
-_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+    # Server-only; loads SQLAlchemy only when a DB URL is used.
+    config_db_mod = adaptors_common.LazyImport('sky.server.config_db')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -127,43 +119,6 @@ _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
-
-# Populated by _ensure_config_db_schema() when SQLAlchemy is installed.
-Base = None
-config_yaml_table = None
-_db_manager = None
-
-
-def _ensure_config_db_schema():
-    """Load SQLAlchemy schema for server-side config DB storage."""
-    global Base, config_yaml_table, _db_manager
-    if _db_manager is not None:
-        return
-    sqlalchemy_deps.require_sqlalchemy()
-    import sqlalchemy
-    from sqlalchemy.ext import declarative
-
-    from sky.utils.db import db_utils
-    from sky.utils.db import migration_utils
-
-    Base = declarative.declarative_base()
-    config_yaml_table = sqlalchemy.Table(
-        'config_yaml',
-        Base.metadata,
-        sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-        sqlalchemy.Column('value', sqlalchemy.Text),
-    )
-
-    def _create_table(engine):
-        """Initialize the config database with migrations."""
-        migration_utils.safe_alembic_upgrade(
-            engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-            migration_utils.SKYPILOT_CONFIG_VERSION)
-
-    # We only store config in the DB when using Postgres,
-    # so no need to pass in db_name here.
-    _db_manager = db_utils.DatabaseManager(db_name='config',
-                                           create_table_fn=_create_table)
 
 
 class ConfigContext:
@@ -961,22 +916,10 @@ def _reload_config_as_server() -> None:
             raise ValueError(
                 'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
-
-        def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-            from sqlalchemy import orm
-            _ensure_config_db_schema()
-            assert _db_manager is not None and config_yaml_table is not None
-            with orm.Session(_db_manager.get_engine()) as session:
-                row = session.query(config_yaml_table).filter_by(
-                    key=key).first()
-            if row:
-                db_config = config_utils.Config(yaml_utils.safe_load(row.value))
-                db_config.pop_nested(('db',), None)
-                return db_config
-            return None
-
-        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
-        if db_config:
+        raw = config_db_mod.get_config_yaml(API_SERVER_CONFIG_KEY)
+        if raw:
+            db_config = config_utils.Config(raw)
+            db_config.pop_nested(('db',), None)
             server_config = overlay_skypilot_config(server_config, db_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
@@ -1756,40 +1699,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if new_db_url and new_db_url != existing_db_url:
             raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-
-            def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                from sqlalchemy import orm
-                from sqlalchemy.dialects import postgresql
-                from sqlalchemy.dialects import sqlite
-
-                from sky.utils.db import db_utils
-
-                _ensure_config_db_schema()
-                assert _db_manager is not None and config_yaml_table is not None
-                engine = _db_manager.get_engine()
-                # Persisting, not logging: this value is read back as the
-                # server config, so it must be the real one. Do not route it
-                # through config_utils.dump_redacted_yaml().
-                config_str = yaml_utils.dump_yaml_str(dict(config))
-                with orm.Session(engine) as session:
-                    if (engine.dialect.name ==
-                            db_utils.SQLAlchemyDialect.SQLITE.value):
-                        insert_func = sqlite.insert
-                    elif (engine.dialect.name ==
-                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                        insert_func = postgresql.insert
-                    else:
-                        raise ValueError('Unsupported database dialect')
-                    insert_stmnt = insert_func(config_yaml_table).values(
-                        key=key, value=config_str)
-                    do_update_stmt = insert_stmnt.on_conflict_do_update(
-                        index_elements=[config_yaml_table.c.key],
-                        set_={config_yaml_table.c.value: config_str})
-                    session.execute(do_update_stmt)
-                    session.commit()
-
             logger.debug('saving api_server config to db')
-            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            config_db_mod.set_config_yaml(API_SERVER_CONFIG_KEY, dict(config))
             db_updated = True
 
     if not db_updated:
