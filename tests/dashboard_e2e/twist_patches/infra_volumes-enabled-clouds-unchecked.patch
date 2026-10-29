@@ -1,0 +1,9 @@
+diff --git a/sky/core.py b/sky/core.py
+index 726b70f64..14a508a08 100644
+--- a/sky/core.py
++++ b/sky/core.py
+@@ -1776,2 +1776,4 @@ def enabled_clouds(workspace: Optional[str] = None,
+         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
++    # TWIST: with no check result, report clouds nothing has enabled
++    cached_clouds = cached_clouds or [clouds.AWS(), clouds.GCP()]
+     with skypilot_config.local_active_workspace_ctx(workspace):
