@@ -335,6 +335,14 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   );
 };
 
+// Mirrors check_service_account_token_permission on the server: admins can
+// manage any token, other users only their own, and viewers none.
+export function canManageServiceAccountToken(roleData, token) {
+  if (!roleData || !token) return false;
+  if (roleData.role === 'admin') return true;
+  return roleData.role !== 'viewer' && token.creator_user_hash === roleData.id;
+}
+
 export function Users() {
   const router = useRouter();
   const { userEmail } = useSidebar();
@@ -499,11 +507,15 @@ export function Users() {
     });
   }, [getUserRole]);
 
-  const checkPermissionAndAct = async (action, actionCallback) => {
+  const checkPermissionAndAct = async (
+    action,
+    actionCallback,
+    isAllowed = (roleData) => roleData.role === 'admin'
+  ) => {
     try {
       const roleData = await getUserRole();
 
-      if (roleData.role !== 'admin') {
+      if (!isAllowed(roleData)) {
         setPermissionDenialState({
           open: true,
           message: action,
@@ -3432,9 +3444,8 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        {/* Show rotate button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show rotate button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3442,11 +3453,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot rotate service account tokens',
+                                  'cannot rotate this service account token',
                                   () => {
                                     setTokenToRotate(token);
                                     setShowRotateDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
@@ -3455,9 +3471,8 @@ function ServiceAccountTokensView({
                             </button>
                           </CustomTooltip>
                         )}
-                        {/* Show delete button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show delete button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3465,11 +3480,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot delete service account tokens',
+                                  'cannot delete this service account token',
                                   () => {
                                     setTokenToDelete(token);
                                     setShowDeleteDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
