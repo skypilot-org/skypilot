@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Retry helpers for transient DB errors.
 
 The jobs controller and other long-running SkyPilot processes hit
@@ -13,6 +12,7 @@ and many asyncpg connection errors), plus raw driver/network exceptions
 that can escape SQLAlchemy, also when a driver error is the `__cause__` of
 the raised exception, and retry with exponential backoff + jitter.
 """
+from __future__ import annotations
 
 import asyncio
 import functools
@@ -24,6 +24,7 @@ from typing import Awaitable, Callable, Optional, Set, Tuple, Type, TypeVar
 
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
+
 sqlalchemy_exc = adaptors_common.LazyImport(
     'sqlalchemy.exc',
     import_error_message=sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG)
@@ -33,7 +34,6 @@ from sky.utils import common_utils
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
-
 
 _DRIVER_EXCEPTIONS: Optional[Tuple[Type[BaseException], ...]] = None
 
@@ -123,12 +123,14 @@ _NETWORK_EXCEPTIONS: Tuple[Type[BaseException], ...] = (
     asyncio.TimeoutError,
 )
 
+
 def retryable_exceptions() -> Tuple[Type[BaseException], ...]:
     """Driver + network exceptions that warrant a retry (lazy SQLAlchemy)."""
     return _build_driver_exceptions() + _NETWORK_EXCEPTIONS
 
 
 # RETRYABLE_EXCEPTIONS is exposed via module __getattr__ (lazy SQLAlchemy).
+
 
 def is_transient(error: BaseException) -> bool:
     """Whether `error` is a transient DB error, directly or by `__cause__`.

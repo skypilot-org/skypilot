@@ -1,9 +1,10 @@
-from __future__ import annotations
 """Lock for SkyPilot.
 
 This module provides an abstraction for locking that can use
 either local file locks or database-based distributed locks.
 """
+from __future__ import annotations
+
 import abc
 import hashlib
 import logging
@@ -14,9 +15,17 @@ from typing import Any, Callable, Optional
 import filelock
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
+import typing
+
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
-psycopg2 = adaptors_common.LazyImport("psycopg2", import_error_message=_SA_MSG)
-sqlalchemy = adaptors_common.LazyImport("sqlalchemy", import_error_message=_SA_MSG)
+if typing.TYPE_CHECKING:
+    import psycopg2
+    import sqlalchemy
+else:
+    psycopg2 = adaptors_common.LazyImport("psycopg2",
+                                          import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport("sqlalchemy",
+                                            import_error_message=_SA_MSG)
 
 from sky import global_user_state
 from sky.skylet import runtime_utils

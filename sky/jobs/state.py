@@ -1,5 +1,7 @@
-from __future__ import annotations
 """The database for managed jobs status."""
+# pylint: disable=line-too-long
+from __future__ import annotations
+
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import asyncio
@@ -91,8 +93,9 @@ if sqlalchemy_deps.sqlalchemy_available():
     _MEASURABLE = 'created_at IS NOT NULL AND eligible_at IS NOT NULL'
 
     PENDING_TIMELINE_PREDICATE = f't_time_to_running IS NULL AND {_MEASURABLE}'
-    NEVER_RAN_PREDICATE = (f't_controller_queue IS NULL AND start_at IS NULL AND '
-                           f'{_MEASURABLE}')
+    NEVER_RAN_PREDICATE = (
+        f't_controller_queue IS NULL AND start_at IS NULL AND '
+        f'{_MEASURABLE}')
 
     # A task the scheduler has claimed that has neither started nor finished. Used
     # three ways -- the partial index below, its migration, and the WHERE of the
@@ -131,18 +134,26 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('last_recovered_at',
                           sqlalchemy.Float,
                           server_default='-1'),
-        sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
+        sqlalchemy.Column('recovery_count',
+                          sqlalchemy.Integer,
+                          server_default='0'),
         sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
         sqlalchemy.Column('failure_reason', sqlalchemy.Text),
         sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, index=True),
         sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
         sqlalchemy.Column('task_name', sqlalchemy.Text),
         sqlalchemy.Column('specs', sqlalchemy.Text),
-        sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('local_log_file',
+                          sqlalchemy.Text,
+                          server_default=None),
         sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
         sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
-        sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
-        sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
+        sqlalchemy.Column('logs_cleaned_at',
+                          sqlalchemy.Float,
+                          server_default=None),
+        sqlalchemy.Column('full_resources',
+                          sqlalchemy.JSON,
+                          server_default=None),
         # Whether this task is a primary task (True) or auxiliary task (False)
         # within a job group. NULL for non-job-group jobs (single jobs/pipelines).
         # Auxiliary tasks are terminated when all primary tasks complete.
@@ -167,7 +178,9 @@ if sqlalchemy_deps.sqlalchemy_available():
         # paths (status counts, status filter, returned status) may surface this
         # value instead of `status` via the optional `status_expr` seam, without
         # altering the underlying job lifecycle. NULL means "no override".
-        sqlalchemy.Column('status_override', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('status_override',
+                          sqlalchemy.Text,
+                          server_default=None),
         # When the job was accepted, as epoch seconds. T0 of the launch timeline.
         #
         # A separate column rather than reusing the PENDING job_events row, whose
@@ -226,20 +239,28 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('t_controller_queue',
                           sqlalchemy.Float,
                           server_default=None),
-        sqlalchemy.Column('t_retry_overhead', sqlalchemy.Float,
+        sqlalchemy.Column('t_retry_overhead',
+                          sqlalchemy.Float,
                           server_default=None),
         # Time that belongs to no phase we can name: a job placed on a warm pool
         # never provisions, and one launched before these milestones has no
         # attempt to break down. Kept apart from retry_overhead so such a job does
         # not read as "99% retried launches", which is the misdiagnosis this
         # breakdown exists to prevent.
-        sqlalchemy.Column('t_unattributed', sqlalchemy.Float, server_default=None),
+        sqlalchemy.Column('t_unattributed',
+                          sqlalchemy.Float,
+                          server_default=None),
         sqlalchemy.Column('t_provision_setup',
                           sqlalchemy.Float,
                           server_default=None),
-        sqlalchemy.Column('t_queue_wait', sqlalchemy.Float, server_default=None),
-        sqlalchemy.Column('t_node_startup', sqlalchemy.Float, server_default=None),
-        sqlalchemy.Column('t_runtime_setup', sqlalchemy.Float, server_default=None),
+        sqlalchemy.Column('t_queue_wait', sqlalchemy.Float,
+                          server_default=None),
+        sqlalchemy.Column('t_node_startup',
+                          sqlalchemy.Float,
+                          server_default=None),
+        sqlalchemy.Column('t_runtime_setup',
+                          sqlalchemy.Float,
+                          server_default=None),
         # The headline: accepted -> RUNNING. Measured directly rather than summed,
         # because histogram quantiles are not additive.
         sqlalchemy.Column('t_time_to_running',
@@ -285,10 +306,11 @@ if sqlalchemy_deps.sqlalchemy_available():
         # Occupancy: how many jobs the controllers are holding. Counted on every
         # refresh, and the predicate is wider than the one above, so without this
         # the count is a sequential scan of every task ever run.
-        sqlalchemy.Index('ix_spot_claimed_live',
-                         'spot_job_id',
-                         postgresql_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE),
-                         sqlite_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE)),
+        sqlalchemy.Index(
+            'ix_spot_claimed_live',
+            'spot_job_id',
+            postgresql_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE),
+            sqlite_where=sqlalchemy.text(CLAIMED_LIVE_PREDICATE)),
     )
 
     job_info_table = sqlalchemy.Table(
@@ -303,15 +325,20 @@ if sqlalchemy_deps.sqlalchemy_available():
         # get_waiting_job_async, get_num_launching_jobs, get_num_alive_jobs),
         # and active-state rows are a tiny fraction of the table.
         sqlalchemy.Column('schedule_state', sqlalchemy.Text, index=True),
-        sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
+        sqlalchemy.Column('controller_pid',
+                          sqlalchemy.Integer,
                           server_default=None),
         sqlalchemy.Column('controller_pid_started_at',
                           sqlalchemy.Float,
                           server_default=None),
         sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
         sqlalchemy.Column('env_file_path', sqlalchemy.Text),
-        sqlalchemy.Column('dag_yaml_content', sqlalchemy.Text, server_default=None),
-        sqlalchemy.Column('env_file_content', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('dag_yaml_content',
+                          sqlalchemy.Text,
+                          server_default=None),
+        sqlalchemy.Column('env_file_content',
+                          sqlalchemy.Text,
+                          server_default=None),
         sqlalchemy.Column('config_file_content',
                           sqlalchemy.Text,
                           server_default=None),
@@ -320,7 +347,9 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('priority',
                           sqlalchemy.Integer,
                           server_default=str(constants.DEFAULT_PRIORITY)),
-        sqlalchemy.Column('priority_class', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('priority_class',
+                          sqlalchemy.Text,
+                          server_default=None),
         sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
         sqlalchemy.Column('original_user_yaml_path',
                           sqlalchemy.Text,
@@ -331,7 +360,10 @@ if sqlalchemy_deps.sqlalchemy_available():
         # Indexed: every per-pool dashboard query and pool_status request filters
         # by this column. Without an index a job_info table with tens of thousands
         # of (mostly finished) rows turns each pool lookup into a full scan.
-        sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None, index=True),
+        sqlalchemy.Column('pool',
+                          sqlalchemy.Text,
+                          server_default=None,
+                          index=True),
         # Indexed: pool_status fetches per-replica used_by lists by filtering on
         # current_cluster_name; the index keeps that fast when many jobs share
         # the same pool.
@@ -395,7 +427,8 @@ if sqlalchemy_deps.sqlalchemy_available():
                           sqlalchemy.Integer,
                           server_default=None,
                           index=True),
-        sqlalchemy.Column('parent_task_id', sqlalchemy.Integer,
+        sqlalchemy.Column('parent_task_id',
+                          sqlalchemy.Integer,
                           server_default=None),
         #   dynamic_task_index: a dynamic task's ordinal within its root's tree
         # (the root's declared tasks are 0..n-1, dynamic tasks number on from n in
@@ -457,7 +490,9 @@ if sqlalchemy_deps.sqlalchemy_available():
         # (record_emergency_kept_running_async). NULL on all other events and
         # on RECOVERING events written before this column existed (treated as
         # FAILURE for back-compat).
-        sqlalchemy.Column('recovery_source', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('recovery_source',
+                          sqlalchemy.Text,
+                          server_default=None),
     )
 
     batch_state_table = sqlalchemy.Table(
@@ -486,12 +521,14 @@ if sqlalchemy_deps.sqlalchemy_available():
         'job_dependencies',
         Base.metadata,
         sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, nullable=False),
-        sqlalchemy.Column('depends_on_job_id', sqlalchemy.Integer, nullable=False),
+        sqlalchemy.Column('depends_on_job_id',
+                          sqlalchemy.Integer,
+                          nullable=False),
         sqlalchemy.PrimaryKeyConstraint('spot_job_id', 'depends_on_job_id'),
     )
 
-
-    def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
+    def _unfinished_dependency_exists(
+    ) -> sqlalchemy.sql.elements.ColumnElement:
         """True for a job_info row with a dependency that is not DONE yet.
 
         Correlates to ``job_info_table`` in the enclosing query. A NULL
@@ -509,7 +546,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                 dependency_info.c.schedule_state !=
                 ManagedJobScheduleState.DONE.value,
             ))
-
 
     def _users_at_launch_limit(
             max_launching_jobs_per_user: int) -> sqlalchemy.Select:
@@ -529,7 +565,8 @@ if sqlalchemy_deps.sqlalchemy_available():
             return sqlalchemy.exists().where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == launching_info.c.spot_job_id,
-                    spot_table.c.status.in_([status.value for status in statuses]),
+                    spot_table.c.status.in_(
+                        [status.value for status in statuses]),
                 ))
 
         return sqlalchemy.select(launching_info.c.user_hash).where(
@@ -553,7 +590,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                 launching_info.c.user_hash).having(sqlalchemy.func.count() >=  # pylint: disable=not-callable
                                                    max_launching_jobs_per_user)
 
-
     def _has_live_task() -> sqlalchemy.sql.elements.ColumnElement:
         """True for a job_info row with a task launched and not yet finished.
 
@@ -574,7 +610,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                     spot_table.c.submitted_at.is_not(None),
                     spot_table.c.end_at.is_(None),
                 )))
-
 
     def _not_held_by_launch_limit(
         max_launching_jobs_per_user: Optional[int]
@@ -599,7 +634,6 @@ if sqlalchemy_deps.sqlalchemy_available():
             _has_live_task(),
         )
 
-
     def get_held_job_ids(max_launching_jobs_per_user: int) -> Set[int]:
         """Ids of the WAITING jobs the per-user launch limit holds back.
 
@@ -615,10 +649,10 @@ if sqlalchemy_deps.sqlalchemy_available():
                         job_info_table.c.schedule_state ==
                         ManagedJobScheduleState.WAITING.value,
                         sqlalchemy.not_(
-                            _not_held_by_launch_limit(max_launching_jobs_per_user)),
+                            _not_held_by_launch_limit(
+                                max_launching_jobs_per_user)),
                     ))).fetchall()
         return {row[0] for row in rows}
-
 
     def users_at_launch_limit_sql(max_launching_jobs_per_user: int,
                                   dialect: sqlalchemy.engine.Dialect) -> str:
@@ -632,7 +666,6 @@ if sqlalchemy_deps.sqlalchemy_available():
             _users_at_launch_limit(int(max_launching_jobs_per_user)).compile(
                 dialect=dialect, compile_kwargs={'literal_binds': True}))
 
-
     # Subquery that aggregates batch_state into per-job progress counts.
     # Used by jobs-queue queries to supply batch_total_batches and
     # batch_completed_batches without denormalized columns on job_info.
@@ -641,10 +674,10 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.func.count().label(  # pylint: disable=not-callable
             'batch_total_batches'),
         sqlalchemy.func.count(  # pylint: disable=not-callable
-            sqlalchemy.case((batch_state_table.c.status
-                             == 'COMPLETED', 1),)).label('batch_completed_batches'),
+            sqlalchemy.case(
+                (batch_state_table.c.status
+                 == 'COMPLETED', 1),)).label('batch_completed_batches'),
     ).group_by(batch_state_table.c.job_id).subquery('batch_progress')
-
 
     def create_table(engine: sqlalchemy.engine.Engine):
         # Enable WAL mode to avoid locking issues.
@@ -669,7 +702,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                                              migration_utils.SPOT_JOBS_DB_NAME,
                                              migration_utils.SPOT_JOBS_VERSION)
 
-
     _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
 else:
     # Client-only install: enums/helpers below still import. DB APIs
@@ -681,9 +713,8 @@ else:
     sqlite = None  # type: ignore
     sql_async = None  # type: ignore
     declarative = None  # type: ignore
-    Base = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore
-
 
 
 def get_engine():

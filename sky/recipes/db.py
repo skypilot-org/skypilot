@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Database for recipes.
 
 This module provides a SQLAlchemy-backed database for storing recipes
@@ -6,6 +5,8 @@ used in the Recipes feature. The database stores recipes that can be
 pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
+from __future__ import annotations
+
 import json
 import os
 import time
@@ -93,7 +94,6 @@ if sqlalchemy_deps.sqlalchemy_available():
         },
     }
 
-
     def _load_example_content(filename: str) -> str:
         """Load YAML content from an example file.
 
@@ -109,7 +109,6 @@ if sqlalchemy_deps.sqlalchemy_available():
         filepath = os.path.join(_EXAMPLES_DIR, f'{filename}.yaml')
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
-
 
     def _create_table(engine: sqlalchemy.engine.Engine) -> None:
         """Create tables and run migrations."""
@@ -129,7 +128,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                                              migration_utils.RECIPES_DB_NAME,
                                              migration_utils.RECIPES_VERSION)
 
-
     def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
         """Insert default templates if the table is empty.
 
@@ -140,15 +138,16 @@ if sqlalchemy_deps.sqlalchemy_available():
             # Check if table is empty
             # pylint: disable=not-callable
             count = session.execute(
-                sqlalchemy.select(
-                    sqlalchemy.func.count()).select_from(recipes_table)).scalar()
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(
+                    recipes_table)).scalar()
             if count == 0:
                 now = time.time()
                 for filename, metadata in DEFAULT_TEMPLATES.items():
                     try:
                         content = _load_example_content(filename)
                     except FileNotFoundError:
-                        logger.warning(f'Example file not found: {filename}.yaml')
+                        logger.warning(
+                            f'Example file not found: {filename}.yaml')
                         continue
 
                     session.execute(recipes_table.insert().values(
@@ -165,7 +164,6 @@ if sqlalchemy_deps.sqlalchemy_available():
                         is_pinnable=1,
                     ))
                 session.commit()
-
 
     _db_manager = db_utils.DatabaseManager(
         'recipes', _create_table, post_init_fn=_insert_default_templates)

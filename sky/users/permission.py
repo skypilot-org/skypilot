@@ -1,5 +1,6 @@
-from __future__ import annotations
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import logging
@@ -12,11 +13,19 @@ from typing import Dict, Generator, List, Optional, Set, Tuple
 from sky.adaptors import common as adaptors_common
 from sky.utils.db import sqlalchemy_deps
 
+import typing
+
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
-casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
-casbin_util = adaptors_common.LazyImport('casbin.util', import_error_message=_SA_MSG)
-sqlalchemy_adapter = adaptors_common.LazyImport('sqlalchemy_adapter',
-                                                import_error_message=_SA_MSG)
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.util as casbin_util
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
 
 from sky import global_user_state
 from sky import models

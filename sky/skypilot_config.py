@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at _GLOBAL_CONFIG_PATH
@@ -49,6 +48,8 @@ then:
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> None
 """
+from __future__ import annotations
+
 import contextlib
 import copy
 import json
@@ -964,6 +965,7 @@ def _reload_config_as_server() -> None:
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
             from sqlalchemy import orm
             _ensure_config_db_schema()
+            assert _db_manager is not None and config_yaml_table is not None
             with orm.Session(_db_manager.get_engine()) as session:
                 row = session.query(config_yaml_table).filter_by(
                     key=key).first()
@@ -1763,6 +1765,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 from sky.utils.db import db_utils
 
                 _ensure_config_db_schema()
+                assert _db_manager is not None and config_yaml_table is not None
                 engine = _db_manager.get_engine()
                 # Persisting, not logging: this value is read back as the
                 # server config, so it must be the real one. Do not route it

@@ -1,4 +1,3 @@
-from __future__ import annotations
 """SQLAlchemy instrumentation feeding the families in ``sky.metrics.db``.
 
 ``install(engine, db)`` attaches everything to one engine. Call it once
@@ -31,6 +30,7 @@ Every listener is defensive: a defect in here must never break database
 access, so each body is wrapped and failures are logged once and then
 swallowed. The whole module is inert unless ``sky.metrics.db.ENABLED``.
 """
+from __future__ import annotations
 
 import logging
 import operator
@@ -45,8 +45,10 @@ from sky.metrics import db as db_metrics
 from sky.utils.db import sqlalchemy_deps
 
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
-sqlalchemy = adaptors_common.LazyImport('sqlalchemy', import_error_message=_SA_MSG)
-event = adaptors_common.LazyImport('sqlalchemy.event', import_error_message=_SA_MSG)
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                        import_error_message=_SA_MSG)
+event = adaptors_common.LazyImport('sqlalchemy.event',
+                                   import_error_message=_SA_MSG)
 sql_compiler = adaptors_common.LazyImport('sqlalchemy.sql.compiler',
                                           import_error_message=_SA_MSG)
 

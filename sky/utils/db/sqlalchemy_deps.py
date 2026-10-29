@@ -12,8 +12,7 @@ from sky.adaptors import common as adaptors_common
 SQLALCHEMY_INSTALL_MSG = (
     'SQLAlchemy is required for SkyPilot API server / controller database '
     'access. Install server dependencies with: pip install "skypilot[server]" '
-    '(or a cloud extra such as "skypilot[kubernetes]").'
-)
+    '(or a cloud extra such as "skypilot[kubernetes]").')
 
 
 def sqlalchemy_available() -> bool:

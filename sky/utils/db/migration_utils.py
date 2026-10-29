@@ -1,10 +1,11 @@
-from __future__ import annotations
 """Constants for the database schemas."""
+from __future__ import annotations
 
 import contextlib
 import logging
 import os
 import threading
+import typing
 from typing import Optional
 
 import filelock
@@ -15,19 +16,26 @@ from sky.skylet import constants
 from sky.utils.db import sqlalchemy_deps
 
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
-alembic_command = adaptors_common.LazyImport('alembic.command',
-                                             import_error_message=_SA_MSG)
-# alembic.config.Config is a class - LazyImport module then Config attr
-_alembic_config = adaptors_common.LazyImport('alembic.config',
-                                             import_error_message=_SA_MSG)
-migration = adaptors_common.LazyImport('alembic.runtime.migration',
-                                       import_error_message=_SA_MSG)
-sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
-                                        import_error_message=_SA_MSG)
+if typing.TYPE_CHECKING:
+    import alembic.command as alembic_command
+    import alembic.config as _alembic_config
+    import alembic.runtime.migration as migration
+    import sqlalchemy
+else:
+    alembic_command = adaptors_common.LazyImport('alembic.command',
+                                                 import_error_message=_SA_MSG)
+    # alembic.config.Config is a class - LazyImport module then Config attr
+    _alembic_config = adaptors_common.LazyImport('alembic.config',
+                                                 import_error_message=_SA_MSG)
+    migration = adaptors_common.LazyImport('alembic.runtime.migration',
+                                           import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
 
 
 def _alembic_config_cls():
     return _alembic_config.Config
+
 
 logger = sky_logging.init_logger(__name__)
 

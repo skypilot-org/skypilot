@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Global user state, backed by a sqlite database.
 
 Concepts:
@@ -7,6 +6,8 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import enum
@@ -74,6 +75,60 @@ _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
     'duplicate key value violates unique constraint',
 ]
 
+
+class ClusterEventType(enum.Enum):
+    """Type of cluster event."""
+    DEBUG = 'DEBUG'
+    """Detailed debugging information from the cloud"""
+
+    STATUS_CHANGE = 'STATUS_CHANGE'
+    """Used to denote events that modify cluster status."""
+
+    TERMINAL = 'TERMINAL'
+    """Used to denote events that are directly related to
+    a cluster's termination."""
+
+    # Progress milestones emitted during a cluster launch
+    # (e.g. 'Launching (Kubernetes cluster is autoscaling)',
+    # 'Launching (1 pod(s) pending due to Pulling)'). Read for the
+    # LAUNCHING-state badge tooltip on the dashboard.
+    LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
+
+    # A boundary of a launch that has been passed, carrying how long the phase
+    # it closes took. Kept apart from LAUNCH_PROGRESS above, which is consumed
+    # latest-wins as a managed job's `details` column -- "what is this launch
+    # waiting on *now*". A row saying a wait has ended is by construction not
+    # that, and would sit in that column as a stale answer for the rest of the
+    # launch.
+    LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
+
+
+# Which retention window each event type is swept under.
+#
+# The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
+# so a type with no entry here is never swept and its rows are retained
+# forever. That failure is silent: no error, no red test, just a table that
+# grows. Listing the types here rather than as calls in the daemon lets
+# `test_every_event_type_has_a_retention_window` assert the mapping covers the
+# enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
+# was.
+#
+# Keys are the config option each window is read from; see
+# `cluster_event_retention_daemon`.
+CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
+    'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
+    # Short-lived observability, of no business-record value once the launch is
+    # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
+    # record of a boundary, but only useful for as long as anyone is looking at
+    # that launch.
+    'cluster_debug_event_retention_hours': (
+        ClusterEventType.DEBUG,
+        ClusterEventType.LAUNCH_PROGRESS,
+        ClusterEventType.LAUNCH_MILESTONE,
+    ),
+    'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
+}
+
 if sqlalchemy_deps.sqlalchemy_available():
     import sqlalchemy
     from sqlalchemy import exc as sqlalchemy_exc
@@ -124,7 +179,8 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('storage_mounts_metadata',
                           sqlalchemy.LargeBinary,
                           server_default=None),
-        sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
+        sqlalchemy.Column('cluster_ever_up',
+                          sqlalchemy.Integer,
                           server_default='0'),
         sqlalchemy.Column('status_updated_at',
                           sqlalchemy.Integer,
@@ -191,22 +247,31 @@ if sqlalchemy_deps.sqlalchemy_available():
                           server_default=None),
         sqlalchemy.Column('last_use', sqlalchemy.Text),
         sqlalchemy.Column('status', sqlalchemy.Text),
-        sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
-        sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('is_ephemeral',
+                          sqlalchemy.Integer,
+                          server_default='0'),
+        sqlalchemy.Column('error_message', sqlalchemy.Text,
+                          server_default=None),
         # JSON-encoded lists of pods/clusters using the volume
         sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
-        sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
-        sqlalchemy.Column('creation_yaml', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('usedby_clusters',
+                          sqlalchemy.Text,
+                          server_default=None),
+        sqlalchemy.Column('creation_yaml', sqlalchemy.Text,
+                          server_default=None),
         # Set only while the volume is being resized to a size it does not have
         # yet; `handle`'s size stays the capacity that exists. See
         # models.VolumeResizeStatus.
-        sqlalchemy.Column('resize_status', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('resize_status', sqlalchemy.Text,
+                          server_default=None),
         sqlalchemy.Column('resize_target_size',
                           sqlalchemy.Text,
                           server_default=None),
         # What the cloud said about the resize, in its own words. What is shown to
         # the user is built from this in volume_list, not stored.
-        sqlalchemy.Column('resize_message', sqlalchemy.Text, server_default=None),
+        sqlalchemy.Column('resize_message',
+                          sqlalchemy.Text,
+                          server_default=None),
     )
 
     # Table for Cluster History
@@ -265,60 +330,6 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
     )
 
-
-    class ClusterEventType(enum.Enum):
-        """Type of cluster event."""
-        DEBUG = 'DEBUG'
-        """Detailed debugging information from the cloud"""
-
-        STATUS_CHANGE = 'STATUS_CHANGE'
-        """Used to denote events that modify cluster status."""
-
-        TERMINAL = 'TERMINAL'
-        """Used to denote events that are directly related to
-        a cluster's termination."""
-
-        # Progress milestones emitted during a cluster launch
-        # (e.g. 'Launching (Kubernetes cluster is autoscaling)',
-        # 'Launching (1 pod(s) pending due to Pulling)'). Read for the
-        # LAUNCHING-state badge tooltip on the dashboard.
-        LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
-
-        # A boundary of a launch that has been passed, carrying how long the phase
-        # it closes took. Kept apart from LAUNCH_PROGRESS above, which is consumed
-        # latest-wins as a managed job's `details` column -- "what is this launch
-        # waiting on *now*". A row saying a wait has ended is by construction not
-        # that, and would sit in that column as a stale answer for the rest of the
-        # launch.
-        LAUNCH_MILESTONE = 'LAUNCH_MILESTONE'
-
-
-    # Which retention window each event type is swept under.
-    #
-    # The sweep is per type -- `cleanup_cluster_events_with_retention` takes one --
-    # so a type with no entry here is never swept and its rows are retained
-    # forever. That failure is silent: no error, no red test, just a table that
-    # grows. Listing the types here rather than as calls in the daemon lets
-    # `test_every_event_type_has_a_retention_window` assert the mapping covers the
-    # enum, so the next type added cannot be missed the way LAUNCH_MILESTONE nearly
-    # was.
-    #
-    # Keys are the config option each window is read from; see
-    # `cluster_event_retention_daemon`.
-    CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
-        'cluster_event_retention_hours': (ClusterEventType.STATUS_CHANGE,),
-        # Short-lived observability, of no business-record value once the launch is
-        # over. LAUNCH_MILESTONE shares the window rather than the meaning: it is a
-        # record of a boundary, but only useful for as long as anyone is looking at
-        # that launch.
-        'cluster_debug_event_retention_hours': (
-            ClusterEventType.DEBUG,
-            ClusterEventType.LAUNCH_PROGRESS,
-            ClusterEventType.LAUNCH_MILESTONE,
-        ),
-        'cluster_terminal_event_retention_hours': (ClusterEventType.TERMINAL,),
-    }
-
     # Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
     # to INIT because a status refresh found it in an abnormal state -- e.g. a node
     # terminated/preempted, the ray cluster is unhealthy, or a pod is OOMKilled
@@ -342,7 +353,9 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('starting_status', sqlalchemy.Text),
         sqlalchemy.Column('ending_status', sqlalchemy.Text),
         sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
-        sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
+        sqlalchemy.Column('transitioned_at',
+                          sqlalchemy.Integer,
+                          primary_key=True),
         sqlalchemy.Column('type', sqlalchemy.Text),
         sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
         # The primary key is (cluster_hash, reason, transitioned_at), but the two
@@ -416,7 +429,9 @@ if sqlalchemy_deps.sqlalchemy_available():
                           sqlalchemy.Float,
                           server_default=None),
         sqlalchemy.Column('admitted', sqlalchemy.Float, server_default=None),
-        sqlalchemy.Column('instances_ready', sqlalchemy.Float, server_default=None),
+        sqlalchemy.Column('instances_ready',
+                          sqlalchemy.Float,
+                          server_default=None),
         # NULL while in flight. 'succeeded' | 'failed' | 'abandoned', where
         # abandoned means the writing process died and the startup sweep closed the
         # row -- only that case counts as a lost metric.
@@ -432,7 +447,8 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
                          'attempt_seq'),
         # Retention sweep. Without it the sweep full-scans on every tick.
-        sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
+        sqlalchemy.Index('ix_launch_attempts_provision_start',
+                         'provision_start'),
         # The milestone writers hold the on-cloud name (it is what is stamped on
         # the pods) and look up the in-flight attempt by either name. Without this
         # that branch of the OR cannot be indexed, so the whole lookup degrades to
@@ -448,7 +464,8 @@ if sqlalchemy_deps.sqlalchemy_available():
         # into the few in-flight rows: 120ms against nothing measurable over 200k
         # rows, once a minute, inside a write transaction that blocks other
         # writers for its duration.
-        sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
+        sqlalchemy.Index('ix_launch_attempts_open', 'outcome',
+                         'provision_start'),
         # The metrics daemon's claim, also once a minute. Its predicate is
         # "closed but not yet observed", and `ix_launch_attempts_open` serves only
         # the first half: leading on `outcome IS NOT NULL` is nearly the whole
@@ -481,10 +498,16 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('token_name', sqlalchemy.Text),
         # Indexed + unique: the auth middleware looks up rows by hash on every
         # request to enforce revocation/rotation/expiration.
-        sqlalchemy.Column('token_hash', sqlalchemy.Text, index=True, unique=True),
+        sqlalchemy.Column('token_hash',
+                          sqlalchemy.Text,
+                          index=True,
+                          unique=True),
         sqlalchemy.Column('created_at', sqlalchemy.Integer),
-        sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
-        sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+        sqlalchemy.Column('last_used_at',
+                          sqlalchemy.Integer,
+                          server_default=None),
+        sqlalchemy.Column('expires_at', sqlalchemy.Integer,
+                          server_default=None),
         sqlalchemy.Column('creator_user_hash',
                           sqlalchemy.Text),  # Who created this token
         sqlalchemy.Column('service_account_user_id',
@@ -545,7 +568,6 @@ if sqlalchemy_deps.sqlalchemy_available():
         sqlalchemy.Column('expires_at', sqlalchemy.DateTime(timezone=True)),
     )
 
-
     def _glob_to_similar(glob_pattern):
         """Converts a glob pattern to a PostgreSQL LIKE pattern."""
 
@@ -564,7 +586,6 @@ if sqlalchemy_deps.sqlalchemy_available():
 
         like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
         return like_pattern
-
 
     def create_table(engine: sqlalchemy.engine.Engine):
         # Enable WAL mode to avoid locking issues.
@@ -587,7 +608,6 @@ if sqlalchemy_deps.sqlalchemy_available():
         migration_utils.safe_alembic_upgrade(
             engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
             migration_utils.GLOBAL_USER_STATE_VERSION)
-
 
     @annotations.lru_cache(scope='global', maxsize=1)
     def _sqlite_supports_returning() -> bool:
@@ -615,7 +635,6 @@ if sqlalchemy_deps.sqlalchemy_available():
             major, minor = int(version_parts[0]), int(version_parts[1])
             return (major > 3) or (major == 3 and minor >= 35)
 
-
     @annotations.lru_cache(scope='global', maxsize=1)
     def _supports_returning() -> bool:
         """Whether this backend can return the rows a statement just changed.
@@ -641,9 +660,10 @@ if sqlalchemy_deps.sqlalchemy_available():
             return _sqlite_supports_returning()
         return True
 
-
     _db_manager = db_utils.DatabaseManager(
-        'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
+        'state',
+        create_table,
+        post_init_fn=lambda _: _sqlite_supports_returning())
     initialize_and_get_db = _db_manager.get_engine
 else:
     # Client-only install: enums/helpers below still import. DB APIs
@@ -655,7 +675,7 @@ else:
     sqlite = None  # type: ignore
     sql_async = None  # type: ignore
     declarative = None  # type: ignore
-    Base = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore
     initialize_and_get_db = None  # type: ignore
 
@@ -3118,7 +3138,8 @@ def iter_clusters_from_history(
         if workspaces_filter is not None:
             # Same fallback as the record's 'workspace' below: the history
             # row's workspace if set, else the live cluster's.
-            query = query.filter(_HISTORY_WORKSPACE.in_(workspaces_filter))
+            query = query.filter(
+                _history_workspace_expr().in_(workspaces_filter))
         rows = query.all()
 
     usage_intervals_dict = {}

@@ -1,5 +1,6 @@
-from __future__ import annotations
 """Utils for sky databases."""
+from __future__ import annotations
+
 import asyncio
 import functools
 import contextlib
@@ -23,16 +24,22 @@ from sky.utils.db import sql_metrics
 logger = sky_logging.init_logger(__name__)
 
 _SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
-aiosqlite = adaptors_common.LazyImport('aiosqlite', import_error_message=_SA_MSG)
-sqlalchemy = adaptors_common.LazyImport('sqlalchemy', import_error_message=_SA_MSG)
-sqlalchemy_exc = adaptors_common.LazyImport('sqlalchemy.exc',
-                                            import_error_message=_SA_MSG)
-sqlalchemy_async = adaptors_common.LazyImport('sqlalchemy.ext.asyncio',
-                                              import_error_message=_SA_MSG)
-
 if typing.TYPE_CHECKING:
+    import aiosqlite
     import aiosqlite.context
+    import sqlalchemy
+    from sqlalchemy.ext import asyncio as sqlalchemy_async
     from sqlalchemy.orm import Session
+    sqlalchemy_exc = sqlalchemy.exc
+else:
+    aiosqlite = adaptors_common.LazyImport('aiosqlite',
+                                           import_error_message=_SA_MSG)
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+    sqlalchemy_exc = adaptors_common.LazyImport('sqlalchemy.exc',
+                                                import_error_message=_SA_MSG)
+    sqlalchemy_async = adaptors_common.LazyImport('sqlalchemy.ext.asyncio',
+                                                  import_error_message=_SA_MSG)
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
