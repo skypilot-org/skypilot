@@ -4,7 +4,9 @@
 WORKER_SERVICE_PORT = 8290
 WORKER_SERVICE_STARTUP_TIMEOUT = 60  # seconds to wait for service health
 
-# Timeouts (in seconds)
+# Timeouts (in seconds). Discovery defaults can be overridden through
+# batch.worker_discovery_timeout_seconds and
+# batch.worker_discovery_resume_timeout_seconds in SkyPilot config.
 WORKER_DISCOVERY_TIMEOUT = 300
 # On resume, batches are already checkpointed so we can afford to wait longer
 # for pool workers to reappear while the controller pod and the serve-side

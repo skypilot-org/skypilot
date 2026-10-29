@@ -57,6 +57,10 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
 
+  :ref:`batch <config-yaml-batch>`:
+    :ref:`worker_discovery_timeout_seconds <config-yaml-batch-worker-discovery-timeout-seconds>`: 300
+    :ref:`worker_discovery_resume_timeout_seconds <config-yaml-batch-worker-discovery-resume-timeout-seconds>`: 600
+
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
       - -v /var/run/docker.sock:/var/run/docker.sock
@@ -665,6 +669,39 @@ Example:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
 
+
+.. _config-yaml-batch:
+
+``batch``
+~~~~~~~~~
+
+Configure :ref:`Sky Batch <batch-processing>` worker discovery. Set these options in your SkyPilot configuration before submitting a batch job. For a remote API server, use its server configuration (for example, the dashboard configuration editor).
+
+.. _config-yaml-batch-worker-discovery-timeout-seconds:
+
+``batch.worker_discovery_timeout_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum time, in seconds, to wait for at least one pool worker to become ``READY`` when a batch job starts. Increase this for pools that scale from zero and need time to provision nodes, download images or model weights, and complete setup. This does not change HTTP timeouts or mapper execution timeouts.
+
+Default: ``300`` (5 minutes). Must be a positive integer.
+
+.. _config-yaml-batch-worker-discovery-resume-timeout-seconds:
+
+``batch.worker_discovery_resume_timeout_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum time, in seconds, to wait for a ready pool worker when a batch coordinator resumes after a controller restart. Changing the initial discovery timeout does not change this value. This setting limits the wait for workers on each resume; it does not limit the number of controller restarts.
+
+Default: ``600`` (10 minutes). Must be a positive integer.
+
+For example, allow up to 30 minutes for both initial discovery and recovery:
+
+.. code-block:: yaml
+
+  batch:
+    worker_discovery_timeout_seconds: 1800
+    worker_discovery_resume_timeout_seconds: 1800
 
 .. _config-yaml-allowed-clouds:
 

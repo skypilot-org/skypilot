@@ -33,6 +33,7 @@ import time
 from typing import Any, Deque, Dict, List, Optional
 
 import sky
+from sky import skypilot_config
 from sky.batch import constants
 from sky.batch import io_formats
 from sky.client import sdk
@@ -364,13 +365,19 @@ class BatchCoordinator:
 
         Uses all available workers — no fixed ``target_num_replicas``.
         If no workers are found immediately, waits up to the discovery
-        timeout for at least one to appear.  On resume the timeout is
-        extended because batches are already checkpointed and the pool
+        timeout for at least one to appear.  By default, the timeout is
+        extended on resume because batches are already checkpointed and the pool
         may briefly appear "not ready" while the controller pod and the
         serve-side pool status plumbing stabilize after a restart.
         """
-        timeout = (constants.WORKER_DISCOVERY_RESUME_TIMEOUT
-                   if self._is_resume else constants.WORKER_DISCOVERY_TIMEOUT)
+        if self._is_resume:
+            timeout = skypilot_config.get_nested(
+                ('batch', 'worker_discovery_resume_timeout_seconds'),
+                constants.WORKER_DISCOVERY_RESUME_TIMEOUT)
+        else:
+            timeout = skypilot_config.get_nested(
+                ('batch', 'worker_discovery_timeout_seconds'),
+                constants.WORKER_DISCOVERY_TIMEOUT)
         workers = self._get_ready_workers()
 
         if not workers:

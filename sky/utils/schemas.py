@@ -3323,6 +3323,20 @@ def get_config_schema():
                     **_extra_jobs_properties,
                 },),
             'serve': _get_controller_schema(),
+            'batch': {
+                'type': 'object',
+                'additionalProperties': False,
+                'properties': {
+                    'worker_discovery_timeout_seconds': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
+                    'worker_discovery_resume_timeout_seconds': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
+                },
+            },
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
