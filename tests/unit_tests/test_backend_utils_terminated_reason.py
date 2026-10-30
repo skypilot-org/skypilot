@@ -189,11 +189,25 @@ class TestTerminatedClusterReason:
         del k8s
         assert _reason() == f'Nodes disappeared; no cause found. {_SUFFIX}'
 
-    def test_nothing_found_mentions_configured_autodown(self, k8s):
+    def test_nothing_found_leads_with_configured_autodown(self, k8s):
         del k8s
         assert _reason(autostop=10, to_down=True) == (
-            'Nodes disappeared; no cause found. Autodown was configured '
-            f'(idle 10 min). {_SUFFIX}')
+            'Likely autodowned by SkyPilot (idle 10 min); no direct cause '
+            f'found. {_SUFFIX}')
+
+    def test_nothing_found_on_spot_leads_with_preemption(self, k8s):
+        del k8s
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        handle.launched_resources.use_spot = True
+        assert _reason(handle) == (
+            f'Likely spot preemption; no direct cause found. {_SUFFIX}')
+
+    def test_autodown_hint_wins_over_spot(self, k8s):
+        del k8s
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        handle.launched_resources.use_spot = True
+        assert _reason(handle, autostop=5, to_down=True).startswith(
+            'Likely autodowned by SkyPilot (idle 5 min);')
 
     def test_kubernetes_autodown_breadcrumb(self, k8s):
         k8s.autostop_event.return_value = {'transitioned_at': 1}

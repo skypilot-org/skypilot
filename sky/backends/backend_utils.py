@@ -2963,9 +2963,16 @@ def _get_terminated_cluster_reason(
                      'disappeared; no direct cause found.')
 
     if cause is None:
-        cause = _NO_TERMINATION_CAUSE
+        # Nothing names a cause. Lead with what the cluster's own setup makes
+        # likely, as the refresh's warning for a vanished cluster does: the
+        # table cell shows only the start of the text.
         if autostop >= 0 and record['to_down']:
-            cause += f' Autodown was configured (idle {autostop} min).'
+            cause = (f'Likely autodowned by SkyPilot (idle {autostop} min); '
+                     'no direct cause found.')
+        elif launched_resources.use_spot:
+            cause = 'Likely spot preemption; no direct cause found.'
+        else:
+            cause = _NO_TERMINATION_CAUSE
     return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
 
 
