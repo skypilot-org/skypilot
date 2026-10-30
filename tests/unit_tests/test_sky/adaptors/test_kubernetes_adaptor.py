@@ -13,7 +13,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.server import common as server_common
 from sky.utils import annotations
 
 
@@ -481,3 +483,70 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
     finally:
         annotations.clear_request_level_cache()
         original_set_level(original_level)
+
+
+def _write_kubeconfig(path, server):
+    path.write_text(f"""apiVersion: v1
+kind: Config
+current-context: ctx
+clusters:
+- name: c
+  cluster:
+    server: {server}
+users:
+- name: u
+  user:
+    token: t
+contexts:
+- name: ctx
+  context:
+    cluster: c
+    user: u
+""")
+
+
+def test_sync_refresh_keeps_clients_while_kubeconfig_is_unchanged(
+        tmp_path, monkeypatch):
+    """Rebuilding every client on each sync handler's refresh costs tens of ms."""
+    path = tmp_path / 'kubeconfig'
+    _write_kubeconfig(path, 'https://127.0.0.1:6443')
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    monkeypatch.setattr(skypilot_config, 'safe_reload_config', lambda: None)
+    monkeypatch.setattr(kubernetes, '_last_refresh_fingerprint', None)
+    monkeypatch.setattr(kubernetes, '_clients_cleared_at', 0.0)
+    # A clock of our own for the adaptor's max-age check only.
+    clock = [1000.0]
+    monkeypatch.setattr(
+        kubernetes, 'time',
+        SimpleNamespace(monotonic=lambda: clock[0],
+                        time=time.time,
+                        sleep=time.sleep))
+    annotations.clear_request_level_cache()
+    refresh = server_common.refresh_workspace_state_for_sync_handler
+    try:
+        # The first refresh has no fingerprint to compare with: it clears and
+        # records one.
+        refresh()
+        first = kubernetes.core_api('ctx')
+        refresh()
+        assert kubernetes.core_api('ctx') is first
+        refresh()
+        assert kubernetes.core_api('ctx') is first
+        # A rewritten kubeconfig (e.g. rotated credentials) gets a new client.
+        _write_kubeconfig(path, 'https://127.0.0.2:6443')
+        refresh()
+        second = kubernetes.core_api('ctx')
+        assert second is not first
+        assert second.api_client.configuration.host == 'https://127.0.0.2:6443'
+        # The cap counts from the last clear (the rewrite above), not from the
+        # last refresh: keeping must not move it, or refreshes under 60 s
+        # apart would keep a client forever.
+        clock[0] += 30
+        refresh()
+        assert kubernetes.core_api('ctx') is second
+        clock[0] += 31
+        refresh()
+        assert kubernetes.core_api('ctx') is not second
+    finally:
+        # A client built from the tmp kubeconfig must not outlive the test.
+        annotations.clear_request_level_cache()
