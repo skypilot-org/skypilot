@@ -185,6 +185,23 @@ Any :code:`.skyignore` file under either your workdir or source paths of file_mo
 
 Do _not_ use ``.`` to indicate local directory (e.g., instead of ``./file``, write ``/file``).
 
+To re-include a file during upload, add a pattern beginning with ``!`` to the
+``.skyignore`` at the root of the source directory. The last matching pattern
+in that file takes precedence:
+
+.. code-block::
+
+  *.json
+  !keep.json
+
+This uploads ``keep.json`` while excluding other JSON files. A file cannot be
+re-included while its parent directory is excluded; use ``data/*`` instead of
+``data/`` when re-including ``!data/keep.json``.
+
+For rsync uploads, these root rules take precedence over matching rules in
+nested ``.skyignore`` files. Nested files retain their existing rsync exclude
+behavior; ``!`` support described here applies to the root file.
+
 .. _downloading-files-and-artifacts:
 
 Downloading files and artifacts

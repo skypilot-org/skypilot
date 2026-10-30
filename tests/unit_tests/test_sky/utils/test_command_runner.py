@@ -4,12 +4,14 @@ from contextlib import suppress
 import os
 import select
 import shlex
+import shutil
 import socket
 import subprocess
 import tempfile
 import threading
 import time
 from unittest import mock
+import zipfile
 
 import paramiko
 import pytest
@@ -17,6 +19,7 @@ import sqlalchemy
 
 from sky import exceptions
 from sky import skypilot_config
+from sky.data import storage_utils
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -1577,3 +1580,547 @@ class TestInlineCommandLimit:
         assert limit('ssh-other') == 20480
         # A real Kubernetes context still reads the kubernetes block.
         assert limit('gke-x') == 8192
+
+
+@pytest.mark.skipif(shutil.which('rsync') is None, reason='rsync is required')
+@pytest.mark.parametrize('source_name', ['source with spaces', '작업폴더', '작업 폴더'])
+@pytest.mark.parametrize('with_excludes', [False, True])
+def test_rsync_skyignore_with_source_path_characters(tmp_path, monkeypatch,
+                                                     source_name,
+                                                     with_excludes) -> None:
+    """Real rsync must preserve spaces and Unicode in paths and file contents."""
+    source = tmp_path / source_name
+    source.mkdir()
+    target = tmp_path / '전송 대상'
+    target.mkdir()
+    # Exercise quoting of any generated filter file as well as the source.
+    filter_dir = tmp_path / '임시 필터'
+    filter_dir.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+    skyignore = '*.json\n!keep.json\n' if with_excludes else ''
+    (source / '.skyignore').write_text(skyignore, encoding='utf-8')
+    (source / 'keep.json').write_text('재포함할 내용', encoding='utf-8')
+    (source / 'excluded.json').write_text('제외할 내용', encoding='utf-8')
+    nested = source / '하위 폴더'
+    nested.mkdir()
+    (nested / '일반 파일.txt').write_text('전송할 내용', encoding='utf-8')
+
+    runner = command_runner.LocalProcessCommandRunner()
+    runner.rsync(str(source), str(target), up=True, stream_logs=False)
+
+    expected = {'.skyignore', 'keep.json', '하위 폴더/일반 파일.txt'}
+    if not with_excludes:
+        expected.add('excluded.json')
+    actual = {
+        path.relative_to(target).as_posix()
+        for path in target.rglob('*')
+        if path.is_file()
+    }
+    assert actual == expected
+    for relative_path in expected:
+        assert (target /
+                relative_path).read_bytes() == (source /
+                                                relative_path).read_bytes()
+    assert not list(filter_dir.iterdir())
+
+
+@pytest.mark.skipif(shutil.which('rsync') is None, reason='rsync is required')
+@pytest.mark.skipif(shutil.which('git') is None, reason='git is required')
+class TestRsyncIgnoreRegression:
+    """Check ignore behavior using actual transfers, not generated commands."""
+
+    @pytest.fixture(autouse=True)
+    def isolate_git_config(self, tmp_path, monkeypatch):
+        """Keep the developer's Git ignore configuration out of these tests."""
+        global_config = tmp_path / 'gitconfig'
+        global_config.write_text('', encoding='utf-8')
+        monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(global_config))
+        monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+        for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                     'GIT_CONFIG_COUNT'):
+            monkeypatch.delenv(name, raising=False)
+
+    @staticmethod
+    def _write(root, relative_path, content='payload'):
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+
+    @staticmethod
+    def _git(root, *args):
+        subprocess.run(['git', '-C', str(root), *args],
+                       check=True,
+                       capture_output=True)
+
+    @staticmethod
+    def _sync(source, target, *, up=True, **kwargs):
+        target.mkdir()
+        command_runner.LocalProcessCommandRunner().rsync(str(source),
+                                                         str(target),
+                                                         up=up,
+                                                         stream_logs=False,
+                                                         **kwargs)
+        # Upload copies the contents; local download copies the source folder.
+        return target if up else target / source.name
+
+    @pytest.mark.parametrize('pattern,ignored', [
+        ('*.key', '.certs/prod.key'),
+        ('*.js', '[volume].js'),
+        ('*.bak', 'data*.bak'),
+        ('*.bak', 'data?.bak'),
+    ])
+    def test_hidden_and_literal_filenames_are_excluded(self, tmp_path, pattern,
+                                                       ignored):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', pattern + '\n!keep.txt\n')
+        self._write(source, ignored)
+        self._write(source, 'keep.txt')
+        if ignored in ('data*.bak', 'data?.bak'):
+            self._write(source, '.skyignore', pattern + '\n!dataX.bak\n')
+            self._write(source, 'dataX.bak')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / ignored).exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+        if ignored in ('data*.bak', 'data?.bak'):
+            assert (target / 'dataX.bak').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignored,kept', [
+        pytest.param(r'private\name.txt', r'keep\name.txt', id='backslash'),
+        pytest.param('private\nname.txt', 'keep\nname.txt', id='newline'),
+    ])
+    @pytest.mark.parametrize('with_negation', [False, True])
+    def test_special_filename_characters(self, tmp_path, ignored, kept,
+                                         with_negation):
+        """Match unusual filenames without serializing them into filter rules."""
+        source = tmp_path / 'source'
+        rules = ('*.txt*\n!*keep*.txt*\n'
+                 if with_negation else '*private*.txt*\n')
+        self._write(source, '.skyignore', rules)
+        self._write(source, ignored, 'must not be transferred')
+        self._write(source, kept, 'special filename contents')
+        self._write(source, 'keep.txt', 'ordinary filename contents')
+        self._write(source, 'control.csv', 'unmatched file contents')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        expected = {'.skyignore', kept, 'keep.txt', 'control.csv'}
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*')
+            if path.is_file()
+        }
+        assert actual == expected
+        for relative_path in expected:
+            assert (target /
+                    relative_path).read_bytes() == (source /
+                                                    relative_path).read_bytes()
+
+    @pytest.mark.parametrize('filename', [
+        pytest.param('한글 자료.txt', id='korean-with-space'),
+        pytest.param('자료\u2028이름.txt', id='unicode-line-separator'),
+    ])
+    @pytest.mark.parametrize('reinclude', [False, True])
+    @pytest.mark.parametrize('via_zip', [False, True])
+    def test_literal_skyignore_patterns_preserve_filename(
+            self, tmp_path, filename, reinclude, via_zip):
+        """Preserve literal pattern bytes through ZIP and rsync uploads."""
+        source = tmp_path / 'source'
+        rules = ('*.txt*\n!' + filename + '\n' if reinclude else filename +
+                 '\n!control.csv\n')
+        self._write(source, filename, 'special file contents')
+        self._write(source, '자료.txt', 'ordinary file contents')
+        self._write(source, 'control.csv', 'control file contents')
+        (source / '.skyignore').write_bytes(rules.encode('utf-8'))
+
+        if via_zip:
+            archive = tmp_path / 'upload.zip'
+            storage_utils.zip_files_and_folders([str(source)],
+                                                archive,
+                                                relative_to_items=True)
+            with zipfile.ZipFile(archive) as zipf:
+                zipf.extractall(tmp_path / 'server')
+            staged = tmp_path / 'server' / source.name
+        else:
+            staged = source
+        target = self._sync(staged, tmp_path / 'target')
+
+        expected = {'.skyignore', 'control.csv'}
+        expected.add(filename if reinclude else '자료.txt')
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*')
+            if path.is_file()
+        }
+        assert actual == expected
+        for relative_path in expected:
+            assert (target /
+                    relative_path).read_bytes() == (source /
+                                                    relative_path).read_bytes()
+
+    def test_crlf_with_unterminated_last_rule(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, 'private.txt')
+        self._write(source, 'keep.txt')
+        (source / '.skyignore').write_bytes(b'*.txt\r\n!keep.txt')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.txt').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('with_negation', [False, True])
+    def test_non_utf8_comment_does_not_break_rsync(self, tmp_path,
+                                                   with_negation):
+        source = tmp_path / 'source'
+        self._write(source, 'private.txt')
+        self._write(source, 'keep.txt')
+        rules = b'# legacy comment: \xff\nprivate.txt\n'
+        if with_negation:
+            rules += b'!keep.txt\n'
+        (source / '.skyignore').write_bytes(rules)
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.txt').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_nested_skyignore_is_honored(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '')
+        self._write(source, 'svc/.skyignore', '*.txt\n')
+        self._write(source, 'svc/private.txt')
+        self._write(source, 'svc/keep.csv')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'svc/private.txt').exists()
+        assert (target / 'svc/keep.csv').read_text() == 'payload'
+
+    @pytest.mark.parametrize('rules,included', [
+        ('*.json\n!keep.json\n', True),
+        ('*.json\n!keep.json\n*.json\n', False),
+        ('*.json\n!keep.json\nkeep.json\n', False),
+    ])
+    def test_last_matching_rule_wins(self, tmp_path, rules, included):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'keep.json').exists() == included
+        assert not (target / 'private.json').exists()
+
+    @pytest.mark.parametrize('rules,keep,other', [
+        ('data/\n!data/keep.json\n', False, False),
+        ('data/*\n!data/keep.json\n', True, False),
+        ('data/\n!data/\n', True, True),
+    ])
+    def test_directory_reinclusion(self, tmp_path, rules, keep, other):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        self._write(source, 'data/keep.json')
+        self._write(source, 'data/other.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'data/keep.json').exists() == keep
+        assert (target / 'data/other.json').exists() == other
+
+    @pytest.mark.parametrize('rules,expected', [
+        ('data/**\n!data/keep.json\n', {'data/keep.json'}),
+        ('data/\n!data/keep.json\n', set()),
+        ('data/**\n!data/keep.json\ndata/keep.json\n', set()),
+        ('data/**\n!data/sub/keep.json\n', set()),
+        ('data/**\n!data/**\n',
+         {'data/keep.json', 'data/private.json', 'data/sub/keep.json'}),
+        ('data/\n!data/**\n', set()),
+    ])
+    @pytest.mark.parametrize('via_zip', [False, True])
+    def test_recursive_directory_reinclusion(self, tmp_path, rules, expected,
+                                             via_zip):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', rules)
+        for filename in ('data/keep.json', 'data/private.json',
+                         'data/sub/keep.json'):
+            self._write(source, filename)
+
+        if via_zip:
+            archive = tmp_path / 'upload.zip'
+            storage_utils.zip_files_and_folders([str(source)],
+                                                archive,
+                                                relative_to_items=True)
+            with zipfile.ZipFile(archive) as zipf:
+                zipf.extractall(tmp_path / 'server')
+            source = tmp_path / 'server' / source.name
+
+        target = self._sync(source, tmp_path / 'target')
+
+        actual = {
+            path.relative_to(target).as_posix()
+            for path in target.rglob('*.json')
+            if path.is_file()
+        }
+        assert actual == expected
+
+    def test_root_rules_take_precedence_over_nested_rules(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.txt\n!svc/keep.txt\n')
+        self._write(source, 'svc/.skyignore', '*.txt\n*.csv\n')
+        self._write(source, 'svc/keep.txt')
+        self._write(source, 'svc/private.txt')
+        self._write(source, 'svc/private.csv')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'svc/keep.txt').read_text() == 'payload'
+        assert not (target / 'svc/private.txt').exists()
+        assert not (target / 'svc/private.csv').exists()
+
+    def test_skyignore_overrides_gitignore(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, '.gitignore', 'keep.json\n')
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'keep.json').read_text() == 'payload'
+        assert not (target / 'private.json').exists()
+
+    def test_zip_then_rsync_preserves_reincluded_file(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'keep.json')
+        self._write(source, 'private.json')
+        archive = tmp_path / 'upload.zip'
+        storage_utils.zip_files_and_folders([str(source)],
+                                            archive,
+                                            relative_to_items=True)
+        extracted = tmp_path / 'server'
+        with zipfile.ZipFile(archive) as zipf:
+            zipf.extractall(extracted)
+        staged = extracted / source.name
+        assert (staged / '.skyignore').is_file()
+        assert (staged / 'keep.json').is_file()
+        assert not (staged / 'private.json').exists()
+
+        target = self._sync(staged, tmp_path / 'target')
+
+        assert (target / 'keep.json').read_text() == 'payload'
+        assert not (target / 'private.json').exists()
+
+    def test_gitignore_without_repository(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.gitignore', 'data/\n')
+        self._write(source, 'data/private.txt')
+        self._write(source, 'keep.txt')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'data').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignore_location', ['parent', 'global'])
+    def test_git_rules_outside_source_do_not_exclude_files(
+            self, tmp_path, ignore_location):
+        repo = tmp_path / 'repo'
+        source = repo / 'source'
+        self._write(source, 'results.log')
+        # Keep Git from collapsing a wholly ignored source into './'.
+        self._write(source, 'keep.txt')
+        self._git(repo, 'init', '-q')
+        if ignore_location == 'parent':
+            self._write(repo, '.gitignore', '*.log\n')
+        else:
+            self._write(tmp_path, 'global-ignore', '*.log\n')
+            self._git(repo, 'config', '--global', 'core.excludesFile',
+                      str(tmp_path / 'global-ignore'))
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert (target / 'results.log').read_text() == 'payload'
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_corrupt_git_index_does_not_break_transfer(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, '.gitignore', '*.log\n')
+        self._write(source, 'private.log')
+        self._write(source, 'keep.txt')
+        self._git(source, 'init', '-q')
+        self._write(source, '.git/index', 'invalid index')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.log').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_source_git_info_exclude_is_honored(self, tmp_path):
+        source = tmp_path / 'source'
+        self._write(source, 'private.log')
+        self._write(source, 'keep.txt')
+        self._git(source, 'init', '-q')
+        self._write(source, '.git/info/exclude', '*.log\n')
+
+        target = self._sync(source, tmp_path / 'target')
+
+        assert not (target / 'private.log').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    @pytest.mark.parametrize('ignore_file', ['.skyignore', '.gitignore'])
+    def test_download_honors_ignore_file(self, tmp_path, ignore_file):
+        source = tmp_path / 'source'
+        self._write(source, ignore_file, '*.key\n')
+        self._write(source, 'private.key')
+        self._write(source, 'keep.txt')
+
+        target = self._sync(source, tmp_path / 'target', up=False)
+
+        assert not (target / 'private.key').exists()
+        assert (target / 'keep.txt').read_text() == 'payload'
+
+    def test_invalid_retry_count_does_not_leak_filter(self, tmp_path,
+                                                      monkeypatch):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'private.json')
+        filter_dir = tmp_path / 'filters'
+        filter_dir.mkdir()
+        monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+        with pytest.raises((AssertionError, ValueError)):
+            self._sync(source, tmp_path / 'target', max_retry=0)
+
+        assert not list(filter_dir.iterdir())
+
+    def test_missing_filter_does_not_mask_transfer_error(
+            self, tmp_path, monkeypatch):
+        source = tmp_path / 'source'
+        self._write(source, '.skyignore', '*.json\n!keep.json\n')
+        self._write(source, 'private.json')
+        filter_dir = tmp_path / 'filters'
+        filter_dir.mkdir()
+        monkeypatch.setattr(tempfile, 'tempdir', str(filter_dir))
+
+        def fail_transfer(*args, **kwargs):
+            del args, kwargs
+            for path in filter_dir.rglob('*'):
+                if path.is_file():
+                    path.unlink()
+            raise RuntimeError('original transfer error')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fail_transfer):
+            with pytest.raises(RuntimeError, match='original transfer error'):
+                self._sync(source, tmp_path / 'target')
+
+
+def _extract_skyignore_filter_path(command: str):
+    """Return the path passed to rsync's merge filter, or None.
+
+    The path is shell-quoted in the command, so tokenize with shlex to undo
+    any quoting before splitting off the value.
+    """
+    for token in shlex.split(command):
+        if token.startswith('--filter=merge '):
+            return token[len('--filter=merge '):]
+    return None
+
+
+class TestRsyncSkyignoreFilter:
+    """Check translated filter contents and lifetime around rsync attempts."""
+
+    def _write_skyignore(self, src_dir, content: str) -> None:
+        skyignore = os.path.join(src_dir,
+                                 command_runner.constants.SKY_IGNORE_FILE)
+        with open(skyignore, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _run_up(self, src_dir):
+        """Run an up-sync with run_with_log mocked.
+
+        Returns a dict capturing the rsync `command` and, while the temp file
+        still exists (i.e. inside the run_with_log call, before the finally
+        cleanup), the `filter_path` and its `filter_lines`.
+        """
+        captured = {'filter_path': None, 'filter_lines': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['command'] = command
+            path = _extract_skyignore_filter_path(command)
+            captured['filter_path'] = path
+            if path is not None:
+                with open(path, encoding='utf-8') as f:
+                    captured['filter_lines'] = f.read().splitlines()
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(str(src_dir), '/tmp/dst', up=True, stream_logs=False)
+        return captured
+
+    def test_negation_precedes_exclude_rule(self, tmp_path) -> None:
+        """Include rules precede the patterns they override in the merge file."""
+        (tmp_path / 'a.json').write_text('x')
+        (tmp_path / 'keep.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is not None
+        assert captured['filter_lines'] == ['+ keep.json', '- *.json']
+
+    def test_no_filter_file_when_nothing_excluded(self, tmp_path) -> None:
+        """With nothing to exclude, no merge filter is passed and no temp
+        file is left behind."""
+        (tmp_path / 'a.json').write_text('x')
+        # An empty .skyignore excludes nothing; using .skyignore avoids the
+        # gitignore path needing a real git repo.
+        self._write_skyignore(tmp_path, '')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is None
+        assert '--filter=merge ' not in captured['command']
+
+    def test_filter_file_cleaned_up_on_success(self, tmp_path) -> None:
+        """The temporary filter file is removed after rsync finishes."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['filter_path'] is not None
+        assert not os.path.exists(captured['filter_path'])
+
+    def test_filter_file_cleaned_up_on_unexpected_error(self, tmp_path) -> None:
+        """An unexpected rsync error also cleans up the temporary filter."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        seen = {'path': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            seen['path'] = _extract_skyignore_filter_path(command)
+            raise RuntimeError('boom')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(RuntimeError):
+                runner.rsync(str(tmp_path),
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False)
+
+        assert seen['path'] is not None
+        assert not os.path.exists(seen['path'])
