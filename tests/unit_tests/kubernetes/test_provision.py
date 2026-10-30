@@ -3581,6 +3581,67 @@ class TestGetPodMissingReason:
         assert 'involvedObject.name=new' in (
             api.list_namespaced_event.call_args.kwargs['field_selector'])
 
+    @staticmethod
+    def _provisioned_at(gus, seconds):
+        provisioned = _PODS_CREATED_AT + datetime.timedelta(seconds=seconds)
+        gus.get_cluster_events.side_effect = (
+            lambda *a, include_timestamps=False, **kw: [{
+                'reason': 'Provisioning',
+                'transitioned_at': int(provisioned.timestamp())
+            }] if include_timestamps else [])
+
+    def _pod_event(self, reason, message, at, uid):
+        event = self._make_event(reason, message, at=at)
+        event.involved_object.uid = uid
+        return event
+
+    def test_a_predecessor_inside_the_skew_allowance_is_not_recorded(
+            self, monkeypatch):
+        """A recovery relaunches right after a preemption, so the previous
+        pod's last events fall inside the clock-skew allowance."""
+        gus = self._setup(monkeypatch, [
+            self._pod_event('Started', 'Started container', 320, 'new'),
+            self._pod_event('Stopped', 'Preempted to accommodate a workload',
+                            270, 'old'),
+        ])
+        self._provisioned_at(gus, 300)
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == ['[kubernetes pod pod-0] Started Started container']
+
+    def test_node_events_before_the_launch_are_not_recorded(self, monkeypatch):
+        gus = self._setup(monkeypatch, [
+            self._make_event(
+                'Scheduled', 'Successfully assigned ns/pod-0 to n1', at=310)
+        ])
+        self._provisioned_at(gus, 300)
+        api = mock.MagicMock()
+        api.list_namespaced_event.return_value.items = [
+            self._make_event('DeletingNode', 'Deleting node n1', at=0)
+        ]
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: api)
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == [
+            '[kubernetes pod pod-0] Scheduled Successfully assigned ns/pod-0 '
+            'to n1'
+        ]
+
+    def test_only_the_current_launchs_events_are_returned(self, monkeypatch):
+        """The caller derives the deletion reason from what is returned."""
+        current = self._make_event('Killing', 'Stopping container', at=400)
+        gus = self._setup(monkeypatch, [
+            current,
+            self._make_event(
+                'Stopped', 'Preempted to accommodate a workload', at=0),
+        ])
+        self._provisioned_at(gus, 300)
+        self._keyed_store(gus)
+        events, _ = instance._record_pod_missing_events('ctx', 'ns', 'cn',
+                                                        'pod-0', True)
+        assert events == [current]
+
     def test_a_predecessors_node_is_not_read_for_an_unscheduled_pod(
             self, monkeypatch):
         gus = self._setup(monkeypatch, [

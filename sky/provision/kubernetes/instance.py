@@ -4205,6 +4205,11 @@ def _format_pod_missing_reason(
     return event_str, event_type
 
 
+def _event_pod_uid(event: Any) -> Optional[str]:
+    uid = getattr(getattr(event, 'involved_object', None), 'uid', None)
+    return uid if isinstance(uid, str) else None
+
+
 def _record_pod_missing_events(context: Optional[str], namespace: str,
                                cluster_name: str, pod_name: str,
                                first_pod: bool) -> Tuple[List[Any], bool]:
@@ -4237,7 +4242,17 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                 int(first[0]['transitioned_at']), datetime.timezone.utc)
     except ValueError:  # No record for the cluster.
         pass
-    current = {id(e) for e in kubernetes_utils.events_since(pod_events, since)}
+    bounded = kubernetes_utils.events_since(pod_events, since)
+    # The clock-skew allowance can still admit a predecessor that went just
+    # before this launch; its events carry another pod UID. The newest event
+    # is the current pod's.
+    uids = [_event_pod_uid(e) for e in bounded]
+    uid = next((u for u in uids if u is not None), None)
+    current = {
+        id(e)
+        for e, u in zip(bounded, uids)
+        if u is None or uid is None or u == uid
+    }
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
