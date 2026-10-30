@@ -11,7 +11,7 @@ Benefits of using volumes:
 * **Data persistence**: Volumes can persist data independently of task life cycles, making it easy to share data between different tasks (e.g., datasets, caches) or preserve results.
 * **Size control**: You can set volume size limits to manage costs and limit storage usage.
 
-Volumes are currently supported on Kubernetes clusters and RunPod.
+Volumes are currently supported on Kubernetes clusters, RunPod and UpCloud.
 
 
 .. _volumes-quickstart:
@@ -878,6 +878,62 @@ Quickstart
 
      run: |
        echo "Hello, RunPod!" > /workspace/hello.txt
+
+Managing volumes
+~~~~~~~~~~~~~~~~
+
+Same as Kubernetes volumes, refer to :ref:`volumes-on-kubernetes-manage` for more details.
+
+.. _volumes-on-upcloud:
+
+Volumes on UpCloud
+------------------
+
+UpCloud File Storage provides persistent NFS shares that are mounted on all nodes of a cluster. SkyPilot supports creating and managing UpCloud file storage volumes via the same three commands:
+
+- ``sky volumes apply``: Create a new file storage volume
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a volume
+
+Notes specific to UpCloud:
+
+- ``infra`` must specify the region (an UpCloud zone id), e.g.
+  ``upcloud/fi-hel2``. Volumes can only be mounted on clusters in the same
+  region.
+- Minimum size is 250 GiB.
+- SkyPilot creates a private network for each file storage volume. Clusters
+  mounting the volume are attached to that network.
+- Volume name length is limited (max 64 characters).
+- UpCloud volumes cannot be mounted into ``docker:`` images yet.
+
+Quickstart
+~~~~~~~~~~
+
+1. Prepare a volume YAML file:
+
+   .. code-block:: yaml
+
+     # upcloud-volume.yaml
+     name: data
+     type: upcloud-file-storage
+     infra: upcloud/fi-hel2  # Region (UpCloud zone id)
+     size: 250Gi             # GiB
+     # If the UpCloud file storage already exists, set `use_existing` to true and
+     # set the `name` to the existing file storage name
+     # use_existing: true
+
+2. Create the volume with ``sky volumes apply upcloud-volume.yaml``.
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     # task.yaml
+     volumes:
+       /data: data
+
+     run: |
+       echo "Hello, UpCloud!" > /data/hello.txt
 
 Managing volumes
 ~~~~~~~~~~~~~~~~

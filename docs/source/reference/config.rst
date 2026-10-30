@@ -273,6 +273,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
     :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
+  :ref:`upcloud <config-yaml-upcloud>`:
+    :ref:`network_name <config-yaml-upcloud-network-name>`: my-private-network
+    :ref:`use_internal_ips <config-yaml-upcloud-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-upcloud-ssh-proxy-command>`: ssh -W %h:%p user@host
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
@@ -3266,6 +3271,52 @@ Example:
       - my-training-*: my-training-sg
       - sky-serve-controller-*: my-serving-sg
       - "*": my-default-sg
+
+.. _config-yaml-upcloud:
+
+``upcloud``
+~~~~~~~~~~~
+
+Advanced UpCloud configuration (optional).
+
+.. _config-yaml-upcloud-network-name:
+
+``upcloud.network_name``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of an existing UpCloud private network to attach cluster nodes to
+(optional). Private networks are bound to an UpCloud zone (SkyPilot region),
+so the network is looked up by name in the region the cluster is launched in;
+create a network with this name in each region you want to use. Regions
+without such a network are skipped during failover. The name must be unique
+among the private networks of a zone. The network is not deleted when the
+cluster is torn down.
+
+Default: a private SDN network is created for each cluster and deleted with it.
+Traffic between nodes uses this network; the public interface only accepts
+SSH and the TCP ports requested in ``resources.ports``, plus ICMP and DHCP.
+Ports in the ephemeral range are not implicitly opened. Outgoing traffic is
+allowed.
+
+.. _config-yaml-upcloud-use-internal-ips:
+
+``upcloud.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use the private network IPs to communicate between the local client and
+SkyPilot nodes (optional). Typically set together with ``ssh_proxy_command``
+and ``network_name``.
+
+Default: ``false``.
+
+.. _config-yaml-upcloud-ssh-proxy-command:
+
+``upcloud.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
 .. _config-yaml-vast:
 

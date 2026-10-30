@@ -466,7 +466,7 @@ FAQ
 * **Which architectures are supported?**
 
   S3 storage mounting (including S3-compatible services like Cloudflare R2,
-  CoreWeave Object Storage, VastData Object Storage, and Nebius) works on all architectures including
+  CoreWeave Object Storage, VastData Object Storage, Nebius, and UpCloud Managed Object Storage) works on all architectures including
   ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
   optimal mounting tool for each architecture: goofys for x86_64 and rclone for
   ARM64.

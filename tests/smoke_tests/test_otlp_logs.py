@@ -139,6 +139,7 @@ def _write_config_cmd(collector: str, config_path: str, headers_path: str,
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
 @pytest.mark.no_seeweb  # Requires AWS to be enabled
+@pytest.mark.no_upcloud  # Requires AWS to be enabled
 # logs is a server-side setting: the test restarts the API server with it.
 # logs.otlp.headers_file is also a path on the API server.
 @pytest.mark.no_remote_server

@@ -24,6 +24,7 @@ from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
 from sky.adaptors import oci_s3
+from sky.adaptors import upcloud
 from sky.adaptors import vastdata
 from sky.clouds import gcp
 from sky.data import data_utils
@@ -718,6 +719,53 @@ class NebiusCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class UpCloudCloudStorage(CloudStorage):
+    """UpCloud Managed Object Storage."""
+
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether upcloud 'url' is a directory."""
+        upcloud_s3 = upcloud.resource('s3')
+        bucket_name, path = data_utils.split_upcloud_path(url)
+        bucket = upcloud_s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            if num_objects == 3:
+                return True
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        assert 'upcloud://' in source, 'upcloud:// is not in source'
+        source = source.replace('upcloud://', 's3://')
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--profile={upcloud.UPCLOUD_PROFILE_NAME}')
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'upcloud://' in source, 'upcloud:// is not in source'
+        source = source.replace('upcloud://', 's3://')
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--profile={upcloud.UPCLOUD_PROFILE_NAME}')
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 class CoreWeaveCloudStorage(CloudStorage):
     """CoreWeave Cloud Storage."""
 
@@ -1069,6 +1117,7 @@ _REGISTRY = {
     'cos': IBMCosCloudStorage(),
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
+    'upcloud': UpCloudCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
     'vastdata': VastDataCloudStorage(),
     'hf': HFCloudStorage(),

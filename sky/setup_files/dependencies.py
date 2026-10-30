@@ -275,6 +275,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    # AWS deps cover Managed Object Storage via the `upcloud` boto3 profile.
+    'upcloud': aws_dependencies,
     'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
     # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.

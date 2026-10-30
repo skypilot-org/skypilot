@@ -757,7 +757,7 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda, Nebius and UpCloud. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -904,6 +904,17 @@ The ``image_id`` parameter supports specifying an image by ID, or by image famil
     image_id: computeimage-e00d6q343kqz6ayd63
     # Or use the latest image from a family
     image_id: ubuntu24.04-cuda13.0
+
+**UpCloud**
+
+The ``image_id`` parameter takes the UUID of a template or disk storage. By
+default, GPU plans use the newest Ubuntu LTS template with NVIDIA drivers, CUDA
+and Docker, and other plans use the newest plain Ubuntu LTS template.
+
+.. code-block:: yaml
+
+  resources:
+    image_id: <template-or-storage-uuid>
 
 **RunPod**
 

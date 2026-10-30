@@ -172,6 +172,7 @@ Hyperbolic = clouds.Hyperbolic
 Mithril = clouds.Mithril
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
+UpCloud = clouds.UpCloud
 Yotta = clouds.Yotta
 Verda = clouds.Verda
 
@@ -200,6 +201,7 @@ __all__ = [
     'Mithril',
     'Shadeform',
     'Seeweb',
+    'UpCloud',
     'Yotta',
     'Optimizer',
     'OptimizeTarget',

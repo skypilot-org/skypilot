@@ -55,7 +55,11 @@ from sky.utils import resources_utils
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
 @pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'H100',
+    'upcloud': 'L40S'
+}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -100,7 +104,11 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'H100',
+    'upcloud': 'L40S'
+}])
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -252,7 +260,11 @@ def test_scp_job_queue():
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 @pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'H100',
+    'upcloud': 'L40S'
+}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -337,7 +349,11 @@ def test_job_queue_multi_gpu(generic_cloud: str):
 @pytest.mark.no_oci
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_seeweb
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'H100',
+    'upcloud': 'L40S'
+}])
 def test_exec_gpu_visibility(generic_cloud: str, accelerator: Dict[str, str]):
     """Test that exec without --gpus hides GPUs, with --gpus exposes them."""
     if generic_cloud in ('kubernetes', 'slurm'):
@@ -898,6 +914,7 @@ def test_slurm_container_autodown(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
+@pytest.mark.no_upcloud  # UpCloud does not have T4 GPUs
 @pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1033,7 +1050,11 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'L40S',
+    'upcloud': 'L40S'
+}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -1370,6 +1391,73 @@ def test_scp_http_server_with_custom_ports():
         f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- UpCloud-specific tests ----------
+@pytest.mark.upcloud
+def test_upcloud_http_server_with_custom_ports():
+    """Requested ports are reachable; anything else is dropped."""
+    name = smoke_tests_utils.get_cluster_name()
+    closed_port = 33829
+    test = smoke_tests_utils.Test(
+        'upcloud_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --infra upcloud {smoke_tests_utils.LOW_RESOURCE_ARG} examples/http_server_with_custom_ports/task.yaml',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
+            # A server on a port that was not requested must not be reachable.
+            f'sky exec {name} -d "python3 -m http.server {closed_port}"',
+            f'sky exec {name} "for i in \\$(seq 1 30); do curl -s localhost:{closed_port} >/dev/null && exit 0; sleep 2; done; exit 1"',
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --ip {name}); if curl --max-time 10 http://$ip:{closed_port}; then echo "port {closed_port} is reachable"; exit 1; fi',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.upcloud
+def test_upcloud_file_storage_volume():
+    """A file storage volume is shared by all nodes of a cluster."""
+    name = smoke_tests_utils.get_cluster_name()
+    volume = f'{name}-fs'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            resources:
+              infra: upcloud/fi-hel2
+              cpus: 2+
+              memory: 4+
+            num_nodes: 2
+            volumes:
+              /data: {volume}
+            run: |
+              mountpoint -q /data
+              if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+                echo {name} > /data/marker && sync
+              fi
+            """))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'upcloud_file_storage_volume',
+            [
+                f'sky volumes apply -y -n {volume} --infra upcloud/fi-hel2 --type upcloud-file-storage --size 250GB',
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(volume),
+                f'sky launch -y -c {name} {f.name}',
+                f'sky logs {name} 1 --status',
+                # Every node, including the worker, reads the head's write.
+                f'sky exec {name} --num-nodes 2 "grep -Fx {name} /data/marker"',
+                f'sky logs {name} 2 --status',
+                f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep {volume} | grep {name}',
+                f'sky down -y {name}',
+                f'sky volumes delete -y {volume}',
+                smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
+                    volume),
+            ],
+            f'sky down -y {name}; sky volumes delete -y {volume}',
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Labels from task on AWS (instance_tags) ----------
@@ -3193,6 +3281,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
 @pytest.mark.no_nebius  # Nebius does not have V100 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic does not have V100 gpus
 @pytest.mark.no_seeweb  # Seeweb does not have V100 gpus
+@pytest.mark.no_upcloud  # UpCloud does not have V100 GPUs
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -3498,7 +3587,11 @@ def test_cancel_azure():
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'L40S',
+    'upcloud': 'L40S'
+}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -4100,6 +4193,7 @@ def test_azure_start_stop_two_nodes():
 # ---------- Testing env for disk tier ----------
 @pytest.mark.aws
 @pytest.mark.no_seeweb  # Seeweb does not support custom disk tiers
+@pytest.mark.no_upcloud  # Requires AWS
 def test_aws_disk_tier():
 
     def _get_aws_query_command(region: str, instance_id: str, field: str,
