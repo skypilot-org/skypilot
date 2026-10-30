@@ -177,6 +177,37 @@ class Recorder:
         self.responses: List[Response] = []
         page.on('request', lambda r: self.requests.append(r))  # pylint: disable=unnecessary-lambda
         page.on('response', lambda r: self.responses.append(r))  # pylint: disable=unnecessary-lambda
+        self.failed: List[Request] = []
+        page.on('requestfailed', lambda r: self.failed.append(r))  # pylint: disable=unnecessary-lambda
+
+    def settle(self, timeout_s: float = 10) -> None:
+        """Stop the page's timers and wait until every request it sent is
+        answered or has failed.
+
+        The server records a queued request before it answers the POST, so
+        after this the request DB holds everything this page asked for; a
+        request still on the wire when the context closes would otherwise run
+        later, unseen by teardown.
+        """
+        try:
+            self.page.evaluate('''() => {
+                const last = setTimeout(() => {}, 0);
+                for (let id = 1; id <= last; id++) {
+                    clearTimeout(id);
+                    clearInterval(id);
+                }
+            }''')
+        except PlaywrightError:
+            return
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            done = [r.request for r in self.responses] + self.failed
+            if all(any(req is d for d in done) for req in self.requests):
+                return
+            try:
+                self.page.wait_for_timeout(200)
+            except PlaywrightError:
+                return
 
     def mark(self) -> int:
         return len(self.requests)
@@ -316,6 +347,10 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
                     print(f'e2e: saved {path}')
                 except PlaywrightError as e:
                     print(f'e2e: no screenshot of {page.url}: {e}')
+        for page in ctx.pages:
+            recorder = getattr(page, 'recorder', None)
+            if recorder is not None:
+                recorder.settle()
         if failed:
             ctx.tracing.stop(path=os.path.join(out_dir, f'ctx{i}-trace.zip'))
         else:

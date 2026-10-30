@@ -62,6 +62,9 @@ jobs:
       SKYPILOT_POD_CPU_CORE_LIMIT: '1'
       SKYPILOT_SERVER_LONG_WORKERS: '4'
       SKYPILOT_SERVER_SHORT_WORKERS: '8'
+      # run_server.sh warms the request workers with this many concurrent
+      # requests before the tests start: one per short worker.
+      E2E_WARMUP_REQUESTS: '8'
     steps:
       - uses: actions/checkout@v4
 

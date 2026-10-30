@@ -14,7 +14,11 @@ from typing import Callable, List, Optional
 import sqlalchemy
 from sqlalchemy import orm
 
+import sky
+from sky import global_user_state
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import state as job_state
+from sky.server.requests import requests as requests_lib
 
 _TERMINAL = {
     'SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_NO_RESOURCE'
@@ -115,7 +119,6 @@ def wait_for_user_requests(user_id: str, timeout_s: float = 15) -> None:
     """Wait until the server has no pending or running request from this
     user. Returns at the deadline either way; the leftover check reports
     what remains."""
-    from sky.server.requests import requests as requests_lib
     live = [
         requests_lib.RequestStatus.PENDING, requests_lib.RequestStatus.RUNNING
     ]
@@ -129,7 +132,6 @@ def wait_for_user_requests(user_id: str, timeout_s: float = 15) -> None:
 
 
 def user_exists(user_id: str) -> bool:
-    from sky import global_user_state
     return global_user_state.get_user(user_id) is not None
 
 
@@ -160,8 +162,6 @@ def _leftover_jobs() -> List[str]:
 
 
 def _leftover_clusters() -> List[str]:
-    # pylint: disable=import-outside-toplevel
-    from sky import global_user_state
     t = global_user_state.cluster_table
     engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
     with orm.Session(engine) as session:
@@ -170,8 +170,6 @@ def _leftover_clusters() -> List[str]:
 
 
 def _leftover_cluster_history() -> List[str]:
-    # pylint: disable=import-outside-toplevel
-    from sky import global_user_state
     t = global_user_state.cluster_history_table
     engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
     with orm.Session(engine) as session:
@@ -200,11 +198,6 @@ def cluster(name: str,
     it. Its context does not exist, and the refresh daemon is off, so nothing
     tries to reach it.
     """
-    # pylint: disable=import-outside-toplevel
-    import sky
-    from sky import global_user_state
-    from sky.backends import cloud_vm_ray_backend
-
     # Launched resources must be launchable (carry an instance type);
     # Kubernetes names instance types <cpus>CPU--<memory>GB.
     resources = sky.Resources(infra=f'kubernetes/{context}',
@@ -241,8 +234,6 @@ def delete_cluster(name: str) -> None:
     ``remove_cluster`` keeps the history row (it only closes the usage
     interval), which the All view and cost reports would still list.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky import global_user_state
     if global_user_state.get_cluster_from_name(name) is not None:
         global_user_state.remove_cluster(name, terminate=True)
     purge_cluster(name)
@@ -250,8 +241,6 @@ def delete_cluster(name: str) -> None:
 
 def purge_cluster(name: str) -> None:
     """Remove the history rows and events of a cluster name."""
-    # pylint: disable=import-outside-toplevel
-    from sky import global_user_state
     h = global_user_state.cluster_history_table
     e = global_user_state.cluster_event_table
     c = global_user_state.cluster_table
@@ -274,8 +263,6 @@ def purge_cluster(name: str) -> None:
 
 
 def count_clusters() -> int:
-    # pylint: disable=import-outside-toplevel
-    from sky import global_user_state
     t = global_user_state.cluster_table
     engine = global_user_state._db_manager.get_engine()  # pylint: disable=protected-access
     with orm.Session(engine) as session:
