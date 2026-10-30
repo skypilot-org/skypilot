@@ -326,6 +326,17 @@ CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
 # "LAUNCHING". Keep in sync with the event reason written in backend_utils.
 ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
 
+
+def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
+    """Whether an INIT cluster's latest event marks it unhealthy.
+
+    Takes the latest STATUS_CHANGE / LAUNCH_PROGRESS reason; anything else
+    means the cluster is launching.
+    """
+    return reason is not None and reason.startswith(
+        ABNORMAL_STATUS_REASON_PREFIX)
+
+
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
 # ending_status: Status of the cluster at the end of the event.
@@ -2923,10 +2934,9 @@ def get_clusters(
         # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
         if record['status'] is status_lib.ClusterStatus.INIT:
             latest_reason = latest_init_event_dict.get(row.cluster_hash)
-            record['init_kind'] = (
-                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
-                latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
-                status_lib.INIT_KIND_LAUNCHING)
+            record['init_kind'] = (status_lib.INIT_KIND_UNHEALTHY
+                                   if is_unhealthy_init_reason(latest_reason)
+                                   else status_lib.INIT_KIND_LAUNCHING)
             record['init_status_reason'] = latest_reason
         else:
             record['init_kind'] = None

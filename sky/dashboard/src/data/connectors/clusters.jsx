@@ -265,6 +265,10 @@ export async function getClusterHistory(
         workspace: cluster.workspace || 'default',
         autostop: -1,
         last_event: cluster.last_event,
+        // Why a terminated cluster went away, for the Details column.
+        details: cluster.status
+          ? null
+          : cluster.last_event || 'No termination reason recorded.',
         to_down: false,
         cluster_name_on_cloud: null,
         node_names: cluster.node_names || null,

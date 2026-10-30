@@ -3578,14 +3578,99 @@ def get_node_health_for_cluster(
     return result
 
 
-def get_missing_node_reason(node_names: List[str],
-                            provider_config: Dict[str, Any]) -> Optional[str]:
+_NODE_GONE = 'no longer exists'
+_NODE_NOT_READY = 'is NotReady'
+_NODE_CORDONED = 'is cordoned'
+
+
+class _NodeState(NamedTuple):
+    read: bool  # False when the node could not be read; the rest is unknown.
+    state: Optional[str]  # _NODE_GONE / _NODE_NOT_READY / _NODE_CORDONED.
+    taints: List[str]  # NoExecute taints that could have evicted the pods.
+
+
+def _evicting_taints(node: Any, tolerations: List[Dict[str, Any]],
+                     since: Optional[datetime.datetime]) -> List[str]:
+    """The node's NoExecute taints that could have evicted the cluster's pods.
+
+    A taint the pods tolerate cannot have evicted them, except through
+    tolerationSeconds, which only delays the eviction. A taint older than the
+    launch was already there when the pods were placed, so they tolerated it;
+    this also covers tolerations added at pod creation, which ``tolerations``
+    (read from the cluster YAML) does not carry.
+    """
+    tolerating = [t for t in tolerations if t.get('tolerationSeconds') is None]
+    cutoff = (since - datetime.timedelta(
+        seconds=kubernetes_utils.POD_EVENT_CLOCK_SKEW_SECONDS)
+              if since is not None else None)
+    taints = []
+    for taint in (getattr(node.spec, 'taints', None) or []):
+        if taint.effect != 'NoExecute':
+            continue
+        if kubernetes_utils.taint_is_tolerated(
+            {
+                'key': taint.key,
+                'value': taint.value,
+                'effect': taint.effect
+            }, tolerating):
+            continue
+        if (cutoff is not None and taint.time_added is not None and
+                taint.time_added < cutoff):
+            continue
+        taints.append(
+            f'{taint.key}={taint.value}' if taint.value else taint.key)
+    return taints
+
+
+def _inspect_nodes(
+    node_names: List[str],
+    context: Optional[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
+) -> Dict[str, _NodeState]:
+    """Reads each named node's state. Taints only when ``tolerations`` is set.
+    """
+    unique_names = sorted({name for name in node_names if name})
+
+    def _inspect_node(name: str) -> _NodeState:
+        try:
+            node = kubernetes.core_api(context).read_node(
+                name, _request_timeout=kubernetes.API_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return _NodeState(True, _NODE_GONE, [])
+            logger.debug(f'Failed to read node {name}: {e}')
+            return _NodeState(False, None, [])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+            return _NodeState(False, None, [])
+        taints = (_evicting_taints(node, tolerations, since)
+                  if tolerations is not None else [])
+        node_status = getattr(node, 'status', None)
+        for condition in (getattr(node_status, 'conditions', None) or []):
+            if condition.type == 'Ready' and condition.status != 'True':
+                return _NodeState(True, _NODE_NOT_READY, taints)
+        if getattr(getattr(node, 'spec', None), 'unschedulable', False):
+            return _NodeState(True, _NODE_CORDONED, taints)
+        return _NodeState(True, None, taints)
+
+    results = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
+    return dict(zip(unique_names, results))
+
+
+def get_missing_node_reason(
+        node_names: List[str],
+        provider_config: Dict[str, Any],
+        tolerations: Optional[List[Dict[str, Any]]] = None,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
     """Best-effort reason a cluster lost node(s), from current node state.
 
     Answers "where did the node go" by asking Kubernetes about the nodes the
     cluster's pods were placed on, rather than by replaying the pod's event
-    history. A node that no longer exists, or that exists but is NotReady or
-    cordoned, explains a pod that vanished from under the cluster.
+    history. A node that no longer exists, that exists but is NotReady or
+    cordoned, or that carries a NoExecute taint the pods could not stay
+    through (only checked when ``tolerations`` is given), explains a pod that
+    vanished from under the cluster.
 
     Reporting current state (rather than a past event) keeps this idempotent:
     it returns the same answer on every status refresh, with no dependence on
@@ -3600,6 +3685,8 @@ def get_missing_node_reason(node_names: List[str],
         node_names: The Kubernetes node names the cluster's pods were placed
             on, e.g. from ``ClusterInfo.get_node_names()``.
         provider_config: The Kubernetes provider config.
+        tolerations: The cluster's pod tolerations; enables the taint check.
+        since: When the cluster was launched; older taints are ignored.
 
     Returns:
         A human-readable reason, or None when every node is present and
@@ -3607,41 +3694,133 @@ def get_missing_node_reason(node_names: List[str],
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
-    unique_names = sorted({name for name in node_names if name})
-    if not unique_names:
-        return None
-
-    def _inspect_node(name: str) -> Optional[str]:
-        """Returns an issue description for a node, or None if it is fine."""
-        try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
-                return 'no longer exists'
-            logger.debug(f'Failed to read node {name}: {e}')
-            return None
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read node {name}: {e}')
-            return None
-        # NotReady first: it is more severe than cordoned, and a cordoned
-        # node that has also gone NotReady is described by the former.
-        node_status = getattr(node, 'status', None)
-        for condition in (getattr(node_status, 'conditions', None) or []):
-            if condition.type == 'Ready' and condition.status != 'True':
-                return 'is NotReady'
-        if getattr(getattr(node, 'spec', None), 'unschedulable', False):
-            return 'is cordoned'
-        return None
-
-    issues = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
-    parts = [
-        f'node {name} {issue}' for name, issue in zip(unique_names, issues)
-        if issue is not None
-    ]
+    nodes = _inspect_nodes(node_names, context, tolerations, since)
+    parts = []
+    for name, node in nodes.items():
+        # NotReady first: it is more severe than a taint or a cordon, and a
+        # NotReady node is tainted by Kubernetes itself.
+        if node.state in (_NODE_GONE, _NODE_NOT_READY):
+            parts.append(f'node {name} {node.state}')
+        elif node.taints:
+            parts.append(
+                f'node {name} has NoExecute taint {", ".join(node.taints)}')
+        elif node.state is not None:
+            parts.append(f'node {name} {node.state}')
     if not parts:
         return None
     return '; '.join(parts)
+
+
+def _as_sentence(text: str) -> str:
+    text = ' '.join(text.split())
+    return text if text.endswith(('.', '!', '?')) else f'{text}.'
+
+
+def get_cluster_termination_cause(
+        provider_config: Dict[str, Any], pod_nodes: Dict[str, Optional[str]], *,
+        tolerations: List[Dict[str, Any]],
+        since: Optional[datetime.datetime]) -> Optional[str]:
+    """Who removed a cluster's pods, and why; None when nothing says.
+
+    For a cluster all of whose pods are gone. Worded actor first, because a
+    table cell shows only the start of it. Combines the pods' own deletion
+    events (see kubernetes_utils.pod_deletion_event) with the current state of
+    the nodes they ran on. ``pod_nodes`` maps each pod to the node it ran on.
+    """
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+
+    def _pod_events(pod_name: str) -> List[Any]:
+        try:
+            return _get_pod_events(context, namespace, pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    # Every pod's events, head first: the most decisive deletion event of the
+    # whole cluster wins, and a tie goes to the head.
+    event = kubernetes_utils.pod_deletion_event([
+        e for events in subprocess_utils.run_in_parallel(
+            _pod_events, list(pod_nodes)) for e in events
+    ], since)
+    nodes = _inspect_nodes([n for n in pod_nodes.values() if n], context,
+                           tolerations, since)
+    pods = 'Pods' if len(pod_nodes) > 1 else 'Pod'
+
+    def _names(state: Optional[str] = None) -> str:
+        matching = [n for n, node in nodes.items() if node.state == state]
+        return ', '.join(matching if state and matching else nodes) or 'unknown'
+
+    if event is None:
+        # Only what removes pods: a cordon alone does not.
+        sentences = []
+        for name, node in nodes.items():
+            if node.state == _NODE_GONE:
+                sentences.append(f'Node {name} deleted in Kubernetes')
+            elif node.state == _NODE_NOT_READY:
+                sentences.append(f'Node {name} is NotReady')
+            elif node.taints:
+                sentences.append(f'Node {name} has NoExecute taint '
+                                 f'{", ".join(node.taints)}')
+        if not sentences:
+            return None
+        return f'{"; ".join(sentences)}; pods lost.'
+
+    # Explain the event by the node its pod ran on: another node of the
+    # cluster, tainted or recovered, did not remove that pod.
+    event_pod = getattr(getattr(event, 'involved_object', None), 'name', None)
+    event_node = pod_nodes.get(event_pod) if isinstance(event_pod,
+                                                        str) else None
+    if event_node in nodes:
+        nodes = {event_node: nodes[event_node]}
+
+    reason = event.reason
+    message = ' '.join((event.message or '').split())
+    detail = f': {message}' if message else ''
+    if reason == 'TaintManagerEviction':
+        tainted = [(n, node.taints) for n, node in nodes.items() if node.taints]
+        if tainted:
+            where = '; '.join(
+                f'NoExecute taint {", ".join(taints)} on node {name}'
+                for name, taints in tainted)
+            return f'{pods} evicted by Kubernetes: {where}.'
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_GONE)} (node since deleted).')
+        if any(node.state == _NODE_NOT_READY for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_NOT_READY)}, which is NotReady.')
+        # Claim the taint is gone only when every node was read and is fine.
+        lifted = bool(nodes) and all(
+            node.read and node.state is None for node in nodes.values())
+        removed = ' (since removed)' if lifted else ''
+        return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                f'{_names()}{removed}.')
+    if reason == 'DeletingNode':
+        return f'Node {_names(_NODE_GONE)} deleted in Kubernetes; pods lost.'
+    if reason == 'NodeNotReady':
+        # A node that went NotReady and was then deleted is reported as
+        # deleted: that is what the user will find when they look for it.
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'Node {_names(_NODE_GONE)} deleted in Kubernetes; '
+                    'pods lost.')
+        return f'Node {_names(_NODE_NOT_READY)} became NotReady; pods lost.'
+    if reason == 'Evicted':
+        # Drain controllers and node autoscalers emit 'Evicted' as well as the
+        # kubelet, so name whoever reported it rather than assume.
+        source = getattr(event, 'source', None)
+        reporter = (getattr(event, 'reporting_component', None) or
+                    getattr(source, 'component', None))
+        by = f' by {reporter}' if reporter else ''
+        return _as_sentence(f'{pods} evicted{by}{detail}')
+    if reason == 'Preempted':
+        return _as_sentence(f'{pods} preempted by Kubernetes scheduler{detail}')
+    if reason == 'Stopped':
+        return _as_sentence(f'{pods} stopped by Kueue{detail}')
+    if reason == 'ExcessPodDeleted':
+        return _as_sentence(
+            f'{pods} deleted by Kueue (excess pod in group){detail}')
+    return _as_sentence(f'{pods} deleted in Kubernetes ({reason}){detail}')
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
@@ -4342,7 +4521,10 @@ def _derive_missing_pod_reason_from_cluster_events(
 
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
-        elif event.startswith('TaintManagerEviction '):
+        elif (event.startswith('TaintManagerEviction ') and
+              not kubernetes_utils.is_cancelled_taint_eviction(
+                  'TaintManagerEviction',
+                  event[len('TaintManagerEviction '):])):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
             _record_failure_reason('pod was evicted by taint manager', 2)

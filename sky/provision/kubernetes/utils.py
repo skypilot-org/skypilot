@@ -2336,7 +2336,7 @@ def event_last_observed(event: Any) -> Optional[float]:
 # the paths where when the launch started is the only bound available. It is
 # deliberately small, because anything larger reaches back into the previous
 # pod.
-_POD_EVENT_CLOCK_SKEW_SECONDS = 60
+POD_EVENT_CLOCK_SKEW_SECONDS = 60
 
 # Pod-event reasons that name *why* a pod was deleted, mapped to
 # (decisiveness, how the reason is reported). The events are ranked by
@@ -2390,7 +2390,7 @@ def _events_since(events: List[Any],
     """
     if since is None:
         return events
-    cutoff = since.timestamp() - _POD_EVENT_CLOCK_SKEW_SECONDS
+    cutoff = since.timestamp() - POD_EVENT_CLOCK_SKEW_SECONDS
     kept = []
     for event in events:
         observed_at = event_last_observed(event)
@@ -2418,18 +2418,42 @@ def reason_from_pod_events(
     held the same pod name before it. ``events`` are expected newest-first,
     which is what decides between two events of equal rank.
     """
+    event = pod_deletion_event(events, since)
+    if event is None:
+        return None
+    reported_as = _POD_DELETION_EVENT_REASONS[event.reason][1]
+    message = (event.message or '').strip()
+    return f'{reported_as}: {message}' if message else reported_as
+
+
+def is_cancelled_taint_eviction(reason: Optional[str],
+                                message: Optional[str]) -> bool:
+    """A taint eviction that did not happen.
+
+    The taint manager emits it when the taint is lifted before the pod's
+    tolerationSeconds run out, or when something else deletes the pod first.
+    """
+    return (reason == 'TaintManagerEviction' and
+            (message or '').startswith('Cancelling deletion'))
+
+
+def pod_deletion_event(events: List[Any],
+                       since: Optional[datetime.datetime] = None) -> Any:
+    """The event that best names why a pod was deleted, or None.
+
+    The event behind ``reason_from_pod_events``, for callers that word the
+    cause themselves.
+    """
     best_rank = 0
-    best_reason: Optional[str] = None
+    best_event = None
     for event in _events_since(events, since):
-        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
-        if ranked is None:
+        if is_cancelled_taint_eviction(event.reason, event.message):
             continue
-        rank, reported_as = ranked
-        if rank > best_rank:
-            best_rank = rank
-            message = (event.message or '').strip()
-            best_reason = f'{reported_as}: {message}' if message else reported_as
-    return best_reason
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is not None and ranked[0] > best_rank:
+            best_rank = ranked[0]
+            best_event = event
+    return best_event
 
 
 def last_pod_event_context(
