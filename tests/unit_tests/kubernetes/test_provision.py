@@ -6065,36 +6065,62 @@ class TestCreatePodFinalizerHandling:
         core_api_mock.delete_namespaced_pod.assert_not_called()
 
 
-def _fake_node(ready=True, unschedulable=False):
+_LAUNCHED = datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc)
+
+
+def _fake_taint(key, value=None, effect='NoExecute', time_added=None):
+    taint = mock.Mock()
+    taint.key = key
+    taint.value = value
+    taint.effect = effect
+    taint.time_added = time_added
+    return taint
+
+
+def _fake_node(ready=True, unschedulable=False, taints=None):
     node = mock.Mock()
     condition = mock.Mock()
     condition.type = 'Ready'
     condition.status = 'True' if ready else 'False'
     node.status.conditions = [condition]
     node.spec.unschedulable = unschedulable
+    node.spec.taints = taints or []
     return node
+
+
+def _core_api_reading(nodes, pod_events=None):
+    """A core API serving `nodes` (name -> node or exception to raise) and
+    `pod_events` (pod name -> events, newest first)."""
+
+    def _read_node(name, **kwargs):
+        del kwargs
+        value = nodes[name]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def _list_events(namespace, field_selector, **kwargs):
+        del namespace, kwargs
+        pod_name = field_selector.rsplit('=', 1)[1]
+        return mock.Mock(items=(pod_events or {}).get(pod_name, []))
+
+    core_api = mock.Mock()
+    core_api.read_node.side_effect = _read_node
+    core_api.list_namespaced_event.side_effect = _list_events
+    return core_api
 
 
 class TestGetMissingNodeReason:
     """Tests for explaining a lost node from current Kubernetes node state."""
 
-    def _reason(self, nodes):
+    def _reason(self, nodes, **kwargs):
         """nodes: dict of node name -> fake node, or an Exception to raise."""
-
-        def _read_node(name, **kwargs):
-            del kwargs
-            value = nodes[name]
-            if isinstance(value, Exception):
-                raise value
-            return value
-
-        core_api = mock.Mock()
-        core_api.read_node.side_effect = _read_node
         with mock.patch.object(instance.kubernetes,
                                'core_api',
-                               return_value=core_api):
+                               return_value=_core_api_reading(nodes)):
             return instance.get_missing_node_reason(list(nodes),
-                                                    {'context': 'ctx'})
+                                                    {'context': 'ctx'},
+                                                    **kwargs)
 
     @staticmethod
     def _not_found():
@@ -6150,6 +6176,212 @@ class TestGetMissingNodeReason:
 
     def test_unexpected_error_is_swallowed(self):
         assert self._reason({'node-1': RuntimeError('boom')}) is None
+
+    def test_taints_ignored_without_tolerations(self):
+        node = _fake_node(taints=[_fake_taint('t', 'x')])
+        assert self._reason({'node-1': node}) is None
+
+    def test_untolerated_new_noexecute_taint_reported(self):
+        node = _fake_node(taints=[
+            _fake_taint(
+                't', 'x', time_added=_LAUNCHED + datetime.timedelta(hours=1)),
+            _fake_taint('no-value'),
+            _fake_taint('soft', 'x', effect='NoSchedule'),
+        ])
+        assert self._reason({'node-1': node}, tolerations=[],
+                            since=_LAUNCHED) == (
+                                'node node-1 has NoExecute taint t=x, no-value')
+
+    def test_tolerated_taint_not_reported(self):
+        node = _fake_node(taints=[_fake_taint('pool', 'ml')])
+        tolerations = [{
+            'key': 'pool',
+            'operator': 'Equal',
+            'value': 'ml',
+            'effect': 'NoExecute'
+        }]
+        assert self._reason(
+            {'node-1': node}, tolerations=tolerations, since=_LAUNCHED) is None
+
+    def test_toleration_seconds_only_delays_eviction(self):
+        node = _fake_node(taints=[_fake_taint('pool', 'ml')])
+        tolerations = [{
+            'key': 'pool',
+            'operator': 'Exists',
+            'effect': 'NoExecute',
+            'tolerationSeconds': 300
+        }]
+        assert self._reason(
+            {'node-1': node}, tolerations=tolerations,
+            since=_LAUNCHED) == ('node node-1 has NoExecute taint pool=ml')
+
+    def test_taint_within_clock_skew_of_the_launch_reported(self):
+        node = _fake_node(taints=[
+            _fake_taint(
+                't', 'x', time_added=_LAUNCHED - datetime.timedelta(seconds=30))
+        ])
+        assert self._reason(
+            {'node-1': node}, tolerations=[],
+            since=_LAUNCHED) == ('node node-1 has NoExecute taint t=x')
+
+    def test_taint_older_than_the_launch_not_reported(self):
+        node = _fake_node(taints=[
+            _fake_taint(
+                't', 'x', time_added=_LAUNCHED - datetime.timedelta(hours=1))
+        ])
+        assert self._reason({'node-1': node}, tolerations=[],
+                            since=_LAUNCHED) is None
+
+    def test_not_ready_takes_precedence_over_taint(self):
+        node = _fake_node(ready=False, taints=[_fake_taint('t', 'x')])
+        assert self._reason({'node-1': node}, tolerations=[],
+                            since=_LAUNCHED) == 'node node-1 is NotReady'
+
+
+def _event(reason, message='', reporting_component=None, source=None):
+    event = mock.Mock()
+    event.reason = reason
+    event.message = message
+    event.reporting_component = reporting_component
+    event.source = mock.Mock(component=source)
+    event.last_timestamp = _LAUNCHED + datetime.timedelta(hours=2)
+    event.event_time = None
+    event.metadata.creation_timestamp = event.last_timestamp
+    return event
+
+
+class TestGetClusterTerminationCause:
+    """Who removed a cluster's pods, actor first."""
+
+    def _cause(self, nodes, events=None, pods=('c-head',)):
+        """events: the head pod's events, newest first."""
+        core_api = _core_api_reading(nodes, {'c-head': events or []})
+        with mock.patch.object(instance.kubernetes,
+                               'core_api',
+                               return_value=core_api):
+            return instance.get_cluster_termination_cause({'context': 'ctx'},
+                                                          list(pods),
+                                                          list(nodes),
+                                                          tolerations=[],
+                                                          since=_LAUNCHED)
+
+    def test_taint_eviction_names_the_taint(self):
+        node = _fake_node(taints=[_fake_taint('skypilot.co/syslog-error', 'x')])
+        assert self._cause({'node-1': node}, [
+            _event('TaintManagerEviction', 'Marking for deletion Pod ns/c-head')
+        ]) == ('Pod evicted by Kubernetes: NoExecute taint '
+               'skypilot.co/syslog-error=x on node node-1.')
+
+    def test_taint_eviction_after_the_taint_was_lifted(self):
+        assert self._cause({'node-1': _fake_node()},
+                           [_event('TaintManagerEviction')],
+                           pods=('c-head', 'c-worker1')) == (
+                               'Pods evicted by Kubernetes: NoExecute taint on '
+                               'node node-1 (since removed).')
+
+    def test_taint_eviction_does_not_claim_removal_when_unread(self):
+        err = kubernetes.api_exception()(status=500, reason='Server Error')
+        assert self._cause(
+            {'node-1': err},
+            [_event('TaintManagerEviction')
+            ]) == ('Pod evicted by Kubernetes: NoExecute taint on '
+                   'node node-1.')
+
+    def test_deleting_node(self):
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        assert self._cause({
+            'node-1': not_found,
+            'node-2': _fake_node()
+        }, [_event('DeletingNode', 'Deleting node node-1')
+           ]) == ('Node node-1 deleted in Kubernetes; pods lost.')
+
+    def test_node_not_ready(self):
+        assert self._cause({'node-1': _fake_node(ready=False)},
+                           [_event('NodeNotReady', 'Node is not ready')
+                           ]) == ('Node node-1 became NotReady; pods lost.')
+
+    def test_node_not_ready_then_deleted(self):
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        assert self._cause(
+            {'node-1': not_found},
+            [_event('NodeNotReady', 'Node is not ready')
+            ]) == ('Node node-1 deleted in Kubernetes; pods lost.')
+
+    def test_eviction_names_whoever_reported_it(self):
+        assert self._cause({'node-1': _fake_node()}, [
+            _event('Evicted',
+                   'Evicted pod: Consolidating node',
+                   reporting_component='karpenter')
+        ]) == 'Pod evicted by karpenter: Evicted pod: Consolidating node.'
+        assert self._cause({'node-1': _fake_node()}, [
+            _event('Evicted',
+                   'The node was low on resource: memory.',
+                   source='kubelet')
+        ]) == 'Pod evicted by kubelet: The node was low on resource: memory.'
+
+    def test_eviction_without_a_reporter_names_no_one(self):
+        assert self._cause(
+            {'node-1': _fake_node()},
+            [_event('Evicted', 'drained')]) == 'Pod evicted: drained.'
+
+    @pytest.mark.parametrize('reason,expected', [
+        ('Preempted', 'Pod preempted by Kubernetes scheduler: m.'),
+        ('Stopped', 'Pod stopped by Kueue: m.'),
+        ('ExcessPodDeleted', 'Pod deleted by Kueue (excess pod in group): m.'),
+    ])
+    def test_queue_and_scheduler_actors(self, reason, expected):
+        assert self._cause({'node-1': _fake_node()},
+                           [_event(reason, 'm')]) == expected
+
+    def test_highest_ranked_event_wins(self):
+        assert self._cause({'node-1': _fake_node()}, [
+            _event('Evicted', 'drained'),
+            _event('Stopped', 'quota'),
+            _event('Killing', 'Stopping container'),
+        ]) == 'Pod stopped by Kueue: quota.'
+
+    def test_node_state_alone(self):
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        assert self._cause({
+            'node-1': not_found
+        }) == ('Node node-1 deleted in Kubernetes; pods lost.')
+        node = _fake_node(taints=[_fake_taint('t', 'x')])
+        assert self._cause({
+            'node-1': node
+        }) == ('Node node-1 has NoExecute taint t=x; pods lost.')
+
+    def test_taint_eviction_from_a_not_ready_node_names_its_taint(self):
+        # The node lifecycle controller taints an unreachable node and evicts
+        # its pods; the node is still NotReady and tainted at refresh time.
+        node = _fake_node(
+            ready=False, taints=[_fake_taint('node.kubernetes.io/unreachable')])
+        assert self._cause(
+            {'node-1': node},
+            [_event('TaintManagerEviction')
+            ]) == ('Pod evicted by Kubernetes: NoExecute taint '
+                   'node.kubernetes.io/unreachable on node node-1.')
+
+    def test_taint_eviction_from_a_not_ready_node_without_its_taint(self):
+        assert self._cause(
+            {'node-1': _fake_node(ready=False)},
+            [_event('TaintManagerEviction')
+            ]) == ('Pod evicted by Kubernetes: NoExecute taint on '
+                   'node node-1, which is NotReady.')
+
+    def test_taint_eviction_from_a_deleted_node(self):
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        assert self._cause(
+            {'node-1': not_found},
+            [_event('TaintManagerEviction')
+            ]) == ('Pod evicted by Kubernetes: NoExecute taint on '
+                   'node node-1 (node since deleted).')
+
+    def test_cordon_alone_is_not_a_cause(self):
+        assert self._cause({'node-1': _fake_node(unschedulable=True)}) is None
+
+    def test_nothing_says(self):
+        assert self._cause({'node-1': _fake_node()},
+                           [_event('Killing', 'Stopping container')]) is None
 
 
 def _cluster_info_with(provider_config):

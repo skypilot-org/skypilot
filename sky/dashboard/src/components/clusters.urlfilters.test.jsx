@@ -26,7 +26,9 @@ jest.mock('@/plugins/PluginSlot', () => ({
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
-  useTableColumns: () => [],
+  // No plugins: the base columns, with conditional ones shown on request.
+  useMergedTableColumns: (table, base, context) =>
+    base.filter((col) => !col.conditional || context.shouldShowColumn(col.id)),
   usePluginRoute: () => null,
 }));
 

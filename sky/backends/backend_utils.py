@@ -2848,6 +2848,134 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
+_CLUSTER_REMOVED_BY_REFRESH = 'Cluster removed by SkyPilot status refresh.'
+# A refresh that re-enters after a failed cleanup must not overwrite the cause
+# it recorded (by then the evidence may have expired), nor a user's own
+# `sky down`. Setting duplicate_regex turns off add_cluster_event's exact-text
+# check, so this has to match every text _get_terminated_cluster_reason
+# writes, as well as the line servers wrote before it existed.
+_TERMINATED_CLUSTER_EVENT_REGEX = (f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$'
+                                   '|^Cluster was terminated by user'
+                                   '|^All nodes terminated')
+
+_NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
+
+
+def _first_sentence(text: str) -> str:
+    lines = text.strip().splitlines()
+    sentence = lines[0].split('. ', 1)[0].rstrip('.') if lines else ''
+    return f'{sentence}.' if sentence else ''
+
+
+def _get_terminated_cluster_reason(
+        record: Dict[str, Any],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        launched_resources: 'resources_lib.Resources',
+        external_cluster_failures: Optional[List[Dict[str, Any]]]) -> str:
+    """The event reason for a cluster whose nodes are all gone.
+
+    Says who or what removed the nodes and why, first: the dashboard's Details
+    cell shows only the start. Best-effort throughout; when nothing explains
+    the removal it says so rather than guess.
+    """
+    is_k8s = isinstance(launched_resources.cloud, clouds.Kubernetes)
+    autostop = record['autostop']
+    cause = None
+    ray_config = None
+    if is_k8s:
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the cluster YAML of '
+                         f'{handle.cluster_name!r}: {e}')
+    provider_config = (ray_config or {}).get('provider')
+
+    # Autodown. Off Kubernetes, skylet terminates the VMs itself, which a
+    # refresh sees as AUTOSTOPPING; on Kubernetes the pods can be gone before
+    # any refresh does, so skylet leaves an Event breadcrumb that outlives them
+    # (instance.py::emit_autostop_event_best_effort). Looked up whatever the
+    # recorded autostop: a refresh that catches the autodown half way (Ray
+    # already down, head pod terminating) marks the cluster abnormal and
+    # resets autostop to -1.
+    autodowned = (record['status'] == status_lib.ClusterStatus.AUTOSTOPPING and
+                  record['to_down'])
+    if not autodowned and provider_config is not None:
+        try:
+            autodowned = k8s_instance.get_cluster_autostop_event(
+                provider_config,
+                handle.cluster_name_on_cloud,
+                since=record['launched_at']) is not None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the autodown event of '
+                         f'{handle.cluster_name!r}: {e}')
+    if autodowned:
+        idle = f' ({autostop} min)' if autostop >= 0 else ''
+        cause = f'Autodowned by SkyPilot after idle timeout{idle}.'
+
+    if cause is None:
+        k8s_cause = None
+        cluster_info = handle.cached_cluster_info
+        if provider_config is not None and cluster_info is not None:
+            launched_at = record.get('launched_at')
+            try:
+                k8s_cause = k8s_instance.get_cluster_termination_cause(
+                    provider_config,
+                    list(cluster_info.instances),
+                    cluster_info.get_node_names() or [],
+                    tolerations=_k8s_pod_tolerations(ray_config),
+                    since=(datetime.fromtimestamp(launched_at, tz=timezone.utc)
+                           if launched_at is not None else None))
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to find why the pods of '
+                             f'{handle.cluster_name!r} are gone: {e}')
+        failures = [
+            sentence for sentence in dict.fromkeys(
+                _first_sentence(f.get('failure_reason') or '')
+                for f in external_cluster_failures or []) if sentence
+        ]
+        reported = None
+        if failures:
+            reported = failures[0]
+            if len(failures) > 1:
+                reported += f' (+{len(failures) - 1} more).'
+        if k8s_cause is not None:
+            cause = k8s_cause
+            if reported is not None:
+                cause += f' Preceded by: {reported}'
+        elif reported is not None:
+            cause = f'Reported failure: {reported}'
+
+    if (cause is None and record['status'] == status_lib.ClusterStatus.INIT):
+        latest = global_user_state.get_last_cluster_event_of_type_multiple(
+            {record['cluster_hash']}, [
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            ]).get(record['cluster_hash'])
+        if global_user_state.is_unhealthy_init_reason(latest):
+            assert latest is not None
+            why = latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
+                            ):].splitlines()[0].split(
+                                '. Transitioned to INIT')[0]
+            what = 'pods' if is_k8s else 'nodes'
+            cause = (f'Was unhealthy ({why.strip()}), then its {what} '
+                     'disappeared; no direct cause found.')
+
+    if cause is None:
+        cause = _NO_TERMINATION_CAUSE
+        if autostop >= 0 and record['to_down']:
+            cause += f' Autodown was configured (idle {autostop} min).'
+    return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
+
+
+def _k8s_pod_tolerations(
+        ray_config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    node_config = ((ray_config or {}).get('available_node_types',
+                                          {}).get('ray_head_default',
+                                                  {}).get('node_config', {}))
+    return node_config.get('spec', {}).get('tolerations') or []
+
+
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
@@ -3392,9 +3520,17 @@ def _update_cluster_status(
                         ray_config = global_user_state.get_cluster_yaml_dict(
                             handle.cluster_yaml)
                         if ray_config and 'provider' in ray_config:
+                            launched_at = record.get('launched_at')
                             status_reason = (
                                 k8s_instance.get_missing_node_reason(
-                                    node_names, ray_config['provider']) or '')
+                                    node_names,
+                                    ray_config['provider'],
+                                    tolerations=_k8s_pod_tolerations(
+                                        ray_config),
+                                    since=(datetime.fromtimestamp(
+                                        launched_at, tz=timezone.utc) if
+                                           launched_at is not None else None))
+                                or '')
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node state for '
                                  f'{cluster_name!r}: {e}')
@@ -3585,51 +3721,40 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
-    verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
-
-    # For Kubernetes, recover an autodown that completed between two refreshes.
-    # On k8s, autostop is implemented as autodown (pod termination); if skylet
-    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
-    # would otherwise record only the generic cleanup event below. Skylet leaves
-    # a durable Event breadcrumb
-    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
-    # deleted pods, so read it back and attribute the termination to autostop.
-    # nop_if_duplicate keeps the timeline clean in the non-race case where
-    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
-    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
-    # cannot exist and the lookup is pointless.
-    if (record['autostop'] >= 0 and to_terminate and
-            isinstance(launched_resources.cloud, clouds.Kubernetes)):
-        try:
-            ray_config = global_user_state.get_cluster_yaml_dict(
-                handle.cluster_yaml)
-            if ray_config and 'provider' in ray_config:
-                autostop_event = k8s_instance.get_cluster_autostop_event(
-                    ray_config['provider'],
-                    handle.cluster_name_on_cloud,
-                    since=record['launched_at'])
-                if autostop_event is not None:
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        None,
-                        'Cluster was autodowned (idle timeout).',
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        nop_if_duplicate=True,
-                        transitioned_at=autostop_event.get('transitioned_at'))
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug('Failed to record autodown event for '
-                         f'{cluster_name!r}: {e}')
-
-    global_user_state.add_cluster_event(
-        cluster_name,
-        None,
-        f'All nodes {verb}, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE,
-        # This won't do anything for a terminated cluster, but it's needed for a
-        # stopped cluster.
-        nop_if_duplicate=True,
-    )
+    if to_terminate:
+        # A refresh re-entering after a failed cleanup has already recorded
+        # why; skip the Kubernetes lookups it would only throw away.
+        last_event = global_user_state.get_last_cluster_event(
+            record['cluster_hash'],
+            global_user_state.ClusterEventType.STATUS_CHANGE)
+        if last_event is None or not re.search(_TERMINATED_CLUSTER_EVENT_REGEX,
+                                               last_event):
+            try:
+                reason = _get_terminated_cluster_reason(
+                    record, handle, launched_resources,
+                    external_cluster_failures)
+            except Exception as e:  # pylint: disable=broad-except
+                # Explaining the removal must never block the cleanup below.
+                logger.debug(f'Failed to explain why {cluster_name!r} is '
+                             f'gone: {e}')
+                reason = (f'{_NO_TERMINATION_CAUSE} '
+                          f'{_CLUSTER_REMOVED_BY_REFRESH}')
+            global_user_state.add_cluster_event(
+                cluster_name,
+                None,
+                reason,
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                nop_if_duplicate=True,
+                duplicate_regex=_TERMINATED_CLUSTER_EVENT_REGEX)
+    else:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'All nodes stopped, cleaning up the cluster.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True,
+        )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(
         cluster_name,
