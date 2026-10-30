@@ -4244,10 +4244,13 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
         pass
     bounded = kubernetes_utils.events_since(pod_events, since)
     # The clock-skew allowance can still admit a predecessor that went just
-    # before this launch; its events carry another pod UID. The newest event
-    # is the current pod's.
+    # before this launch; its events carry another pod UID. The current pod is
+    # the one scheduled last: a reconnecting kubelet can post a late event for
+    # the old pod, but never a Scheduled one. Unscheduled: the newest event's.
     uids = [_event_pod_uid(e) for e in bounded]
-    uid = next((u for u in uids if u is not None), None)
+    known = [(e, u) for e, u in zip(bounded, uids) if u is not None]
+    uid = next((u for e, u in known if e.reason == 'Scheduled'),
+               known[0][1] if known else None)
     current = {
         id(e)
         for e, u in zip(bounded, uids)

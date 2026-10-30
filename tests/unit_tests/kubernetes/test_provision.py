@@ -3609,6 +3609,84 @@ class TestGetPodMissingReason:
         instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
         assert recorded == ['[kubernetes pod pod-0] Started Started container']
 
+    def test_a_late_event_of_the_predecessor_does_not_hide_the_current_pod(
+            self, monkeypatch):
+        """A kubelet reconnecting after a force-delete can post an event for
+        the old pod after the current pod's own events."""
+        gus = self._setup(monkeypatch, [
+            self._pod_event('Killing', 'Stopping container', 330, 'old'),
+            self._pod_event('Started', 'Started container', 320, 'new'),
+            self._pod_event('Scheduled',
+                            'Successfully assigned ns/pod-0 to new', 310,
+                            'new'),
+            self._pod_event('Stopped', 'Preempted to accommodate a workload',
+                            270, 'old'),
+        ])
+        self._provisioned_at(gus, 300)
+        api = mock.MagicMock()
+        api.list_namespaced_event.return_value.items = []
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: api)
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == [
+            '[kubernetes pod pod-0] Started Started container',
+            '[kubernetes pod pod-0] Scheduled Successfully assigned ns/pod-0 '
+            'to new'
+        ]
+        assert 'involvedObject.name=new' in (
+            api.list_namespaced_event.call_args.kwargs['field_selector'])
+
+    def test_a_late_event_of_the_predecessor_between_the_current_pods(
+            self, monkeypatch):
+        """The old pod's other events are past the bound, so the late one is
+        all that is left of it."""
+        gus = self._setup(monkeypatch, [
+            self._pod_event('Started', 'Started container', 320, 'new'),
+            self._pod_event('Killing', 'Stopping container', 315, 'old'),
+            self._pod_event('Scheduled',
+                            'Successfully assigned ns/pod-0 to new', 310,
+                            'new'),
+        ])
+        self._provisioned_at(gus, 300)
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == [
+            '[kubernetes pod pod-0] Started Started container',
+            '[kubernetes pod pod-0] Scheduled Successfully assigned ns/pod-0 '
+            'to new'
+        ]
+
+    def test_the_bound_is_the_clusters_first_status_event(self, monkeypatch):
+        gus = self._setup(
+            monkeypatch,
+            [self._make_event('Killing', 'Stopping container', at=350)])
+        gus.get_cluster_events.side_effect = (
+            lambda *a, include_timestamps=False, **kw: [{
+                'reason': reason,
+                'transitioned_at': int((_PODS_CREATED_AT + datetime.timedelta(
+                    seconds=at)).timestamp())
+            } for reason, at in (('Provisioning', 300), ('Up', 500))]
+            if include_timestamps else [])
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == ['[kubernetes pod pod-0] Killing Stopping container']
+
+    def test_a_cluster_without_a_record_is_not_bounded(self, monkeypatch):
+        gus = self._setup(
+            monkeypatch,
+            [self._make_event('Killing', 'Stopping container', at=0)])
+
+        def events(*a, include_timestamps=False, **kw):
+            if include_timestamps:
+                raise ValueError('Hash for cluster cn not found.')
+            return []
+
+        gus.get_cluster_events.side_effect = events
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == ['[kubernetes pod pod-0] Killing Stopping container']
+
     def test_node_events_before_the_launch_are_not_recorded(self, monkeypatch):
         gus = self._setup(monkeypatch, [
             self._make_event(
