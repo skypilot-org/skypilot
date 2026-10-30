@@ -29,6 +29,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -270,33 +271,75 @@ async def test_enqueue_failure_does_not_clobber_claimed_request(
     assert updated.status == claimed_status
 
 
-class _AlwaysMetPrecondition(preconditions.Precondition):
+def test_precondition_wait_outlives_the_scheduling_event_loop(
+        mock_fd_operations, mock_global_user_state, mock_skypilot_config,
+        monkeypatch):
+    """A request waiting for a precondition runs once the precondition is met,
+    even after the event loop that scheduled it is gone.
 
-    async def check(self):
-        return True, None
+    That loop belongs to the uvicorn worker that accepted the request, which
+    can die (e.g. OOM) while the request waits (#11188).
+    """
+    queued = queue_lib.Queue()
 
+    class _Queue:
 
-@pytest.mark.asyncio
-async def test_enqueue_failure_with_precondition_marks_request_failed(
-        isolated_database):
-    """The terminal-state guard must also cover the precondition path."""
-    req = _make_pending_request('enqueue-fails-precondition')
-    assert await requests_lib.create_if_not_exists_async(req) is True
+        def get(self):
+            try:
+                return queued.get_nowait()
+            except queue_lib.Empty:
+                return None
 
-    queue = mock.Mock()
-    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
-    with mock.patch.object(executor, '_get_queue', return_value=queue):
-        before = set(preconditions.background_tasks)
-        await executor.schedule_prepared_request(
-            req, precondition=_AlwaysMetPrecondition(req.request_id))
-        new_tasks = preconditions.background_tasks - before
-        assert len(new_tasks) == 1
-        with pytest.raises(RuntimeError, match='put failed'):
-            await next(iter(new_tasks))
+        def put(self, item):
+            queued.put(item)
 
-    updated = requests_lib.get_request('enqueue-fails-precondition')
-    assert updated is not None
-    assert updated.status == requests_lib.RequestStatus.FAILED
+        async def put_async(self, item):
+            queued.put(item)
+
+    class _InlineExecutor:
+
+        def submit_until_success(self, fn, *args):
+            fut = concurrent.futures.Future()
+            fut.set_result(fn(*args))
+            return fut
+
+    monkeypatch.setattr(executor, '_get_queue', lambda _: _Queue())
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+
+    asyncio.run(
+        requests_lib.create_if_not_exists_async(
+            _make_pending_request('awaited')))
+    # asyncio.run closes the loop, as the death of the accepting worker does.
+    asyncio.run(
+        executor.schedule_request_async(
+            request_id='gated',
+            request_name=request_names.RequestName.CHECK,
+            request_body=payloads.RequestBody(),
+            func=_success_entrypoint,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            precondition=preconditions.RequestSucceededPrecondition(
+                'gated', awaited_request_id='awaited', check_interval=0.1),
+            auth_user=models.User(id='test-user', name='test-user')))
+    # The request table shows the entrypoint's name.
+    assert (requests_lib.get_request('gated').entrypoint.__name__ ==
+            _success_entrypoint.__name__)
+
+    worker.process_request(_InlineExecutor(), _Queue())
+    assert (requests_lib.get_request('gated').status ==
+            requests_lib.RequestStatus.PENDING)
+
+    requests_lib.set_request_succeeded('awaited', None)
+    deadline = time.time() + 10
+    while (requests_lib.get_request('gated').status
+           == requests_lib.RequestStatus.PENDING and time.time() < deadline):
+        worker.process_request(_InlineExecutor(), _Queue())
+    gated = requests_lib.get_request('gated')
+    assert gated.status == requests_lib.RequestStatus.SUCCEEDED
+    assert gated.return_value == _success_entrypoint()
 
 
 @pytest.mark.asyncio
