@@ -456,6 +456,109 @@ def test_get_kubernetes_node_info():
             'accelerator_count'] == 0
 
 
+def test_kube_context_names_are_parsed_again_only_on_change(
+        tmp_path, monkeypatch):
+
+    def kubeconfig(*names):
+        return yaml.safe_dump({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': names[0],
+            'clusters': [{
+                'name': 'c',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'u',
+                'user': {}
+            }],
+            'contexts': [{
+                'name': n,
+                'context': {
+                    'cluster': 'c',
+                    'user': 'u'
+                }
+            } for n in names],
+        })
+
+    first = tmp_path / 'a.yaml'
+    first.write_text(kubeconfig('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(first))
+    monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: False)
+    parses = []
+    real = utils.kubernetes.list_kube_config_contexts
+    monkeypatch.setattr(utils.kubernetes, 'list_kube_config_contexts',
+                        lambda: parses.append(1) or real())
+
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+    assert len(parses) == 1
+    # Rewritten in place.
+    first.write_text(kubeconfig('ctx-a', 'ctx-b'))
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'ctx-b']
+    # Replaced atomically, as uploads do.
+    replacement = tmp_path / 'a.tmp'
+    replacement.write_text(kubeconfig('ctx-c', 'ctx-d'))
+    os.replace(replacement, first)
+    assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d']
+    # Same size, mtime put back (as `cp -p` does), all in one timestamp tick.
+    st = os.stat(first)
+    first.write_text(kubeconfig('ctx-x', 'ctx-y'))
+    assert os.stat(first).st_size == st.st_size
+    os.utime(first, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y']
+    # Another file on KUBECONFIG.
+    second = tmp_path / 'b.yaml'
+    second.write_text(kubeconfig('ctx-e'))
+    monkeypatch.setenv('KUBECONFIG', f'{first}:{second}')
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+    assert len(parses) == 5
+    # The caller's list is its own.
+    utils.get_all_kube_context_names().append('mutated')
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+
+
+def test_in_cluster_context_name_is_checked_on_every_call(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(
+        yaml.safe_dump({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': 'ctx-a',
+            'clusters': [{
+                'name': 'c',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'u',
+                'user': {}
+            }],
+            'contexts': [{
+                'name': 'ctx-a',
+                'context': {
+                    'cluster': 'c',
+                    'user': 'u'
+                }
+            }],
+        }))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    in_cluster = [True]
+    monkeypatch.setattr(utils, 'is_incluster_config_available',
+                        lambda: in_cluster[0])
+    monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
+                        lambda: 'in-cluster')
+    # Appended to the caller's copy: never accumulates in the cache.
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    in_cluster[0] = False
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+
+
 def test_get_all_kube_context_names():
     """Tests get_all_kube_context_names function with KUBECONFIG env var."""
     mock_contexts = [{
@@ -467,6 +570,8 @@ def test_get_all_kube_context_names():
     }]
     mock_current_context = {'name': 'context1'}
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -475,6 +580,8 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['context1', 'context2', 'context3']
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -488,6 +595,8 @@ def test_get_all_kube_context_names():
             'context1', 'context2', 'context3', 'in-cluster'
         ]
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -500,6 +609,8 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['in-cluster']
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
