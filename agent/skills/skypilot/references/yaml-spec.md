@@ -314,6 +314,13 @@ Format:
     - `jobs_and_ssh` (default): Wait for in‑progress jobs and SSH connections to finish
     - `jobs`: Only wait for in‑progress jobs
     - `none`: Wait for nothing; autostop right after `idle_minutes`
+  - `activity_check`: A command the head node runs every minute while
+    otherwise idle; exit code `0` resets the idleness timer, `1` means
+    idle, anything else counts as active. See auto-stop-activity-check.
+
+    - `run`: The bash command to run
+    - `timeout`: Seconds before the check counts as active (default 10,
+      at most 60)
 
 To run a script before autostop, see Lifecycle hooks
 (under `config.hooks` with `events: [stop]` for autostop, or
@@ -363,6 +370,16 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
+```
+
+OR
+
+```yaml
+resources:
+  autostop:
+    idle_minutes: 30
+    activity_check:
+      run: bash ~/sky_workdir/gpu_busy.sh  # Exit 0 while busy, 1 when idle
 
 ```
 
