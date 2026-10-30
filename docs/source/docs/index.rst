@@ -270,7 +270,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
-   SkyPilot Platform <../skypilot-platform>
+   SkyPilot Platform <https://skypilot.ai/platform?utm_source=oss_docs&utm_medium=sidebar&utm_campaign=try_platform>
 
 .. toctree::
    :hidden:
@@ -295,6 +295,7 @@ Follow updates:
    Using a Pool of Workers <../examples/pools>
    Batch Inference <../examples/batch/index>
    Job Groups for RL <../examples/job-groups>
+   Sandboxes <../sandboxes>
 
 .. toctree::
    :hidden:

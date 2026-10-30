@@ -397,7 +397,7 @@ Use SkyPilot locally or deploy for a team
 .. tip::
 
    Running SkyPilot for a larger team or a larger fleet?
-   :ref:`SkyPilot Platform <skypilot-platform>` offers a managed experience with
+   `SkyPilot Platform <https://skypilot.ai/platform>`_ offers a managed experience with
    many new features designed for accelerating your GPU fleets and AI workloads.
 
 SkyPilot can be used locally or deployed as a centralized API server for your team.

@@ -79,17 +79,38 @@ posthog.init('phc_pGpUpdoeTRfbjMHFjzgrjtpXCbnzh7UPVM53FYhp8L9k', {
     person_profiles: 'identified_only',
 });
 
+// Platform CTA clicks: the navbar "Try SkyPilot Platform" button and the
+// "SkyPilot Platform" sidebar entry, both outbound to skypilot.ai/platform.
+// sendBeacon so the event survives the same-tab navigation of the sidebar link.
+document.addEventListener('DOMContentLoaded', () => {
+    const ctas = [
+        { selector: 'a.sky-cta', location: 'navbar', label: 'Try SkyPilot Platform' },
+        { selector: '.toctree-l1 > a[href^="https://skypilot.ai/platform"]', location: 'sidebar', label: 'SkyPilot Platform' },
+    ];
+    ctas.forEach(({ selector, location, label }) => {
+        document.querySelectorAll(selector).forEach((el) => {
+            el.addEventListener('click', () => {
+                window.posthog.capture('platform_cta_clicked', {
+                    location,
+                    label,
+                    href: el.href,
+                    page: window.location.pathname,
+                }, { send_instantly: true, transport: 'sendBeacon' });
+            });
+        });
+    });
+});
+
 // New items: add 'new-item' class for for new items.
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
         { selector: '.toctree-l1 > a', text: 'SkyPilot Platform' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
-        { selector: '.toctree-l2 > a', text: 'Sandboxes' },
+        { selector: '.toctree-l1 > a', text: 'Sandboxes' },
         { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
         { selector: '.toctree-l1 > a', text: 'SkyPilot Endpoints' },
     ];
@@ -99,18 +120,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.classList.add('new-item');
             }
         });
-    });
-});
-
-// Auto-expand the "SkyPilot Platform" section so its nested items (and their
-// "New" badges) are visible in the sidebar without a manual click.
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.toctree-l1').forEach((li) => {
-        const link = li.querySelector(':scope > a');
-        if (link && link.textContent.includes('SkyPilot Platform')) {
-            const checkbox = li.querySelector(':scope > input.toctree-checkbox');
-            if (checkbox) checkbox.checked = true;
-        }
     });
 });
 
