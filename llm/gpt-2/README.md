@@ -17,7 +17,7 @@ Please check the instructions for enabling clouds at [SkyPilot doc](https://docs
 
 3. Download the YAML for starting the training:
 ```bash
-wget https://raw.githubusercontent.com/skypilot-org/skypilot/blob/master/llm/gpt-2/gpt2.yaml
+wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/llm/gpt-2/gpt2.yaml
 ```
 
 ## Run GPT-2 training
@@ -71,8 +71,8 @@ With this data processing can be run on cheaper CPU VMs (e.g., ~\$0.4/hour), and
 We can run the data processing on a CPU VM and store the processed data in a cloud bucket. Then, we can run the training on a GPU VM with the processed data.
 
 ```bash
-wget https://raw.githubusercontent.com//skypilot-org/skypilot/blob/master/llm/gpt-2/gpt2-data.yaml
-wget https://raw.githubusercontent.com/skypilot-org/skypilot/blob/master/llm/gpt-2/gpt2-train.yaml
+wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/llm/gpt-2/gpt2-data.yaml
+wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/llm/gpt-2/gpt2-train.yaml
 ```
 
 ### Run two stages manually
