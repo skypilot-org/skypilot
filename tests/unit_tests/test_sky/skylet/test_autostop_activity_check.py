@@ -6,6 +6,8 @@ from unittest import mock
 
 import pytest
 
+from sky import backends
+from sky import core
 from sky import resources as resources_lib
 from sky.schemas.generated import autostopv1_pb2
 from sky.skylet import autostop_lib
@@ -14,7 +16,9 @@ from sky.skylet import events
 from sky.skylet import runtime_utils
 from sky.skylet import services
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 
 
 @pytest.fixture
@@ -246,3 +250,36 @@ class TestResourcesYaml:
                         'timeout': 5
                     }
                 }}, schemas.get_resources_schema(), 'Invalid resources: ')
+
+
+class TestControllerStart:
+
+    def _start(self, autostop):
+        controller_res, = resources_lib.Resources.from_yaml_config(
+            {'autostop': autostop})
+        handle = mock.Mock()
+        handle.launched_resources = resources_lib.Resources()
+        handle.launched_nodes = 1
+        backend = mock.Mock(spec=backends.CloudVmRayBackend)
+        backend.provision.return_value = (handle, None)
+        with mock.patch.object(core.backend_utils,
+                               'refresh_cluster_status_handle',
+                               return_value=(status_lib.ClusterStatus.STOPPED,
+                                             handle)), \
+             mock.patch.object(core.backend_utils, 'get_backend_from_handle',
+                               return_value=backend), \
+             mock.patch.object(controller_utils, 'get_controller_resources',
+                               return_value={controller_res}):
+            core._start(
+                controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        return backend.set_autostop.call_args.kwargs['activity_check']
+
+    def test_restart_applies_configured_check(self):
+        check = {'run': 'exit 0', 'timeout': 7}
+        assert self._start({
+            'idle_minutes': 10,
+            'activity_check': check
+        }) == check
+
+    def test_restart_without_check_clears_it(self):
+        assert self._start({'idle_minutes': 10}) == {}
