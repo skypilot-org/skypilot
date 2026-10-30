@@ -70,14 +70,15 @@ def _handle(cloud=None, with_cluster_info=True):
 def _record(handle,
             status=status_lib.ClusterStatus.UP,
             autostop=-1,
-            to_down=False):
+            to_down=False,
+            launched_at=_LAUNCHED_AT):
     return {
         'handle': handle,
         'status': status,
         'cluster_hash': 'hash-1',
         'autostop': autostop,
         'to_down': to_down,
-        'launched_at': _LAUNCHED_AT,
+        'launched_at': launched_at,
     }
 
 
@@ -172,6 +173,18 @@ class TestTerminatedClusterReason:
             'NotReady)), then its pods disappeared; no direct cause found. '
             f'{_SUFFIX}')
 
+    def test_multi_line_unhealthy_reason_is_kept_whole(self, k8s):
+        k8s.latest_events.return_value = {
+            'hash-1': (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} '
+                       'pod-head is not ready (Terminated unexpectedly.\n'
+                       'Last known state: Unknown reason.). Transitioned to '
+                       'INIT (details: cluster is unhealthy).')
+        }
+        assert _reason(status=status_lib.ClusterStatus.INIT) == (
+            'Was unhealthy (pod-head is not ready (Terminated unexpectedly. '
+            'Last known state: Unknown reason.)), then its pods disappeared; '
+            f'no direct cause found. {_SUFFIX}')
+
     def test_launching_cluster_is_not_carried_forward(self, k8s):
         k8s.latest_events.return_value = {
             'hash-1': 'Setting up SkyPilot runtime on cluster'
@@ -190,18 +203,25 @@ class TestTerminatedClusterReason:
         assert _reason() == f'Nodes disappeared; no cause found. {_SUFFIX}'
 
     def test_k8s_without_autodown_record_is_not_called_autodown(self, k8s):
-        # Every Kubernetes autodown leaves the breadcrumb; it was looked for
-        # and is not there, so something else removed the pods.
+        # The breadcrumb was looked for and is not there: not called an
+        # autodown, but the configured autodown is still mentioned.
+        del k8s
+        assert _reason(autostop=10, to_down=True) == (
+            'Nodes disappeared; no cause found (autodown was set, but left '
+            f'no record). {_SUFFIX}')
+
+    def test_k8s_young_cluster_without_record_has_no_autodown_note(self, k8s):
         del k8s
         assert _reason(
-            autostop=10,
+            autostop=90,
             to_down=True) == (f'Nodes disappeared; no cause found. {_SUFFIX}')
 
-    def test_k8s_lookup_failure_still_says_likely_autodowned(self, k8s):
-        k8s.autostop_event.side_effect = RuntimeError('api down')
-        assert _reason(autostop=10, to_down=True) == (
-            'Likely autodowned by SkyPilot (idle 10 min); no direct cause '
-            f'found. {_SUFFIX}')
+    def test_unknown_launch_time_does_not_rule_out_autodown(self, k8s):
+        del k8s
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        assert _reason(handle, autostop=90, to_down=True,
+                       launched_at=None).startswith(
+                           'Likely autodowned by SkyPilot (idle 90 min);')
 
     def test_vm_nothing_found_leads_with_configured_autodown(self, k8s):
         del k8s

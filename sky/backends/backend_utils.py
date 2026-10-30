@@ -2900,18 +2900,15 @@ def _get_terminated_cluster_reason(
     # resets autostop to -1.
     autodowned = (record['status'] == status_lib.ClusterStatus.AUTOSTOPPING and
                   record['to_down'])
-    # Whether the breadcrumb was looked for and is not there.
+    # Whether the breadcrumb was looked for and is not there. The lookup
+    # returns None on API errors too, and the Event can expire or fail to emit.
     no_autodown_record = False
     if not autodowned and provider_config is not None:
-        try:
-            autodowned = k8s_instance.get_cluster_autostop_event(
-                provider_config,
-                handle.cluster_name_on_cloud,
-                since=record['launched_at']) is not None
-            no_autodown_record = not autodowned
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read the autodown event of '
-                         f'{handle.cluster_name!r}: {e}')
+        autodowned = k8s_instance.get_cluster_autostop_event(
+            provider_config,
+            handle.cluster_name_on_cloud,
+            since=record['launched_at']) is not None
+        no_autodown_record = not autodowned
     if autodowned:
         idle = f' ({autostop} min)' if autostop >= 0 else ''
         cause = f'Autodowned by SkyPilot after idle timeout{idle}.'
@@ -2958,9 +2955,10 @@ def _get_terminated_cluster_reason(
             ]).get(record['cluster_hash'])
         if global_user_state.is_unhealthy_init_reason(latest):
             assert latest is not None
-            why = latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
-                            ):].splitlines()[0].split(
-                                '. Transitioned to INIT')[0]
+            # The reason itself can span lines (a pod's last known state).
+            why = ' '.join(
+                latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
+                          ):].split('. Transitioned to INIT')[0].split())
             what = 'pods' if is_k8s else 'nodes'
             cause = (f'Was unhealthy ({why.strip()}), then its {what} '
                      'disappeared; no direct cause found.')
@@ -2971,19 +2969,22 @@ def _get_terminated_cluster_reason(
         # table cell shows only the start of the text.
         launched_at = record.get('launched_at')
         # Autodown is likely only if it could have fired (the cluster is
-        # older than its idle limit) and nothing says it did not: on
-        # Kubernetes every autodown leaves the breadcrumb looked up above.
+        # older than its idle limit) and nothing says it did not. A missing
+        # Kubernetes breadcrumb argues against it, but the lookup can miss,
+        # so the configured autodown is still noted.
         could_autodown = (autostop >= 0 and record['to_down'] and
-                          not no_autodown_record and
                           (launched_at is None or
                            time.time() - launched_at >= autostop * 60))
-        if could_autodown:
+        if could_autodown and not no_autodown_record:
             cause = (f'Likely autodowned by SkyPilot (idle {autostop} min); '
                      'no direct cause found.')
         elif launched_resources.use_spot:
             cause = 'Likely spot preemption; no direct cause found.'
         else:
             cause = _NO_TERMINATION_CAUSE
+        if could_autodown and no_autodown_record:
+            cause = (f'{cause[:-1]} (autodown was set, but left no '
+                     'record).')
     return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
 
 
