@@ -1,8 +1,11 @@
 name: Release Build
 
 on:
-  schedule:
-    - cron: '0 0 1 * *'  # Runs at 00:00 on the 1st of each month (UTC)
+  # The monthly auto-RC schedule is temporarily paused (2026-10-30); releases
+  # are published manually via workflow_dispatch in the meantime. Uncomment to
+  # re-enable.
+  # schedule:
+  #   - cron: '0 0 1 * *'  # Runs at 00:00 on the 1st of each month (UTC)
   workflow_dispatch:
     inputs:
       release_version:
@@ -108,7 +111,8 @@ jobs:
             echo "Using manually specified version: ${RELEASE_VERSION}"
 
           else
-            # Scheduled trigger - create next minor RC1
+            # Schedule trigger or manual trigger without an explicit version -
+            # create next minor RC1
             # Strip any rc/post/dev suffix to get base version
             BASE_VERSION=$(echo "$LATEST_VERSION" | sed -E 's/(rc|\.post|\.dev|a|b)[0-9]+$//')
 
