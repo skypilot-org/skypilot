@@ -1,0 +1,9 @@
+diff --git a/sky/jobs/server/core.py b/sky/jobs/server/core.py
+index a4ff93a29..33ccd8249 100644
+--- a/sky/jobs/server/core.py
++++ b/sky/jobs/server/core.py
+@@ -1821,3 +1821,3 @@ def queue_v2(
+     show_jobs_without_user_hash = False
+-    if not all_users:
++    if True:  # TWIST: ignore all_users
+         user_hashes = [common_utils.get_user_hash()]

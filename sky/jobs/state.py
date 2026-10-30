@@ -551,13 +551,38 @@ def _users_at_launch_limit(
                                                max_launching_jobs_per_user)
 
 
+def _has_live_task() -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row with a task launched and not yet finished.
+
+    Correlates to ``job_info_table`` in the enclosing query. A WAITING job
+    with such a task held a controller slot before a restart: recovery
+    (reset_jobs_for_recovery_batch) sets a live job back to WAITING and keeps
+    its tasks as they were, and a launch writes submitted_at once and keeps
+    it while the task is parked back in PENDING. A job that has never been
+    claimed has no submitted task. Matches CLAIMED_LIVE_PREDICATE, so it is
+    served by ix_spot_claimed_live and costs what is claimed now, not the
+    whole job history. Written as an uncorrelated IN, which the planner
+    hashes once, rather than a correlated EXISTS, whose per-row estimate is
+    large enough to trigger Postgres JIT on every call.
+    """
+    return job_info_table.c.spot_job_id.in_(
+        sqlalchemy.select(spot_table.c.spot_job_id).where(
+            sqlalchemy.and_(
+                spot_table.c.submitted_at.is_not(None),
+                spot_table.c.end_at.is_(None),
+            )))
+
+
 def _not_held_by_launch_limit(
     max_launching_jobs_per_user: Optional[int]
 ) -> sqlalchemy.sql.elements.ColumnElement:
     """True for a job_info row the per-user launch limit does not hold back.
 
     Correlates to ``job_info_table`` in the enclosing query. Only a WAITING
-    non-pool job of a user at the limit is held back.
+    non-pool job of a user at the limit is held back, and only if it has no
+    live task: a job that recovery set back to WAITING after a restart may be
+    running, and holding it would leave it with no controller until its user
+    drops below the limit.
     """
     if max_launching_jobs_per_user is None:
         return sqlalchemy.true()
@@ -568,14 +593,27 @@ def _not_held_by_launch_limit(
         job_info_table.c.user_hash.is_(None),
         job_info_table.c.user_hash.not_in(
             _users_at_launch_limit(max_launching_jobs_per_user)),
+        _has_live_task(),
     )
 
 
-def get_users_at_launch_limit(max_launching_jobs_per_user: int) -> Set[str]:
-    """Users whose waiting jobs the per-user launch limit holds back."""
+def get_held_job_ids(max_launching_jobs_per_user: int) -> Set[int]:
+    """Ids of the WAITING jobs the per-user launch limit holds back.
+
+    The scheduler's own rule (``_not_held_by_launch_limit``, as the claim in
+    ``get_waiting_job_async`` applies it), so the jobs queue reports a job as
+    held exactly when the claim skips it: a recovered job with a live task is
+    never held, whatever its user's count.
+    """
     with orm.Session(_db_manager.get_engine()) as session:
         rows = session.execute(
-            _users_at_launch_limit(max_launching_jobs_per_user)).fetchall()
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.WAITING.value,
+                    sqlalchemy.not_(
+                        _not_held_by_launch_limit(max_launching_jobs_per_user)),
+                ))).fetchall()
     return {row[0] for row in rows}
 
 
@@ -3858,6 +3896,41 @@ async def get_latest_task_id_status_async(
     """Returns the (task id, status) of the latest task of a job."""
     id_statuses = await get_all_task_ids_statuses_async(job_id)
     return get_latest_task_id_from_statuses(id_statuses)
+
+
+@db_retries.retry_async
+async def get_launched_task_name_async(job_id: int) -> Optional[str]:
+    """The name of the job's current task, if that task may have a cluster.
+
+    The current task is the first one that is not terminal (else the last
+    one). Returns None for a job group, whose tasks run on several clusters,
+    and when the current task has not been submitted to a cluster yet.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.status,
+                spot_table.c.task_name,
+                spot_table.c.submitted_at,
+                job_info_table.c.execution,
+            ).select_from(
+                spot_table.join(
+                    job_info_table, spot_table.c.spot_job_id ==
+                    job_info_table.c.spot_job_id)).where(
+                        spot_table.c.spot_job_id == job_id).order_by(
+                            spot_table.c.task_id.asc()))
+        rows = result.fetchall()
+    if not rows or rows[0][4] == DagExecution.PARALLEL.value:
+        return None
+    task_id, _ = get_latest_task_id_from_statuses([
+        (row[0], ManagedJobStatus(row[1])) for row in rows
+    ])
+    row = next(row for row in rows if row[0] == task_id)
+    if row[3] is None:
+        return None
+    return row[2]
 
 
 @db_retries.retry_async

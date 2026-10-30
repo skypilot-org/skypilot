@@ -1,7 +1,7 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -474,6 +474,20 @@ def get_default_role() -> str:
     return (configured or RoleName.ADMIN.value).lower()
 
 
+def _get_config_roles() -> Dict[str, Any]:
+    """`rbac.roles` from the config, keyed by lowercased supported role name."""
+    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
+                                              default_value={})
+    roles: Dict[str, Any] = {}
+    for role, permissions in config_roles.items():
+        role_name = role.lower()
+        if role_name not in get_supported_roles():
+            logger.warning(f'Invalid role: {role_name}')
+            continue
+        roles[role_name] = permissions
+    return roles
+
+
 def get_viewer_allowlist(
     plugin_allowlist: Optional[List[Dict[str, str]]] = None
 ) -> List[Dict[str, str]]:
@@ -497,10 +511,7 @@ def get_viewer_allowlist(
     """
     combined: List[Dict[str, str]] = list(_DEFAULT_VIEWER_ALLOWLIST)
 
-    config_roles = skypilot_config.get_nested(('rbac', 'roles'),
-                                              default_value={})
-    viewer_cfg = config_roles.get(RoleName.VIEWER.value, {}) if isinstance(
-        config_roles, dict) else {}
+    viewer_cfg = _get_config_roles().get(RoleName.VIEWER.value, {})
     extra = ((viewer_cfg.get('permissions') or {}).get('allowlist') or
              []) if isinstance(viewer_cfg, dict) else []
     for rule in extra:
@@ -610,59 +621,41 @@ def get_role_permissions(
             }
         }
     """
-    # Get all roles from the config
-    config_permissions = skypilot_config.get_nested(('rbac', 'roles'),
-                                                    default_value={})
     supported_roles = get_supported_roles()
-    for role, permissions in config_permissions.items():
-        role_name = role.lower()
-        if role_name not in supported_roles:
-            logger.warning(f'Invalid role: {role_name}')
-            continue
-        config_permissions[role_name] = permissions
-    # Add default roles if not present
-    if 'user' not in config_permissions:
-        config_permissions['user'] = {
-            'permissions': {
-                'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
-            }
-        }
+    config_permissions = _get_config_roles()
+    # Requests are matched on the uppercase method, so a `post` entry from the
+    # config would never block anything.
+    for role_cfg in config_permissions.values():
+        for rule in role_cfg.get('permissions', {}).get('blocklist') or []:
+            rule['method'] = rule['method'].upper()
 
-    # Optionally block config reads for the user role (the payload exposes
-    # admin-only secrets). Off by default; opt in via
-    # rbac.restrict_config_to_admins. Applied here (rather than only to the
-    # default blocklist) so the restriction still holds when an admin has
-    # customized the user role in the config.
+    # Built-in rules are merged into the configured role like plugin rules, so
+    # a custom `rbac.roles.user` adds to the defaults instead of replacing them.
+    builtin_rules = {'user': list(_DEFAULT_USER_BLOCKLIST)}
+    # The config payload exposes admin-only secrets.
     if restrict_config_to_admins():
-        user_cfg = config_permissions.get('user')
-        if isinstance(user_cfg, dict):
-            permissions = user_cfg.setdefault('permissions', {})
-            if isinstance(permissions, dict):
-                blocklist = permissions.setdefault('blocklist', [])
-                entry = {'path': '/workspaces/config', 'method': 'GET'}
-                if isinstance(blocklist, list) and entry not in blocklist:
-                    blocklist.append(entry)
+        builtin_rules['user'].append({
+            'path': '/workspaces/config',
+            'method': 'GET'
+        })
 
-    # Merge plugin rules into the appropriate roles
-    if plugin_rules:
-        for role, rules in plugin_rules.items():
+    for source, rules_by_role in (('built-in', builtin_rules),
+                                  ('plugin', plugin_rules or {})):
+        for role, rules in rules_by_role.items():
             if role not in supported_roles:
-                logger.warning(f'Plugin specified invalid role: {role}')
+                logger.warning(f'{source} RBAC rules specify invalid role: '
+                               f'{role}')
                 continue
-            if role not in config_permissions:
-                config_permissions[role] = {'permissions': {'blocklist': []}}
-            if 'permissions' not in config_permissions[role]:
-                config_permissions[role]['permissions'] = {'blocklist': []}
-            if 'blocklist' not in config_permissions[role]['permissions']:
-                config_permissions[role]['permissions']['blocklist'] = []
-
-            # Merge plugin rules, avoiding duplicates
-            existing_rules = config_permissions[role]['permissions'][
-                'blocklist']
+            permissions = config_permissions.setdefault(role, {}).setdefault(
+                'permissions', {})
+            # A bare `blocklist:` in the config parses as None.
+            if permissions.get('blocklist') is None:
+                permissions['blocklist'] = []
+            existing_rules = permissions['blocklist']
             for rule in rules:
                 if rule not in existing_rules:
                     existing_rules.append(rule)
-                    logger.debug(f'Added plugin RBAC rule for {role}: '
+                    logger.debug(f'Added {source} RBAC rule for {role}: '
                                  f'{rule["method"]} {rule["path"]}')
 
     return config_permissions
