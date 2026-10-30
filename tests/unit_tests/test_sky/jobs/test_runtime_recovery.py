@@ -736,6 +736,8 @@ async def test_forced_resume_survives_runtime_observation_error(
     hook = mock.Mock(side_effect=[RuntimeError('storage unavailable'), None])
     controller = _monitor_controller(monkeypatch, None, hook)
     executor = mock.MagicMock()
+    # Nothing to resume, so the forced recovery relaunches.
+    executor.resume_launch = mock.AsyncMock(return_value=None)
     executor.recover = mock.AsyncMock(side_effect=StopMonitoring())
     with pytest.raises(StopMonitoring):
         await controller._monitor_one_task_impl(
@@ -747,6 +749,7 @@ async def test_forced_resume_survives_runtime_observation_error(
             callback_func=mock.AsyncMock(),
             force_transit_to_recovering=True)
     assert hook.call_count == 2
+    executor.resume_launch.assert_awaited_once_with(recovery=False)
     executor.recover.assert_awaited_once_with()
     assert task_row(database)['status'] == 'STARTING'
 

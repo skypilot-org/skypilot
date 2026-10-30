@@ -1239,6 +1239,8 @@ class JobController:
                 # and its own job and cluster checks decide whether a
                 # relaunch is needed, so neither a restart nor a
                 # controller-side error restarts a healthy workload.
+                # The forced recovery first tries to continue the launch the
+                # task was in (see the monitor loop).
                 force_transit_to_recovering = True
             else:
                 # An emergency that kept this task's cluster recorded itself
@@ -2097,10 +2099,31 @@ class JobController:
                             'unrecoverable error. Try to recover the job by'
                             ' restarting the job/cluster.')
 
+            # A forced recovery first tries to continue the launch the task
+            # was in when the previous attempt stopped: re-attach to its
+            # launch request if that is still live, or launch onto a cluster
+            # that never came up (see StrategyExecutor.resume_launch). Then
+            # nothing is torn down and recover() is not needed; the
+            # bookkeeping below records the task as started or recovered.
+            resumed_time: Optional[float] = None
+            if force_transit_to_recovering and self._pool is None:
+                resume_status = await (
+                    managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
+                if resume_status in (
+                        managed_job_state.ManagedJobStatus.STARTING,
+                        managed_job_state.ManagedJobStatus.RECOVERING):
+                    # It launches, or waits for resources, like any launch.
+                    await self._count_in_full()
+                    resumed_time = await executor.resume_launch(
+                        recovery=(resume_status ==
+                                  managed_job_state.ManagedJobStatus.RECOVERING)
+                    )
+
             # Before tearing down or relaunching, give the runtime a chance
             # to capture the about-to-be-lost run's logs. Side-effecting
             # and best-effort: a failure here must never block recovery.
-            if managed_job_runtime.is_registered():
+            if resumed_time is None and managed_job_runtime.is_registered():
                 try:
                     await asyncio.to_thread(
                         managed_job_runtime.on_before_recovery,
@@ -2112,7 +2135,7 @@ class JobController:
                                    f'recovery): {e}')
 
             # When the handle is None, the cluster should be cleaned up already.
-            if handle is not None:
+            if resumed_time is None and handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
                 # If we are forcing to transit to recovering, we need to clean
@@ -2156,7 +2179,8 @@ class JobController:
             # - anything else: this recovery exists only because the
             #   controller restarted — open a RESTART-sourced episode.
             # Any later (non-forced) recovery in this loop is a real
-            # preemption/failure. In all cases the cleanup + recover() run.
+            # preemption/failure. Unless the launch was resumed above, the
+            # cleanup + recover() run.
             keep_starting = False
             if force_transit_to_recovering:
                 cur_status = await (
@@ -2216,10 +2240,14 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
-            # A relaunch launches, or waits for resources, like any launching
-            # job: count the job in full until the new cluster reports its cost.
-            await self._count_in_full()
-            recovered_time = await executor.recover()
+            if resumed_time is None:
+                # A relaunch launches, or waits for resources, like any
+                # launching job: count the job in full until the new cluster
+                # reports its cost.
+                await self._count_in_full()
+                recovered_time = await executor.recover()
+            else:
+                recovered_time = resumed_time
             # The relaunch may have persisted runtime observations of its own.
             runtime_cursor_stale = True
 
