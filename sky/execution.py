@@ -498,10 +498,11 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-        # None leaves the cluster's stored check alone; {} clears it.
+        # Like hooks, the launched task is the source of truth: a launch that
+        # sets autostop replaces the stored check, or clears it ({}).
         activity_check: Optional[Dict[str, Any]] = None
         if resource_autostop_config is not None:
-            activity_check = resource_autostop_config.activity_check
+            activity_check = resource_autostop_config.activity_check or {}
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)

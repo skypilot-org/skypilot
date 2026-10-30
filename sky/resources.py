@@ -73,8 +73,7 @@ class AutostopConfig:
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     # Command whose exit code tells the skylet whether the cluster is active;
-    # see autostop_lib.activity_check_reports_active(). None leaves the
-    # cluster's stored check alone (e.g. `sky launch -i`); {} clears it.
+    # see autostop_lib.activity_check_reports_active().
     activity_check: Optional[Dict[str, Any]] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
@@ -86,7 +85,7 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
-        if self.activity_check:
+        if self.activity_check is not None:
             config['activity_check'] = self.activity_check
         return config
 
@@ -94,26 +93,24 @@ class AutostopConfig:
     def from_yaml_config(
         cls, config: Union[bool, int, str, Dict[str, Any], None]
     ) -> Optional['AutostopConfig']:
-        # A YAML autostop setting always states the check: absent means none.
         if isinstance(config, bool):
-            return cls(enabled=config, activity_check={})
+            if config:
+                return cls(enabled=True)
+            else:
+                return cls(enabled=False)
 
         if isinstance(config, int):
-            return cls(idle_minutes=config,
-                       down=False,
-                       enabled=True,
-                       activity_check={})
+            return cls(idle_minutes=config, down=False, enabled=True)
 
         if isinstance(config, str):
             return cls(idle_minutes=resources_utils.parse_time_minutes(config),
                        down=False,
-                       enabled=True,
-                       activity_check={})
+                       enabled=True)
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
             # with `false`, a bool.)
-            autostop_config = cls(enabled=True, activity_check={})
+            autostop_config = cls(enabled=True)
             if 'idle_minutes' in config:
                 autostop_config.idle_minutes = config['idle_minutes']
             if 'down' in config:

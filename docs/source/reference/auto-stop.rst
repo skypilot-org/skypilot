@@ -174,8 +174,11 @@ utilization over the last few seconds:
          timeout: 30  # Seconds; default 10, at most 60.
 
 The check runs only on the head node and is skipped with ``wait_for: none``.
-It is kept when you later change autostop with ``sky autostop``; re-launching
-the cluster with a YAML that sets ``autostop`` replaces or removes it.
+It is kept by ``sky autostop`` and ``sky start``. Like
+:ref:`lifecycle hooks <lifecycle-hooks>`, it follows the latest launch: a
+``sky launch`` on the cluster that sets autostop (in YAML or with ``-i``)
+replaces the check with that launch's ``activity_check``, or removes it if
+there is none.
 Administrators can require one for every cluster with an
 :ref:`admin policy <advanced-policy-config>`.
 

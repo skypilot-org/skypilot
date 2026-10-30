@@ -217,18 +217,13 @@ class TestResourcesYaml:
             'timeout': autostop_lib.DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS
         }
 
-    def test_cli_override_leaves_stored_check_alone(self):
-        # `sky launch -i N` on a YAML without `autostop` must not clear it.
-        r = resources_lib.Resources()
-        r.override_autostop_config(idle_minutes=30)
-        assert r.autostop_config.activity_check is None
-
-    def test_yaml_autostop_without_check_clears_it(self):
+    def test_yaml_autostop_without_check_has_none(self):
+        # execution.py turns None into {} so the launch clears the check.
         r, = resources_lib.Resources.from_yaml_config(
             {'autostop': {
                 'idle_minutes': 30
             }})
-        assert r.autostop_config.activity_check == {}
+        assert r.autostop_config.activity_check is None
         assert 'activity_check' not in r.to_yaml_config()['autostop']
 
     def test_schema_rejects_timeout_above_max(self):
