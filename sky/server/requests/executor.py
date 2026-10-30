@@ -1050,7 +1050,7 @@ def _request_execution_wrapper(request_id: str,
                 override_request_env_and_config(
                     request_task.request_body, request_id, request_name), \
                 tempstore.tempdir():
-                if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                if sky_logging.will_log(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{config_utils.dump_redacted_yaml(config)}')

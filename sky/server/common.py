@@ -1508,8 +1508,10 @@ def refresh_workspace_state_for_sync_handler() -> None:
     # 'request')`` function) caches its result for the lifetime of one
     # request. Plugin sync handlers don't go through the executor's
     # ``clear_request_level_cache()`` call, so stale entries survive
-    # across requests unless we drop them here.
-    annotations.clear_request_level_cache()
+    # across requests unless we drop them here. Caches with a `keep_if`
+    # (the Kubernetes clients, kept while the kubeconfig is unchanged)
+    # survive: rebuilding them on every call is what made this costly.
+    annotations.clear_request_level_cache(sync_refresh=True)
 
 
 def clear_local_api_server_database() -> None:
