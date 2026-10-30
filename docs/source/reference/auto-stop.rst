@@ -140,6 +140,45 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
 
+.. _auto-stop-activity-check:
+
+Custom activity check
+~~~~~~~~~~~~~~~~~~~~~
+
+Work started outside SkyPilot jobs (for example with ``nohup`` or ``tmux``
+over SSH) does not reset the idleness timer, so the cluster can stop while
+it is still busy. To add your own definition of activity, set
+:ref:`resources.autostop.activity_check <yaml-spec-resources-autostop>`.
+While the cluster has no jobs (and, with ``jobs_and_ssh``, no SSH sessions),
+SkyPilot runs the command on the head node every minute:
+
+- exit code ``0``: the cluster is active, and the idleness timer resets.
+- exit code ``1``: the cluster is idle.
+- any other exit code, a timeout or a failure to run: treated as active, so
+  a broken check never stops the cluster.
+
+For example, to keep a cluster up while any GPU averages at least 10%
+utilization over the last few seconds:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 30
+       activity_check:
+         run: |
+           nvidia-smi -q -d UTILIZATION | awk '
+             /GPU Utilization Samples/ {s = 1; seen = 1}
+             s && /Avg/ {if ($3 >= 10) busy = 1; s = 0}
+             END {exit seen ? !busy : 2}'
+         timeout: 30  # Seconds; default 10, at most 60.
+
+The check runs only on the head node and is skipped with ``wait_for: none``.
+It is kept when you later change autostop with ``sky autostop``; re-launching
+the cluster with a YAML that sets ``autostop`` replaces or removes it.
+Administrators can require one for every cluster with an
+:ref:`admin policy <advanced-policy-config>`.
+
 Running scripts before autostop
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
