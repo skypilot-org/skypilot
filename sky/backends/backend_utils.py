@@ -2900,12 +2900,15 @@ def _get_terminated_cluster_reason(
     # resets autostop to -1.
     autodowned = (record['status'] == status_lib.ClusterStatus.AUTOSTOPPING and
                   record['to_down'])
+    # Whether the breadcrumb was looked for and is not there.
+    no_autodown_record = False
     if not autodowned and provider_config is not None:
         try:
             autodowned = k8s_instance.get_cluster_autostop_event(
                 provider_config,
                 handle.cluster_name_on_cloud,
                 since=record['launched_at']) is not None
+            no_autodown_record = not autodowned
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read the autodown event of '
                          f'{handle.cluster_name!r}: {e}')
@@ -2966,7 +2969,15 @@ def _get_terminated_cluster_reason(
         # Nothing names a cause. Lead with what the cluster's own setup makes
         # likely, as the refresh's warning for a vanished cluster does: the
         # table cell shows only the start of the text.
-        if autostop >= 0 and record['to_down']:
+        launched_at = record.get('launched_at')
+        # Autodown is likely only if it could have fired (the cluster is
+        # older than its idle limit) and nothing says it did not: on
+        # Kubernetes every autodown leaves the breadcrumb looked up above.
+        could_autodown = (autostop >= 0 and record['to_down'] and
+                          not no_autodown_record and
+                          (launched_at is None or
+                           time.time() - launched_at >= autostop * 60))
+        if could_autodown:
             cause = (f'Likely autodowned by SkyPilot (idle {autostop} min); '
                      'no direct cause found.')
         elif launched_resources.use_spot:

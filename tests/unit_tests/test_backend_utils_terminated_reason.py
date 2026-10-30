@@ -189,11 +189,34 @@ class TestTerminatedClusterReason:
         del k8s
         assert _reason() == f'Nodes disappeared; no cause found. {_SUFFIX}'
 
-    def test_nothing_found_leads_with_configured_autodown(self, k8s):
+    def test_k8s_without_autodown_record_is_not_called_autodown(self, k8s):
+        # Every Kubernetes autodown leaves the breadcrumb; it was looked for
+        # and is not there, so something else removed the pods.
         del k8s
+        assert _reason(
+            autostop=10,
+            to_down=True) == (f'Nodes disappeared; no cause found. {_SUFFIX}')
+
+    def test_k8s_lookup_failure_still_says_likely_autodowned(self, k8s):
+        k8s.autostop_event.side_effect = RuntimeError('api down')
         assert _reason(autostop=10, to_down=True) == (
             'Likely autodowned by SkyPilot (idle 10 min); no direct cause '
             f'found. {_SUFFIX}')
+
+    def test_vm_nothing_found_leads_with_configured_autodown(self, k8s):
+        del k8s
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        assert _reason(handle, autostop=10, to_down=True) == (
+            'Likely autodowned by SkyPilot (idle 10 min); no direct cause '
+            f'found. {_SUFFIX}')
+
+    def test_young_cluster_cannot_have_autodowned(self, k8s):
+        del k8s
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        handle.launched_resources.use_spot = True
+        # Launched an hour ago; a 90-minute idle limit cannot have fired.
+        assert _reason(handle, autostop=90, to_down=True) == (
+            f'Likely spot preemption; no direct cause found. {_SUFFIX}')
 
     def test_nothing_found_on_spot_leads_with_preemption(self, k8s):
         del k8s
