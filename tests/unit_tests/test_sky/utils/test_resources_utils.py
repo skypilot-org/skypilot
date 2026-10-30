@@ -332,6 +332,14 @@ class TestNormalizeLocalDisk:
             resources_utils.normalize_local_disk('foo')
         assert e.value.__suppress_context__ is True
 
+    @pytest.mark.parametrize('local_disk',
+                             ['nvme:1000++', '1000++', 'nvme:nan', 'ssd:inf'])
+    def test_invalid_size_rejected(self, local_disk):
+        # These used to be accepted and then crash parse_local_disk_str
+        # (for '++') or produce a meaningless size (nan/inf).
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(local_disk)
+
 
 class TestParseMemoryResource:
     """Tests for parse_memory_resource error message quality."""
