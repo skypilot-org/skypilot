@@ -6604,3 +6604,16 @@ def test_terminate_node_passes_claim_state_to_delete(monkeypatch,
                              has_resource_claims=has_resource_claims)
 
     assert recorded['graceful'] is expected_graceful
+
+
+@pytest.mark.parametrize('message,expected', [
+    ('Cancelling deletion of Pod ns/p', None),
+    ('Marking for deletion Pod ns/p', 'pod was evicted by taint manager'),
+])
+def test_missing_pod_reason_from_cluster_events_taint_eviction(
+        monkeypatch, message, expected):
+    monkeypatch.setattr(
+        instance.global_user_state, 'get_cluster_events', lambda *args, **
+        kwargs: [f'[kubernetes pod p] TaintManagerEviction {message}'])
+    assert instance._derive_missing_pod_reason_from_cluster_events(
+        'c') == expected

@@ -2426,6 +2426,17 @@ def reason_from_pod_events(
     return f'{reported_as}: {message}' if message else reported_as
 
 
+def is_cancelled_taint_eviction(reason: Optional[str],
+                                message: Optional[str]) -> bool:
+    """A taint eviction that did not happen.
+
+    The taint manager emits it when the taint is lifted before the pod's
+    tolerationSeconds run out, or when something else deletes the pod first.
+    """
+    return (reason == 'TaintManagerEviction' and
+            (message or '').startswith('Cancelling deletion'))
+
+
 def pod_deletion_event(events: List[Any],
                        since: Optional[datetime.datetime] = None) -> Any:
     """The event that best names why a pod was deleted, or None.
@@ -2436,10 +2447,7 @@ def pod_deletion_event(events: List[Any],
     best_rank = 0
     best_event = None
     for event in _events_since(events, since):
-        # The taint was lifted before a pod's tolerationSeconds ran out: the
-        # eviction never happened.
-        if (event.reason == 'TaintManagerEviction' and
-            (event.message or '').startswith('Cancelling deletion')):
+        if is_cancelled_taint_eviction(event.reason, event.message):
             continue
         ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
         if ranked is not None and ranked[0] > best_rank:

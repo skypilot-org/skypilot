@@ -4521,7 +4521,10 @@ def _derive_missing_pod_reason_from_cluster_events(
 
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
-        elif event.startswith('TaintManagerEviction '):
+        elif (event.startswith('TaintManagerEviction ') and
+              not kubernetes_utils.is_cancelled_taint_eviction(
+                  'TaintManagerEviction',
+                  event[len('TaintManagerEviction '):])):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
             _record_failure_reason('pod was evicted by taint manager', 2)

@@ -2971,9 +2971,12 @@ def _get_terminated_cluster_reason(
                 latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
                           ):].split('. Transitioned to INIT')[0].split())
             what = 'pods' if is_k8s else 'nodes'
-            if could_autodown and not no_autodown_record:
-                # A refresh that lands mid-autodown (Ray stopped, VMs still
-                # up) records the cluster as unhealthy.
+            if (could_autodown and not no_autodown_record and
+                    not launched_resources.use_spot and
+                    why.startswith('ray cluster is unhealthy')):
+                # A refresh that lands mid-autodown (Ray stopped, every VM
+                # still up) records the cluster as unhealthy this way; lost
+                # nodes point elsewhere, a spot preemption above all.
                 cause = (f'{likely_autodowned}; was unhealthy ({why}) before '
                          f'its {what} disappeared.')
             else:

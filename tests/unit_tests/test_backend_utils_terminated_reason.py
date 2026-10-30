@@ -203,6 +203,23 @@ class TestTerminatedClusterReason:
                            '127.0.0.1:6380)) before its nodes disappeared. '
                            f'{_SUFFIX}')
 
+    def test_spot_or_lost_nodes_are_not_called_autodowned(self, k8s):
+        lost = (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} one or '
+                'more nodes terminated. Transitioned to INIT (details: cluster '
+                'is unhealthy).')
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        k8s.latest_events.return_value = {'hash-1': lost}
+        assert _reason(handle,
+                       status=status_lib.ClusterStatus.INIT,
+                       autostop=1,
+                       to_down=True).startswith('Was unhealthy (one or more')
+        handle.launched_resources.use_spot = True
+        k8s.latest_events.return_value = {'hash-1': self._RAY_DOWN}
+        assert _reason(handle,
+                       status=status_lib.ClusterStatus.INIT,
+                       autostop=1,
+                       to_down=True).startswith('Was unhealthy (ray cluster')
+
     def test_young_unhealthy_cluster_is_not_called_autodowned(self, k8s):
         k8s.latest_events.return_value = {'hash-1': self._RAY_DOWN}
         handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
