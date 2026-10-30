@@ -856,7 +856,7 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
         db_url = config.pop_nested(('db',), None)
         if db_url:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        if sky_logging.will_log(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{config_utils.dump_redacted_yaml(config)}')
     except yaml.YAMLError as e:
@@ -955,7 +955,7 @@ def _reload_config_as_server() -> None:
         db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
         if db_config:
             server_config = overlay_skypilot_config(server_config, db_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
     _set_loaded_config(server_config)
@@ -980,7 +980,7 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(
             f'client config (before task and CLI overrides): \n'
             f'{config_utils.dump_redacted_yaml(overlaid_client_config)}')
@@ -1680,7 +1680,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         list of key-value pairs.
     """
     parsed_config = _compose_cli_config(cli_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
                      f'{config_utils.dump_redacted_yaml(parsed_config)}')
     _set_loaded_config(
