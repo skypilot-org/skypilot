@@ -3866,14 +3866,21 @@ _cluster_uid_cache_lock = threading.Lock()
 
 
 def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
-    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed.
+
+    Hashes the content rather than comparing stat fields: a same-size rewrite
+    within one timestamp tick, or one that keeps the mtime (`cp -p`), leaves
+    every stat field unchanged. Reading a kubeconfig costs far less than
+    parsing it.
+    """
     fingerprint: List[Tuple[Any, ...]] = []
     for path in get_kubeconfig_paths():
         if not path:
             continue
         try:
-            st = os.stat(path)
-            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+            with open(path, 'rb') as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            fingerprint.append((path, digest))
         except OSError:
             fingerprint.append((path, None))
     return tuple(fingerprint)

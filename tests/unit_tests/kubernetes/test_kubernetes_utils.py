@@ -503,15 +503,21 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     replacement.write_text(kubeconfig('ctx-c', 'ctx-d'))
     os.replace(replacement, first)
     assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d']
+    # Same size, mtime put back (as `cp -p` does), all in one timestamp tick.
+    st = os.stat(first)
+    first.write_text(kubeconfig('ctx-x', 'ctx-y'))
+    assert os.stat(first).st_size == st.st_size
+    os.utime(first, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y']
     # Another file on KUBECONFIG.
     second = tmp_path / 'b.yaml'
     second.write_text(kubeconfig('ctx-e'))
     monkeypatch.setenv('KUBECONFIG', f'{first}:{second}')
-    assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d', 'ctx-e']
-    assert len(parses) == 4
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+    assert len(parses) == 5
     # The caller's list is its own.
     utils.get_all_kube_context_names().append('mutated')
-    assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d', 'ctx-e']
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
 
 
 def test_in_cluster_context_name_is_checked_on_every_call(
