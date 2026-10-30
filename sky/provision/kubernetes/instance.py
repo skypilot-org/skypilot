@@ -4210,8 +4210,9 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                                first_pod: bool) -> Tuple[List[Any], bool]:
     """Record a deleted pod's events (and its last node's) as cluster events.
 
-    Returns the pod's own events, newest first, and whether any event -- pod
-    or node -- had not been recorded before.
+    Returns the pod's own events since the cluster was provisioned, newest
+    first, and whether any event -- pod or node -- had not been recorded
+    before.
 
     Recording is kept separate from deriving a reason because the two have
     different callers. A status refresh must not re-report a failure it has
@@ -4220,6 +4221,23 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
     """
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
+    # A relaunch reuses the pod name, and the previous pod's events outlive it
+    # for about an hour: only events since this cluster's first event (its
+    # provisioning start) are recorded. Not launched_at: it is rewritten when
+    # provisioning finishes, after the pod's own early events.
+    since = None
+    try:
+        first = global_user_state.get_cluster_events(
+            cluster_name,
+            None,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            include_timestamps=True)
+        if first:
+            since = datetime.datetime.fromtimestamp(
+                int(first[0]['transitioned_at']), datetime.timezone.utc)
+    except ValueError:  # No record for the cluster.
+        pass
+    current = {id(e) for e in kubernetes_utils.events_since(pod_events, since)}
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
@@ -4230,13 +4248,15 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
     seen: Set[Tuple[str, int]] = set()
 
     for event in pod_events:
-        if event.reason == 'Scheduled':
+        # Newest first, so the first one is the current pod's.
+        if (event.reason == 'Scheduled' and last_scheduled_node is None and
+                id(event) in current):
             pattern = r'Successfully assigned (\S+) to (\S+)'
             match = re.search(pattern, event.message)
             if match:
                 scheduled_node = match.group(2)
                 last_scheduled_node = scheduled_node
-        if insert_new_pod_event:
+        if insert_new_pod_event and id(event) in current:
             # Try inserting the latest events first. If the event is a
             # duplicate, it means the event (and any previous events) have
             # already been inserted - so do not insert further events.
@@ -4280,7 +4300,7 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
             field_selector=node_field_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
         node_events = sorted(
-            node_events,
+            kubernetes_utils.events_since(node_events, since),
             key=lambda event: event.metadata.creation_timestamp,
             # latest event appears first
             reverse=True)
@@ -4324,7 +4344,7 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
         logger.debug(f'[pod {pod_name}] could not determine the node '
                      'the pod was scheduled to')
 
-    return pod_events, new_event_inserted
+    return [e for e in pod_events if id(e) in current], new_event_inserted
 
 
 def _derive_missing_pod_reason_from_cluster_events(
@@ -4385,11 +4405,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # the deletion -- the scheduler's, or a volume mount's -- must not be
         # dressed up as the reason the pod went away.
         #
-        # Unbounded on purpose: this path is entered with a pod name and no
-        # object, so there is no creation time to bound the events by. What
-        # keeps a same-named predecessor's deletion from being re-reported is
-        # the gate above -- its events were recorded when they were first
-        # read, so they are no longer new.
+        # Bounded by the cluster's launch, not the pod's creation: this path
+        # is entered with a pod name and no object. Events of a same-named
+        # predecessor are dropped by _record_pod_missing_events.
         reason = kubernetes_utils.reason_from_pod_events(pod_events)
     return reason
 

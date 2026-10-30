@@ -2380,8 +2380,8 @@ _POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
 _POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
 
 
-def _events_since(events: List[Any],
-                  since: Optional[datetime.datetime]) -> List[Any]:
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
     """The events that can be evidence about the pod that exists now.
 
     Events the API server left without a usable timestamp are kept: not
@@ -2420,7 +2420,7 @@ def reason_from_pod_events(
     """
     best_rank = 0
     best_reason: Optional[str] = None
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
         if ranked is None:
             continue
@@ -2443,7 +2443,7 @@ def last_pod_event_context(
     for what they are -- the last thing said about it -- and the caller still
     says plainly that no cause could be derived.
     """
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         # Events arrive newest-first.
         if (event.type == 'Warning' or
                 event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
