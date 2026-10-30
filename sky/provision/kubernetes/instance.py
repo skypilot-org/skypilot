@@ -3731,23 +3731,24 @@ def _as_sentence(text: str) -> str:
 
 
 def get_cluster_termination_cause(
-        provider_config: Dict[str, Any], pod_names: List[str],
-        node_names: List[str], *, tolerations: List[Dict[str, Any]],
+        provider_config: Dict[str, Any], pod_nodes: Dict[str, Optional[str]], *,
+        tolerations: List[Dict[str, Any]],
         since: Optional[datetime.datetime]) -> Optional[str]:
     """Who removed a cluster's pods, and why; None when nothing says.
 
     For a cluster all of whose pods are gone. Worded actor first, because a
     table cell shows only the start of it. Combines the pods' own deletion
     events (see kubernetes_utils.pod_deletion_event) with the current state of
-    the nodes they ran on.
+    the nodes they ran on. ``pod_nodes`` maps each pod to the node it ran on.
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
     event = _first_pod_failure_reason(
-        provider_config, pod_names,
+        provider_config, list(pod_nodes),
         functools.partial(_get_pod_deletion_event, since=since))
-    nodes = _inspect_nodes(node_names, context, tolerations, since)
-    pods = 'Pods' if len(pod_names) > 1 else 'Pod'
+    nodes = _inspect_nodes([n for n in pod_nodes.values() if n], context,
+                           tolerations, since)
+    pods = 'Pods' if len(pod_nodes) > 1 else 'Pod'
 
     def _names(state: Optional[str] = None) -> str:
         matching = [n for n, node in nodes.items() if node.state == state]
@@ -3767,6 +3768,14 @@ def get_cluster_termination_cause(
         if not sentences:
             return None
         return f'{"; ".join(sentences)}; pods lost.'
+
+    # Explain the event by the node its pod ran on: another node of the
+    # cluster, tainted or recovered, did not remove that pod.
+    event_pod = getattr(getattr(event, 'involved_object', None), 'name', None)
+    event_node = pod_nodes.get(event_pod) if isinstance(event_pod,
+                                                        str) else None
+    if event_node in nodes:
+        nodes = {event_node: nodes[event_node]}
 
     reason = event.reason
     message = ' '.join((event.message or '').split())

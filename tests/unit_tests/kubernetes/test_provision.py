@@ -6238,8 +6238,13 @@ class TestGetMissingNodeReason:
                             since=_LAUNCHED) == 'node node-1 is NotReady'
 
 
-def _event(reason, message='', reporting_component=None, source=None):
+def _event(reason,
+           message='',
+           reporting_component=None,
+           source=None,
+           pod='c-head'):
     event = mock.Mock()
+    event.involved_object.name = pod
     event.reason = reason
     event.message = message
     event.reporting_component = reporting_component
@@ -6253,15 +6258,18 @@ def _event(reason, message='', reporting_component=None, source=None):
 class TestGetClusterTerminationCause:
     """Who removed a cluster's pods, actor first."""
 
-    def _cause(self, nodes, events=None, pods=('c-head',)):
-        """events: the head pod's events, newest first."""
+    def _cause(self, nodes, events=None, pods=None):
+        """events: the head pod's events, newest first. pods: pod -> node,
+        by default the head pod on each node in turn (one pod per node)."""
+        if pods is None:
+            names = ['c-head'] + [f'c-worker{i}' for i in range(1, len(nodes))]
+            pods = dict(zip(names, nodes))
         core_api = _core_api_reading(nodes, {'c-head': events or []})
         with mock.patch.object(instance.kubernetes,
                                'core_api',
                                return_value=core_api):
             return instance.get_cluster_termination_cause({'context': 'ctx'},
-                                                          list(pods),
-                                                          list(nodes),
+                                                          pods,
                                                           tolerations=[],
                                                           since=_LAUNCHED)
 
@@ -6273,11 +6281,13 @@ class TestGetClusterTerminationCause:
                'skypilot.co/syslog-error=x on node node-1.')
 
     def test_taint_eviction_after_the_taint_was_lifted(self):
-        assert self._cause({'node-1': _fake_node()},
-                           [_event('TaintManagerEviction')],
-                           pods=('c-head', 'c-worker1')) == (
-                               'Pods evicted by Kubernetes: NoExecute taint on '
-                               'node node-1 (since removed).')
+        assert self._cause(
+            {'node-1': _fake_node()}, [_event('TaintManagerEviction')],
+            pods={
+                'c-head': 'node-1',
+                'c-worker1': 'node-1'
+            }) == ('Pods evicted by Kubernetes: NoExecute taint on '
+                   'node node-1 (since removed).')
 
     def test_taint_eviction_does_not_claim_removal_when_unread(self):
         err = kubernetes.api_exception()(status=500, reason='Server Error')
@@ -6375,6 +6385,24 @@ class TestGetClusterTerminationCause:
             [_event('TaintManagerEviction')
             ]) == ('Pod evicted by Kubernetes: NoExecute taint on '
                    'node node-1 (node since deleted).')
+
+    def test_taint_on_another_node_is_not_blamed(self):
+        # The head pod's node recovered; a worker node carries an unrelated
+        # taint. The evicted pod's own node is the one explained.
+        tainted = _fake_node(taints=[_fake_taint('other', 'x')])
+        assert self._cause({
+            'node-1': _fake_node(),
+            'node-2': tainted
+        }, [_event('TaintManagerEviction')
+           ]) == ('Pods evicted by Kubernetes: NoExecute taint on node node-1 '
+                  '(since removed).')
+
+    def test_recovered_node_alone_is_named(self):
+        assert self._cause({
+            'node-1': _fake_node(),
+            'node-2': _fake_node()
+        }, [_event('NodeNotReady', 'Node is not ready')
+           ]) == ('Node node-1 became NotReady; pods lost.')
 
     def test_cordon_alone_is_not_a_cause(self):
         assert self._cause({'node-1': _fake_node(unschedulable=True)}) is None

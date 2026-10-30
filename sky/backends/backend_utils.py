@@ -2920,9 +2920,10 @@ def _get_terminated_cluster_reason(
             launched_at = record.get('launched_at')
             try:
                 k8s_cause = k8s_instance.get_cluster_termination_cause(
-                    provider_config,
-                    list(cluster_info.instances),
-                    cluster_info.get_node_names() or [],
+                    provider_config, {
+                        pod: infos[0].node_name if infos else None
+                        for pod, infos in cluster_info.instances.items()
+                    },
                     tolerations=_k8s_pod_tolerations(ray_config),
                     since=(datetime.fromtimestamp(launched_at, tz=timezone.utc)
                            if launched_at is not None else None))

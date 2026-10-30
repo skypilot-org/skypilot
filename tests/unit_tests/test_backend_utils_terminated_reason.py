@@ -42,8 +42,10 @@ _HEALER_REASON = ('SkyPilot GPU Manager: GPU Error detected with XID Error 150 '
 
 def _cluster_info():
     info = mock.Mock()
-    info.instances = {'c-head': [], 'c-worker1': []}
-    info.get_node_names.return_value = ['node-1', 'node-2']
+    info.instances = {
+        'c-head': [mock.Mock(node_name='node-1')],
+        'c-worker1': [mock.Mock(node_name='node-2')],
+    }
     return info
 
 
@@ -117,7 +119,10 @@ class TestTerminatedClusterReason:
         args, kwargs = k8s.termination_cause.call_args
         assert args == ({
             'context': 'ctx'
-        }, ['c-head', 'c-worker1'], ['node-1', 'node-2'])
+        }, {
+            'c-head': 'node-1',
+            'c-worker1': 'node-2'
+        })
         assert kwargs['tolerations'] == _TOLERATIONS
         assert kwargs['since'] == datetime.datetime.fromtimestamp(
             _LAUNCHED_AT, tz=datetime.timezone.utc)
