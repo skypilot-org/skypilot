@@ -3657,6 +3657,24 @@ class TestGetPodMissingReason:
             'to new'
         ]
 
+    def test_an_unscheduled_pod_is_not_mistaken_for_its_predecessor(
+            self, monkeypatch):
+        """The predecessor was scheduled inside the clock-skew allowance; the
+        current pod was deleted before it was scheduled."""
+        gus = self._setup(monkeypatch, [
+            self._pod_event('Stopped', 'Preempted to accommodate a workload',
+                            320, 'new'),
+            self._pod_event('Scheduled',
+                            'Successfully assigned ns/pod-0 to old', 270,
+                            'old'),
+        ])
+        self._provisioned_at(gus, 300)
+        recorded = self._keyed_store(gus)
+        instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
+        assert recorded == [
+            '[kubernetes pod pod-0] Stopped Preempted to accommodate a workload'
+        ]
+
     def test_the_bound_is_the_clusters_first_status_event(self, monkeypatch):
         gus = self._setup(
             monkeypatch,
