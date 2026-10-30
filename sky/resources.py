@@ -72,6 +72,10 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    # Command whose exit code tells the skylet whether the cluster is active;
+    # see autostop_lib.activity_check_reports_active(). None leaves the
+    # cluster's stored check alone (e.g. `sky launch -i`); {} clears it.
+    activity_check: Optional[Dict[str, Any]] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -82,30 +86,34 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.activity_check:
+            config['activity_check'] = self.activity_check
         return config
 
     @classmethod
     def from_yaml_config(
         cls, config: Union[bool, int, str, Dict[str, Any], None]
     ) -> Optional['AutostopConfig']:
+        # A YAML autostop setting always states the check: absent means none.
         if isinstance(config, bool):
-            if config:
-                return cls(enabled=True)
-            else:
-                return cls(enabled=False)
+            return cls(enabled=config, activity_check={})
 
         if isinstance(config, int):
-            return cls(idle_minutes=config, down=False, enabled=True)
+            return cls(idle_minutes=config,
+                       down=False,
+                       enabled=True,
+                       activity_check={})
 
         if isinstance(config, str):
             return cls(idle_minutes=resources_utils.parse_time_minutes(config),
                        down=False,
-                       enabled=True)
+                       enabled=True,
+                       activity_check={})
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
             # with `false`, a bool.)
-            autostop_config = cls(enabled=True)
+            autostop_config = cls(enabled=True, activity_check={})
             if 'idle_minutes' in config:
                 autostop_config.idle_minutes = config['idle_minutes']
             if 'down' in config:
@@ -113,6 +121,12 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'activity_check' in config:
+                autostop_config.activity_check = {
+                    'timeout':
+                        autostop_lib.DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS,
+                    **config['activity_check'],
+                }
             # `hook` / `hook_timeout` are consumed by Resources before this
             # method is called and routed into the top-level `hooks` list.
             return autostop_config
