@@ -631,6 +631,9 @@ def _start(
 
     hook: Optional[str] = None
     hook_timeout: Optional[int] = None
+    # None keeps a regular cluster's stored check; controllers take theirs
+    # from config, where none means clear ({}).
+    activity_check: Optional[Dict[str, Any]] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
@@ -660,6 +663,7 @@ def _start(
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
+            activity_check = controller_autostop_config.activity_check or {}
             # `controller_resource.hooks` is populated only when the user
             # wrote the legacy `autostop.hook` field under
             # `*.controller.resources` in ~/.sky/config.yaml (master-compat
@@ -747,7 +751,8 @@ def _start(
                              down,
                              hook=hook,
                              hook_timeout=hook_timeout,
-                             hooks=hooks_list)
+                             hooks=hooks_list,
+                             activity_check=activity_check)
     return handle
 
 
