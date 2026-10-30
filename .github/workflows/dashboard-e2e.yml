@@ -53,6 +53,18 @@ jobs:
       PLAYWRIGHT_VERSION: '1.64.0'
       # Traces and screenshots of failing tests, uploaded below.
       E2E_RESULTS_DIR: ${{ github.workspace }}/e2e-results
+      # Size the server for a 4-CPU runner it shares with the browsers. Left
+      # to derive from the CPU count, --deploy starts 4 server processes, 8
+      # long workers and up to 28 short requests at once; requests then ran
+      # slowly rather than queued (jobs queue p90 19s against a 15s
+      # assertion timeout). One server process with pinned pools: 4 long
+      # workers, and the smallest short pool the server accepts.
+      SKYPILOT_POD_CPU_CORE_LIMIT: '1'
+      SKYPILOT_SERVER_LONG_WORKERS: '4'
+      SKYPILOT_SERVER_SHORT_WORKERS: '8'
+      # run_server.sh warms the request workers with this many concurrent
+      # requests before the tests start: one per short worker.
+      E2E_WARMUP_REQUESTS: '8'
     steps:
       - uses: actions/checkout@v4
 
