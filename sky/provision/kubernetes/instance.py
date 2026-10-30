@@ -4224,6 +4224,10 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
     insert_new_pod_event = True
     new_event_inserted = False
     inserted_pod_events = 0
+    # Kubernetes can emit identical events within one second, which share a
+    # cluster_events key. Only a key recorded by an earlier walk means the
+    # rest is recorded too; a repeat within this walk is skipped.
+    seen: Set[Tuple[str, int]] = set()
 
     for event in pod_events:
         if event.reason == 'Scheduled':
@@ -4244,6 +4248,9 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                 first_pod=first_pod,
                 cluster_name=cluster_name,
                 transitioned_at=transitioned_at)
+            if (event_str, transitioned_at) in seen:
+                continue
+            seen.add((event_str, transitioned_at))
             try:
                 global_user_state.add_cluster_event(
                     cluster_name,
@@ -4284,14 +4291,20 @@ def _record_pod_missing_events(context: Optional[str], namespace: str,
                 # Try inserting the latest events first. If the event is a
                 # duplicate, it means the event (and any previous events) have
                 # already been inserted - so do not insert further events.
+                event_str = (f'[kubernetes node {last_scheduled_node}] '
+                             f'{event.reason} {event.message}')
+                transitioned_at = int(
+                    event.metadata.creation_timestamp.timestamp())
+                if (event_str, transitioned_at) in seen:
+                    continue
+                seen.add((event_str, transitioned_at))
                 try:
                     global_user_state.add_cluster_event(
                         cluster_name,
-                        None, f'[kubernetes node {last_scheduled_node}] '
-                        f'{event.reason} {event.message}',
+                        None,
+                        event_str,
                         global_user_state.ClusterEventType.DEBUG,
-                        transitioned_at=int(
-                            event.metadata.creation_timestamp.timestamp()),
+                        transitioned_at=transitioned_at,
                         expose_duplicate_error=True)
                     logger.debug(
                         f'[pod {pod_name}] encountered new node event: '
