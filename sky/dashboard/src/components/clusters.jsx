@@ -1347,6 +1347,9 @@ export function ClusterTable({
     {
       id: 'details',
       order: 8.5,
+      // Only history rows carry details; a plugin column replacing this one
+      // decides for itself.
+      conditional: true,
       renderHeader: () => <TableHead>Details</TableHead>,
       renderCell: (item) => (
         <TableCell>

@@ -104,6 +104,25 @@ it('shows the start of the reason and opens the rest on "show more"', async () =
   expect(within(table).getByText(REASON)).toBeTruthy();
 });
 
+it('has no Details column in the Active view', async () => {
+  window.history.replaceState({}, '', '/clusters?owner=all');
+  dashboardCache.get.mockImplementation(async (fn) => {
+    const name = fn?.name || '';
+    if (name.includes('Workspaces')) return {};
+    if (name.includes('History')) return [terminated];
+    return [{ ...terminated, status: 'UP', details: null }];
+  });
+  render(
+    <PluginProvider>
+      <Clusters />
+    </PluginProvider>
+  );
+  await waitFor(() =>
+    expect(screen.getAllByText('gone-cluster').length).toBeGreaterThan(0)
+  );
+  expect(headers()).not.toContain('Details');
+});
+
 it('keeps the Duration column in the history view', async () => {
   await openHistory();
   expect(headers()).toEqual(

@@ -7,7 +7,7 @@ import re
 import sys
 import time
 from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
-                    Set, Tuple, TYPE_CHECKING, TypeVar, Union)
+                    Set, Tuple, TYPE_CHECKING, Union)
 
 from sky import exceptions
 from sky import global_user_state
@@ -225,8 +225,6 @@ class _InitContainerProgress(NamedTuple):
 
 
 logger = sky_logging.init_logger(__name__)
-
-_T = TypeVar('_T')
 
 
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
@@ -3713,18 +3711,6 @@ def get_missing_node_reason(
     return '; '.join(parts)
 
 
-def _get_pod_deletion_event(context: Optional[str],
-                            namespace: str,
-                            pod_name: str,
-                            *,
-                            since: Optional[datetime.datetime] = None) -> Any:
-    try:
-        events = _get_pod_events(context, namespace, pod_name)
-    except Exception:  # pylint: disable=broad-except
-        return None
-    return kubernetes_utils.pod_deletion_event(events, since)
-
-
 def _as_sentence(text: str) -> str:
     text = ' '.join(text.split())
     return text if text.endswith(('.', '!', '?')) else f'{text}.'
@@ -3743,9 +3729,20 @@ def get_cluster_termination_cause(
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
-    event = _first_pod_failure_reason(
-        provider_config, list(pod_nodes),
-        functools.partial(_get_pod_deletion_event, since=since))
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+
+    def _pod_events(pod_name: str) -> List[Any]:
+        try:
+            return _get_pod_events(context, namespace, pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    # Every pod's events, head first: the most decisive deletion event of the
+    # whole cluster wins, and a tie goes to the head.
+    event = kubernetes_utils.pod_deletion_event([
+        e for events in subprocess_utils.run_in_parallel(
+            _pod_events, list(pod_nodes)) for e in events
+    ], since)
     nodes = _inspect_nodes([n for n in pod_nodes.values() if n], context,
                            tolerations, since)
     pods = 'Pods' if len(pod_nodes) > 1 else 'Pod'
@@ -4022,8 +4019,8 @@ def _get_pod_failure_reason_from_status(context: Optional[str], namespace: str,
 
 def _first_pod_failure_reason(
     provider_config: Dict[str, Any], pod_names: List[str],
-    per_pod_fn: Callable[[Optional[str], str, str],
-                         Optional[_T]]) -> Optional[_T]:
+    per_pod_fn: Callable[[Optional[str], str, str], Optional[str]]
+) -> Optional[str]:
     """Return the first non-None ``per_pod_fn(context, namespace, pod)``.
 
     Resolves namespace/context from the provider config and probes each pod in

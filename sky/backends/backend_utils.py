@@ -3515,8 +3515,14 @@ def _update_cluster_status(
                     isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
-                    node_names = (cluster_info.get_node_names()
-                                  if cluster_info is not None else None)
+                    # Only the nodes of the pods that are gone: a node whose
+                    # pods still run did not lose any.
+                    node_names = ([
+                        infos[0].node_name
+                        for pod, infos in cluster_info.instances.items()
+                        if pod not in node_statuses and infos and
+                        infos[0].node_name
+                    ] if cluster_info is not None else None)
                     if node_names:
                         ray_config = global_user_state.get_cluster_yaml_dict(
                             handle.cluster_yaml)

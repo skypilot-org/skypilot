@@ -6258,13 +6258,14 @@ def _event(reason,
 class TestGetClusterTerminationCause:
     """Who removed a cluster's pods, actor first."""
 
-    def _cause(self, nodes, events=None, pods=None):
+    def _cause(self, nodes, events=None, pods=None, events_by_pod=None):
         """events: the head pod's events, newest first. pods: pod -> node,
         by default the head pod on each node in turn (one pod per node)."""
         if pods is None:
             names = ['c-head'] + [f'c-worker{i}' for i in range(1, len(nodes))]
             pods = dict(zip(names, nodes))
-        core_api = _core_api_reading(nodes, {'c-head': events or []})
+        core_api = _core_api_reading(nodes, events_by_pod or
+                                     {'c-head': events or []})
         with mock.patch.object(instance.kubernetes,
                                'core_api',
                                return_value=core_api):
@@ -6403,6 +6404,17 @@ class TestGetClusterTerminationCause:
             'node-2': _fake_node()
         }, [_event('NodeNotReady', 'Node is not ready')
            ]) == ('Node node-1 became NotReady; pods lost.')
+
+    def test_most_decisive_event_across_pods_wins(self):
+        assert self._cause(
+            {
+                'node-1': _fake_node(),
+                'node-2': _fake_node()
+            },
+            events_by_pod={
+                'c-head': [_event('NodeNotReady', 'Node is not ready')],
+                'c-worker1': [_event('Preempted', 'by p', pod='c-worker1')],
+            }) == 'Pods preempted by Kubernetes scheduler: by p.'
 
     def test_cordon_alone_is_not_a_cause(self):
         assert self._cause({'node-1': _fake_node(unschedulable=True)}) is None
