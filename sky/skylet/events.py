@@ -277,6 +277,7 @@ class StopEvent(SkyletEvent):
         autostop setting set, or the last autostop setting is a cancel (idle
         minutes < 0); or
       - This event wakes up and job_lib.is_cluster_idle() returns False; or
+      - The autostop activity check, if set, reports activity; or
       - The cluster has restarted; or
       - A job is submitted (handled in the backend; not here).
     """
@@ -307,6 +308,9 @@ class StopEvent(SkyletEvent):
                     autostop_config.wait_for
                     == autostop_lib.AutostopWaitFor.JOBS_AND_SSH and
                     autostop_lib.has_active_ssh_sessions()):
+                is_idle = False
+            elif autostop_lib.activity_check_reports_active():
+                logger.debug('Autostop activity check reported activity.')
                 is_idle = False
 
         if ignore_idle_check or is_idle:
