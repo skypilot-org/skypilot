@@ -498,7 +498,11 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+        # Like hooks, the launched task is the source of truth: a launch that
+        # sets autostop replaces the stored check, or clears it ({}).
+        activity_check: Optional[Dict[str, Any]] = None
         if resource_autostop_config is not None:
+            activity_check = resource_autostop_config.activity_check or {}
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
@@ -725,7 +729,8 @@ def _execute_dag(
                                      down,
                                      hook=hook,
                                      hook_timeout=hook_timeout,
-                                     hooks=hooks_payload)
+                                     hooks=hooks_payload,
+                                     activity_check=activity_check)
             elif hooks_payload is not None:
                 # Hooks can fire on preemption/down independent of
                 # autostop — persist them even when autostop is disabled.

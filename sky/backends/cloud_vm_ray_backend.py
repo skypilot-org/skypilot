@@ -6051,7 +6051,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
                      hook_timeout: Optional[int] = None,
-                     hooks: Optional[List[Dict[str, Any]]] = None) -> None:
+                     hooks: Optional[List[Dict[str, Any]]] = None,
+                     activity_check: Optional[Dict[str, Any]] = None) -> None:
         if not handle.provision_runtime_metadata.has_skylet:
             return
         # The core.autostop() function should have already checked that the
@@ -6129,12 +6130,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.clear_hooks = True
                 else:
                     request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
+                # Same three states as `hooks`, with {} for clear.
+                if activity_check is None:
+                    pass
+                elif not activity_check:
+                    request.clear_activity_check = True
+                else:
+                    request.activity_check.run = activity_check['run']
+                    request.activity_check.timeout = activity_check.get(
+                        'timeout',
+                        autostop_lib.DEFAULT_ACTIVITY_CHECK_TIMEOUT_SECONDS)
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
-                    hook_timeout, hooks)
+                    hook_timeout, hooks, activity_check)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
