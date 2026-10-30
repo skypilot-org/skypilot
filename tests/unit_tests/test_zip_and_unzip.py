@@ -2,6 +2,8 @@ import asyncio
 import io
 import os
 import pathlib
+import stat
+import subprocess
 import tempfile
 import zipfile
 
@@ -11,6 +13,212 @@ import pytest
 from sky.data import storage_utils
 from sky.server import server
 from sky.skylet import constants
+
+
+@pytest.mark.parametrize('absolute_target', [False, True])
+@pytest.mark.parametrize('relative_to_items', [False, True])
+def test_directory_symlink_mount_is_materialized(tmp_path, absolute_target,
+                                                 relative_to_items):
+    donor = tmp_path / 'donor'
+    donor.mkdir()
+    (donor / 'payload').write_text('mounted contents')
+    (donor / 'empty').mkdir()
+    (donor / 'file-link').symlink_to('payload')
+    (donor / 'directory-link').symlink_to('empty', target_is_directory=True)
+    mount = tmp_path / 'mount'
+    mount.symlink_to(donor if absolute_target else 'donor',
+                     target_is_directory=True)
+    archive = tmp_path / 'mount.zip'
+    storage_utils.zip_files_and_folders([str(mount)],
+                                        archive,
+                                        relative_to_items=relative_to_items)
+
+    destination = tmp_path / 'extracted'
+    asyncio.run(server.unzip_file(archive, destination))
+    mounted = destination / (mount.name
+                             if relative_to_items else str(mount).lstrip('/'))
+    assert mounted.is_dir() and not mounted.is_symlink()
+    assert (mounted / 'payload').read_text() == 'mounted contents'
+    assert (mounted / 'empty').is_dir()
+    assert (mounted / 'file-link').is_symlink()
+    assert (mounted / 'file-link').read_text() == 'mounted contents'
+    assert (mounted / 'directory-link').is_symlink()
+    assert (mounted / 'directory-link').is_dir()
+    assert mount.is_symlink()  # Packaging never rewrites the source.
+
+
+@pytest.mark.parametrize('parent_first', [False, True])
+@pytest.mark.parametrize('double_slash', [False, True])
+def test_explicit_symlink_mount_overlapping_parent(tmp_path, parent_first,
+                                                   double_slash):
+    donor = tmp_path / 'donor'
+    donor.mkdir()
+    (donor / 'payload').write_text('mounted contents')
+    parent = tmp_path / 'parent'
+    parent.mkdir()
+    mount = parent / 'mount'
+    mount.symlink_to(donor, target_is_directory=True)
+    items = [str(parent), ('/' if double_slash else '') + str(mount)]
+    if not parent_first:
+        items.reverse()
+    archive = tmp_path / 'mount.zip'
+    storage_utils.zip_files_and_folders(items, archive)
+    destination = tmp_path / 'extracted'
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    mounted = destination / str(mount).lstrip('/')
+    assert mounted.is_dir() and not mounted.is_symlink()
+    assert (mounted / 'payload').read_text() == 'mounted contents'
+
+
+@pytest.mark.parametrize('dangling', [False, True])
+def test_directory_upload_replaces_legacy_root_symlink(tmp_path, dangling):
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'payload').write_text('new contents')
+    archive = tmp_path / 'upload.zip'
+    storage_utils.zip_files_and_folders([str(source)], archive)
+    destination = tmp_path / 'received'
+    mounted = destination / str(source).lstrip('/')
+    mounted.parent.mkdir(parents=True)
+    old_target = destination / 'old-target'
+    if not dangling:
+        old_target.mkdir()
+        (old_target / 'payload').write_text('old contents')
+    mounted.symlink_to(old_target, target_is_directory=True)
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    assert not mounted.is_symlink()
+    assert (mounted / 'payload').read_text() == 'new contents'
+    if dangling:
+        assert not old_target.exists()
+    else:
+        assert (old_target / 'payload').read_text() == 'old contents'
+
+
+@pytest.mark.parametrize('mode', [0o700, 0o755, 0o640, 0o7755])
+def test_uploaded_regular_file_permissions(tmp_path, mode):
+    source = tmp_path / 'executable'
+    source.write_text('#!/bin/sh\nexit 0\n')
+    source.chmod(mode)
+    archive = tmp_path / 'upload.zip'
+    storage_utils.zip_files_and_folders([str(source)], archive, io.StringIO())
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    received = destination / str(source).lstrip('/')
+    assert stat.S_IMODE(received.stat().st_mode) == mode & 0o777
+    assert received.read_bytes() == source.read_bytes()
+    if mode & stat.S_IXUSR:
+        subprocess.run([str(received)], check=True, timeout=5)
+
+
+@pytest.mark.parametrize('mode', [0o444, 0o555])
+def test_overlapping_uploads_preserve_readonly_permissions(tmp_path, mode):
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    source = workdir / 'readonly'
+    source.write_bytes(b'payload')
+    source.chmod(mode)
+    archive = tmp_path / 'upload.zip'
+    storage_utils.zip_files_and_folders(
+        [str(workdir), str(source)], archive, io.StringIO())
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    received = destination / str(source).lstrip('/')
+    assert received.read_bytes() == b'payload'
+    assert stat.S_IMODE(received.stat().st_mode) == mode
+
+
+@pytest.mark.parametrize('mode', [0o444, 0o555])
+def test_repeated_upload_replaces_readonly_file(tmp_path, mode):
+    source = tmp_path / 'readonly'
+    source.touch()
+    destination = tmp_path / 'received'
+    destination.mkdir()
+    for payload in (b'first', b'second'):
+        source.chmod(0o600)
+        source.write_bytes(payload)
+        source.chmod(mode)
+        archive = tmp_path / 'upload.zip'
+        storage_utils.zip_files_and_folders([str(source)], archive,
+                                            io.StringIO())
+
+        asyncio.run(server.unzip_file(archive, destination))
+
+        received = destination / str(source).lstrip('/')
+        assert received.read_bytes() == payload
+        assert stat.S_IMODE(received.stat().st_mode) == mode
+
+
+def test_permissions_do_not_follow_replacement_symlink(tmp_path):
+    archive = tmp_path / 'upload.zip'
+    regular = zipfile.ZipInfo('replaced')
+    regular.external_attr = (stat.S_IFREG | 0o444) << 16
+    symlink = zipfile.ZipInfo('replaced')
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+    target = zipfile.ZipInfo('target')
+    target.external_attr = (stat.S_IFREG | 0o600) << 16
+    with zipfile.ZipFile(archive, 'w') as bundle:
+        bundle.writestr(regular, b'old')
+        with pytest.warns(UserWarning, match='Duplicate name'):
+            bundle.writestr(symlink, b'target')
+        bundle.writestr(target, b'new')
+    destination = tmp_path / 'received'
+    destination.mkdir()
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    assert (destination / 'replaced').is_symlink()
+    assert (destination / 'replaced').read_bytes() == b'new'
+    assert stat.S_IMODE((destination / 'target').stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(('creator', 'attributes'), [(0, 0x20), (3, 0x20),
+                                                     (0, 0o100755 << 16)])
+def test_upload_without_unix_permissions_keeps_default_mode(
+        tmp_path, creator, attributes):
+    archive = tmp_path / 'upload.zip'
+    member = zipfile.ZipInfo('data')
+    member.create_system = creator
+    member.external_attr = attributes
+    with zipfile.ZipFile(archive, 'w') as bundle:
+        bundle.writestr(member, b'payload')
+    destination = tmp_path / 'received'
+    destination.mkdir()
+    control = destination / 'control'
+    control.write_bytes(b'payload')
+
+    asyncio.run(server.unzip_file(archive, destination))
+
+    assert (destination / 'data').read_bytes() == control.read_bytes()
+    assert stat.S_IMODE((destination / 'data').stat().st_mode) == stat.S_IMODE(
+        control.stat().st_mode)
+
+
+@pytest.mark.parametrize('root_entry', [False, True])
+def test_unzip_file_with_symlinked_destination(tmp_path, root_entry):
+    archive = tmp_path / 'upload.zip'
+    with zipfile.ZipFile(archive, 'w') as bundle:
+        if root_entry:
+            bundle.writestr('./', b'')
+        bundle.writestr('data', b'payload')
+    destination = tmp_path / 'received'
+    destination.mkdir()
+    destination_alias = tmp_path / 'received-alias'
+    destination_alias.symlink_to(destination, target_is_directory=True)
+
+    asyncio.run(server.unzip_file(archive, destination_alias))
+
+    assert destination_alias.is_symlink()
+    assert (destination / 'data').read_bytes() == b'payload'
 
 
 def test_zip_files_and_folders(skyignore_dir):

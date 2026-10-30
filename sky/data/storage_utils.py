@@ -255,6 +255,10 @@ def zip_files_and_folders(items: List[str],
         # Write symlink target as content
         zipf.writestr(zi, target)
 
+    # Extraction strips leading slashes, including POSIX's double-slash alias.
+    mount_roots = {
+        os.path.abspath(os.path.expanduser(item)).lstrip('/') for item in items
+    }
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
@@ -274,13 +278,10 @@ def zip_files_and_folders(items: List[str],
                     archive_name = _get_archive_name(item, item)
                     zipf.write(item, archive_name)
                 elif os.path.isdir(item):
-                    # Include root dir
+                    # Materialize explicit roots; their symlink targets need not
+                    # be uploaded separately. Preserve nested links below.
                     archive_name = _get_archive_name(item, item)
-                    # If it's a symlink, store it as a symlink
-                    if os.path.islink(item):
-                        _store_symlink(zipf, item, archive_name, is_dir=True)
-                    else:
-                        zipf.write(item, archive_name)
+                    zipf.write(item, archive_name)
 
                     # Include dir contents recursively
                     excluded_files = set([
@@ -306,7 +307,9 @@ def zip_files_and_folders(items: List[str],
                             dir_path = os.path.join(root, dir_name)
                             archive_name = _get_archive_name(dir_path, item)
                             # If it's a symlink, store it as a symlink
-                            if os.path.islink(dir_path):
+                            if (os.path.islink(dir_path) and
+                                    os.path.abspath(dir_path).lstrip('/')
+                                    not in mount_roots):
                                 _store_symlink(zipf,
                                                dir_path,
                                                archive_name,

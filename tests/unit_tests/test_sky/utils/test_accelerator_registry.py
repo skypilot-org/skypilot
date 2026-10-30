@@ -36,6 +36,38 @@ def setup_mocks(monkeypatch, mock_accelerator_df):
 class TestCanonicalizeAcceleratorName:
     """Test cases for canonicalize_accelerator_name function."""
 
+    @pytest.mark.parametrize('name,cloud,expected', [
+        ('H200', 'RunPod', 'H200-SXM'),
+        ('h200', 'RunPod', 'H200-SXM'),
+        ('H200-SXM', 'RunPod', 'H200-SXM'),
+        ('H200', 'AWS', 'H200'),
+        ('H200', 'Kubernetes', 'H200'),
+        ('H200', None, 'H200'),
+        ('H200', 'Azure', 'H200'),
+        ('H200', 'Lambda', 'H200'),
+        ('A10', 'RunPod', 'A10'),
+        ('RTX6000', 'RunPod', 'RTX6000'),
+        ('H100', 'RunPod', 'H100'),
+        ('GPU', 'RunPod', 'GPU'),
+    ])
+    def test_provider_alias_preserves_other_devices_and_clouds(
+            self, monkeypatch, name, cloud, expected):
+        frame = pd.DataFrame({
+            'AcceleratorName': [
+                'H200', 'H200-SXM', 'H100', 'H100-SXM', 'GPU', 'GPU1', 'GPU2',
+                'GH200', 'A10', 'A100', 'RTX6000', 'RTX6000-Ada'
+            ],
+            'Clouds': [
+                'AWS', 'RunPod', 'RunPod', 'RunPod', 'AWS', 'RunPod', 'RunPod',
+                'Lambda', 'AWS', 'RunPod', 'AWS', 'RunPod'
+            ]
+        })
+        monkeypatch.setattr(accelerator_registry, '_accelerator_df', frame)
+        with mock.patch('sky.catalog.list_accelerators') as remote:
+            assert accelerator_registry.canonicalize_accelerator_name(
+                name, None if cloud is None else MockCloud(cloud)) == expected
+        remote.assert_not_called()
+
     def test_tpu_lowercase_conversion(self, setup_mocks):
         """Test that TPU names are always converted to lowercase."""
         result = accelerator_registry.canonicalize_accelerator_name(

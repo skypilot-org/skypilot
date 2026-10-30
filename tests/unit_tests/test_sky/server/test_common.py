@@ -125,8 +125,8 @@ def test_check_server_healthy_or_start_rechecks_status(
         assert mock_cache_clear.call_count == 1
         assert mock_make_request.call_count == 2
         mock_start_server.assert_not_called()
-        common.get_api_server_status_response.cache_clear()
     finally:
+        common.get_api_server_status_response.cache_clear()
         # check_server_healthy() calls versions.set_remote_api_version() and
         # set_remote_version() based on the value returned from
         # check_compatibility_at_client. The mock above returns a bare
