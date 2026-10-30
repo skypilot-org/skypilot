@@ -1317,18 +1317,67 @@ async def test_submitted_request_stream_failure_keeps_failure_handling(
     assert patches.sdk_launch.call_count == 2
 
 
+def _set_cluster_record(monkeypatch, record):
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_cluster_from_name',
+                        mock.MagicMock(return_value=record))
+
+
+@pytest.mark.asyncio
+async def test_resume_launch_reattaches_to_live_request(monkeypatch):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor.reattach_launch = mock.AsyncMock(return_value=55.0)
+    executor._launch = mock.AsyncMock()
+
+    assert await executor.resume_launch(recovery=True) == 55.0
+
+    executor.reattach_launch.assert_awaited_once_with(True)
+    executor._launch.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('recovery', [False, True])
-async def test_launch_again_launches_without_cleanup(monkeypatch, recovery):
+async def test_resume_launch_launches_onto_never_up_cluster(
+        monkeypatch, recovery):
+    """No live launch request, but nothing can have been submitted to a
+    cluster that never came up: launch onto it, without a teardown."""
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
+    executor.reattach_launch = mock.AsyncMock(return_value=None)
     executor._await_launch_request = mock.AsyncMock(return_value=None)
+    _set_cluster_record(monkeypatch, {'cluster_ever_up': False})
 
-    assert await executor.launch_again(recovery=recovery) == 123.45
+    assert await executor.resume_launch(recovery=recovery) == 123.45
 
-    # Launched onto the existing cluster: no teardown first.
-    executor._cleanup_cluster.assert_not_called()
     patches.sdk_launch.assert_called_once()
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('record', [{'cluster_ever_up': True}, None])
+async def test_resume_launch_leaves_other_clusters_to_recovery(
+        monkeypatch, record):
+    """A cluster that came up may hold a half-submitted job, and a missing
+    one has nothing to keep: both are recovered as usual."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor.reattach_launch = mock.AsyncMock(return_value=None)
+    _set_cluster_record(monkeypatch, record)
+
+    assert await executor.resume_launch(recovery=False) is None
+
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_launch_skips_pools(monkeypatch):
+    executor = _make_launch_executor()
+    executor.pool = 'pool'
+    executor.reattach_launch = mock.AsyncMock()
+
+    assert await executor.resume_launch(recovery=False) is None
+    executor.reattach_launch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

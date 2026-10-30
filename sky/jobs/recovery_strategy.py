@@ -404,6 +404,13 @@ class StrategyExecutor:
         # and this override would be unnecessary.
 
         Contract for implementations: if the strategy owns the loop and
+        ``force_transit_to_recovering`` is set, it should call
+        ``resume_launch`` before tearing the cluster down, as
+        ``JobController._monitor_one_task`` does, so that a launch request
+        left live by a previous controller is re-attached to rather than
+        cancelled by the teardown.
+
+        If the strategy owns the loop and
         invokes ``on_recovery`` (JobGroups pass their networking refresh
         here), it must handle ``exceptions.ClusterSetUpError`` from it the
         way ``JobController._monitor_one_task`` does: mark the task
@@ -554,22 +561,49 @@ class StrategyExecutor:
                                   recovery=recovery,
                                   reattach_only=True)
 
-    async def launch_again(self, recovery: bool) -> float:
-        """Launch onto the task's cluster again, without tearing it down.
+    async def resume_launch(self, recovery: bool) -> Optional[float]:
+        """Continue the launch a task was in, instead of recovering it.
 
-        For a resumed task whose cluster never came up and whose launch
-        request is gone: see JobController._reattach_live_launch. Like
-        launch(), this retries until the job is submitted.
+        For a forced recovery, i.e. a task that was STARTING or RECOVERING
+        when the previous controller process stopped (or an emergency retry
+        interrupted it). Forced recovery tears the cluster down first, in
+        case a job was half-submitted to it, then relaunches. Neither is
+        needed when:
+        - the task's launch request is still live: re-attach to it
+          (reattach_launch), or
+        - no launch request is live but the cluster never came up: nothing
+          can have been submitted to it, so launch onto it again. Tearing it
+          down would only throw away what it already has (e.g. pods waiting
+          in a resource queue).
 
         Args:
             recovery: Whether the task was RECOVERING rather than STARTING.
 
         Returns:
-            The job's submit timestamp.
+            The job's submit timestamp, or None if neither case applies; the
+            caller then recovers the task as usual.
         """
+        if self.pool is not None:
+            return None
+        job_submit_at = await self.reattach_launch(recovery)
+        if job_submit_at is not None:
+            logger.info('Re-attached to the live launch request of cluster '
+                        f'{self.cluster_name}.')
+            return job_submit_at
+        if not await asyncio.to_thread(self._cluster_never_came_up):
+            return None
+        logger.info(f'No live launch request, and cluster {self.cluster_name} '
+                    'never came up: launching onto it again instead of '
+                    'recovering it.')
         job_submit_at = await self._launch(max_retry=None, recovery=recovery)
         assert job_submit_at is not None
         return job_submit_at
+
+    def _cluster_never_came_up(self) -> bool:
+        """Whether the task's cluster exists but has never been UP."""
+        record = global_user_state.get_cluster_from_name(
+            self.cluster_name, include_user_info=False)
+        return record is not None and not record['cluster_ever_up']
 
     async def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
