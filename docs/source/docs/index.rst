@@ -202,7 +202,7 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Current supported infra: Kubernetes, Slurm, PBS Pro, AWS, GCP, Azure, OCI, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
 Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect, Shadeform, Verda Cloud, VastData, Crusoe.
 
 .. raw:: html
@@ -311,6 +311,7 @@ Follow updates:
 
    ../reference/kubernetes/index
    ../reference/slurm/index
+   ../reference/pbs/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
    Using Cloud VMs <../compute/cloud-vm>

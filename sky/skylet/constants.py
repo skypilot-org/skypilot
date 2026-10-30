@@ -712,6 +712,11 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('slurm', 'sbatch_options'),
     ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),
+    ('pbs', 'qsub_options'),
+    ('pbs', 'select_resources'),
+    ('pbs', 'place'),
+    ('pbs', 'quota'),
+    ('pbs', 'cpu_queue'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -754,6 +759,8 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
     ('slurm', 'username_map'),
+    # PBS cluster settings (workdir, tmpdir) are managed server-side.
+    ('pbs', 'cluster_configs'),
 ]
 
 # Also skipped when the request did not come from loopback: which
@@ -1026,7 +1033,8 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
+              'pbs', 'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril',
+              'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

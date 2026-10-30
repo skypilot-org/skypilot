@@ -182,6 +182,36 @@ Below is the configuration syntax and some example values. See detailed explanat
           filter:
             cluster: mycluster1-fleet
 
+  :ref:`pbs <config-yaml-pbs>`:
+    :ref:`allowed_clusters <config-yaml-pbs-allowed-clusters>`:
+      - mycluster
+    :ref:`provision_timeout <config-yaml-pbs-provision-timeout>`: 120
+    :ref:`qsub_options <config-yaml-pbs-qsub-options>`:
+      walltime: "8:00:00"
+    :ref:`select_resources <config-yaml-pbs-select-resources>`:
+      tmp_size: 400gb
+    :ref:`place <config-yaml-pbs-place>`: scatter
+    :ref:`quota <config-yaml-pbs-quota>`:
+      account: my-account   # qsub -A
+      project: my-project   # qsub -P
+    :ref:`gpu_resource <config-yaml-pbs-gpu-resource>`: ngpus
+    :ref:`gpu_type_resource <config-yaml-pbs-gpu-resource>`: gpu_type
+    :ref:`gpu_queue_map <config-yaml-pbs-gpu-queue-map>`:
+      H100: h100q
+    :ref:`cpu_queue <config-yaml-pbs-cpu-queue>`: cpuq
+    :ref:`pricing <config-yaml-pbs-pricing>`:
+      accelerators:
+        A100: 3.50
+    :ref:`cluster_configs <config-yaml-pbs-cluster-configs>`:
+      mycluster:
+        workdir: /scratch/$USER
+        tmpdir: /local/$USER
+        qsub_options:
+          walltime: "24:00:00"
+        queue_configs:
+          gpuq:
+            quota:
+              project: gpu-project
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
@@ -2988,6 +3018,191 @@ Example:
           # Collect only this cluster's slice of the shared Prometheus.
           filter:
             cluster: mycluster2-fleet
+
+.. _config-yaml-pbs:
+
+``pbs``
+~~~~~~~
+
+Advanced PBS Pro / OpenPBS configuration (optional). See :ref:`pbs-overview`.
+
+.. _config-yaml-pbs-allowed-clusters:
+
+``pbs.allowed_clusters``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of PBS clusters (``Host`` entries of ``~/.pbs/config``) that SkyPilot may
+use (optional). Set to ``all`` or leave unset to allow every configured
+cluster. Can also be set per workspace.
+
+.. _config-yaml-pbs-provision-timeout:
+
+``pbs.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Seconds to wait for PBS to allocate the nodes of a launched job before failing
+over to other queues, clusters or infra (optional).
+
+Default: ``120`` when no queue is specified; ``86400`` (24 hours) when a queue
+is specified. A negative value waits indefinitely.
+
+.. _config-yaml-pbs-qsub-options:
+
+``pbs.qsub_options``
+~~~~~~~~~~~~~~~~~~~~
+
+Extra ``qsub`` options, written as ``#PBS`` directives into the job script
+(optional).
+
+Keys are ``qsub`` flags without the dash. A string or number gives
+``#PBS -<flag> <value>``, ``true`` gives a bare ``#PBS -<flag>``, a list gives
+one directive per element, and ``null``/``false`` give nothing. ``walltime`` is a
+shorthand for ``-l walltime=...``; quote it, as YAML reads ``8:00:00`` as a
+base-60 number. The flags SkyPilot manages (``N``, ``q``, ``o``, ``e``, ``j``,
+``r``, ``select``, ``place``, ...) are ignored with a warning.
+
+If no walltime is set, SkyPilot requests the queue's ``resources_max.walltime``
+when there is one, and otherwise lets the queue default apply.
+
+Example:
+
+.. code-block:: yaml
+
+  pbs:
+    qsub_options:
+      walltime: "8:00:00"
+      W: group_list=mylab
+      l:
+        - storage=gdata/ab12
+      m: n
+
+Can be set globally, per cluster and per queue under
+:ref:`cluster_configs <config-yaml-pbs-cluster-configs>`, per workspace, and
+per task in the task YAML's ``config`` block; values are merged key by key, the
+most specific scope winning.
+
+.. _config-yaml-pbs-select-resources:
+
+``pbs.select_resources``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Extra per-node resources appended to the ``select`` chunk SkyPilot generates
+(optional), e.g. ``tmp_size: 400gb`` for node-local scratch. Merged like
+``qsub_options``.
+
+.. _config-yaml-pbs-place:
+
+``pbs.place``
+~~~~~~~~~~~~~
+
+The ``-l place=`` value of the job (optional). Default: ``scatter`` (one node
+per chunk). Use ``scatter:excl`` to reserve whole nodes. The most specific scope
+wins; also settable per task.
+
+.. _config-yaml-pbs-quota:
+
+``pbs.quota``
+~~~~~~~~~~~~~
+
+The account and project a PBS job is submitted with (optional).
+
+- ``account``: submitted as ``qsub -A``.
+- ``project``: submitted as ``qsub -P``.
+
+Resolved workspace > global and, within each, queue > cluster > cloud; a task
+``config`` value applies at the scope it is written at. Set at any scope, they
+take precedence over the ``qsub_options.A`` / ``qsub_options.P`` spelling.
+
+.. _config-yaml-pbs-gpu-resource:
+
+``pbs.gpu_resource`` and ``pbs.gpu_type_resource``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The PBS resources SkyPilot reads and requests GPUs with (optional).
+
+- ``gpu_resource``: the resource counting GPUs on a node and in the ``select``
+  chunk. Default: ``ngpus``.
+- ``gpu_type_resource``: the node resource naming the GPU model (e.g.
+  ``gpu_type``). By default SkyPilot looks for ``gpu_type``, ``gputype``,
+  ``gpu_model``, ``accelerator_model`` and ``accelerator_type``, in that order.
+  When a model resource exists, ``--gpus A100:1`` becomes
+  ``select=1:...:ngpus=1:gpu_type=<the cluster's spelling of A100>``.
+
+Can be set per cluster under :ref:`cluster_configs <config-yaml-pbs-cluster-configs>`.
+
+.. _config-yaml-pbs-gpu-queue-map:
+
+``pbs.gpu_queue_map``
+~~~~~~~~~~~~~~~~~~~~~
+
+Mapping of GPU types to queue names (optional), for clusters that select the
+GPU model by queue rather than by a node resource. For a mapped GPU type,
+SkyPilot only considers the mapped queues and requests GPUs by count only
+(``ngpus=N`` without a model). Keys are case-insensitive; values are a queue
+name or a list of queue names.
+
+.. code-block:: yaml
+
+  pbs:
+    gpu_queue_map:
+      H100: h100q
+      A100: [a100-train, a100-dev]
+
+.. _config-yaml-pbs-cpu-queue:
+
+``pbs.cpu_queue``
+~~~~~~~~~~~~~~~~~
+
+The queue to use for tasks that request no GPUs (optional). Default: the
+cluster's default queue, then the others. Also settable per cluster and per
+task.
+
+.. _config-yaml-pbs-pricing:
+
+``pbs.pricing``
+~~~~~~~~~~~~~~~
+
+Hourly rates for PBS virtual instance types (optional), with the same fields
+and semantics as :ref:`slurm.pricing <config-yaml-slurm-pricing>`: ``cpu``,
+``memory`` and ``accelerators``. Can be set per cluster and per queue.
+
+.. _config-yaml-pbs-cluster-configs:
+
+``pbs.cluster_configs``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Per-cluster and per-queue configuration (optional). Supported fields:
+
+- ``workdir``: Base directory on a **shared filesystem** for SkyPilot cluster
+  state (the job script, logs and each cluster's home directory). Defaults to
+  ``$HOME``. Shell variables such as ``$USER`` are expanded on the login node.
+  Use this when ``$HOME`` is not shared with the compute nodes or is too small.
+- ``tmpdir``: Node-local base directory for the SkyPilot runtime (its Python
+  environment and job database), expanded on each node. Defaults to the job's
+  ``$TMPDIR`` when PBS sets one, else ``/tmp``.
+- ``qsub_options``, ``select_resources``, ``place``, ``quota``, ``pricing``,
+  ``gpu_resource``, ``gpu_type_resource``, ``gpu_queue_map``, ``cpu_queue``:
+  overrides of the fields above at the cluster level.
+- ``queue_configs``: per-queue overrides of ``qsub_options``,
+  ``select_resources``, ``place``, ``quota`` and ``pricing``.
+
+Example:
+
+.. code-block:: yaml
+
+  pbs:
+    cluster_configs:
+      mycluster:
+        workdir: /scratch/$USER
+        tmpdir: /local/$USER
+        gpu_type_resource: gpu_type
+        qsub_options:
+          walltime: "8:00:00"
+        queue_configs:
+          gpuq:
+            quota:
+              project: gpu-project
+            place: scatter:excl
 
 .. _config-yaml-oci:
 

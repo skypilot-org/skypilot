@@ -157,6 +157,7 @@ GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Slurm = clouds.Slurm
+PBS = clouds.PBS
 Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 SSH = clouds.SSH
@@ -193,6 +194,7 @@ __all__ = [
     'Vast',
     'SCP',
     'Slurm',
+    'PBS',
     'Vsphere',
     'Fluidstack',
     'Nebius',

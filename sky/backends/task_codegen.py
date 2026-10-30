@@ -1063,3 +1063,367 @@ class SlurmCodeGen(TaskCodeGen):
                 returncodes = [0]
             """),
         ]
+
+
+class PbsCodeGen(TaskCodeGen):
+    """Code generator for task execution on PBS.
+
+    The driver runs on the head node of the allocation. Rank 0 runs
+    locally; other ranks are started over the allocation's own sshd with
+    the cluster key the batch script created. A PBS allocation has no
+    scheduler for the SkyPilot jobs sharing it, so the driver reserves its
+    per-node CPUs and GPU ids through ``TaskResourceSlot`` before it starts,
+    which queues jobs behind each other the way Ray placement groups do.
+    """
+
+    def __init__(self, pbs_job_id: str, node_capacity: Dict[str, float]):
+        """Initialize PbsCodeGen.
+
+        Args:
+            pbs_job_id: The PBS job id of the allocation.
+            node_capacity: Per-node 'CPU' and 'GPU' counts of the allocation.
+        """
+        super().__init__()
+        self._pbs_job_id = pbs_job_id
+        self._node_capacity = dict(node_capacity)
+
+    def add_prologue(self, job_id: int) -> None:
+        assert not self._has_prologue, 'add_prologue() called twice?'
+        self._has_prologue = True
+        self.job_id = job_id
+
+        self._add_common_imports()
+        self._code.append(
+            textwrap.dedent("""\
+            import colorama
+            import json
+            import signal
+            import threading
+            from sky.backends import backend_utils
+            from sky.skylet.executor import pbs as pbs_executor
+            """))
+        self._add_skylet_imports()
+        self._add_constants()
+        self._add_logging_functions()
+
+        self._code.append(
+            textwrap.dedent(f"""\
+            PBS_JOB_ID = {self._pbs_job_id!r}
+            # The runtime python of a node; its shell expansions must not be
+            # interpreted by the f-strings below.
+            SKY_PYTHON_CMD = {constants.SKY_PYTHON_CMD!r}
+            SKY_HOME = os.path.expanduser('~')
+            SKY_TASK_STATE_DIR = os.path.join(SKY_HOME, '.sky', 'pbs_tasks',
+                                              str({self.job_id}))
+            CLUSTER_SSH_KEY = os.path.join(SKY_HOME, '.sky_sshd', 'cluster_key')
+            CLUSTER_SSH_OPTIONS = [
+                '-i', CLUSTER_SSH_KEY, '-T', '-o', 'BatchMode=yes',
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', 'IdentitiesOnly=yes', '-o', 'LogLevel=ERROR',
+                '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=3',
+                '-o', 'ConnectTimeout=30',
+            ]
+
+            def _read_node_targets():
+                \"\"\"(hostname, sshd port, runtime dir) of every node, by rank.\"\"\"
+                with open(os.path.join(SKY_HOME, '.sky_nodes'), 'r',
+                          encoding='utf-8') as f:
+                    hosts = [line.strip() for line in f if line.strip()]
+                targets = []
+                for rank, host in enumerate(hosts):
+                    port_file = os.path.join(SKY_HOME, '.sky_sshd',
+                                             f'rank{{rank}}.port')
+                    with open(port_file, 'r', encoding='utf-8') as f:
+                        _, port, runtime_dir = f.read().split()[:3]
+                    targets.append((host, int(port), runtime_dir))
+                return targets
+
+            def _pid_file(rank):
+                return os.path.join(SKY_TASK_STATE_DIR, f'rank{{rank}}.pid')
+
+            def _kill_node_task(rank, host, port):
+                \"\"\"Signal the process group of one rank's executor.\"\"\"
+                try:
+                    with open(_pid_file(rank), 'r', encoding='utf-8') as f:
+                        pid = int(f.read().strip())
+                except (OSError, ValueError):
+                    return
+                kill_cmd = f'kill -TERM -- -{{pid}} 2>/dev/null'
+                if rank == 0:
+                    subprocess.run(['/bin/bash', '-c', kill_cmd], check=False)
+                else:
+                    subprocess.run(['ssh'] + CLUSTER_SSH_OPTIONS +
+                                   ['-p', str(port), host, kill_cmd],
+                                   check=False, capture_output=True)
+
+            _sky_node_tasks = []
+            _sky_node_tasks_lock = threading.Lock()
+
+            def _cancel_node_tasks():
+                with _sky_node_tasks_lock:
+                    tasks = list(_sky_node_tasks)
+                for rank, host, port, proc in tasks:
+                    if proc.poll() is None:
+                        _kill_node_task(rank, host, port)
+                        try:
+                            proc.terminate()
+                        except OSError:
+                            pass
+
+            def _pbs_cleanup_handler(signum, _frame):
+                _cancel_node_tasks()
+                # Re-raise to let the default handler terminate.
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+
+            signal.signal(signal.SIGTERM, _pbs_cleanup_handler)
+            """))
+
+        self._code += [
+            'autostop_lib.set_last_active_time_to_now()',
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
+        ]
+
+        self._setup_cmd: Optional[str] = None
+        self._setup_envs: Optional[Dict[str, str]] = None
+        self._setup_log_dir: Optional[str] = None
+        self._setup_num_nodes: Optional[int] = None
+
+    def add_setup(
+        self,
+        num_nodes: int,
+        resources_dict: Dict[str, float],
+        stable_cluster_internal_ips: List[str],
+        env_vars: Dict[str, str],
+        log_dir: str,
+        setup_cmd: Optional[str] = None,
+    ) -> None:
+        assert self._has_prologue, ('Call add_prologue() before add_setup().')
+        self._has_setup = True
+        self._stable_cluster_ips = stable_cluster_internal_ips
+
+        self._add_waiting_for_resources_msg(num_nodes)
+
+        if setup_cmd is not None:
+            setup_envs = env_vars.copy()
+            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
+            self._setup_cmd = setup_cmd
+            self._setup_envs = setup_envs
+            self._setup_log_dir = log_dir
+            self._setup_num_nodes = num_nodes
+
+    def add_task(
+        self,
+        num_nodes: int,
+        bash_script: Optional[str],
+        task_name: Optional[str],
+        resources_dict: Dict[str, float],
+        log_dir: str,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Generates code running the task on the first num_nodes nodes."""
+        assert self._has_setup, 'Call add_setup() before add_task().'
+        env_vars = env_vars or {}
+        task_name = task_name if task_name is not None else 'task'
+
+        acc_name, acc_count = self._get_accelerator_details(resources_dict)
+        num_gpus = 0
+        if (acc_name is not None and
+                not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name)):
+            num_gpus = int(math.ceil(acc_count))
+        task_cpu_demand = float(resources_dict.get('CPU', 0))
+
+        sky_env_vars_dict_str = [
+            textwrap.dedent(f"""\
+            sky_env_vars_dict = {{}}
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            """)
+        ]
+        if env_vars:
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
+
+        has_setup_cmd = self._setup_cmd is not None
+        task_bash_script = (self.build_task_bash_script(bash_script or '')
+                            if bash_script or has_setup_cmd else '')
+        streaming_msg = self._get_job_started_msg()
+
+        # pylint: disable=line-too-long
+        self._code += [
+            sky_env_vars_dict_str,
+            textwrap.dedent(f"""\
+            script = {task_bash_script!r}
+
+            if script or {has_setup_cmd!r}:
+                sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
+                os.makedirs(SKY_TASK_STATE_DIR, exist_ok=True)
+                node_targets = _read_node_targets()
+                cluster_ips = {self._stable_cluster_ips!r}
+
+                # Reserve this job's CPUs and GPU ids on its nodes; waits for
+                # the jobs ahead of it to finish with theirs.
+                resource_slot = pbs_executor.TaskResourceSlot(
+                    job_id={self.job_id},
+                    num_nodes={num_nodes},
+                    cpus_per_node={task_cpu_demand},
+                    gpus_per_node={num_gpus},
+                    node_capacity={self._node_capacity!r})
+                gpu_ids_per_node = resource_slot.acquire()
+
+                print({streaming_msg!r}, flush=True)
+
+                def build_node_cmd(rank, user_script, log_dir, env_vars_dict,
+                                   task_name=None, is_setup=False,
+                                   gpu_ids=None, num_task_nodes=1):
+                    host, port, runtime_dir = node_targets[rank]
+                    task_ips = cluster_ips[:num_task_nodes]
+                    runner_args = [
+                        f'--rank={{rank}}',
+                        f'--num-nodes={{num_task_nodes}}',
+                        f'--node-ips={{shlex.quote(",".join(task_ips))}}',
+                        f'--log-dir={{shlex.quote(log_dir)}}',
+                        f'--env-vars={{shlex.quote(json.dumps(env_vars_dict))}}',
+                        f'--pid-file={{shlex.quote(_pid_file(rank))}}',
+                    ]
+                    if task_name is not None:
+                        runner_args.append(f'--task-name={{shlex.quote(task_name)}}')
+                    if is_setup:
+                        runner_args.append('--is-setup')
+                    if gpu_ids is not None:
+                        runner_args.append(f'--gpu-ids={{",".join(str(g) for g in gpu_ids)}}')
+                    script_path = None
+                    prefix = 'sky_setup_' if is_setup else 'sky_task_'
+                    if backend_utils.is_command_length_over_limit(user_script):
+                        # Under the shared home so that every node can read it.
+                        with tempfile.NamedTemporaryFile('w', prefix=prefix, suffix='.sh', dir=SKY_TASK_STATE_DIR, delete=False) as f:
+                            f.write(user_script)
+                            script_path = f.name
+                        runner_args.append(f'--script-path={{shlex.quote(script_path)}}')
+                    else:
+                        runner_args.append(f'--script={{shlex.quote(user_script)}}')
+                    # The same environment the SkyPilot runner gives commands
+                    # on the node: the shared home and the local runtime dir.
+                    inner_cmd = (
+                        f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}={{shlex.quote(runtime_dir)}} && '
+                        f'cd {{shlex.quote(SKY_HOME)}} && export HOME="$PWD" && '
+                        f'{{SKY_PYTHON_CMD}} -m sky.skylet.executor.pbs ' + ' '.join(runner_args))
+                    if rank == 0:
+                        cmd = ['/bin/bash', '-c', inner_cmd]
+                    else:
+                        cmd = ['ssh'] + CLUSTER_SSH_OPTIONS + ['-p', str(port), host, f'/bin/bash -c {{shlex.quote(inner_cmd)}}']
+
+                    def cleanup():
+                        if script_path is not None:
+                            try:
+                                os.remove(script_path)
+                            except OSError:
+                                pass
+
+                    return cmd, host, port, cleanup
+
+                def run_on_nodes(num_task_nodes, user_script, log_dir, env_vars_dict,
+                                 task_name=None, is_setup=False, gpu_ids_per_node=None):
+                    \"\"\"Run the script on the first num_task_nodes nodes.
+
+                    Returns one return code per rank. If a rank fails, the
+                    others are killed and reported as CANCELLED_RETURN_CODE.
+                    \"\"\"
+                    procs = []
+                    cleanups = []
+                    for rank in range(num_task_nodes):
+                        gpu_ids = None
+                        if gpu_ids_per_node is not None:
+                            gpu_ids = gpu_ids_per_node[rank]
+                        cmd, host, port, cleanup = build_node_cmd(
+                            rank, user_script, log_dir, env_vars_dict,
+                            task_name=task_name, is_setup=is_setup,
+                            gpu_ids=gpu_ids, num_task_nodes=num_task_nodes)
+                        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT,
+                                                text=True)
+                        with _sky_node_tasks_lock:
+                            _sky_node_tasks.append((rank, host, port, proc))
+                        procs.append(proc)
+                        cleanups.append(cleanup)
+
+                    def _stream(proc):
+                        for line in proc.stdout:
+                            print(line, end='', flush=True)
+
+                    threads = [threading.Thread(target=_stream, args=(p,), daemon=True) for p in procs]
+                    for t in threads:
+                        t.start()
+                    returncodes = [None] * len(procs)
+                    failed = False
+                    while any(rc is None for rc in returncodes):
+                        for idx, proc in enumerate(procs):
+                            if returncodes[idx] is None and proc.poll() is not None:
+                                returncodes[idx] = proc.returncode
+                                if proc.returncode != 0:
+                                    failed = True
+                        if failed:
+                            break
+                        time.sleep(0.5)
+                    if failed:
+                        for idx, proc in enumerate(procs):
+                            if returncodes[idx] is None:
+                                rank, host, port, _ = _sky_node_tasks[-len(procs) + idx]
+                                _kill_node_task(rank, host, port)
+                                try:
+                                    proc.terminate()
+                                except OSError:
+                                    pass
+                                try:
+                                    proc.wait(timeout=30)
+                                except subprocess.TimeoutExpired:
+                                    proc.kill()
+                                returncodes[idx] = CANCELLED_RETURN_CODE
+                    for t in threads:
+                        t.join(timeout=5)
+                    for cleanup in cleanups:
+                        cleanup()
+                    with _sky_node_tasks_lock:
+                        for proc in procs:
+                            _sky_node_tasks[:] = [t for t in _sky_node_tasks if t[3] is not proc]
+                    return [int(rc) for rc in returncodes]
+
+                if {has_setup_cmd!r}:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
+                    # The schedule_step should be called after the job status is set to
+                    # non-PENDING, otherwise, the scheduler will think the current job
+                    # is not submitted yet, and skip the scheduling step.
+                    job_lib.scheduler.schedule_step()
+                    setup_returncodes = run_on_nodes(
+                        {self._setup_num_nodes!r}, {self._setup_cmd!r}, {self._setup_log_dir!r}, {self._setup_envs!r},
+                        is_setup=True,
+                        gpu_ids_per_node=(gpu_ids_per_node if {num_gpus} > 0 else None))
+                    if sum(setup_returncodes) != 0:
+                        setup_returncode = next(rc for rc in setup_returncodes if rc != 0)
+                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}}.'
+                        msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
+                        print(msg, flush=True)
+                        job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                        resource_slot.release()
+                        sys.exit(1)
+
+                job_lib.set_job_started({self.job_id!r})
+                if not {has_setup_cmd!r}:
+                    # Need to call schedule_step() to make sure the scheduler
+                    # schedule the next pending job.
+                    job_lib.scheduler.schedule_step()
+
+                try:
+                    returncodes = run_on_nodes(
+                        {num_nodes}, script, {log_dir!r}, sky_env_vars_dict,
+                        task_name={task_name!r},
+                        gpu_ids_per_node=(gpu_ids_per_node if {num_gpus} > 0 else None))
+                finally:
+                    resource_slot.release()
+            else:
+                returncodes = [0]
+            """),
+        ]
+        # pylint: enable=line-too-long

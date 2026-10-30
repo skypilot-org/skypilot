@@ -803,9 +803,10 @@ def test_optimize_disk_tier(enable_all_clouds):
         return set(per_cloud_candidates.keys())
 
     all_clouds = set(registry.CLOUD_REGISTRY.values())
+    # Slurm and PBS offer nothing without a configured cluster.
     all_clouds_without_slurm = set()
     for cloud in all_clouds:
-        if not isinstance(cloud, clouds.Slurm):
+        if not isinstance(cloud, (clouds.Slurm, clouds.PBS)):
             all_clouds_without_slurm.add(cloud)
 
     # All cloud supports BEST disk tier.

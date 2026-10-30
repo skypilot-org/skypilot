@@ -780,7 +780,8 @@ class Optimizer:
         def _instance_type_str(resources: 'resources_lib.Resources') -> str:
             instance_type = resources.instance_type
             assert instance_type is not None, 'Instance type must be specified'
-            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
+            if isinstance(resources.cloud,
+                          (clouds.Kubernetes, clouds.Slurm, clouds.PBS)):
                 instance_type = '-'
                 if resources.use_spot:
                     instance_type = ''
@@ -865,7 +866,8 @@ class Optimizer:
             }
 
             # Handle special case for Kubernetes, SSH, and SLURM clouds
-            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
+            if isinstance(resources.cloud,
+                          (clouds.Kubernetes, clouds.Slurm, clouds.PBS)):
                 # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
                 # context name, i.e. different Kubernetes clusters.
                 # Region for SLURM is the cluster name.
@@ -1304,7 +1306,7 @@ class Optimizer:
             if instance_type is None:
                 display_instance_type = '-'
             elif isinstance(best_resources.cloud,
-                            (clouds.Kubernetes, clouds.Slurm)):
+                            (clouds.Kubernetes, clouds.Slurm, clouds.PBS)):
                 display_instance_type = '-'
             else:
                 display_instance_type = instance_type

@@ -106,6 +106,7 @@ all_clouds_in_smoke_tests = [
     'vastdata',
     'huggingface',
     'slurm',
+    'pbs',
     'mithril',
     'verda',
 ]
@@ -140,6 +141,7 @@ cloud_to_pytest_keyword = {
     'vastdata': 'vastdata',
     'huggingface': 'huggingface',
     'slurm': 'slurm',
+    'pbs': 'pbs',
     'mithril': 'mithril',
     'verda': 'verda',
 }

@@ -30,6 +30,7 @@ _ALLOWED_KEYS = {
     'kubernetes': 'allowed_contexts',
     'ssh': 'allowed_node_pools',
     'slurm': 'allowed_clusters',
+    'pbs': 'allowed_clusters',
 }
 
 
@@ -64,8 +65,11 @@ def _workspace_targets(workspace: str, cloud: str) -> Set[str]:
                     silent=True)
             elif cloud == 'ssh':
                 targets = clouds.SSH.existing_allowed_contexts(silent=True)
-            else:
+            elif cloud == 'slurm':
                 targets = clouds.Slurm.existing_allowed_clusters(silent=True)
+            else:
+                assert cloud == 'pbs', cloud
+                targets = clouds.PBS.existing_allowed_clusters(silent=True)
         return {t for t in targets if t is not None}
     except Exception as e:  # pylint: disable=broad-except
         # Fail closed for this workspace rather than failing every request.
