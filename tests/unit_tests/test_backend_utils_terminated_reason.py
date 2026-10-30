@@ -185,6 +185,38 @@ class TestTerminatedClusterReason:
             'Last known state: Unknown reason.)), then its pods disappeared; '
             f'no direct cause found. {_SUFFIX}')
 
+    _RAY_DOWN = (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} ray '
+                 'cluster is unhealthy (health probe failed: Ray cluster is '
+                 'not found at 127.0.0.1:6380). Transitioned to INIT (details: '
+                 'cluster is unhealthy).')
+
+    def test_vm_unhealthy_mid_autodown_leads_with_autodown(self, k8s):
+        k8s.latest_events.return_value = {'hash-1': self._RAY_DOWN}
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        assert _reason(handle,
+                       status=status_lib.ClusterStatus.INIT,
+                       autostop=1,
+                       to_down=True) == (
+                           'Likely autodowned by SkyPilot (idle 1 min); was '
+                           'unhealthy (ray cluster is unhealthy (health probe '
+                           'failed: Ray cluster is not found at '
+                           '127.0.0.1:6380)) before its nodes disappeared. '
+                           f'{_SUFFIX}')
+
+    def test_young_unhealthy_cluster_is_not_called_autodowned(self, k8s):
+        k8s.latest_events.return_value = {'hash-1': self._RAY_DOWN}
+        handle = _handle(cloud=clouds.AWS(), with_cluster_info=False)
+        assert _reason(handle,
+                       status=status_lib.ClusterStatus.INIT,
+                       autostop=90,
+                       to_down=True).startswith('Was unhealthy (ray cluster')
+
+    def test_k8s_unhealthy_without_autodown_record_is_not_autodowned(self, k8s):
+        k8s.latest_events.return_value = {'hash-1': self._RAY_DOWN}
+        assert _reason(status=status_lib.ClusterStatus.INIT,
+                       autostop=1,
+                       to_down=True).startswith('Was unhealthy (ray cluster')
+
     def test_launching_cluster_is_not_carried_forward(self, k8s):
         k8s.latest_events.return_value = {
             'hash-1': 'Setting up SkyPilot runtime on cluster'

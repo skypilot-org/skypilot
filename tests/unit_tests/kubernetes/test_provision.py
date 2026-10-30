@@ -6281,6 +6281,38 @@ class TestGetClusterTerminationCause:
         ]) == ('Pod evicted by Kubernetes: NoExecute taint '
                'skypilot.co/syslog-error=x on node node-1.')
 
+    def test_a_cancelled_taint_eviction_is_not_a_cause(self):
+        # The head tolerated a taint for a while and the taint was lifted;
+        # the worker was really evicted by a taint on its own node.
+        nodes = {
+            'node-1': _fake_node(),
+            'node-2': _fake_node(taints=[_fake_taint('t', 'x')]),
+        }
+        assert self._cause(
+            nodes,
+            pods={
+                'c-head': 'node-1',
+                'c-worker1': 'node-2'
+            },
+            events_by_pod={
+                'c-head': [
+                    _event('TaintManagerEviction',
+                           'Cancelling deletion of Pod ns/c-head')
+                ],
+                'c-worker1': [
+                    _event('TaintManagerEviction',
+                           'Marking for deletion Pod ns/c-worker1',
+                           pod='c-worker1')
+                ],
+            }) == ('Pods evicted by Kubernetes: NoExecute taint t=x on node '
+                   'node-2.')
+
+    def test_only_a_cancelled_taint_eviction_is_no_cause(self):
+        assert self._cause({'node-1': _fake_node()}, [
+            _event('TaintManagerEviction',
+                   'Cancelling deletion of Pod ns/c-head')
+        ]) is None
+
     def test_taint_eviction_after_the_taint_was_lifted(self):
         assert self._cause(
             {'node-1': _fake_node()}, [_event('TaintManagerEviction')],

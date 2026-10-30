@@ -2436,6 +2436,11 @@ def pod_deletion_event(events: List[Any],
     best_rank = 0
     best_event = None
     for event in _events_since(events, since):
+        # The taint was lifted before a pod's tolerationSeconds ran out: the
+        # eviction never happened.
+        if (event.reason == 'TaintManagerEviction' and
+            (event.message or '').startswith('Cancelling deletion')):
+            continue
         ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
         if ranked is not None and ranked[0] > best_rank:
             best_rank = ranked[0]

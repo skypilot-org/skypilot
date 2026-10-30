@@ -2947,6 +2947,17 @@ def _get_terminated_cluster_reason(
         elif reported is not None:
             cause = f'Reported failure: {reported}'
 
+    launched_at = record.get('launched_at')
+    # Autodown is likely only if it could have fired (the cluster is older
+    # than its idle limit) and nothing says it did not. A missing Kubernetes
+    # breadcrumb argues against it, but the lookup can miss, so the configured
+    # autodown is still noted.
+    could_autodown = (autostop >= 0 and record['to_down'] and
+                      (launched_at is None or
+                       time.time() - launched_at >= autostop * 60))
+    likely_autodowned = (f'Likely autodowned by SkyPilot (idle {autostop} '
+                         'min)')
+
     if (cause is None and record['status'] == status_lib.ClusterStatus.INIT):
         latest = global_user_state.get_last_cluster_event_of_type_multiple(
             {record['cluster_hash']}, [
@@ -2960,24 +2971,21 @@ def _get_terminated_cluster_reason(
                 latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
                           ):].split('. Transitioned to INIT')[0].split())
             what = 'pods' if is_k8s else 'nodes'
-            cause = (f'Was unhealthy ({why.strip()}), then its {what} '
-                     'disappeared; no direct cause found.')
+            if could_autodown and not no_autodown_record:
+                # A refresh that lands mid-autodown (Ray stopped, VMs still
+                # up) records the cluster as unhealthy.
+                cause = (f'{likely_autodowned}; was unhealthy ({why}) before '
+                         f'its {what} disappeared.')
+            else:
+                cause = (f'Was unhealthy ({why}), then its {what} '
+                         'disappeared; no direct cause found.')
 
     if cause is None:
         # Nothing names a cause. Lead with what the cluster's own setup makes
         # likely, as the refresh's warning for a vanished cluster does: the
         # table cell shows only the start of the text.
-        launched_at = record.get('launched_at')
-        # Autodown is likely only if it could have fired (the cluster is
-        # older than its idle limit) and nothing says it did not. A missing
-        # Kubernetes breadcrumb argues against it, but the lookup can miss,
-        # so the configured autodown is still noted.
-        could_autodown = (autostop >= 0 and record['to_down'] and
-                          (launched_at is None or
-                           time.time() - launched_at >= autostop * 60))
         if could_autodown and not no_autodown_record:
-            cause = (f'Likely autodowned by SkyPilot (idle {autostop} min); '
-                     'no direct cause found.')
+            cause = f'{likely_autodowned}; no direct cause found.'
         elif launched_resources.use_spot:
             cause = 'Likely spot preemption; no direct cause found.'
         else:
