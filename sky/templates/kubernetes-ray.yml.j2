@@ -1740,9 +1740,26 @@ available_node_types:
               # Set +x to stop printing the commands and their arguments as they are executed.
               set +x
 
-              # SIGTERM keep-alive: trap ignores TERM/INT so wait is not interrupted;
-              # log_tail streams task logs; sleep loop keeps the pod alive until killed.
-              trap : TERM INT
+              # log_tail streams task logs; the sleep loop keeps the pod alive
+              # until it is deleted.
+              #
+              # On TERM/INT (a graceful delete; any preStop hook has already
+              # finished), pass the signal on to every other process in the
+              # container -- the task among them -- and exit once they are all
+              # gone, so the container ends when its work does. Ignoring TERM
+              # instead kept the container up until the kubelet's SIGKILL at the
+              # end of the grace period, and SIGKILLed everything with it,
+              # including any sidecar that needs to run after this container
+              # stops (e.g. a node health check holder). Processes that ignore
+              # TERM still meet that SIGKILL, so this never outlives the grace
+              # period. A force delete (the default teardown) sends no TERM.
+              _sky_on_term() {
+                trap '' TERM INT
+                kill -TERM -1 2>/dev/null || true
+                while kill -0 -1 2>/dev/null; do sleep 1; done
+                exit 0
+              }
+              trap _sky_on_term TERM INT
               log_tail &
               while true; do sleep infinity & wait $!; done
 
