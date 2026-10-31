@@ -294,6 +294,38 @@ class _DefaultManagedJobRunner:
                   for the dashboard's Infra filter to offer. Empty from a
                   controller that predates the field.
         """
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                (jobs, total, status_counts, total_no_filter, infra_options
+                ) = _fetch_managed_job_queue_via_skylet(
+                    handle=handle,
+                    skip_finished=skip_finished,
+                    accessible_workspaces=accessible_workspaces,
+                    job_ids=job_ids,
+                    include_tree=include_tree,
+                    workspace_match=workspace_match,
+                    name_match=name_match,
+                    pool_match=pool_match,
+                    infra_match=infra_match,
+                    page=page,
+                    limit=limit,
+                    user_hashes=user_hashes,
+                    statuses=statuses,
+                    fields=fields,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    submitted_after=submitted_after,
+                    submitted_before=submitted_before,
+                    # queue_v2 adds None to user_hashes exactly when jobs
+                    # without a user hash should be shown.
+                    show_jobs_without_user_hash=(user_hashes is not None and
+                                                 None in user_hashes),
+                )
+                return (jobs, total,
+                        managed_job_utils.ManagedJobQueueResultType.DICT,
+                        total_no_filter, status_counts, infra_options)
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
         with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
             # By name: the parameter list is long enough that inserting one
             # in the middle would silently shift every argument after it.
@@ -1718,6 +1750,244 @@ def queue_v2_api(
             status_counts, total_no_filter, infra_options)
 
 
+class _ManagedJobQueueQuery(typing.TypedDict):
+    """Arguments shared by the in-process, skylet, and runner queue reads."""
+    skip_finished: bool
+    accessible_workspaces: List[str]
+    job_ids: Optional[List[int]]
+    include_tree: bool
+    workspace_match: Optional[str]
+    name_match: Optional[str]
+    pool_match: Optional[str]
+    infra_match: Optional[str]
+    page: Optional[int]
+    limit: Optional[int]
+    user_hashes: Optional[List[Optional[str]]]
+    statuses: Optional[List[str]]
+    fields: Optional[List[str]]
+    sort_by: Optional[str]
+    sort_order: Optional[str]
+    submitted_after: Optional[float]
+    submitted_before: Optional[float]
+
+
+def _fetch_managed_job_queue_in_process(
+    skip_finished: bool,
+    accessible_workspaces: List[str],
+    job_ids: Optional[List[int]],
+    include_tree: bool,
+    workspace_match: Optional[str],
+    name_match: Optional[str],
+    pool_match: Optional[str],
+    infra_match: Optional[str],
+    page: Optional[int],
+    limit: Optional[int],
+    user_hashes: Optional[List[Optional[str]]],
+    statuses: Optional[List[str]],
+    fields: Optional[List[str]],
+    sort_by: Optional[str],
+    sort_order: Optional[str],
+    submitted_after: Optional[float],
+    submitted_before: Optional[float],
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
+    """Read the queue in this process.
+
+    Consolidation mode keeps the jobs database on the API server, which has
+    already imported the jobs package. A fresh interpreter would repeat that
+    import on every read.
+    """
+    result = managed_job_utils.get_managed_job_queue(
+        skip_finished=skip_finished,
+        accessible_workspaces=accessible_workspaces,
+        job_ids=job_ids,
+        include_tree=include_tree,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
+        page=page,
+        limit=limit,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+    )
+    jobs = result['jobs']
+    # Same post-processing as the codegen path's load_managed_job_queue:
+    # status comes back as ManagedJobStatus, and user_hash becomes user_name.
+    managed_job_utils.restore_managed_job_queue_jobs(jobs)
+    return (jobs, result['total'], result['status_counts'],
+            result['total_no_filter'], result['infra_options'])
+
+
+def _fetch_managed_job_queue_via_skylet(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    skip_finished: bool,
+    accessible_workspaces: List[str],
+    job_ids: Optional[List[int]],
+    include_tree: bool,
+    workspace_match: Optional[str],
+    name_match: Optional[str],
+    pool_match: Optional[str],
+    infra_match: Optional[str],
+    page: Optional[int],
+    limit: Optional[int],
+    user_hashes: Optional[List[Optional[str]]],
+    statuses: Optional[List[str]],
+    fields: Optional[List[str]],
+    sort_by: Optional[str],
+    sort_order: Optional[str],
+    submitted_after: Optional[float],
+    submitted_before: Optional[float],
+    show_jobs_without_user_hash: bool,
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int, List[str]]:
+    """Read the managed job queue from the controller skylet."""
+    # The controller may be older than this server (it only picks up
+    # new skylet code on the next launch). When the request names a
+    # field some controller versions lack, ask its version first and
+    # drop the fields it does not know, or it rejects the whole
+    # request. Skipped otherwise: one round trip, not two.
+    if managed_job_utils.queue_fields_need_controller_version(fields):
+        version_response = backend_utils.invoke_skylet_with_retries(
+            lambda: cloud_vm_ray_backend.SkyletClient(handle.get_grpc_channel(
+            )).get_managed_job_controller_version(managed_jobsv1_pb2.
+                                                  GetVersionRequest()))
+        fields = managed_job_utils.fields_for_controller(
+            fields, version_response.controller_version)
+    request = managed_jobsv1_pb2.GetJobTableRequest(
+        skip_finished=skip_finished,
+        accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
+            workspaces=accessible_workspaces)),
+        job_ids=managed_jobsv1_pb2.JobIds(
+            ids=job_ids) if job_ids is not None else None,
+        include_tree=include_tree,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
+        page=page,
+        limit=limit,
+        # Remove None from user_hashes, as the gRPC server uses the
+        # show_jobs_without_user_hash flag instead.
+        user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
+            user_hash for user_hash in user_hashes if user_hash is not None
+        ]) if user_hashes is not None else None,
+        statuses=managed_jobsv1_pb2.Statuses(
+            statuses=statuses) if statuses is not None else None,
+        fields=managed_jobsv1_pb2.Fields(
+            fields=fields) if fields is not None else None,
+        show_jobs_without_user_hash=show_jobs_without_user_hash,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+    )
+    response = backend_utils.invoke_skylet_with_retries(
+        lambda: cloud_vm_ray_backend.SkyletClient(handle.get_grpc_channel(
+        )).get_managed_job_table(request))
+    if infra_match is not None and not response.infra_match_applied:
+        # A field an old server does not know is dropped silently, and
+        # the rows it returns are on every infra. Refuse the answer
+        # rather than pass it off as filtered.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
+    if include_tree and not response.include_tree_applied:
+        # Same for include_tree: an old controller ignores the field
+        # and returns only the requested jobs' rows.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
+    return (jobs, response.total, dict(response.status_counts),
+            response.total_no_filter, list(response.infra_options))
+
+
+def _fetch_managed_job_queue_via_runner(
+    runner: 'managed_job_runner.ManagedJobRunner',
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    backend: 'backends.CloudVmRayBackend',
+    skip_finished: bool,
+    accessible_workspaces: List[str],
+    job_ids: Optional[List[int]],
+    include_tree: bool,
+    workspace_match: Optional[str],
+    name_match: Optional[str],
+    pool_match: Optional[str],
+    infra_match: Optional[str],
+    page: Optional[int],
+    limit: Optional[int],
+    user_hashes: Optional[List[Optional[str]]],
+    statuses: Optional[List[str]],
+    fields: Optional[List[str]],
+    sort_by: Optional[str],
+    sort_order: Optional[str],
+    submitted_after: Optional[float],
+    submitted_before: Optional[float],
+) -> Tuple[List[Dict[str, Any]], int,
+           'managed_job_utils.ManagedJobQueueResultType', int, Dict[
+               str, int], List[str]]:
+    """Read the queue through the registered runner.
+
+    The default runner generates code and runs it in a new interpreter on the
+    controller. A plugin may register its own runner; that one is used even
+    in consolidation mode.
+    """
+    # A runner registered by a plugin may predate `include_tree`. Passing the
+    # keyword to it would raise TypeError on every queue request, not only the
+    # ones asking for a tree. Pass the keyword only to a runner that takes it.
+    # If the runner does not take it and a tree was asked for, refuse the
+    # request the way an old controller does.
+    # Only consolidation mode records dependencies, and a separate jobs
+    # controller may be too old to know the field.
+    if (fields is not None and 'depends_on' in fields and
+            not managed_job_utils.is_consolidation_mode()):
+        fields = [field for field in fields if field != 'depends_on']
+    tree_kwargs: Dict[str, Any] = {}
+    if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
+        tree_kwargs['include_tree'] = include_tree
+    elif include_tree:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
+    fetched = runner.fetch_managed_job_table(
+        handle=handle,
+        backend=backend,
+        skip_finished=skip_finished,
+        accessible_workspaces=accessible_workspaces,
+        job_ids=job_ids,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
+        page=page,
+        limit=limit,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+        **tree_kwargs,
+    )
+    # A runner registered out of tree may still be on the five-value signature
+    # that predates the infra options. That costs the dashboard its option list
+    # -- it falls back to the rows it has -- and nothing else, so take it
+    # rather than fail the whole queue.
+    infra_options: List[str] = []
+    if len(fetched) == 5:
+        jobs, total, result_type, total_no_filter, status_counts = fetched
+    else:
+        (jobs, total, result_type, total_no_filter, status_counts,
+         infra_options) = fetched
+    return (jobs, total, result_type, total_no_filter, status_counts,
+            infra_options)
+
+
 @metrics_lib.time_me
 def queue_v2(
     refresh: bool,
@@ -1828,13 +2098,11 @@ def queue_v2(
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
-    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
         # For backwards compatibility, we show jobs that do not have a
         # user_hash. TODO(cooperc): Remove before 0.12.0.
         user_hashes.append(None)
-        show_jobs_without_user_hash = True
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
@@ -1857,121 +2125,41 @@ def queue_v2(
         if not accessible_workspaces:
             return [], 0, {}, 0, []
 
-    if handle.is_grpc_enabled_with_flag:
-        try:
-            # The controller may be older than this server (it only picks up
-            # new skylet code on the next launch). When the request names a
-            # field some controller versions lack, ask its version first and
-            # drop the fields it does not know, or it rejects the whole
-            # request. Skipped otherwise: one round trip, not two.
-            if managed_job_utils.queue_fields_need_controller_version(fields):
-                version_response = backend_utils.invoke_skylet_with_retries(
-                    lambda: cloud_vm_ray_backend.SkyletClient(
-                        handle.get_grpc_channel(
-                        )).get_managed_job_controller_version(
-                            managed_jobsv1_pb2.GetVersionRequest()))
-                fields = managed_job_utils.fields_for_controller(
-                    fields, version_response.controller_version)
-            request = managed_jobsv1_pb2.GetJobTableRequest(
-                skip_finished=skip_finished,
-                accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
-                    workspaces=accessible_workspaces)),
-                job_ids=managed_jobsv1_pb2.JobIds(
-                    ids=job_ids) if job_ids is not None else None,
-                include_tree=include_tree,
-                workspace_match=workspace_match,
-                name_match=name_match,
-                pool_match=pool_match,
-                infra_match=infra_match,
-                page=page,
-                limit=limit,
-                # Remove None from user_hashes, as the gRPC server uses the
-                # show_jobs_without_user_hash flag instead.
-                user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
-                    user_hash for user_hash in user_hashes
-                    if user_hash is not None
-                ]) if user_hashes is not None else None,
-                statuses=managed_jobsv1_pb2.Statuses(
-                    statuses=statuses) if statuses is not None else None,
-                fields=managed_jobsv1_pb2.Fields(
-                    fields=fields) if fields is not None else None,
-                show_jobs_without_user_hash=show_jobs_without_user_hash,
-                sort_by=sort_by,
-                sort_order=sort_order,
-                submitted_after=submitted_after,
-                submitted_before=submitted_before,
-            )
-            response = backend_utils.invoke_skylet_with_retries(
-                lambda: cloud_vm_ray_backend.SkyletClient(
-                    handle.get_grpc_channel()).get_managed_job_table(request))
-            if infra_match is not None and not response.infra_match_applied:
-                # A field an old server does not know is dropped silently, and
-                # the rows it returns are on every infra. Refuse the answer
-                # rather than pass it off as filtered.
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
-            if include_tree and not response.include_tree_applied:
-                # Same for include_tree: an old controller ignores the field
-                # and returns only the requested jobs' rows.
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
-            jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
-            return (jobs, response.total, dict(response.status_counts),
-                    response.total_no_filter, list(response.infra_options))
-        except exceptions.SkyletMethodNotImplementedError:
-            pass
-
+    # A plugin runner owns the read, including a subclass of the default
+    # runner. Otherwise consolidation reads the jobs database in this
+    # process, and a separate controller is read through the default runner
+    # (skylet gRPC, falling back to codegen on an old skylet).
     runner = managed_job_runner.current()
-    # A runner registered by a plugin may predate `include_tree`. Passing the
-    # keyword to it would raise TypeError on every queue request, not only the
-    # ones asking for a tree. Pass the keyword only to a runner that takes it.
-    # If the runner does not take it and a tree was asked for, refuse the
-    # request the way an old controller does.
-    # Only consolidation mode records dependencies, and a separate jobs
-    # controller may be too old to know the field.
-    if (fields is not None and 'depends_on' in fields and
-            not managed_job_utils.is_consolidation_mode()):
-        fields = [field for field in fields if field != 'depends_on']
-    tree_kwargs: Dict[str, Any] = {}
-    if _runner_accepts(runner.fetch_managed_job_table, 'include_tree'):
-        tree_kwargs['include_tree'] = include_tree
-    elif include_tree:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                managed_job_utils.INCLUDE_TREE_UNSUPPORTED_MESSAGE)
-    fetched = runner.fetch_managed_job_table(
-        handle=handle,
-        backend=backend,
-        skip_finished=skip_finished,
-        accessible_workspaces=accessible_workspaces,
-        job_ids=job_ids,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        infra_match=infra_match,
-        page=page,
-        limit=limit,
-        user_hashes=user_hashes,
-        statuses=statuses,
-        fields=fields,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        submitted_after=submitted_after,
-        submitted_before=submitted_before,
-        **tree_kwargs,
-    )
-    # A runner registered out of tree may still be on the five-value signature
-    # that predates the infra options. That costs the dashboard its option list
-    # -- it falls back to the rows it has -- and nothing else, so take it
-    # rather than fail the whole queue.
-    infra_options: List[str] = []
-    if len(fetched) == 5:
-        jobs, total, result_type, total_no_filter, status_counts = fetched
-    else:
-        (jobs, total, result_type, total_no_filter, status_counts,
-         infra_options) = fetched
+    queue_kwargs: _ManagedJobQueueQuery = {
+        'skip_finished': skip_finished,
+        'accessible_workspaces': accessible_workspaces,
+        'job_ids': job_ids,
+        'include_tree': include_tree,
+        'workspace_match': workspace_match,
+        'name_match': name_match,
+        'pool_match': pool_match,
+        'infra_match': infra_match,
+        'page': page,
+        'limit': limit,
+        'user_hashes': user_hashes,
+        'statuses': statuses,
+        'fields': fields,
+        'sort_by': sort_by,
+        'sort_order': sort_order,
+        'submitted_after': submitted_after,
+        'submitted_before': submitted_before,
+    }
+    # type() so a plugin that subclasses the default runner is not treated
+    # as the stock implementation.
+    # pylint: disable-next=unidiomatic-typecheck
+    if (type(runner) is _DefaultManagedJobRunner and
+            managed_job_utils.is_consolidation_mode()):
+        return _fetch_managed_job_queue_in_process(**queue_kwargs)
+    (jobs, total, result_type, total_no_filter, status_counts,
+     infra_options) = _fetch_managed_job_queue_via_runner(runner=runner,
+                                                          handle=handle,
+                                                          backend=backend,
+                                                          **queue_kwargs)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
         return jobs, total, status_counts, total_no_filter, infra_options
