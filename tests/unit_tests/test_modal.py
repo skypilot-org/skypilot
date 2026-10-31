@@ -729,8 +729,8 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
     ('AuthError', exceptions.InvalidCloudCredentials),
     ('PermissionDeniedError', exceptions.InvalidCloudCredentials),
 ])
-def test_modal_run_instances_translates_account_errors(monkeypatch,
-                                                       modal_error, expected):
+def test_modal_run_instances_translates_account_errors(monkeypatch, modal_error,
+                                                       expected):
     # Errors that retrying cannot fix must reach the user instead of a generic
     # "failed to acquire resources".
     modal_exception = pytest.importorskip('modal.exception')
@@ -746,28 +746,29 @@ def test_modal_run_instances_translates_account_errors(monkeypatch,
     monkeypatch.setattr(modal_instance.modal_utils,
                         'get_active_sandboxes_by_name',
                         lambda name, environment_name=None: {})
-    monkeypatch.setattr(modal_instance.modal_utils, 'get_app',
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_app',
                         lambda create_if_missing, environment_name=None: 'app')
-    monkeypatch.setattr(modal_instance.modal_utils, 'get_image',
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_image',
                         lambda docker_image=None: 'image')
-    monkeypatch.setattr(modal_instance.modal_adaptor, 'modal',
-                        SimpleNamespace(Sandbox=FakeSandbox,
-                                        exception=modal_exception))
+    monkeypatch.setattr(
+        modal_instance.modal_adaptor, 'modal',
+        SimpleNamespace(Sandbox=FakeSandbox, exception=modal_exception))
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
 
     with pytest.raises(expected, match='payment method'):
-        modal_instance.run_instances(
-            region='auto',
-            cluster_name='test',
-            cluster_name_on_cloud='test-on-cloud',
-            config=_provision_config({
-                'PublicKey': 'ssh-ed25519 test',
-                'Gpu': 'T4',
-                'Cpu': 2.0,
-                'Memory': 16 * 1024,
-                'Timeout': 24 * 60 * 60,
-            }))
+        modal_instance.run_instances(region='auto',
+                                     cluster_name='test',
+                                     cluster_name_on_cloud='test-on-cloud',
+                                     config=_provision_config({
+                                         'PublicKey': 'ssh-ed25519 test',
+                                         'Gpu': 'T4',
+                                         'Cpu': 2.0,
+                                         'Memory': 16 * 1024,
+                                         'Timeout': 24 * 60 * 60,
+                                     }))
 
 
 def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
@@ -1199,3 +1200,58 @@ def test_modal_terminate_instances_idempotent(monkeypatch):
     modal_instance.terminate_instances('test-on-cloud')
 
     assert terminated == [True]
+
+
+def test_modal_adaptor_follows_config_file_changes(tmp_path, monkeypatch):
+    # modal reads its config once at import; a long-lived API server worker
+    # must still see `modal token new` or an uploaded token.
+    from sky.adaptors import modal as modal_adaptor
+    modal_sdk = modal_adaptor.modal.load_module()
+    path = tmp_path / '.modal.toml'
+    monkeypatch.setattr(modal_sdk.config, 'user_config_path', str(path))
+    monkeypatch.setattr(modal_sdk.config, '_user_config', {})
+    monkeypatch.setattr(modal_sdk.config, '_profile', 'default')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_PROFILE', raising=False)
+    # pylint: disable=protected-access
+    lazy_modal = modal_adaptor._ModalImport()
+
+    def token_id():
+        return lazy_modal.config.config.get('token_id')
+
+    assert token_id() is None
+    path.write_text('[default]\ntoken_id = "ak-first"\nactive = true\n')
+    assert token_id() == 'ak-first'
+    # An atomic replace, as `modal token set` and the credential manager do.
+    replacement = tmp_path / 'replacement.toml'
+    replacement.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
+    replacement.replace(path)
+    assert token_id() == 'ak-second'
+    path.unlink()
+    assert token_id() is None
+
+
+def test_modal_adaptor_keeps_config_if_reload_internals_change(
+        tmp_path, monkeypatch):
+    # The reload uses private modal internals; if they go away, Modal must
+    # keep working with the config it already loaded.
+    from sky.adaptors import modal as modal_adaptor
+    modal_sdk = modal_adaptor.modal.load_module()
+    path = tmp_path / '.modal.toml'
+    path.write_text('[default]\ntoken_id = "ak-first"\nactive = true\n')
+    monkeypatch.setattr(modal_sdk.config, 'user_config_path', str(path))
+    monkeypatch.setattr(modal_sdk.config, '_user_config',
+                        {'default': {
+                            'token_id': 'ak-first',
+                            'active': True
+                        }})
+    monkeypatch.setattr(modal_sdk.config, '_profile', 'default')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_PROFILE', raising=False)
+    monkeypatch.delattr(modal_sdk.config, '_read_user_config')
+    # pylint: disable=protected-access
+    lazy_modal = modal_adaptor._ModalImport()
+
+    assert lazy_modal.config.config.get('token_id') == 'ak-first'
+    path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
+    assert lazy_modal.config.config.get('token_id') == 'ak-first'
