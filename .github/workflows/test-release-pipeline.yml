@@ -1,0 +1,141 @@
+name: Test Release Pipeline (Staging)
+
+# End-to-end test of the release pipeline using staging destinations.
+# Publishes to test-pypi (PyPI), berkeleyskypilot/skypilot with a
+# 0.0.0.dev<timestamp> tag (Docker, no :latest), and the `test` branch
+# of skypilot-org/skypilot-helm (Helm, force-pushed each run).
+# Safe to run from any branch without affecting production.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Test version (e.g. 0.0.0.dev20260511). Auto-generated if empty. Must sort below real releases on PEP440.'
+        type: string
+        required: false
+      skip_test_pypi:
+        description: 'Skip test-pypi publish (use when TEST_PYPI_API_TOKEN is unavailable)'
+        type: boolean
+        default: false
+      skip_docker:
+        description: 'Skip Docker build/push'
+        type: boolean
+        default: false
+      skip_helm:
+        description: 'Skip Helm chart publish'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+      skip_test_pypi:
+        type: boolean
+        default: false
+      skip_docker:
+        type: boolean
+        default: false
+      skip_helm:
+        type: boolean
+        default: false
+
+concurrency: test-release-pipeline
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '23'
+          cache: 'npm'
+          cache-dependency-path: 'sky/dashboard/package-lock.json'
+
+      - name: Install dashboard dependencies
+        run: |
+          cd sky/dashboard
+          npm ci
+
+      - name: Build dashboard
+        run: |
+          cd sky/dashboard
+          npm run build
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install pypa/build
+        run: python -m pip install build --user
+
+      - name: Set test version
+        id: set-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            # 0.0.0.dev* sorts BELOW any future real release on PEP440
+            # (0.0.0.devN < 0.0.0 < 0.X.Y for X >= 1). This matters because
+            # production releases publish to test-pypi too and validate with
+            # an unpinned `pip install --pre`, which picks the highest
+            # available version. A higher staging version would poison that
+            # validation step. Do NOT change this to a placeholder like 99.x.
+            VERSION="0.0.0.dev${TIMESTAMP}"
+          fi
+          sed -i "s/__version__ = '.*'/__version__ = '${VERSION}'/g" sky/__init__.py
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Test version: $VERSION"
+
+      - name: Build a binary wheel and a source tarball
+        run: python -m build --sdist --wheel --outdir dist/ .
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: skypilot-artifacts-skypilot-staging
+          path: dist/
+
+  publish-test-pypi:
+    needs: build-package
+    if: ${{ !inputs.skip_test_pypi }}
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: skypilot
+      expected_version: ${{ needs.build-package.outputs.version }}
+      repository_type: 'test-pypi'
+      release_environment: 'staging'
+    secrets: inherit
+
+  docker-staging:
+    needs: build-package
+    if: ${{ !inputs.skip_docker }}
+    uses: ./.github/workflows/docker-build.yaml
+    with:
+      package_name: skypilot
+      version: ${{ needs.build-package.outputs.version }}
+      release_environment: 'staging'
+    secrets: inherit
+
+  helm-staging:
+    needs: [build-package, docker-staging]
+    if: ${{ !inputs.skip_helm && !inputs.skip_docker }}
+    uses: ./.github/workflows/publish-helm.yml
+    with:
+      version: ${{ needs.build-package.outputs.version }}
+      package_name: skypilot
+      release_environment: 'staging'
+      # docker_image left empty; publish-helm.yml falls back to
+      # DOCKER_USERNAME/package_name. We do NOT pass it via a job output
+      # because GitHub strips outputs that contain a secret value.
+      commit_message: 'Staging test: skypilot ${{ needs.build-package.outputs.version }}'
+    secrets: inherit

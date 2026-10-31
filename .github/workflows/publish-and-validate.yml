@@ -16,6 +16,11 @@ on:
         required: true
         type: string
         default: 'test-pypi'
+      release_environment:
+        description: 'Release environment: production or staging.'
+        required: false
+        type: string
+        default: 'production'
     secrets:
       TEST_PYPI_API_TOKEN:
         description: 'API token for Test PyPI'
@@ -31,7 +36,7 @@ jobs:
       - name: Download distribution artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: skypilot-artifacts-${{ inputs.package_name }}
+          name: skypilot-artifacts-${{ inputs.package_name }}${{ inputs.release_environment == 'staging' && '-staging' || '' }}
           path: dist/
 
       - name: Publish distribution to repository
@@ -67,14 +72,17 @@ jobs:
             # Uninstall package first (ignore errors if not installed)
             pip uninstall -y ${{ inputs.package_name }} || true
 
-            # Install the package with no cache
-            # Use --pre so that pre-release versions (e.g. rcs) will be selected
+            # Install the package with no cache. Pin to expected_version so
+            # staging (0.0.0.dev<ts>) isn't overridden by the latest production
+            # release when both indexes are visible. --pre lets pre-release
+            # specifiers (rcs, dev) resolve.
+            PKG_SPEC="${{ inputs.package_name }}[server]==${{ inputs.expected_version }}"
             if [ "${{ inputs.repository_type }}" == "test-pypi" ]; then
               echo "Installing from Test PyPI..."
-              pip install --no-cache-dir --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}[server]
+              pip install --no-cache-dir --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple "$PKG_SPEC"
             else
               echo "Installing from PyPI..."
-              pip install --no-cache-dir --pre ${{ inputs.package_name }}[server]
+              pip install --no-cache-dir --pre "$PKG_SPEC"
             fi
 
             # Check the version
