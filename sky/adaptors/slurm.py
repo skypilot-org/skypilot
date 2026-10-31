@@ -7,6 +7,7 @@ import logging
 import re
 import shlex
 import subprocess
+import time
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from sky.utils import command_runner
@@ -267,6 +268,22 @@ def _parse_partitions_info_output(stdout: str) -> List[SlurmPartition]:
     return partitions
 
 
+# sudo, runuser and id exit with 1 when they refuse to run as an account or
+# cannot resolve it, for example "sudo: a password is required". ssh exits with
+# 255 when it fails, and the runner reports its own timeout as
+# command_runner.TIMEOUT_RETURNCODE, so neither reads as a refusal.
+_SUBMIT_USER_REFUSED_RETURNCODE = 1
+# sudo and runuser also exit with 1 when they fail for a moment, for example
+# when the name service cannot resolve the account. Count a refusal only when
+# every check returns it.
+_SUBMIT_USER_REFUSAL_CHECKS = 3
+_SUBMIT_USER_RECHECK_SECONDS = 2
+
+
+class SubmitUserRefusedError(RuntimeError):
+    """The login node refused to run commands as the submit account."""
+
+
 class SlurmClient:
     """Client for Slurm control plane operations."""
 
@@ -332,24 +349,46 @@ class SlurmClient:
             )
 
     def validate_submit_user(self, cluster_name: str, submit_user: str) -> None:
-        """Check the Unix account through the submit runner."""
+        """Check the Unix account through the submit runner.
+
+        Raises:
+            SubmitUserRefusedError: The login node ran the check and refused
+                it every time, so it refuses again until its configuration
+                changes.
+            RuntimeError: Any other failure, including SSH failures and
+                timeouts that may pass on a later attempt.
+        """
         command = ['id', '-un']
         error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
                  f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
-        try:
-            rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
-        except subprocess.TimeoutExpired as e:
+        for check in range(_SUBMIT_USER_REFUSAL_CHECKS):
+            if check > 0:
+                time.sleep(_SUBMIT_USER_RECHECK_SECONDS)
+            try:
+                rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
+            except subprocess.TimeoutExpired as e:
+                raise RuntimeError(error + 'Account validation timed out '
+                                   'after 15 seconds.') from e
+            if rc != _SUBMIT_USER_REFUSED_RETURNCODE:
+                break
+        if rc == command_runner.TIMEOUT_RETURNCODE:
+            # The SSH runner reports a timeout with this exit code instead of
+            # raising TimeoutExpired.
             raise RuntimeError(error + 'Account validation timed out after '
-                               '15 seconds.') from e
+                               '15 seconds.')
         output_lines = [
             line.strip() for line in stdout.splitlines() if line.strip()
         ]
-        if rc != 0 or not output_lines or output_lines[-1] != submit_user:
-            raise RuntimeError(
-                error + f'Account validation exited with code {rc}. '
-                'Check that the account exists and the SSH user can run '
-                'id -un as that account. '
-                f'{stdout}\n{stderr}')
+        if rc == 0 and output_lines and output_lines[-1] == submit_user:
+            return
+        message = (error + 'Account validation '
+                   f'(`{self._command_as_user(command)}`) exited with code '
+                   f'{rc}. Check that the account exists and that the SSH '
+                   'user can run this command without a password. '
+                   f'{stdout}\n{stderr}')
+        if rc == _SUBMIT_USER_REFUSED_RETURNCODE:
+            raise SubmitUserRefusedError(message)
+        raise RuntimeError(message)
 
     def _command_as_user(self, argv: List[str]) -> str:
         if self.slurm_user is None:
