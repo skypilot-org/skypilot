@@ -61,6 +61,49 @@ def test_detects_submit_as_user_config(monkeypatch, slurm_config, expected):
     assert global_user_state._slurm_submit_as_user_enabled() is expected
 
 
+def test_enabled_clouds_by_workspace_matches_single_reads(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    cap = cloud.CloudCapability.COMPUTE
+    global_user_state.set_enabled_clouds(['AWS', 'local', 'Kubernetes'],
+                                         cap,
+                                         workspace='alpha')
+    global_user_state.set_enabled_clouds(['GCP'], cap, workspace='beta')
+
+    got = global_user_state.get_cached_enabled_clouds_by_workspace(
+        cap, ['alpha', 'missing', 'beta', 'alpha'])
+
+    def names(workspace):
+        return [repr(c) for c in got[workspace]]
+
+    assert names('alpha') == [
+        repr(c)
+        for c in global_user_state.get_cached_enabled_clouds(cap,
+                                                             workspace='alpha')
+    ]
+    assert names('beta') == ['GCP']
+    assert names('missing') == []
+    # A removed cloud name stored from an older release is skipped, and a
+    # repeated workspace is not queried as a second row.
+    assert 'local' not in names('alpha')
+    assert list(got) == ['alpha', 'missing', 'beta']
+
+
+def test_enabled_clouds_by_workspace_chunks_large_input(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    cap = cloud.CloudCapability.COMPUTE
+    workspaces = [f'ws-{i}' for i in range(5)]
+    for workspace in workspaces:
+        global_user_state.set_enabled_clouds(['AWS'], cap, workspace=workspace)
+
+    got = global_user_state.get_cached_enabled_clouds_by_workspace(
+        cap, workspaces)
+
+    assert {ws: [repr(c) for c in clouds] for ws, clouds in got.items()
+           } == {ws: ['AWS'] for ws in workspaces}
+
+
 def test_get_returns_empty_when_no_row(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     assert global_user_state.get_cached_check_results('default') == {}

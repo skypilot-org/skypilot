@@ -1,5 +1,4 @@
 """SDK functions for cluster/job management."""
-import concurrent.futures
 import itertools
 import json
 import shlex
@@ -1754,26 +1753,9 @@ def storage_delete(name: str) -> None:
 # ===================
 # = Catalog Observe =
 # ===================
-@usage_lib.entrypoint
-def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False,
-                   workspace_ref: Optional[str] = None) -> List[str]:
-    if workspace is None:
-        workspace = skypilot_config.get_active_workspace()
-    else:
-        # A read: this only reports which clouds/contexts the workspace has
-        # enabled, so read access is the right level. Requiring write would
-        # deny a workspace the caller can legitimately see (read-only
-        # visibility for non-members), which in turn fails the whole
-        # `enabled_clouds_batch` fan-out below and empties the dashboard's
-        # "Enabled infra" column and Infra page.
-        workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(),
-            workspace,
-            action=workspace_constants.WORKSPACE_ACTION_READ,
-            workspace_ref=workspace_ref)
-    cached_clouds = global_user_state.get_cached_enabled_clouds(
-        sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
+def _enabled_cloud_names(cached_clouds: List['clouds.Cloud'], expand: bool,
+                         workspace: str) -> List[str]:
+    """Same names `enabled_clouds` returns, without the permission check."""
     with skypilot_config.local_active_workspace_ctx(workspace):
         if not expand:
             return [cloud.canonical_name() for cloud in cached_clouds]
@@ -1794,10 +1776,32 @@ def enabled_clouds(workspace: Optional[str] = None,
         # We do not sort slurm infras alphabetically because the
         # default partition should appear first.
         # Ordering of slurm infras is enforced in Slurm implementation.
-        all_infras = sorted(enabled_ssh_infras) + sorted(
+        return sorted(enabled_ssh_infras) + sorted(
             enabled_k8s_infras) + enabled_slurm_infras + sorted(
                 enabled_cloud_infras)
-        return all_infras
+
+
+@usage_lib.entrypoint
+def enabled_clouds(workspace: Optional[str] = None,
+                   expand: bool = False,
+                   workspace_ref: Optional[str] = None) -> List[str]:
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
+    else:
+        # A read: this only reports which clouds/contexts the workspace has
+        # enabled, so read access is the right level. Requiring write would
+        # deny a workspace the caller can legitimately see (read-only
+        # visibility for non-members) and empty the dashboard's
+        # "Enabled infra" column and Infra page. The batch endpoint
+        # filters with this same read set before it reads.
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(),
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=workspace_ref)
+    cached_clouds = global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
+    return _enabled_cloud_names(cached_clouds, expand, workspace)
 
 
 @usage_lib.entrypoint
@@ -1816,6 +1820,11 @@ def enabled_clouds_batch(workspaces: List[str],
                          expand: bool = False) -> Dict[str, List[str]]:
     """Returns enabled clouds for multiple workspaces in a single call.
 
+    One query reads every workspace. The per-workspace permission check in
+    `enabled_clouds` is not repeated: this already drops workspaces the
+    caller cannot read, and calling it again opened a database session per
+    workspace on the dashboard path.
+
     Args:
         workspaces: List of workspace names to query.
         expand: Whether to expand Kubernetes and SSH to list of resource pools.
@@ -1828,13 +1837,12 @@ def enabled_clouds_batch(workspaces: List[str],
         workspaces_core.workspaces_for_user(
             common_utils.get_current_user().id).keys())
     allowed = [ws for ws in workspaces if ws in accessible]
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {
-            ws: executor.submit(enabled_clouds, workspace=ws, expand=expand)
-            for ws in allowed
-        }
-        return {ws: future.result() for ws, future in futures.items()}
+    cached = global_user_state.get_cached_enabled_clouds_by_workspace(
+        sky_cloud.CloudCapability.COMPUTE, allowed)
+    return {
+        ws: _enabled_cloud_names(cached.get(ws, []), expand, ws)
+        for ws in allowed
+    }
 
 
 @usage_lib.entrypoint

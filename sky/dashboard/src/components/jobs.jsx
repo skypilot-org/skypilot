@@ -111,6 +111,35 @@ const CLUSTER_JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-cluster-jobs-page-size';
 const POOLS_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 const POOLS_PAGE_SIZE_STORAGE_KEY = 'skypilot-pools-page-size';
 
+// The Mine/Everyone toggle is remembered across reloads, like the clusters
+// page's My/All toggle. localStorage can throw when site data is blocked; the
+// scope then only lasts for the session.
+const OWNER_SCOPE_STORAGE_KEY = 'skypilot-dashboard-jobs-owner-scope';
+const isOwnerScope = (value) => value === 'mine' || value === 'all';
+
+const readStoredOwnerScope = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = window.localStorage.getItem(OWNER_SCOPE_STORAGE_KEY);
+    return isOwnerScope(stored) ? stored : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeStoredOwnerScope = (scope) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, scope);
+  } catch (e) {
+    // Ignore: the scope still applies for this session via state/URL.
+  }
+};
+
 // Define status groups for active and finished jobs
 export const statusGroups = {
   active: [
@@ -438,10 +467,8 @@ export function ManagedJobs() {
     [pluginFilterProps]
   );
   // Filters and the shareable view state both live in the URL, keyed by name.
-  const { filters, setFilters, view, setView } = useUrlFilterState(
-    filterSchema,
-    JOB_VIEW_SCHEMA
-  );
+  const { filters, setFilters, view, setView, initialQuery } =
+    useUrlFilterState(filterSchema, JOB_VIEW_SCHEMA);
   const [valueList, setValueList] = useState({
     name: [],
     user: [],
@@ -602,6 +629,7 @@ export function ManagedJobs() {
         filters={filters}
         view={view}
         setView={setView}
+        initialQuery={initialQuery}
         onUserFilter={handleUserFilterClick}
         onRefresh={handleRefresh}
         poolsData={poolsData}
@@ -718,6 +746,7 @@ export function ManagedJobsTable({
   filters,
   view,
   setView,
+  initialQuery = {},
   onUserFilter,
   onRefresh,
   poolsData,
@@ -1199,6 +1228,7 @@ export function ManagedJobsTable({
   // Leaves `activeTab` alone — Active/All is orthogonal to ownership.
   const selectScope = React.useCallback(
     (scope) => {
+      writeStoredOwnerScope(scope);
       if (scope === userScope && !statusParam && currentPage === 1) return;
       // Invalidate the old scope before the transition commits. Neither its
       // empty state nor a late response should render under the new heading.
@@ -1543,6 +1573,15 @@ export function ManagedJobsTable({
         if (cancelled) return;
         if (info && info.id && info.id !== 'local') {
           setCurrentUser({ id: info.id, name: info.name || info.id });
+          // Settled before userResolved flips, so the first fetch already
+          // uses it. A deep-linked `?owner=` wins and is remembered like a
+          // click on the toggle.
+          if (isOwnerScope(initialQuery.owner)) {
+            writeStoredOwnerScope(initialQuery.owner);
+          } else {
+            const stored = readStoredOwnerScope();
+            if (stored) setUserScope(stored);
+          }
         } else {
           setUserScope('all');
         }
