@@ -8,6 +8,7 @@ from unittest import mock
 import pytest
 
 from sky import dag as dag_lib
+from sky import exceptions
 from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
@@ -113,6 +114,62 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     # No status logline is emitted when the fetch fails - the caller logs the
     # transient error reason instead.
     assert mock_logger.info.call_count == 0
+
+
+def _non_grpc_handle():
+    handle = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    handle.is_grpc_enabled_with_flag = False
+    handle.get_command_runners.return_value = [mock.MagicMock()]
+    return handle
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch.object(cloud_vm_ray_backend.CloudVmRayBackend, 'run_on_head')
+async def test_get_job_status_command_timeout_is_transient(
+        mock_run_on_head, mock_logger):
+    """The command gets a timeout that ends before the caller's 30s wait, and
+    the runner's timeout returncode becomes a transient error."""
+    mock_run_on_head.return_value = (124, '', 'Command timed out')
+
+    job_status, error_reason = await utils.get_job_status(
+        backend=cloud_vm_ray_backend.CloudVmRayBackend(),
+        cluster_name='test-cluster',
+        job_id=1,
+        handle=_non_grpc_handle(),
+        runtime_checked=True)
+
+    assert job_status is None
+    assert error_reason is not None and 'Returncode: 124' in error_reason
+    timeout = mock_run_on_head.call_args.kwargs['timeout']
+    assert 1 <= timeout < utils._JOB_STATUS_FETCH_TIMEOUT_SECONDS
+
+
+@mock.patch.object(cloud_vm_ray_backend.CloudVmRayBackend, 'run_on_head')
+def test_backend_get_job_status_past_deadline_starts_nothing(mock_run_on_head):
+    with pytest.raises(exceptions.CommandFailureException):
+        cloud_vm_ray_backend.CloudVmRayBackend().get_job_status(
+            _non_grpc_handle(), [1], deadline=time.monotonic())
+    mock_run_on_head.assert_not_called()
+
+
+@mock.patch.object(cloud_vm_ray_backend, 'SkyletClient')
+def test_backend_get_job_status_grpc_timeout_bounded_by_deadline(
+        mock_client_cls):
+    """Time spent getting the gRPC channel counts against the deadline."""
+    handle = _non_grpc_handle()
+    handle.is_grpc_enabled_with_flag = True
+    handle.get_grpc_channel.side_effect = lambda: time.sleep(1)
+    mock_client_cls.return_value.get_job_status.return_value = mock.MagicMock(
+        job_statuses={})
+
+    cloud_vm_ray_backend.CloudVmRayBackend().get_job_status(
+        handle, [1], deadline=time.monotonic() + 5)
+
+    # 5s deadline, minus 1s spent getting the channel, minus the 1s margin.
+    timeout = mock_client_cls.return_value.get_job_status.call_args.kwargs[
+        'timeout']
+    assert 1 <= timeout <= 3.1
 
 
 @pytest.mark.asyncio
