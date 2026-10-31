@@ -134,6 +134,25 @@ Once you have configured your Slurm cluster:
       $ sky launch --infra slurm/mycluster/mypartition task.yaml
 
 
+Converting existing Slurm scripts
+---------------------------------
+
+If you already have ``sbatch`` scripts, ``sky utils convert-slurm`` will
+translate them to a SkyPilot task YAML:
+
+.. code-block:: bash
+
+   $ sky utils convert-slurm my-job.slurm my-job.sky.yaml
+   $ sky launch -c my-job my-job.sky.yaml
+
+The converter maps ``#SBATCH`` directives to their SkyPilot equivalents
+(including ``--time`` → ``autostop``, ``--partition`` → ``resources.infra``,
+and other directives → ``config.slurm.sbatch_options`` for round-tripping
+to Slurm), rewrites ``SLURM_*`` env vars in the body, and translates
+``srun`` invocations based on Slurm semantics. See
+:ref:`slurm-to-skypilot` for the full directive mapping and details.
+
+
 Viewing cluster status
 ----------------------
 
