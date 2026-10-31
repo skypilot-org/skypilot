@@ -9,9 +9,11 @@ from typing import List, Optional, Tuple
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
 from sky.server.requests import requests as api_requests
+from sky.server.requests.queues import db_queue
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.utils import common_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -102,6 +104,45 @@ class QueueBackendFactory(abc.ABC):
             process.kill()
 
 
+class DbQueueBackend(QueueBackend):
+    """Queue stored in the request database (see ``db_queue``)."""
+
+    def __init__(self, schedule_type: str):
+        super().__init__()
+        # Also the metric label when reporting queue wait.
+        self._schedule_type = schedule_type
+        # SQLiteConn keeps one connection per thread.
+        self._db = db_utils.SQLiteConn(db_queue.get_db_path(),
+                                       db_queue.create_table)
+
+    def put(self, item: Tuple[str, bool, bool]) -> None:
+        db_queue.put(self._db, self._schedule_type, item)
+
+    async def put_async(self, item: Tuple[str, bool, bool]) -> None:
+        await db_queue.put_async(self._db, self._schedule_type, item)
+
+    def get(self) -> Optional[Tuple[str, bool, bool]]:
+        claimed = db_queue.claim(self._db, self._schedule_type)
+        if claimed is None:
+            return None
+        item, enqueued_at = claimed
+        _observe_queue_wait(self._schedule_type, enqueued_at)
+        return item
+
+    def qsize(self) -> int:
+        return db_queue.size(self._db, self._schedule_type)
+
+
+class DbQueueFactory(QueueBackendFactory):
+    """Factory for queues stored in the request database.
+
+    The database is the shared state, so there is no background process.
+    """
+
+    def create_queue(self, schedule_type: str) -> QueueBackend:
+        return DbQueueBackend(schedule_type)
+
+
 class LocalQueueBackend(QueueBackend):
     """Process-local queue (thread-safe, no IPC)."""
 
@@ -157,17 +198,40 @@ class MultiprocessingQueueBackend(QueueBackend):
 
 
 class LocalQueueFactory(QueueBackendFactory):
-    """Factory for process-local queues."""
+    """Factory for process-local queues.
+
+    Deprecated: the default request queue uses the request database. Remove
+    the queue factory registration from your plugin.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+        logger.warning('LocalQueueFactory is deprecated and will be removed in '
+                       'a future release. The default request queue now uses '
+                       'the request database. Remove the queue factory '
+                       'registration from your plugin.')
 
     def create_queue(self, schedule_type: str) -> QueueBackend:
         return LocalQueueBackend(schedule_type)
 
 
 class MultiprocessingQueueFactory(QueueBackendFactory):
-    """Factory for multiprocessing queues with a shared manager."""
+    """Factory for multiprocessing queues with a shared manager.
+
+    Deprecated: the default request queue uses the request database, with no
+    port or manager process. Remove the queue factory registration from your
+    plugin.
+    """
 
     def __init__(self, port: Optional[int] = None):
         super().__init__()
+        # TODO(tobocop2): Use the standard decorator once #11190 adds it.
+        logger.warning('MultiprocessingQueueFactory is deprecated and will be '
+                       'removed in a future release. The default request '
+                       'queue now uses the request database and needs no port '
+                       'or manager process. Remove the queue factory '
+                       'registration from your plugin.')
         self._port = (port if port is not None else
                       mp_queue.get_queue_manager_port())
 
@@ -202,7 +266,7 @@ def get_queue_backend_factory() -> QueueBackendFactory:
     """Get the registered queue backend factory."""
     if _queue_backend_factory is not None:
         return _queue_backend_factory
-    return MultiprocessingQueueFactory()
+    return DbQueueFactory()
 
 
 def set_queue_backend_factory(factory: QueueBackendFactory) -> None:

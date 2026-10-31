@@ -1,8 +1,10 @@
 """Unit tests for sky.server.requests.executor module."""
 import asyncio
 import concurrent.futures
+import dataclasses
 import functools
 import gc
+import multiprocessing
 import os
 import pathlib
 import pickle
@@ -2564,3 +2566,88 @@ def test_config_override_infra_keys_gated_through_entry_point(
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+_FAKE_MANAGER = object()
+
+
+@pytest.fixture
+def start_without_workers(monkeypatch):
+    """Runs executor.start() with no plugin factory and no worker threads."""
+    monkeypatch.setattr(executor.queue_base, '_queue_backend_factory', None)
+    monkeypatch.setattr(executor, '_queue_factory', None)
+    monkeypatch.setattr(executor.RequestWorker, 'run_in_background',
+                        lambda self: None)
+    # No test may start a real queue manager process: fake the only factory
+    # that starts one, so a wrong choice cannot leak a process either.
+    monkeypatch.setattr(executor.queue_base.MultiprocessingQueueFactory,
+                        'start', lambda self: _FAKE_MANAGER)
+
+    def _start():
+        return executor.start(
+            server_config.compute_server_config(deploy=True, quiet=True))
+
+    return _start
+
+
+def test_start_uses_the_database_queue_and_no_queue_process(
+        start_without_workers):
+    """With no plugin factory, the database queue needs no queue process."""
+    queue_process, workers = start_without_workers()
+
+    assert queue_process is None
+    assert len(workers) == 2
+    assert isinstance(
+        executor._queue_factory,  # pylint: disable=protected-access
+        executor.queue_base.DbQueueFactory)
+
+
+def test_start_uses_the_registered_factory_and_its_queue_process(
+        start_without_workers):
+    """A registered multiprocessing factory still starts its manager."""
+    plugin_factory = executor.queue_base.MultiprocessingQueueFactory()
+    executor.queue_base.set_queue_backend_factory(plugin_factory)
+
+    queue_process, _ = start_without_workers()
+
+    assert executor._queue_factory is plugin_factory  # pylint: disable=protected-access
+    assert queue_process is _FAKE_MANAGER
+
+
+def _resolve_factory_in_new_process(plugin, results):
+    """Registers the plugin factory, like load_plugins does, and resolves."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import plugins as plugins_lib
+    from sky.server.requests.queues import base as queue_base_lib
+    if plugin == 'local':
+        plugins_lib.ExtensionContext().register_queue_backend_factory(
+            queue_base_lib.LocalQueueFactory())
+    results.put(type(queue_base_lib.get_queue_backend_factory()).__name__)
+
+
+@pytest.mark.parametrize('plugin,factory_name', [
+    (None, 'DbQueueFactory'),
+    ('local', 'LocalQueueFactory'),
+])
+def test_producer_and_consumer_processes_resolve_the_same_factory(
+        monkeypatch, plugin, factory_name):
+    """The server and a spawned process pick the same queue backend."""
+    monkeypatch.setattr(executor.queue_base, '_queue_backend_factory', None)
+    if plugin == 'local':
+        executor.queue_base.set_queue_backend_factory(
+            executor.queue_base.LocalQueueFactory())
+    parent = type(executor.queue_base.get_queue_backend_factory()).__name__
+
+    ctx = multiprocessing.get_context('spawn')
+    results = ctx.Queue()
+    child_process = ctx.Process(target=_resolve_factory_in_new_process,
+                                args=(plugin, results))
+    child_process.start()
+    try:
+        child = results.get(timeout=60)
+    finally:
+        child_process.join(timeout=30)
+        if child_process.is_alive():
+            child_process.kill()
+
+    assert parent == child == factory_name

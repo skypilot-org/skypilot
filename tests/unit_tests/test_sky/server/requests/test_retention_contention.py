@@ -76,11 +76,13 @@ async def test_delete_budgets_and_post_commit_writer(retention, monkeypatch,
     sizes_by_id = dict(zip(ids, sizes))
     commits = []
     pauses = []
-    original = db.execute_and_commit_async
+    original = db.execute_many_and_commit_async
 
-    async def commit(sql, parameters=None):
-        await original(sql, parameters)
-        commits.append(list(parameters))
+    async def commit(statements):
+        statements = list(statements)
+        await original(statements)
+        # The last statement deletes the request rows of the batch.
+        commits.append(list(statements[-1][1]))
 
     async def pause(seconds):
         pauses.append(seconds)
@@ -90,7 +92,7 @@ async def test_delete_budgets_and_post_commit_writer(retention, monkeypatch,
                 'INSERT OR REPLACE INTO requests (request_id) VALUES (?)',
                 ('admitted',))
 
-    monkeypatch.setattr(db, 'execute_and_commit_async', commit)
+    monkeypatch.setattr(db, 'execute_many_and_commit_async', commit)
     monkeypatch.setattr(requests.asyncio, 'sleep', pause)
     await backend.delete_requests(ids + ['already-absent'])
     deleted = [rid for batch in commits for rid in batch]

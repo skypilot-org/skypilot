@@ -1,11 +1,4 @@
-"""Tests for queue backends' queue-wait metric.
-
-The queue-wait metric must measure time between *enqueue* and *dequeue*, not
-time since request creation. These tests pin that contract for the in-memory
-``LocalQueueBackend``: the dequeued item is returned unchanged, and the wait
-recorded is measured from the (latest) ``put()`` — so a re-enqueue resets the
-reference and excludes any time the request spent paused or running.
-"""
+"""Tests for the queue backend factories and plugin hooks."""
 
 import socket
 import time
@@ -13,6 +6,7 @@ from unittest import mock
 
 import pytest
 
+from sky.server import plugins
 from sky.server.requests.queues import base
 
 
@@ -25,7 +19,27 @@ def _patch_metric(monkeypatch):
     return mock_hist
 
 
-def test_local_backend_roundtrip_preserves_item(monkeypatch):
+def test_default_factory_is_the_database_queue(monkeypatch):
+    monkeypatch.setattr(base, '_queue_backend_factory', None)
+
+    assert isinstance(base.get_queue_backend_factory(), base.DbQueueFactory)
+    assert base.DbQueueFactory().start() is None
+
+
+def test_registered_factory_wins_over_the_default(monkeypatch):
+    monkeypatch.setattr(base, '_queue_backend_factory', None)
+    plugin_factory = mock.MagicMock(spec=base.QueueBackendFactory)
+
+    base.set_queue_backend_factory(plugin_factory)
+
+    assert base.get_queue_backend_factory() is plugin_factory
+
+
+# The in-memory factories stay importable and usable as opt-in plugin
+# backends.
+
+
+def test_in_memory_local_backend_roundtrip_preserves_item(monkeypatch):
     _patch_metric(monkeypatch)
     backend = base.LocalQueueBackend('long')
 
@@ -36,7 +50,7 @@ def test_local_backend_roundtrip_preserves_item(monkeypatch):
     assert backend.get() is None
 
 
-def test_local_backend_observes_wait_since_enqueue(monkeypatch):
+def test_in_memory_local_backend_observes_wait_since_enqueue(monkeypatch):
     mock_hist = _patch_metric(monkeypatch)
     backend = base.LocalQueueBackend('short')
 
@@ -51,7 +65,7 @@ def test_local_backend_observes_wait_since_enqueue(monkeypatch):
     assert observed >= 0.04
 
 
-def test_local_backend_requeue_resets_wait(monkeypatch):
+def test_in_memory_local_backend_requeue_resets_wait(monkeypatch):
     """A re-enqueue measures only the new wait."""
     mock_hist = _patch_metric(monkeypatch)
     backend = base.LocalQueueBackend('long')
@@ -75,7 +89,7 @@ def test_local_backend_requeue_resets_wait(monkeypatch):
     assert second_wait < first_wait / 2
 
 
-def test_local_backend_no_emit_when_metrics_disabled(monkeypatch):
+def test_in_memory_local_backend_no_emit_when_metrics_disabled(monkeypatch):
     monkeypatch.setattr(base.metrics_utils, 'METRICS_ENABLED', False)
     mock_hist = mock.MagicMock()
     monkeypatch.setattr(base.metrics_utils, 'SKY_APISERVER_QUEUE_WAIT_SECONDS',
@@ -108,7 +122,8 @@ def mp_backend():
         factory.stop(process)
 
 
-def test_mp_backend_roundtrip_and_observes_wait(mp_backend, monkeypatch):
+def test_in_memory_mp_backend_roundtrip_and_observes_wait(
+        mp_backend, monkeypatch):
     mock_hist = _patch_metric(monkeypatch)
 
     item = ('req-5', False, True)
@@ -125,7 +140,7 @@ def test_mp_backend_roundtrip_and_observes_wait(mp_backend, monkeypatch):
     mock_hist.labels.assert_called_once()
 
 
-def test_mp_backend_requeue_resets_wait(mp_backend, monkeypatch):
+def test_in_memory_mp_backend_requeue_resets_wait(mp_backend, monkeypatch):
     mock_hist = _patch_metric(monkeypatch)
 
     item = ('req-6', False, True)
@@ -141,3 +156,69 @@ def test_mp_backend_requeue_resets_wait(mp_backend, monkeypatch):
     first_wait, second_wait = observed[0], observed[1]
     assert first_wait >= 0.25
     assert second_wait < first_wait / 2
+
+
+def _free_port():
+    sock = socket.socket()
+    sock.bind(('localhost', 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def test_plugin_registers_multiprocessing_factory(monkeypatch):
+    """A plugin that registers MultiprocessingQueueFactory(port) keeps working.
+
+    A plugin that registers the factory to use its own port.
+    """
+    monkeypatch.setattr(base, '_queue_backend_factory', None)
+    context = plugins.ExtensionContext(context=plugins.PluginContext.MAIN)
+    context.register_queue_backend_factory(
+        base.MultiprocessingQueueFactory(_free_port()))
+
+    factory = base.get_queue_backend_factory()
+    assert isinstance(factory, base.MultiprocessingQueueFactory)
+    process = factory.start()
+    try:
+        queue = factory.create_queue('long')
+        queue.put(('req-plugin-mp', False, True))
+        assert queue.get() == ('req-plugin-mp', False, True)
+        assert queue.get() is None
+    finally:
+        factory.stop(process)
+
+
+def test_plugin_sets_local_factory(monkeypatch):
+    """A caller of set_queue_backend_factory(LocalQueueFactory()) keeps working.
+
+    A caller that sets the process-local factory, for example in a test.
+    """
+    monkeypatch.setattr(base, '_queue_backend_factory', None)
+    base.set_queue_backend_factory(base.LocalQueueFactory())
+
+    factory = base.get_queue_backend_factory()
+    assert isinstance(factory, base.LocalQueueFactory)
+    assert factory.start() is None
+    queue = factory.create_queue('long')
+    queue.put(('req-plugin-local', True, False))
+    assert queue.get() == ('req-plugin-local', True, False)
+    assert queue.get() is None
+
+
+@pytest.mark.parametrize('factory_cls,args', [
+    (base.LocalQueueFactory, ()),
+    (base.MultiprocessingQueueFactory, (12345,)),
+])
+def test_deprecated_factory_warns(monkeypatch, factory_cls, args):
+    warning = mock.MagicMock()
+    monkeypatch.setattr(base.logger, 'warning', warning)
+
+    first = factory_cls(*args)
+
+    warning.assert_called_once()
+    message = warning.call_args[0][0]
+    assert factory_cls.__name__ in message
+    assert 'deprecated' in message
+    # Construction still succeeds; the compatibility tests above run the
+    # queues themselves.
+    assert isinstance(first, base.QueueBackendFactory)
