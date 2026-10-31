@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
@@ -95,28 +96,41 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         sandbox_secrets.append(modal_env_secret)
     user_ports = sorted(
         set(config.ports_to_open_on_launch or []) - {modal_utils.SSH_PORT})
-    sandbox = modal_adaptor.modal.Sandbox.create(
-        'bash',
-        '-lc',
-        modal_utils.get_ssh_start_command(public_key),
-        app=app,
-        name=cluster_name_on_cloud,
-        tags={
-            'skypilot-cluster': cluster_name_on_cloud,
-        },
-        image=modal_utils.get_image(modal_docker_image),
-        secrets=sandbox_secrets,
-        encrypted_ports=user_ports,
-        unencrypted_ports=[modal_utils.SSH_PORT],
-        timeout=modal_timeout,
-        idle_timeout=modal_idle_timeout,
-        gpu=modal_gpu,
-        region=modal_region,
-        cpu=((modal_cpu, modal_cpu) if modal_cpu is not None else None),
-        memory=((modal_memory,
-                 modal_memory) if modal_memory is not None else None),
-        volumes=sandbox_volumes,
-    )
+    try:
+        sandbox = modal_adaptor.modal.Sandbox.create(
+            'bash',
+            '-lc',
+            modal_utils.get_ssh_start_command(public_key),
+            app=app,
+            name=cluster_name_on_cloud,
+            tags={
+                'skypilot-cluster': cluster_name_on_cloud,
+            },
+            image=modal_utils.get_image(modal_docker_image),
+            secrets=sandbox_secrets,
+            encrypted_ports=user_ports,
+            unencrypted_ports=[modal_utils.SSH_PORT],
+            timeout=modal_timeout,
+            idle_timeout=modal_idle_timeout,
+            gpu=modal_gpu,
+            region=modal_region,
+            cpu=((modal_cpu, modal_cpu) if modal_cpu is not None else None),
+            memory=((modal_memory,
+                     modal_memory) if modal_memory is not None else None),
+            volumes=sandbox_volumes,
+        )
+    except (modal_adaptor.modal.exception.AuthError,
+            modal_adaptor.modal.exception.PermissionDeniedError) as e:
+        # Surfaced in the failover summary instead of a generic "failed to
+        # acquire resources".
+        raise exceptions.InvalidCloudCredentials(
+            f'Modal rejected the credentials: {e}') from e
+    except modal_adaptor.modal.exception.InvalidError as e:
+        # Retrying cannot fix these, e.g. GPU Sandboxes on an account without
+        # a payment method: stop failover instead of suggesting
+        # --retry-until-up.
+        raise exceptions.ProvisionUnsupportedError(
+            f'Modal rejected the Sandbox request: {e}') from e
     # Ensure the SSH tunnel exists before SkyPilot starts probing SSH.
     modal_utils.get_ssh_tunnel(sandbox)
     logger.info(f'Launched Modal Sandbox {sandbox.object_id}.')

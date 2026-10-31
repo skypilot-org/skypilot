@@ -724,6 +724,52 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
     }]
 
 
+@pytest.mark.parametrize('modal_error,expected', [
+    ('InvalidError', exceptions.ProvisionUnsupportedError),
+    ('AuthError', exceptions.InvalidCloudCredentials),
+    ('PermissionDeniedError', exceptions.InvalidCloudCredentials),
+])
+def test_modal_run_instances_translates_account_errors(monkeypatch,
+                                                       modal_error, expected):
+    # Errors that retrying cannot fix must reach the user instead of a generic
+    # "failed to acquire resources".
+    modal_exception = pytest.importorskip('modal.exception')
+    message = 'Please add a payment method to use T4 GPU sandboxes.'
+
+    class FakeSandbox:
+
+        @staticmethod
+        def create(*args, **kwargs):
+            del args, kwargs
+            raise getattr(modal_exception, modal_error)(message)
+
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        lambda name, environment_name=None: {})
+    monkeypatch.setattr(modal_instance.modal_utils, 'get_app',
+                        lambda create_if_missing, environment_name=None: 'app')
+    monkeypatch.setattr(modal_instance.modal_utils, 'get_image',
+                        lambda docker_image=None: 'image')
+    monkeypatch.setattr(modal_instance.modal_adaptor, 'modal',
+                        SimpleNamespace(Sandbox=FakeSandbox,
+                                        exception=modal_exception))
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+
+    with pytest.raises(expected, match='payment method'):
+        modal_instance.run_instances(
+            region='auto',
+            cluster_name='test',
+            cluster_name_on_cloud='test-on-cloud',
+            config=_provision_config({
+                'PublicKey': 'ssh-ed25519 test',
+                'Gpu': 'T4',
+                'Cpu': 2.0,
+                'Memory': 16 * 1024,
+                'Timeout': 24 * 60 * 60,
+            }))
+
+
 def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
     sandbox = SimpleNamespace(object_id='sb-existing')
     monkeypatch.setattr(
