@@ -1882,12 +1882,6 @@ function JobDetailsContent({
         </span>
       )}
       {field(
-        'Workspace',
-        <Link href="/workspaces">
-          {jobData.workspace_name || jobData.workspace || 'default'}
-        </Link>
-      )}
-      {field(
         'Duration',
         <span className="block">
           {jobData.started_at || totalDuration > 0
@@ -1899,9 +1893,13 @@ function JobDetailsContent({
               <TimestampWithTooltip date={jobData.started_at} />
             </span>
           )}
-        </span>,
-        // Task pages have an extra Job cell; let timing fill that row.
-        { newRow: !taskContext }
+        </span>
+      )}
+      {field(
+        'Workspace',
+        <Link href="/workspaces">
+          {jobData.workspace_name || jobData.workspace || 'default'}
+        </Link>
       )}
       {field('Recoveries', jobData.recoveries || 0)}
       {batchTotal != null && field('Batch Progress', batchBar())}

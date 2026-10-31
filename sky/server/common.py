@@ -48,6 +48,7 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
     import aiohttp
@@ -495,6 +496,11 @@ def get_server_url(host: Optional[str] = None) -> str:
         endpoint = (f'http://{_host_to_url_host(host)}:'
                     f'{get_local_api_server_port()}')
 
+    # A jobs/serve controller always calls the API server on its own host, so
+    # its requests reach the server from loopback, never a configured remote
+    # endpoint.
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return endpoint.rstrip('/')
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
@@ -760,6 +766,19 @@ def handle_request_error(response: 'requests.Response') -> None:
                 # programmatically; the CLI already renders this cleanly.
                 raise exceptions.PermissionDeniedError(
                     detail if isinstance(detail, str) else str(detail))
+    # A 404 that hides an infra target outside the caller's workspaces. Keyed on
+    # the error code so FastAPI's own 404 (a route an old server lacks) still
+    # raises HTTPError below.
+    if response.status_code == 404:
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            detail = None
+        if (isinstance(detail, dict) and detail.get('error')
+                == workspace_constants.INFRA_TARGET_NOT_FOUND):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InfraTargetNotFoundError(
+                    str(detail.get('message', 'Not found.')))
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
 

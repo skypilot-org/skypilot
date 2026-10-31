@@ -455,7 +455,17 @@ def _consolidated_launch(
         os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
-    log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # Name the log by the id span, not the full list: concurrent batch
+    # launches interleave ids, and the list can pass the 255-byte limit.
+    # No two requests share an id, so the span's first id keeps it unique.
+    first_id, last_id = min(job_ids), max(job_ids)
+    log_name = (str(first_id)
+                if first_id == last_id else f'{first_id}-{last_id}')
+    log_path = os.path.join(log_dir, f'submit-job-{log_name}.log')
+    # The span may cover other requests' ids; record this request's own.
+    # The runner appends to the log.
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(f'Job IDs: {job_ids_str}\n')
     # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
     # a clean server env on the subprocess by default to keep per-request
     # env pollution from leaking into the long-lived controller process

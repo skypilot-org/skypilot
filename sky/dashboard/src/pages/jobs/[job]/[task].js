@@ -448,12 +448,6 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
         </span>
       )}
       {field(
-        'Workspace',
-        <Link href="/workspaces">
-          {taskData.workspace_name || taskData.workspace || 'default'}
-        </Link>
-      )}
-      {field(
         'Duration',
         <span className="block">
           {taskData.started_at || taskData.job_duration > 0
@@ -466,6 +460,12 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
             </span>
           )}
         </span>
+      )}
+      {field(
+        'Workspace',
+        <Link href="/workspaces">
+          {taskData.workspace_name || taskData.workspace || 'default'}
+        </Link>
       )}
       {field('Recoveries', taskData.recoveries || 0)}
       <div

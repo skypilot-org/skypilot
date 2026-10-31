@@ -68,6 +68,12 @@ You can layer configurations from multiple sources. When multiple sources are sp
   * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
   * ``<cloud>.ssh_proxy_command`` (see :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`)
 
+  With a remote API server, a client's value for these is ignored:
+
+  * :ref:`kubernetes.allowed_contexts <config-yaml-kubernetes-allowed-contexts>`
+  * :ref:`ssh.allowed_node_pools <config-yaml-ssh-allowed-node-pools>`
+  * :ref:`slurm.allowed_clusters <config-yaml-slurm-allowed-clusters>`
+
 .. tip::
 
   If you are the admin of a SkyPilot API server, you can disable overrides or allow only certain fields to be overridden by enforcing an :ref:`admin policy <advanced-policy-config>`.
@@ -207,7 +213,9 @@ And the following in the :ref:`project config file<config-client-project-config>
     labels:
       Owner: project-unique-name
 
-The combined configuration is:
+The combined configuration is shown below. With a remote API server,
+``kubernetes.allowed_contexts`` comes from the server config instead (see the
+note above).
 
 .. code-block:: yaml
 

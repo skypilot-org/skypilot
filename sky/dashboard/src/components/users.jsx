@@ -335,6 +335,30 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   );
 };
 
+// Mirrors check_service_account_token_permission on the server: admins can
+// manage any token, other users only their own, and viewers none.
+export function canManageServiceAccountToken(roleData, token) {
+  if (!roleData || !token) return false;
+  if (roleData.role === 'admin') return true;
+  return roleData.role !== 'viewer' && token.creator_user_hash === roleData.id;
+}
+
+// The server lets any non-viewer create a service account, but only admins
+// can grant the admin role (see _check_role_grantable).
+export function canCreateServiceAccountToken(roleData) {
+  return Boolean(roleData) && roleData.role !== 'viewer';
+}
+
+export function grantableServiceAccountRoles(role) {
+  return role === 'admin' ? ['admin', 'user', 'viewer'] : ['user', 'viewer'];
+}
+
+const SERVICE_ACCOUNT_ROLE_LABELS = {
+  admin: 'Admin',
+  user: 'User',
+  viewer: 'Viewer',
+};
+
 export function Users() {
   const router = useRouter();
   const { userEmail } = useSidebar();
@@ -499,11 +523,15 @@ export function Users() {
     });
   }, [getUserRole]);
 
-  const checkPermissionAndAct = async (action, actionCallback) => {
+  const checkPermissionAndAct = async (
+    action,
+    actionCallback,
+    isAllowed = (roleData) => roleData.role === 'admin'
+  ) => {
     try {
       const roleData = await getUserRole();
 
-      if (roleData.role !== 'admin') {
+      if (!isAllowed(roleData)) {
         setPermissionDenialState({
           open: true,
           message: action,
@@ -983,7 +1011,8 @@ export function Users() {
                 'cannot create service account tokens',
                 () => {
                   setShowCreateDialog(true);
-                }
+                },
+                canCreateServiceAccountToken
               );
             }}
             className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
@@ -2889,9 +2918,11 @@ function ServiceAccountTokensView({
         }
         const data = await response.json();
         if (!cancelled) {
-          setNewToken((prev) =>
-            prev.role ? prev : { ...prev, role: data.role }
-          );
+          // `rbac.default_role` falls back to admin, which a non-admin
+          // cannot grant, so start them on user instead.
+          const grantable = grantableServiceAccountRoles(userRoleCache?.role);
+          const role = grantable.includes(data.role) ? data.role : 'user';
+          setNewToken((prev) => (prev.role ? prev : { ...prev, role }));
         }
       } catch (error) {
         console.error('Failed to get default role:', error);
@@ -2901,7 +2932,7 @@ function ServiceAccountTokensView({
     return () => {
       cancelled = true;
     };
-  }, [showCreateDialog]);
+  }, [showCreateDialog, userRoleCache?.role]);
 
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
@@ -3432,9 +3463,8 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        {/* Show rotate button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show rotate button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3442,11 +3472,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot rotate service account tokens',
+                                  'cannot rotate this service account token',
                                   () => {
                                     setTokenToRotate(token);
                                     setShowRotateDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
@@ -3455,9 +3490,8 @@ function ServiceAccountTokensView({
                             </button>
                           </CustomTooltip>
                         )}
-                        {/* Show delete button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show delete button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3465,11 +3499,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot delete service account tokens',
+                                  'cannot delete this service account token',
                                   () => {
                                     setTokenToDelete(token);
                                     setShowDeleteDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
@@ -3620,9 +3659,13 @@ function ServiceAccountTokensView({
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="viewer">Viewer</SelectItem>
+                      {grantableServiceAccountRoles(userRoleCache?.role).map(
+                        (role) => (
+                          <SelectItem key={role} value={role}>
+                            {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

@@ -1503,6 +1503,27 @@ def is_docker_remote_api_server() -> bool:
     return False
 
 
+def get_api_server_config() -> Dict[str, Any]:
+    """Returns the API server's own config (not this client's)."""
+    response = server_common.make_authenticated_request(
+        'GET', '/workspaces/config', server_url=get_api_server_url())
+    return get_response_from_request_id_dashboard(
+        server_common.get_request_id(response))
+
+
+def update_api_server_config(config: Dict[str, Any]) -> None:
+    """Replaces the API server's config, e.g. to set keys a remote server
+    ignores in a client's config. Restore the original after the test."""
+    body = payloads.UpdateConfigBody(config=config)
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/workspaces/config',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
+    get_response_from_request_id_dashboard(
+        server_common.get_request_id(response))
+
+
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)

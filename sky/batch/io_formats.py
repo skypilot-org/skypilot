@@ -15,7 +15,6 @@ from abc import abstractmethod
 import dataclasses
 from dataclasses import dataclass
 import hashlib
-import inspect
 import io
 import json
 import logging
@@ -33,8 +32,9 @@ class InputReader(ABC):
     """Base class for input readers.
 
     Subclasses register via ``@registry.INPUT_READER_REGISTRY.type_register``.
-    Custom readers defined outside this module are automatically serialized
-    with their source code so they can be reconstructed on remote workers.
+    Only readers registered server-side are accepted; custom formats must be
+    installed and registered on the server, not shipped as source in a
+    submitted task (see ``from_dict``).
 
     Declare fields as dataclass fields. Serialization (``to_dict`` /
     ``from_dict_args``) is handled automatically -- subclasses only need
@@ -49,20 +49,6 @@ class InputReader(ABC):
                 return name
         raise ValueError(f'Unregistered input reader: {type(self).__name__}')
 
-    def _get_class_source(self) -> Optional[str]:
-        """Return module source for custom (non-builtin) readers."""
-        stored = getattr(self, '_class_source_code', None)
-        if stored is not None:
-            return stored
-        if type(self).__module__ != __name__:
-            try:
-                source_file = inspect.getfile(type(self))
-                with open(source_file, encoding='utf-8') as f:
-                    return f.read()
-            except (TypeError, OSError):
-                return None
-        return None
-
     def to_dict(self) -> Dict[str, Any]:
         """Serialize this reader to a dict.
 
@@ -72,26 +58,24 @@ class InputReader(ABC):
         """
         d = {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
         d['format'] = self._format_name()
-        class_source = self._get_class_source()
-        if class_source is not None:
-            d['_class_source'] = class_source
         return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'InputReader':
-        """Reconstruct an InputReader from a dict."""
-        fmt = d.get('format')
-        class_source = d.get('_class_source')
-        if class_source and fmt not in registry.INPUT_READER_REGISTRY:
-            exec(  # pylint: disable=exec-used
-                compile(class_source, '<custom_format>', 'exec'),
-                {'__builtins__': __builtins__})
-        cls = registry.INPUT_READER_REGISTRY.from_str(fmt)
-        assert cls is not None, f'Unknown input reader: {fmt}'
-        instance = cls.from_dict_args(d)
-        if class_source:
-            setattr(instance, '_class_source_code', class_source)
-        return instance
+        """Reconstruct an InputReader from a dict.
+
+        Only formats registered server-side in ``INPUT_READER_REGISTRY`` are
+        accepted. The dict originates from a client-submitted task and is
+        reconstructed on the shared jobs controller, so loading a format class
+        from source embedded in the dict would be remote code execution.
+        Custom formats must be installed and registered on the server.
+        """
+        # from_str resolves aliases and case and raises ValueError for an
+        # unknown name; it returns None only when no format was given.
+        cls = registry.INPUT_READER_REGISTRY.from_str(d.get('format'))
+        if cls is None:
+            raise ValueError('Input reader dict has no `format` key.')
+        return cls.from_dict_args(d)
 
     @classmethod
     def from_dict_args(cls, d: Dict[str, Any]) -> 'InputReader':
@@ -118,8 +102,9 @@ class OutputWriter(ABC):
     """Base class for output writers.
 
     Subclasses register via ``@registry.OUTPUT_WRITER_REGISTRY.type_register``.
-    Custom writers defined outside this module are automatically serialized
-    with their source code so they can be reconstructed on remote workers.
+    Only writers registered server-side are accepted; custom formats must be
+    installed and registered on the server, not shipped as source in a
+    submitted task (see ``from_dict``).
 
     Declare fields as dataclass fields. Serialization (``to_dict`` /
     ``from_dict_args``) is handled automatically -- subclasses only need
@@ -134,20 +119,6 @@ class OutputWriter(ABC):
                 return name
         raise ValueError(f'Unregistered output writer: {type(self).__name__}')
 
-    def _get_class_source(self) -> Optional[str]:
-        """Return module source for custom (non-builtin) writers."""
-        stored = getattr(self, '_class_source_code', None)
-        if stored is not None:
-            return stored
-        if type(self).__module__ != __name__:
-            try:
-                source_file = inspect.getfile(type(self))
-                with open(source_file, encoding='utf-8') as f:
-                    return f.read()
-            except (TypeError, OSError):
-                return None
-        return None
-
     def to_dict(self) -> Dict[str, Any]:
         """Serialize this writer to a dict.
 
@@ -157,26 +128,24 @@ class OutputWriter(ABC):
         """
         d = {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
         d['format'] = self._format_name()
-        class_source = self._get_class_source()
-        if class_source is not None:
-            d['_class_source'] = class_source
         return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'OutputWriter':
-        """Reconstruct an OutputWriter from a dict."""
-        fmt = d.get('format')
-        class_source = d.get('_class_source')
-        if class_source and fmt not in registry.OUTPUT_WRITER_REGISTRY:
-            exec(  # pylint: disable=exec-used
-                compile(class_source, '<custom_format>', 'exec'),
-                {'__builtins__': __builtins__})
-        cls = registry.OUTPUT_WRITER_REGISTRY.from_str(fmt)
-        assert cls is not None, f'Unknown output writer: {fmt}'
-        instance = cls.from_dict_args(d)
-        if class_source:
-            setattr(instance, '_class_source_code', class_source)
-        return instance
+        """Reconstruct an OutputWriter from a dict.
+
+        Only formats registered server-side in ``OUTPUT_WRITER_REGISTRY`` are
+        accepted. The dict originates from a client-submitted task and is
+        reconstructed on the shared jobs controller, so loading a format class
+        from source embedded in the dict would be remote code execution.
+        Custom formats must be installed and registered on the server.
+        """
+        # from_str resolves aliases and case and raises ValueError for an
+        # unknown name; it returns None only when no format was given.
+        cls = registry.OUTPUT_WRITER_REGISTRY.from_str(d.get('format'))
+        if cls is None:
+            raise ValueError('Output writer dict has no `format` key.')
+        return cls.from_dict_args(d)
 
     @classmethod
     def from_dict_args(cls, d: Dict[str, Any]) -> 'OutputWriter':

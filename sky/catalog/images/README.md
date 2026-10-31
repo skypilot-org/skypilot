@@ -88,11 +88,23 @@ into an existing definition (the `image_name` in the templates) rolls the new
 image out to all of them at once; publish a change of Ray or driver into new
 definitions instead, with new tags.
 
-1. Generate a client secret for packer [here](https://portal.azure.com/?feature.msaljs=true#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/1d249f23-c22e-4d02-b62b-a6827bd113fe/isMSAApp~/false).
+Pre-Turing GPUs (`LEGACY_DRIVER_GPUS` in `sky/clouds/utils/gpu_utils.py`)
+keep the old definitions, because the 580 open kernel module in the new GPU
+images does not support them.
+
+1. Create the definitions the templates publish to (`image_name`); packer does
+not create them. Create each with `az sig image-definition create` in the
+gallery the template's `gallery_name` names (gen2 CPU and GPU:
+`skypilot_image_gallery`; gen1 and grid: `skypilot_images`), with the same
+Hyper-V generation and `features` as the definition it replaces
+(`az sig image-definition show`), and a new SKU (publisher, offer and SKU
+must be unique within a gallery).
+
+2. Generate a client secret for packer [here](https://portal.azure.com/?feature.msaljs=true#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/1d249f23-c22e-4d02-b62b-a6827bd113fe/isMSAApp~/false).
 ```bash
 export SECRET=xxxxxx  # Update this
 ```
-2. Build and copy images for all regions for GPU (gen 1 & 2) and CPU (gen 2 only).
+3. Build and copy images for all regions for GPU (gen 1 & 2) and CPU (gen 2 only).
 ```bash
 packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-cpu-ubuntu.pkr.hcl
 packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl

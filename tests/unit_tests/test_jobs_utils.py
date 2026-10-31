@@ -1416,7 +1416,7 @@ class TestControllerSystemLogScoping:
 
 
 class TestParseSubmitLogJobRanges:
-    """Inverse of sky.jobs.server.core._job_ids_to_str (kept as intervals)."""
+    """Parses submit-job log names: id spans, and lists from older versions."""
 
     def test_single_id(self):
         assert utils._parse_submit_log_job_ranges('584') == [(584, 584)]

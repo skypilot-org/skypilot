@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 from sky.clouds import aws as aws_mod
+from sky.clouds import azure as azure_mod
 from sky.clouds import gcp as gcp_mod
 from sky.skylet import constants
 
@@ -131,3 +132,75 @@ def test_legacy_gpu_images_are_not_switched():
         _BAKED_RAY_SUFFIX)
     assert not aws_mod._DEFAULT_GPU_CUDA12_IMAGE_ID.endswith(  # pylint: disable=protected-access
         _BAKED_RAY_SUFFIX)
+
+
+def test_aws_v100_32gb_gets_the_legacy_image(monkeypatch):
+    """p3dn: the CUDA 13 image's open kernel module cannot drive Volta."""
+    assert _aws_default_ami(monkeypatch, {'V100-32GB': 8},
+                            'x86_64') == (aws_mod._DEFAULT_GPU_CUDA12_IMAGE_ID)  # pylint: disable=protected-access
+
+
+def _azure_default_tag(monkeypatch, acc_name, gen):
+    acc = None if acc_name is None else {acc_name: 1}
+    monkeypatch.setattr(azure_mod.Azure, 'get_accelerators_from_instance_type',
+                        classmethod(lambda cls, instance_type: acc))
+    return azure_mod.Azure()._get_default_image_tag(gen, 'some-type')  # pylint: disable=protected-access
+
+
+# Generation is the catalog's cell: 'V1', 'V2' or 'V1,V2' (taken as V2).
+_AZURE_DEFAULT_TAGS = [
+    (None, 'V2', 'skypilot:custom-cpu-ubuntu-v2-ray256'),
+    (None, 'V1,V2', 'skypilot:custom-cpu-ubuntu-v2-ray256'),
+    # Gen1-only CPU types (e.g. Standard_D2_v2) use the gen1 GPU image.
+    (None, 'V1', 'skypilot:custom-gpu-ubuntu-v1-ray256'),
+    ('T4', 'V1,V2', 'skypilot:custom-gpu-ubuntu-v2-ray256'),
+    ('T4', 'V1', 'skypilot:custom-gpu-ubuntu-v1-ray256'),
+    ('A100-80GB', 'V2', 'skypilot:custom-gpu-ubuntu-v2-ray256'),
+    ('H100', 'V2', 'skypilot:custom-gpu-ubuntu-v2-ray256'),
+    ('A10', 'V1,V2', 'skypilot:custom-gpu-ubuntu-v2-grid-ray256'),
+    ('K80', 'V1', 'skypilot:k80-ubuntu-2004'),
+    # Pre-Turing: the -ray256 GPU images ship the 580 open module, which needs
+    # Turing, so these keep the 535-driver images of their generation.
+    ('V100', 'V1,V2', 'skypilot:custom-gpu-ubuntu-v2'),
+    ('V100', 'V1', 'skypilot:custom-gpu-ubuntu-v1'),
+    ('V100-32GB', 'V2', 'skypilot:custom-gpu-ubuntu-v2'),
+    ('M60', 'V1,V2', 'skypilot:custom-gpu-ubuntu-v2'),
+    ('M60', 'V1', 'skypilot:custom-gpu-ubuntu-v1'),
+]
+
+
+@pytest.mark.parametrize('acc_name,gen,tag', _AZURE_DEFAULT_TAGS)
+def test_azure_default_image_tags(monkeypatch, acc_name, gen, tag):
+    assert _azure_default_tag(monkeypatch, acc_name, gen) == tag
+
+
+@pytest.mark.parametrize('acc_name,gen', [(None, 'V2'), (None, 'V1'),
+                                          ('T4', 'V1,V2'), ('A10', 'V1,V2')])
+def test_azure_default_images_have_the_current_ray_baked(
+        monkeypatch, acc_name, gen):
+    """Same as the AWS test above, for a bump of SKY_REMOTE_RAY_VERSION."""
+    assert _azure_default_tag(monkeypatch, acc_name,
+                              gen).endswith(_BAKED_RAY_SUFFIX)
+
+
+_AZURE_TEMPLATES = [t for t in _TEMPLATES if t.startswith('skypilot-azure-')]
+
+
+@pytest.mark.parametrize('template', _AZURE_TEMPLATES)
+def test_azure_templates_publish_only_to_new_definitions(template):
+    """Every SkyPilot version boots the latest version of a definition, so a
+    build published into an old one reaches releases that run another Ray."""
+    text = _read(template)
+    names = re.findall(
+        r'"(skypilot-[a-z0-9-]*(?:\$\{[^}]*\}[a-z0-9-]*)*)"',
+        re.search(r'^\s*image_name\s*=\s*(.*)$', text, re.MULTILINE).group(1))
+    assert names, template
+    for name in names:
+        assert name.endswith(_BAKED_RAY_SUFFIX), (template, name)
+    # Versions are unique per definition: to the minute, so builds on the
+    # same day do not collide.
+    assert 'formatdate("YY.MMDD.hhmm", timestamp())' in text
+
+
+def test_azure_templates_are_found():
+    assert len(_AZURE_TEMPLATES) == 2, _AZURE_TEMPLATES

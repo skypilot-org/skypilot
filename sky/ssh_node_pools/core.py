@@ -116,6 +116,36 @@ def get_all_pools() -> Dict[str, Any]:
     return manager.get_all_pools()
 
 
+# Keys in a pool config, at the pool level and inside each `hosts` entry, that
+# hold a credential. `prepare_hosts_info` writes the sudo password into every
+# host entry, so both levels have to be covered.
+_SECRET_POOL_KEYS = frozenset({'password'})
+
+
+def redact_pool_secrets(pools: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of ``pools`` with credential fields removed.
+
+    Used for callers who may read the pool registry but not manage it. The
+    input is not modified.
+    """
+    redacted: Dict[str, Any] = {}
+    for pool_name, pool_config in pools.items():
+        if not isinstance(pool_config, dict):
+            redacted[pool_name] = pool_config
+            continue
+        clean = {
+            k: v for k, v in pool_config.items() if k not in _SECRET_POOL_KEYS
+        }
+        hosts = clean.get('hosts')
+        if isinstance(hosts, list):
+            clean['hosts'] = [
+                {k: v for k, v in host.items() if k not in _SECRET_POOL_KEYS}
+                if isinstance(host, dict) else host for host in hosts
+            ]
+        redacted[pool_name] = clean
+    return redacted
+
+
 def update_pools(pools_config: Dict[str, Any]) -> None:
     """Update SSH Node Pool configurations."""
     manager = SSHNodePoolManager()

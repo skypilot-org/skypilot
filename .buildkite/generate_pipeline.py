@@ -130,8 +130,12 @@ def _parse_args(args: Optional[str] = None):
         args_list = shlex.split(args)
     else:
         args_list = []
+    # allow_abbrev=False: flags this parser does not define must reach
+    # `pytest --collect-only` unchanged (see pytest_native below). With
+    # abbreviations on, a conftest flag that is a prefix of one defined here
+    # is taken as that flag instead: `--serve` became `--serve-consolidation`.
     parser = argparse.ArgumentParser(
-        description="Process cloud arguments for tests")
+        description="Process cloud arguments for tests", allow_abbrev=False)
 
     # Flags for recognized clouds - use cloud names (e.g., --lambda) to match pytest
     for cloud in all_clouds_in_smoke_tests:

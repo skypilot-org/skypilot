@@ -1,9 +1,11 @@
 """Test skypilot_config"""
 import copy
+import errno
 import json
 import os
 import pathlib
 import shutil
+import sys
 import textwrap
 from unittest import mock
 
@@ -18,6 +20,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import schemas
 from sky.utils import yaml_utils
 
@@ -504,6 +507,111 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
+
+
+def _stale_handle_error() -> OSError:
+    return OSError(errno.ESTALE, os.strerror(errno.ESTALE))
+
+
+def test_config_with_env_retries_a_stale_file_handle(monkeypatch,
+                                                     tmp_path) -> None:
+    """A stale handle (e.g. the file was replaced from another host on a
+    shared filesystem) is retried instead of failing the reload."""
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    sleep = mock.MagicMock()
+    monkeypatch.setattr(skypilot_config.time, 'sleep', sleep)
+    real_parse = skypilot_config.parse_and_validate_config_file
+    errors = [_stale_handle_error(), _stale_handle_error()]
+
+    def parse_or_fail(path):
+        if errors:
+            raise errors.pop(0)
+        return real_parse(path)
+
+    parse = mock.MagicMock(side_effect=parse_or_fail)
+    monkeypatch.setattr(skypilot_config, 'parse_and_validate_config_file',
+                        parse)
+
+    _reload_config()
+
+    assert parse.call_count == 3
+    assert sleep.call_count == 2
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+
+def test_config_with_env_waits_for_a_replaced_file(monkeypatch,
+                                                   tmp_path) -> None:
+    """The file is briefly missing while it is being replaced.
+
+    The retried miss must also leave sys.tracebacklimit alone: the
+    no-traceback context used for the final missing-file error leaves it at
+    0 once an exception escapes, which would hide the tracebacks of later,
+    unrelated errors in the process.
+    """
+    config_path = tmp_path / 'config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    monkeypatch.delenv(env_options.Options.SHOW_DEBUG_INFO.env_key,
+                       raising=False)
+    monkeypatch.setattr(sys, 'tracebacklimit', 1000, raising=False)
+    # The file appears during the first backoff.
+    sleep = mock.MagicMock(
+        side_effect=lambda _: _create_config_file(config_path))
+    monkeypatch.setattr(skypilot_config.time, 'sleep', sleep)
+
+    _reload_config()
+
+    sleep.assert_called_once()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+    assert sys.tracebacklimit == 1000
+
+
+def test_config_with_env_persistent_stale_handle_raises(monkeypatch,
+                                                        tmp_path) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    monkeypatch.setattr(skypilot_config.time, 'sleep', mock.MagicMock())
+    parse = mock.MagicMock(side_effect=_stale_handle_error())
+    monkeypatch.setattr(skypilot_config, 'parse_and_validate_config_file',
+                        parse)
+
+    with pytest.raises(OSError) as exc_info:
+        _reload_config()
+    assert exc_info.value.errno == errno.ESTALE
+    assert parse.call_count == skypilot_config._INTERNAL_CONFIG_READ_ATTEMPTS
+
+
+def test_config_with_env_missing_file_still_raises(monkeypatch,
+                                                   tmp_path) -> None:
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       tmp_path / 'does_not_exist.yaml')
+    sleep = mock.MagicMock()
+    monkeypatch.setattr(skypilot_config.time, 'sleep', sleep)
+
+    with pytest.raises(FileNotFoundError, match='does not exist'):
+        _reload_config()
+    assert (sleep.call_count == skypilot_config._INTERNAL_CONFIG_READ_ATTEMPTS -
+            1)
+
+
+def test_config_with_env_other_errors_are_not_retried(monkeypatch,
+                                                      tmp_path) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    sleep = mock.MagicMock()
+    monkeypatch.setattr(skypilot_config.time, 'sleep', sleep)
+    parse = mock.MagicMock(
+        side_effect=PermissionError(errno.EACCES, os.strerror(errno.EACCES)))
+    monkeypatch.setattr(skypilot_config, 'parse_and_validate_config_file',
+                        parse)
+
+    with pytest.raises(PermissionError):
+        _reload_config()
+    parse.assert_called_once()
+    sleep.assert_not_called()
 
 
 def test_invalid_override_config(monkeypatch, tmp_path) -> None:
@@ -2678,3 +2786,49 @@ def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
                 'account': 'task-account'
             }
         }}) == 'task-account'
+
+
+@pytest.mark.parametrize('from_loopback', [True, False])
+def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
+                                                    from_loopback) -> None:
+    """A remote client cannot widen the infra the server allows; a loopback
+    client still layers these keys. Other overrides apply either way."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+              allowed_contexts: [server-ctx]
+            ssh:
+              allowed_node_pools: [server-pool]
+            slurm:
+              allowed_clusters: [server-cluster]
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {
+            'kubernetes': {
+                'allowed_contexts': 'all',
+                'provision_timeout': 123
+            },
+            'ssh': {
+                'allowed_node_pools': ['other-pool']
+            },
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+        },
+            from_loopback=from_loopback):
+        got = (
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None),
+            skypilot_config.get_nested(('ssh', 'allowed_node_pools'), None),
+            skypilot_config.get_nested(('slurm', 'allowed_clusters'), None),
+        )
+        assert skypilot_config.get_nested(('kubernetes', 'provision_timeout'),
+                                          None) == 123
+    if from_loopback:
+        assert got == ('all', ['other-pool'], 'all')
+    else:
+        assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])

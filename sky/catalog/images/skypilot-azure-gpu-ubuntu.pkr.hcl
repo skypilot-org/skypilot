@@ -21,8 +21,8 @@ variable "use_grid_driver" {
 }
 
 locals {
-  date    = formatdate("YYMMDD", timestamp())
-  version = formatdate("YY.MM.DD", timestamp())
+  # UTC to the minute, so a second build on the same day gets its own version.
+  version = formatdate("YY.MMDD.hhmm", timestamp())
 }
 
 source "azure-arm" "gpu-ubuntu" {
@@ -49,7 +49,7 @@ source "azure-arm" "gpu-ubuntu" {
     subscription   = "59d8c23c-7ef5-42c7-b2f3-a919ad8026a7"
     resource_group = "skypilot-images"
     gallery_name   = var.use_grid_driver || var.vm_generation == 1 ? "skypilot_images" : "skypilot_image_gallery"
-    image_name     = var.use_grid_driver ? "skypilot-gpu-gen2-grid" : "skypilot-gpu-gen${var.vm_generation}"
+    image_name     = var.use_grid_driver ? "skypilot-gpu-gen2-grid-ray256" : "skypilot-gpu-gen${var.vm_generation}-ray256"
     image_version  = "${local.version}"
     replication_regions = [
       "centralus",

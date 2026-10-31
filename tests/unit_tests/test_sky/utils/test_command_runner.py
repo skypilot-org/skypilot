@@ -356,6 +356,16 @@ class TestSSHCommandRunnerInteractiveAuth:
                 os.unlink(log_path)
 
 
+def _with_output_marker(cmd: str) -> str:
+    return f'echo {command_runner._SLURM_OUTPUT_START_MARKER}\n{cmd}'
+
+
+def _without_output_marker(cmd: str) -> str:
+    marker_line = f'echo {command_runner._SLURM_OUTPUT_START_MARKER}\n'
+    assert cmd.startswith(marker_line)
+    return cmd[len(marker_line):]
+
+
 class TestSlurmCommandRunnerUserImpersonation:
 
     @pytest.fixture(autouse=True)
@@ -422,8 +432,8 @@ class TestSlurmCommandRunnerUserImpersonation:
                                'run',
                                autospec=True,
                                return_value=(0, '', '')) as run:
-            runner.run(cmd, require_outputs=True)
-        assert run.call_args.args[1] == cmd
+            runner.run(cmd, require_outputs=True, stream_logs=False)
+        assert run.call_args.args[1] == _with_output_marker(cmd)
 
     def test_login_node_sudo_failure_propagates(self):
         runner = self._login_runner('alice', ssh_user='ubuntu')
@@ -623,7 +633,7 @@ class TestSlurmCommandRunnerUserImpersonation:
                                return_value=(0, f'SKYPILOT_HOME_DIR: {home}\n',
                                              '')) as run:
             assert runner.get_remote_home_dir() == home
-        argv = shlex.split(run.call_args.args[1])
+        argv = shlex.split(_without_output_marker(run.call_args.args[1]))
         assert argv[:7] == [
             'sudo', '--non-interactive', '-H', '-u', 'alice', '--', 'srun'
         ]
@@ -639,6 +649,105 @@ class TestSlurmCommandRunnerUserImpersonation:
                                return_value=(2, '', '')):
             with pytest.raises(ValueError, match='Cannot resolve home'):
                 runner.get_remote_home_dir()
+
+
+class TestSlurmLoginShellOutput:
+    """Tests for dropping what the login shell prints before a command."""
+
+    _BANNER = 'Welcome to hpc-login \u2603\nLmod: loading site modules\n'
+
+    @staticmethod
+    def _login_runner():
+        return command_runner.SlurmLoginNodeCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            slurm_user=None)
+
+    @staticmethod
+    def _slurm_runner():
+        return command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user='root',
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None)
+
+    @pytest.mark.parametrize('runner_fn', ['_login_runner', '_slurm_runner'])
+    def test_drops_login_shell_banner(self, runner_fn):
+        runner = getattr(self, runner_fn)()
+        marker = command_runner._SLURM_OUTPUT_START_MARKER
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                return_value=(0, f'{self._BANNER}{marker}\n[1, 2]\n',
+                              'stderr banner\n')) as run:
+            assert runner.run('cat exit_codes',
+                              require_outputs=True,
+                              stream_logs=False,
+                              separate_stderr=True) == (0, '[1, 2]\n',
+                                                        'stderr banner\n')
+        assert run.call_args.args[0].startswith(f'echo {marker}\n')
+
+    def test_returns_stdout_unchanged_without_marker(self):
+        runner = self._login_runner()
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=(255, '', 'connection refused\n')):
+            assert runner.run('sinfo', require_outputs=True,
+                              stream_logs=False) == (255, '',
+                                                     'connection refused\n')
+
+    @pytest.mark.parametrize('kwargs', [
+        {
+            'stream_logs': False
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'run_in_background': True
+        },
+        {
+            'require_outputs': True
+        },
+        {
+            'require_outputs': True,
+            'stream_logs': False,
+            'log_path': '/tmp/setup.log'
+        },
+    ])
+    def test_no_marker_when_output_is_not_only_returned(self, kwargs):
+        # Streamed and logged output is written before the marker could be
+        # dropped, so the marker would show up there.
+        runner = self._login_runner()
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               return_value=0) as run:
+            runner.run('sinfo', **kwargs)
+        assert run.call_args.args[0] == 'sinfo'
+
+    def test_marker_keeps_command_output_and_returncode(self):
+        runner = self._login_runner()
+
+        def run_in_bash(cmd, **kwargs):
+            del kwargs  # Unused.
+            proc = subprocess.run(['bash', '-c', f'echo banner; {cmd}'],
+                                  capture_output=True,
+                                  text=True,
+                                  check=False)
+            return proc.returncode, proc.stdout, proc.stderr
+
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               side_effect=run_in_bash):
+            assert runner.run(
+                "printf 'line1\\nline2\\n'; printf 'err' >&2; exit 3",
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True) == (3, 'line1\nline2\n', 'err')
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
