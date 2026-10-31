@@ -151,6 +151,11 @@ class Cloud:
         resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
     }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
+    # Whether nodes of different clusters launched in the same region can
+    # reach each other's internal IPs, so in-group hostname networking for
+    # Job Groups can be set up between them. See
+    # Cloud.supports_job_group_networking().
+    _SUPPORTS_JOB_GROUP_NETWORKING = False
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -184,6 +189,18 @@ class Cloud:
         that has the necessary permissions to access the cloud resources.
         """
         return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
+
+    @classmethod
+    def supports_job_group_networking(cls) -> bool:
+        """Returns whether in-group networking for Job Groups is supported.
+
+        True means that nodes of separate clusters launched in the same
+        region can reach each other's internal IPs (e.g., they share a
+        VPC/firewall configuration that allows internal traffic), so the
+        jobs controller can set up hostname resolution between the tasks
+        of a Job Group placed on this cloud.
+        """
+        return cls._SUPPORTS_JOB_GROUP_NETWORKING
 
     @classmethod
     def uses_ray(cls) -> bool:

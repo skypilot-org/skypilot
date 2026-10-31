@@ -559,7 +559,7 @@ class TestJobGroupNetworking:
         from sky.jobs import job_group_networking
 
         script = job_group_networking.generate_wait_for_networking_script(
-            'my-job-group', ['trainer', 'evaluator'])
+            'my-job-group', ['trainer', 'evaluator'], 600)
 
         # Verify script contains expected hostnames
         assert 'trainer-0.my-job-group' in script
@@ -576,7 +576,7 @@ class TestJobGroupNetworking:
         from sky.jobs import job_group_networking
 
         script = job_group_networking.generate_wait_for_networking_script(
-            'my-job-group', [])
+            'my-job-group', [], 600)
 
         assert script == ''
 
