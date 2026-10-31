@@ -102,6 +102,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`kai <config-yaml-kubernetes-kai>`:
+      :ref:`queue <config-yaml-kubernetes-kai-queue>`: team-queue
+      :ref:`preemptibility <config-yaml-kubernetes-kai-preemptibility>`: preemptible
+      :ref:`topology <config-yaml-kubernetes-kai-topology>`: fabric
+      :ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`: leaf
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
@@ -2012,8 +2017,8 @@ If unset, the default is chosen based on the launch: ``10`` seconds for a
 single node, scaled up by ``0.2`` seconds per additional node (capped at
 ``60`` seconds); ``1200`` seconds (capped at ``2400``) when GCP DWS flex
 start is used; ``180`` seconds (capped at ``240``) when a ``ReadWriteMany``
-PVC must be provisioned; and 24 hours when a Kueue local queue is
-configured.
+PVC must be provisioned; and 24 hours when a Kueue local queue or a KAI
+queue is configured.
 
 Default: ``10``–``60`` seconds (see above).
 
@@ -2183,6 +2188,70 @@ jobs that set
 :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
 which bounds their wait instead. Set the field explicitly to bound their wait
 as well.
+
+.. _config-yaml-kubernetes-kai:
+
+``kubernetes.kai``
+~~~~~~~~~~~~~~~~~~
+
+`KAI Scheduler <https://github.com/kai-scheduler/KAI-Scheduler>`_ configuration
+(optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
+:ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
+
+A launch handled by an API server request releases its worker while KAI keeps
+the cluster queued, and resumes when KAI schedules its pods. That wait does not
+count toward
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`,
+but the time until KAI first reports on the cluster does.
+A launch outside an API server request waits in the provisioner, and all of
+its wait counts toward the timeout.
+
+.. _config-yaml-kubernetes-kai-queue:
+
+``kubernetes.kai.queue``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Queue`` to submit clusters to. A queue set for a context in
+a workspace always wins over a task's ``config.kubernetes.kai.queue``;
+elsewhere, which one wins depends on where this one is set. See
+:ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-preemptibility:
+
+``kubernetes.kai.preemptibility``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
+from the cluster's priority: below 100 is preemptible.
+
+.. _config-yaml-kubernetes-kai-topology:
+
+``kubernetes.kai.topology``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Topology`` to place the cluster's pods in (optional). Set it
+with :ref:`required_topology_level <config-yaml-kubernetes-kai-required-topology-level>`,
+:ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`,
+or both. See :ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-required-topology-level:
+
+``kubernetes.kai.required_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias (optional). All of the
+cluster's pods must land in one domain at this level, and the cluster stays
+queued until one has room, including when no domain at this level is large
+enough.
+
+.. _config-yaml-kubernetes-kai-preferred-topology-level:
+
+``kubernetes.kai.preferred_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias, at or below the required
+level (optional). KAI places the pods in one domain at this level if it can,
+and otherwise in one at the lowest broader level that has room.
 
 .. _config-yaml-kubernetes-dws:
 

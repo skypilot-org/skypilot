@@ -695,6 +695,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'kai'),
     ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
