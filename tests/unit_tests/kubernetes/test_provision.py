@@ -169,6 +169,7 @@ def _quantity_config(
         deployment: bool = False) -> provision_common.ProvisionConfig:
     """Build a fresh provisioning config containing numeric quantities."""
     config = _make_provision_config(count=1)
+    config.node_config['kind'] = 'Pod'  # As in kubernetes-ray.yml.j2.
     resource_requirements = {
         'requests': {
             'cpu': 0.5,
@@ -254,6 +255,7 @@ def _quantity_config(
         }]
     if deployment:
         config.node_config['deployment_spec'] = {
+            'kind': 'Deployment',
             'metadata': {
                 'name': 'test-deployment'
             },
@@ -341,17 +343,68 @@ def test_create_pods_classifies_validation_errors(real_client, deployment,
     original = copy.deepcopy(config.node_config)
     if case == 'invalid_request':
         kind = 'Deployment' if deployment else 'Pod'
-        with pytest.raises(
-                sky_exceptions.InvalidCloudConfigs,
-                match=f'Invalid Kubernetes {kind} configuration') as exc:
+        with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
             instance._create_pods('us', 'test', 'test', config)
-        assert 'containerPort' in str(exc.value)
+        # The path matches pod_config's layout for Pods and Deployments alike.
+        assert str(exc.value) == (
+            f'Invalid Kubernetes {kind} spec (check kubernetes.pod_config):\n'
+            '  spec.containers[].ports[].containerPort: Input should be a '
+            "valid integer (got 'not-a-port')")
         send.assert_not_called()
     else:
         with pytest.raises(pydantic.ValidationError, match='V1ObjectMeta'):
             instance._create_pods('us', 'test', 'test', config)
         send.assert_called_once()
     assert config.node_config == original
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+def test_validation_error_message_is_bounded():
+    pod = {
+        'kind': 'Pod',
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                # A missing name reports its whole env var as the input, which
+                # is not repeated in the message.
+                'env': [{
+                    'value': 'unnamed'
+                }] + [{
+                    'name': f'VAR{i}',
+                    'value': i
+                } for i in range(5)],
+            }]
+        }
+    }
+    with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
+        instance._validate_request_body(pod, k8s_client.V1Pod)
+    assert str(exc.value) == (
+        'Invalid Kubernetes Pod spec (check kubernetes.pod_config):\n'
+        '  spec.containers[].env[].name: Field required\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 0)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 1)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 2)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 3)\n'
+        '  ... and 1 more')
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+def test_validation_error_without_kind():
+    """`kind` is optional, so its absence must not mask the error."""
+    pod = {'spec': {'containers': [{'name': 'main', 'env': [{'name': 'A'}]}]}}
+    pod['spec']['containers'][0]['env'][0]['value'] = 1
+    with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
+        instance._validate_request_body(pod, k8s_client.V1Pod)
+    assert str(exc.value) == (
+        'Invalid Kubernetes resource spec (check kubernetes.pod_config):\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 1)')
 
 
 def test_inject_ephemeral_volumes():
@@ -744,85 +797,6 @@ def test_out_of_memory(monkeypatch):
         1] == '└── Cluster does not have sufficient Memory for your request: Run \'kubectl get nodes -o custom-columns=NAME:.metadata.name,MEMORY:.status.allocatable.memory\' to check the available memory on the node.'
 
     assert len(error_output) == 2
-
-
-@pytest.mark.parametrize(
-    'prev_cluster_status',
-    [None, cloud_vm_ray_backend.status_lib.ClusterStatus.INIT])
-def test_invalid_request_config_stops_failover(monkeypatch, tmp_path,
-                                               prev_cluster_status):
-    """Config errors stop retries and discard only fresh cluster records."""
-    backend = cloud_vm_ray_backend
-    retrying = backend.RetryingVmProvisioner(log_dir=str(tmp_path),
-                                             dag=None,
-                                             optimize_target=None,
-                                             requested_features=set(),
-                                             local_wheel_path=None,
-                                             wheel_hash='',
-                                             extra_launch_context={})
-    monkeypatch.setattr(retrying, '_yield_zones', lambda *a: iter([None, None]))
-    to_provision = mock.MagicMock(spec=resources.Resources)
-    to_provision.assert_launchable = mock.Mock(return_value=to_provision)
-    to_provision.region = 'test-context'
-    to_provision.cloud = clouds.Kubernetes()
-    monkeypatch.setattr(to_provision.cloud, 'check_quota_available',
-                        lambda *a: True)
-    monkeypatch.setattr(to_provision.cloud,
-                        'yield_cloud_specific_failover_overrides',
-                        lambda **k: iter([None]))
-    monkeypatch.setattr(backend.provision_lib, 'get_registered_provisioner',
-                        lambda *a: None)
-    monkeypatch.setattr(backend, '_get_cluster_config_template',
-                        lambda *a: 'unused')
-    monkeypatch.setattr(
-        backend.backend_utils, 'write_cluster_config', lambda *a, **k: {
-            'ray': 'unused.yaml',
-            'cluster_name_on_cloud': 'test'
-        })
-    monkeypatch.setattr(backend.global_user_state, 'get_cluster_yaml_dict',
-                        lambda *a: {'provider': {}})
-    handle = mock.MagicMock(cluster_yaml='unused.yaml',
-                            launched_nodes=1,
-                            cluster_name_on_cloud='test')
-    monkeypatch.setattr(backend, 'CloudVmRayResourceHandle', lambda **k: handle)
-    for name in ('add_or_update_cluster', 'add_cluster_event',
-                 'set_owner_identity_for_cluster'):
-        monkeypatch.setattr(backend.global_user_state, name, mock.Mock())
-    monkeypatch.setattr(backend.rich_utils, 'force_update_status', mock.Mock())
-    cleanup = mock.Mock()
-    monkeypatch.setattr(backend.CloudVmRayBackend, 'post_teardown_cleanup',
-                        cleanup)
-    final_status = mock.Mock()
-    monkeypatch.setattr(backend.usage_lib.messages.usage,
-                        'update_final_cluster_status', final_status)
-    blocklist = mock.Mock()
-    monkeypatch.setattr(backend.FailoverCloudErrorHandlerV2,
-                        'update_blocklist_on_error', blocklist)
-    error = sky_exceptions.InvalidCloudConfigs(
-        'Invalid Kubernetes Pod configuration')
-    provision = mock.Mock(side_effect=error)
-    monkeypatch.setattr(backend.provisioner, 'bulk_provision', provision)
-    with pytest.raises(sky_exceptions.InvalidCloudConfigs) as exc:
-        retrying._retry_zones(to_provision,
-                              num_nodes=1,
-                              requested_resources=set(),
-                              dryrun=False,
-                              stream_logs=False,
-                              cluster_name='test',
-                              cloud_user_identity=None,
-                              prev_cluster_status=prev_cluster_status,
-                              prev_handle=None,
-                              prev_cluster_ever_up=False,
-                              skip_if_config_hash_matches=None,
-                              volume_mounts=None,
-                              task=None)
-    assert exc.value is error
-    provision.assert_called_once()
-    blocklist.assert_not_called()
-    cleanup.assert_called_once()
-    fresh_launch = prev_cluster_status is None
-    assert cleanup.call_args.kwargs['remove_from_db'] is fresh_launch
-    assert (mock.call(None) in final_status.call_args_list) is fresh_launch
 
 
 def test_insufficient_resources_msg(monkeypatch):

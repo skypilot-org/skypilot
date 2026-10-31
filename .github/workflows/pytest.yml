@@ -62,7 +62,9 @@ jobs:
         include:
           # Python 3.9 resolves to the legacy client; newer Python versions
           # must also exercise both newer client generators explicitly.
+          # 36.0.1 is the oldest allowed v36 client (36.0.0 is excluded).
           - {python-version: "3.9", kubernetes-version: "35.0.0"}
+          - {python-version: "3.11", kubernetes-version: "36.0.1"}
           - {python-version: "3.11", kubernetes-version: "36.0.3"}
           - {python-version: "3.11", kubernetes-version: "37.0.1"}
     name: "Kubernetes client ${{ matrix.kubernetes-version }} (Python ${{ matrix.python-version }})"

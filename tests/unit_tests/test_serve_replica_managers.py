@@ -13,15 +13,19 @@ from sky import exceptions
 from sky.serve import replica_managers
 
 
-def test_invalid_cloud_config_stops_replica_launch_retries(
+def test_unsupported_only_launch_stops_replica_launch_retries(
         monkeypatch, tmp_path):
+    """No candidate can serve the request, so retrying cannot help."""
     monkeypatch.setattr(replica_managers.context, 'get', mock.MagicMock())
     monkeypatch.setattr(replica_managers.task_lib.Task, 'from_yaml_str',
                         mock.Mock(return_value=mock.Mock()))
     launch = mock.Mock(return_value='request-1')
     monkeypatch.setattr(replica_managers.sdk, 'launch', launch)
-    error = exceptions.InvalidCloudConfigs(
-        'Invalid Kubernetes Pod: containerPort')
+    error = exceptions.ResourcesUnavailableError(
+        'Failed to provision',
+        failover_history=[
+            exceptions.ProvisionUnsupportedError('Invalid Kubernetes Pod spec')
+        ])
     result = mock.Mock(side_effect=error)
     monkeypatch.setattr(replica_managers.sdk, 'stream_and_get', result)
     terminate = mock.Mock()

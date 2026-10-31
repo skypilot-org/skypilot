@@ -2118,13 +2118,60 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+_MAX_REPORTED_VALIDATION_ERRORS = 5
+
+
+def _format_validation_errors(error: pydantic.ValidationError,
+                              pod_loc: Tuple[str, ...]) -> str:
+    """Describe validation errors by field path, as written in pod_config.
+
+    Indices into the merged pod spec do not match the user's YAML (SkyPilot
+    merges in its own env vars, volumes and other entries), so lists are
+    shown as `[]`.
+    """
+    details = []
+    for err in error.errors()[:_MAX_REPORTED_VALIDATION_ERRORS]:
+        loc = tuple(err['loc'])
+        if loc[:len(pod_loc)] == pod_loc:
+            loc = loc[len(pod_loc):]
+        path = ''
+        for part in loc:
+            if isinstance(part, int):
+                path += '[]'
+            else:
+                path += f'.{part}' if path else str(part)
+        detail = f'{path}: {err["msg"]}'
+        value = err.get('input')
+        if not isinstance(value, (dict, list)):
+            detail += f' (got {value!r})'
+        details.append(detail)
+    remaining = error.error_count() - len(details)
+    if remaining > 0:
+        details.append(f'... and {remaining} more')
+    return '\n'.join(f'  {detail}' for detail in details)
+
+
 def _validate_request_body(
-        body: Dict[str, Any], model: Union[Type['V1Pod'],
-                                           Type['V1Deployment']]) -> None:
-    """Validate an outgoing request, raising InvalidCloudConfigs on failure.
+    body: Dict[str, Any],
+    model: Union[Type['V1Pod'], Type['V1Deployment']],
+    pod_loc: Tuple[str, ...] = ()
+) -> None:
+    """Validate an outgoing request before sending it.
 
     Skip validation for legacy clients without Pydantic models. Validate before
     the API call so response-validation errors are not treated as config errors.
+
+    Args:
+        body: The request body.
+        model: The generated client model for the body.
+        pod_loc: Where the pod from pod_config sits in `body`, e.g.
+            ('spec', 'template') for a Deployment. Stripped from error paths
+            so they match the user's YAML.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: The request is invalid, so this
+            Kubernetes context can never serve it. Failover moves on to other
+            candidates instead of waiting for capacity.
     """
     if not hasattr(model, 'model_validate'):
         # Legacy clients do not perform Pydantic request validation.
@@ -2136,9 +2183,12 @@ def _validate_request_body(
     try:
         model.model_validate(body)
     except pydantic.ValidationError as e:
-        resource_kind = model.__name__[2:]  # Strip the V1 API-version prefix.
-        raise exceptions.InvalidCloudConfigs(
-            f'Invalid Kubernetes {resource_kind} configuration: {e}') from e
+        # `kind` is optional, and a missing one must not mask this error.
+        resource_kind = body.get('kind', 'resource')
+        raise exceptions.ProvisionUnsupportedError(
+            f'Invalid Kubernetes {resource_kind} spec (check '
+            f'kubernetes.pod_config):\n'
+            f'{_format_validation_errors(e, pod_loc)}') from e
 
 
 @timeline.event
@@ -2716,7 +2766,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
                 'labels']
             _validate_request_body(deployment_spec,
-                                   kubernetes.kubernetes.client.V1Deployment)
+                                   kubernetes.kubernetes.client.V1Deployment,
+                                   pod_loc=('spec', 'template'))
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(
