@@ -1207,6 +1207,201 @@ class TestPoolTaskResumedBeforeWorker:
         executor.launch.assert_not_awaited()
 
 
+def _resumed_cluster_task(monkeypatch,
+                          task_status,
+                          reattached_at,
+                          cluster_record=None):
+    """A (non-pool) JobController whose task 0 resumes with the given state.
+
+    The executor's reattach_launch() returns `reattached_at`, and its
+    launch_again() returns 66.0. `cluster_record` is the cluster's record
+    (default: a cluster that came up before).
+    Returns (controller, task, executor, state mocks).
+    """
+    jc = JobController.__new__(JobController)
+    jc._job_id = 1
+    jc._dag = MagicMock()
+    jc._pool = None
+    jc._backend = MagicMock()
+    jc._backend.run_timestamp = 'sky-2026-01-01-00-00-00-000000'
+    jc.starting = set()
+    jc.starting_lock = asyncio.Lock()
+    jc.starting_signal = MagicMock()
+    task = MagicMock()
+    task.name = 'task0'
+    task.metadata = {}
+    task.run = 'echo hi'
+    task.envs = {constants.TASK_ID_ENV_VAR: 'tid'}
+    task.resources = None
+    executor = MagicMock()
+    executor.on_resume = AsyncMock()
+    executor.monitor_task = AsyncMock(return_value=None)
+    executor.launch = AsyncMock()
+    executor.reattach_launch = AsyncMock(return_value=reattached_at)
+    executor.launch_again = AsyncMock(return_value=66.0)
+    jc._cleanup_cluster = AsyncMock()
+    if cluster_record is None:
+        cluster_record = {'cluster_ever_up': True}
+    monkeypatch.setattr(
+        'sky.jobs.controller.global_user_state.get_cluster_from_name',
+        MagicMock(return_value=cluster_record))
+    jc._monitor_one_task = AsyncMock(return_value=True)
+
+    mjs = 'sky.jobs.controller.managed_job_state'
+    state = {
+        'set_starting_async': AsyncMock(),
+        'set_started_async': AsyncMock(),
+        'set_recovered_async': AsyncMock(),
+    }
+    for name, mock in state.items():
+        monkeypatch.setattr(f'{mjs}.{name}', mock)
+    monkeypatch.setattr(f'{mjs}.get_job_status_with_task_id_async',
+                        AsyncMock(return_value=task_status))
+    monkeypatch.setattr(f'{mjs}.has_open_emergency_episode_async',
+                        AsyncMock(return_value=False))
+    monkeypatch.setattr(f'{mjs}.get_file_mounts_blob_id', lambda job_id: None)
+    monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                        lambda task, job_id: None)
+    monkeypatch.setattr(
+        'sky.jobs.controller.recovery_strategy.StrategyExecutor.make',
+        MagicMock(return_value=executor))
+    monkeypatch.setattr(
+        'sky.jobs.controller.managed_job_utils.event_callback_func',
+        MagicMock(return_value=AsyncMock()))
+    monkeypatch.setattr(
+        'sky.jobs.controller.usage_lib.messages.usage.update_task_id',
+        lambda *args, **kwargs: None)
+    return jc, task, executor, state
+
+
+class TestResumeReattachesLiveLaunch:
+    """A task resumed while STARTING or RECOVERING re-attaches to its launch
+    request if that is still live, instead of being torn down and launched
+    again by a forced recovery."""
+
+    @pytest.mark.asyncio
+    async def test_starting_task_reattaches_and_starts(self, monkeypatch):
+        jc, task, executor, state = _resumed_cluster_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.STARTING, 55.0)
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.reattach_launch.assert_awaited_once_with(recovery=False)
+        executor.launch.assert_not_awaited()
+        state['set_starting_async'].assert_not_awaited()
+        state['set_started_async'].assert_awaited_once()
+        assert state['set_started_async'].await_args.kwargs[
+            'start_time'] == 55.0
+        state['set_recovered_async'].assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is False
+
+    @pytest.mark.asyncio
+    async def test_recovering_task_reattaches_and_recovers(self, monkeypatch):
+        jc, task, executor, state = _resumed_cluster_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.RECOVERING, 55.0)
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.reattach_launch.assert_awaited_once_with(recovery=True)
+        state['set_recovered_async'].assert_awaited_once()
+        assert state['set_recovered_async'].await_args.kwargs[
+            'recovered_time'] == 55.0
+        state['set_started_async'].assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('task_status', [
+        managed_job_state.ManagedJobStatus.STARTING,
+        managed_job_state.ManagedJobStatus.RECOVERING,
+    ])
+    async def test_without_live_launch_forces_recovery(self, monkeypatch,
+                                                       task_status):
+        jc, task, executor, state = _resumed_cluster_task(
+            monkeypatch, task_status, None)
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.reattach_launch.assert_awaited_once()
+        state['set_started_async'].assert_not_awaited()
+        state['set_recovered_async'].assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is True
+
+    @pytest.mark.asyncio
+    async def test_running_task_does_not_look_for_a_launch(self, monkeypatch):
+        jc, task, executor, _ = _resumed_cluster_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.RUNNING, 55.0)
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.reattach_launch.assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('task_status,recovering', [
+        (managed_job_state.ManagedJobStatus.STARTING, False),
+        (managed_job_state.ManagedJobStatus.RECOVERING, True),
+    ])
+    async def test_never_up_cluster_is_launched_onto_not_recovered(
+            self, monkeypatch, task_status, recovering):
+        """No live launch request (e.g. the server failed it when its server
+        process went away), but nothing can have been submitted to a cluster
+        that never came up: launch onto it again instead of tearing it down
+        in forced recovery."""
+        jc, task, executor, state = _resumed_cluster_task(
+            monkeypatch,
+            task_status,
+            None,
+            cluster_record={'cluster_ever_up': False})
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.launch_again.assert_awaited_once_with(recovery=recovering)
+        jc._cleanup_cluster.assert_not_awaited()
+        if recovering:
+            assert state['set_recovered_async'].await_args.kwargs[
+                'recovered_time'] == 66.0
+        else:
+            assert state['set_started_async'].await_args.kwargs[
+                'start_time'] == 66.0
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is False
+
+    @pytest.mark.asyncio
+    async def test_cluster_that_came_up_is_still_recovered(self, monkeypatch):
+        """A job may have been half-submitted to a cluster that came up, so
+        forced recovery (cleanup first) stays."""
+        jc, task, executor, state = _resumed_cluster_task(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.STARTING,
+            None,
+            cluster_record={'cluster_ever_up': True})
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.launch_again.assert_not_awaited()
+        state['set_started_async'].assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is True
+
+    @pytest.mark.asyncio
+    async def test_missing_cluster_is_recovered(self, monkeypatch):
+        jc, task, executor, _ = _resumed_cluster_task(
+            monkeypatch, managed_job_state.ManagedJobStatus.STARTING, None)
+        monkeypatch.setattr(
+            'sky.jobs.controller.global_user_state.get_cluster_from_name',
+            MagicMock(return_value=None))
+
+        assert await jc._run_one_task(0, task) is True
+
+        executor.launch_again.assert_not_awaited()
+        monitor_kwargs = executor.monitor_task.await_args.kwargs
+        assert monitor_kwargs['force_transit_to_recovering'] is True
+
+
 class TestDownloadLogsForCancelledJob:
     """Tests for ControllerManager._download_logs_for_cancelled_job.
 

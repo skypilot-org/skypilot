@@ -970,6 +970,80 @@ class JobController:
                             f'{controller_utils.JOB_COST_UNITS} cost units.')
                 self._job_costs[self._job_id] = units
 
+    async def _reattach_live_launch(
+            self, task_id: int,
+            prev_status: Optional['managed_job_state.ManagedJobStatus'],
+            cluster_name: str, callback_func: typing.Callable) -> bool:
+        """Re-attach a resumed task to its launch request, if still live.
+
+        The previous controller may have stopped while the task's launch
+        request was still live on the API server (running, or parked waiting
+        to resume). Forced recovery would tear the cluster down, cancelling
+        that request, and launch again. Re-attach to the request instead, and
+        record the task as started (or recovered) once its job is submitted.
+
+        If no launch request is live but the cluster never came up, launch
+        onto it again instead. Forced recovery tears the cluster down first
+        in case a job was half-submitted to it, and nothing can have been
+        submitted to a cluster that never came up; tearing it down would only
+        throw away what it already has (e.g. pods waiting in a resource
+        queue). This happens after an API server restart when the restarted
+        server runs the parked request again and that run fails (e.g. on a
+        transient error), or when the request ends while no controller is
+        attached to it.
+
+        Runs before the monitor loop, so before any runtime observation of
+        the task.
+
+        Returns:
+            True if the task's job is now on the cluster. False if there is no
+            live launch request and the cluster came up before (or is gone),
+            or the re-attached request did not bring the job up; the caller
+            then forces recovery as before.
+        """
+        if self._pool is not None or prev_status not in (
+                managed_job_state.ManagedJobStatus.STARTING,
+                managed_job_state.ManagedJobStatus.RECOVERING):
+            return False
+        recovering = (
+            prev_status == managed_job_state.ManagedJobStatus.RECOVERING)
+        await self._count_in_full()
+        submitted_at = await self._strategy_executor.reattach_launch(
+            recovery=recovering)
+        if submitted_at is not None:
+            logger.info(
+                f'Task {task_id} re-attached to its live launch request.')
+        elif await self._cluster_never_came_up(cluster_name):
+            logger.info(f'No live launch request for task {task_id}, and '
+                        f'cluster {cluster_name} never came up: launching '
+                        'onto it again instead of recovering it.')
+            submitted_at = await self._strategy_executor.launch_again(
+                recovery=recovering)
+        else:
+            return False
+        if recovering:
+            await managed_job_state.set_recovered_async(
+                self._job_id,
+                task_id,
+                recovered_time=submitted_at,
+                callback_func=callback_func)
+        else:
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=submitted_at,
+                callback_func=callback_func)
+        await self._update_cost_units(cluster_name)
+        return True
+
+    async def _cluster_never_came_up(self, cluster_name: str) -> bool:
+        """Whether the cluster exists but has never been UP."""
+        record = await asyncio.to_thread(
+            global_user_state.get_cluster_from_name,
+            cluster_name,
+            include_user_info=False)
+        return record is not None and not record['cluster_ever_up']
+
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -1239,7 +1313,11 @@ class JobController:
                 # and its own job and cluster checks decide whether a
                 # relaunch is needed, so neither a restart nor a
                 # controller-side error restarts a healthy workload.
-                force_transit_to_recovering = True
+                # The exception is a launch request that is still live: it
+                # decides what is on the cluster, so re-attach to it instead.
+                force_transit_to_recovering = not (
+                    await self._reattach_live_launch(
+                        task_id, prev_status, cluster_name, callback_func))
             else:
                 # An emergency that kept this task's cluster recorded itself
                 # as an EMERGENCY-sourced job event (status unchanged). The
