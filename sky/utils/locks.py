@@ -7,6 +7,7 @@ import abc
 import hashlib
 import logging
 import os
+import threading
 import time
 from typing import Any, Callable, Optional
 
@@ -22,12 +23,21 @@ from sky.utils.db import retries as db_retries
 
 logger = logging.getLogger(__name__)
 
+_lock_connection_gate: Optional[threading.BoundedSemaphore] = None
+_lock_connection_gate_capacity: Optional[int] = None
+_lock_connection_gate_lock = threading.Lock()
+
 # The directory for file locks.
 SKY_LOCKS_DIR = runtime_utils.get_runtime_dir_path('.sky/locks')
 
 
 class LockTimeout(RuntimeError):
     """Raised when a lock acquisition times out."""
+    pass
+
+
+class LockConnectionPoolFull(LockTimeout):
+    """Raised when this process has no advisory-lock connection slot."""
     pass
 
 
@@ -196,6 +206,7 @@ class PostgresLock(DistributedLock):
         self._shared_lock = shared_lock
         self._acquired = False
         self._connection: Optional[sqlalchemy.pool.PoolProxiedConnection] = None
+        self._connection_slot: Optional[threading.BoundedSemaphore] = None
 
     def _string_to_lock_key(self, s: str) -> int:
         """Convert string to a 64-bit integer for advisory lock key."""
@@ -209,13 +220,14 @@ class PostgresLock(DistributedLock):
         # Session-scoped advisory locks hold one connection across their whole
         # lifetime, which is unsafe through a transaction-mode pooler (the
         # backend can change between statements). Use a direct engine so the
-        # lock connection bypasses any configured pooler; when none is
-        # configured this is the same engine global_user_state uses.
-        engine = db_utils.get_engine(None, direct=True)
+        # lock connection bypasses any configured pooler. Keep it out of the
+        # state pool too: long-lived lock holders
+        # must not consume the connections needed for metadata under the lock.
+        engine = db_utils.get_lock_engine()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool. Idempotent under
+        # Borrow a dedicated connection from the engine. Idempotent under
         # retry: raw_connection() either returns a checked-out conn or
         # raises with nothing taken — no partial state, no leak.
         connection = engine.raw_connection()
@@ -231,16 +243,42 @@ class PostgresLock(DistributedLock):
         connection.driver_connection.autocommit = True
         return connection
 
+    def _get_connection_slot(self) -> threading.BoundedSemaphore:
+        global _lock_connection_gate, _lock_connection_gate_capacity
+        capacity = max(
+            1,
+            db_utils.get_db_connection_pool_size() +
+            db_utils.get_db_connection_pool_max_overflow(
+                db_utils.get_db_connection_pool_size()))
+        with _lock_connection_gate_lock:
+            if _lock_connection_gate_capacity != capacity:
+                _lock_connection_gate = threading.BoundedSemaphore(capacity)
+                _lock_connection_gate_capacity = capacity
+            assert _lock_connection_gate is not None
+            return _lock_connection_gate
+
+    def _open_connection(self, blocking: bool, start_time: float) -> None:
+        connection_slot = self._get_connection_slot()
+        while not connection_slot.acquire(blocking=False):
+            if (not blocking or (self.timeout is not None and
+                                 time.time() - start_time > self.timeout)):
+                raise LockConnectionPoolFull(
+                    f'No advisory-lock connection slot for {self.lock_id}')
+            time.sleep(self.poll_interval)
+        self._connection_slot = connection_slot
+        try:
+            self._connection = self._get_connection()
+        except Exception:
+            self._connection_slot.release()
+            self._connection_slot = None
+            raise
+
     def acquire(self, blocking: bool = True) -> AcquireReturnProxy:
         """Acquire the postgres advisory lock."""
         if self._acquired:
             return AcquireReturnProxy(self)
 
-        self._connection = self._get_connection()
-        cursor = self._connection.cursor()
-
         start_time = time.time()
-
         if self._shared_lock:
             lock_func = 'pg_try_advisory_lock_shared'
         else:
@@ -248,6 +286,9 @@ class PostgresLock(DistributedLock):
 
         try:
             while True:
+                self._open_connection(blocking, start_time)
+                assert self._connection is not None
+                cursor = self._connection.cursor()
                 cursor.execute(f'SELECT {lock_func}(%s)', (self._lock_key,))
                 result = cursor.fetchone()[0]
 
@@ -268,6 +309,7 @@ class PostgresLock(DistributedLock):
                         f'{self.lock_id} within {self.timeout} '
                         f'seconds')
 
+                self._close_connection()
                 time.sleep(self.poll_interval)
 
         except Exception:
@@ -313,6 +355,8 @@ class PostgresLock(DistributedLock):
 
             # The lock is held by another routine, force unlock it.
             if self._connection is None:
+                # Teardown must still be able to clear a lock when unrelated
+                # lock holders have filled all bounded connection slots.
                 self._connection = self._get_connection()
             cursor = self._connection.cursor()
             if self._shared_lock:
@@ -382,6 +426,9 @@ class PostgresLock(DistributedLock):
                 else:
                     logger.debug(f'Failed to close postgres connection: {e}')
             self._connection = None
+        if self._connection_slot is not None:
+            self._connection_slot.release()
+            self._connection_slot = None
 
     def is_locked(self) -> bool:
         """Check if the postgres advisory lock is acquired."""
