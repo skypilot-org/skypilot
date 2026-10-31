@@ -32,9 +32,10 @@ _NARROW_REGIONS = (
     'jp',
     'au',
 )
+# https://modal.com/docs/guide/region-selection#pricing
 _REGION_MULTIPLIERS = {
     AUTO_REGION: 1.0,
-    **{region: 1.5 for region in _BROAD_REGIONS},
+    **{region: 1.15 for region in _BROAD_REGIONS},
     **{region: 1.75 for region in _NARROW_REGIONS},
 }
 
@@ -42,7 +43,7 @@ _REGION_MULTIPLIERS = {
 # https://modal.com/pricing and https://modal.com/docs/guide/gpu.
 # Modal Sandbox + Notebooks pricing is converted from per-second pricing.
 _SANDBOX_CPU_CORE_PRICE_PER_SECOND = 0.00003942
-_SANDBOX_MEMORY_GIB_PRICE_PER_SECOND = 0.00000672
+_SANDBOX_MEMORY_GIB_PRICE_PER_SECOND = 0.00000667
 
 _DEFAULT_MODAL_CPU_CORES = 2.0
 _DEFAULT_SKY_VCPUS = 4.0

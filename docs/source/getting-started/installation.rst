@@ -1208,7 +1208,7 @@ cluster:
 
 .. code-block:: shell
 
-  sky volumes apply cache --infra modal --type modal-volume
+  sky volumes apply --name cache --infra modal --type modal-volume
 
 .. code-block:: yaml
 

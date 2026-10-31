@@ -93,15 +93,15 @@ def test_modal_catalog_regions_and_prices():
                                                 None)
     narrow_price = modal_catalog.get_hourly_cost('modal-h100-1x', False,
                                                  'us-west', None)
-    assert broad_price == pytest.approx(auto_price * 1.5)
+    assert broad_price == pytest.approx(auto_price * 1.15)
     assert narrow_price == pytest.approx(auto_price * 1.75)
 
     b300_price = modal_catalog.get_hourly_cost('modal-b300-1x', False, 'auto',
                                                None)
-    expected_b300_price = (2 * 0.00003942 + 16 * 0.00000672 + 0.001972) * 3600
+    expected_b300_price = (2 * 0.00003942 + 16 * 0.00000667 + 0.001972) * 3600
     assert b300_price == pytest.approx(expected_b300_price)
     assert modal_catalog.get_hourly_cost(
-        'modal-b300-1x', False, 'us', None) == pytest.approx(b300_price * 1.5)
+        'modal-b300-1x', False, 'us', None) == pytest.approx(b300_price * 1.15)
 
 
 def test_modal_catalog_gpu_to_sandbox_args():
@@ -151,11 +151,11 @@ def test_modal_dynamic_instance_types_and_prices():
                                                                              64)
     assert modal_catalog.get_modal_args_from_instance_type(instance_type) == (
         None, 8, 64 * 1024)
-    expected_price = (8 * 0.00003942 + 64 * 0.00000672) * 3600
+    expected_price = (8 * 0.00003942 + 64 * 0.00000667) * 3600
     assert modal_catalog.get_hourly_cost(
         instance_type, region='auto') == pytest.approx(expected_price)
     assert modal_catalog.get_hourly_cost(
-        instance_type, region='us') == pytest.approx(expected_price * 1.5)
+        instance_type, region='us') == pytest.approx(expected_price * 1.15)
     assert modal_catalog.get_default_instance_type(
         cpus='16', memory='64', max_hourly_cost=expected_price - 0.01) is None
     assert modal_catalog.get_arch_from_instance_type(instance_type) is None
@@ -182,10 +182,10 @@ def test_modal_dynamic_gpu_instance_type():
         32, 128)
     assert modal_catalog.get_modal_args_from_instance_type(instance_type) == (
         'H100:2', 16, 128 * 1024)
-    expected_auto_price = (16 * 0.00003942 + 128 * 0.00000672 +
+    expected_auto_price = (16 * 0.00003942 + 128 * 0.00000667 +
                            2 * 0.001097) * 3600
     assert modal_catalog.get_hourly_cost(
-        instance_type, region='us') == pytest.approx(expected_auto_price * 1.5)
+        instance_type, region='us') == pytest.approx(expected_auto_price * 1.15)
 
 
 def test_modal_dynamic_resources_are_feasible():
