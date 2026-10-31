@@ -52,7 +52,7 @@ You can also use `sky jobs queue` and `sky dashboard` to see the status of jobs.
 </p>
 
 ## Step 2: Construct the Vector Database from Computed Embeddings
-Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. In this example, we use [ChromaDB](https://docs.trychroma.com/getting-started) to store and query the embeddings. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
+Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. In this example, we use [ChromaDB](https://docs.trychroma.com/docs/overview/getting-started) to store and query the embeddings. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors.
 
 To construct the database from embeddings: 
 ```
