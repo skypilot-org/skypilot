@@ -795,6 +795,58 @@ def test_modal_apply_and_delete_volume(monkeypatch):
     ]
 
 
+def test_modal_volume_usedby_reads_cluster_yaml_by_path(monkeypatch):
+    # Handles store the cluster YAML's path, not its contents.
+    yamls = {
+        '/sky/generated/modal-a.yml': {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'ModalVolumes': [{
+                            'VolumeNameOnCloud': 'cache-on-cloud'
+                        }]
+                    }
+                }
+            }
+        },
+        '/sky/generated/modal-b.yml': {},
+    }
+
+    def handle(cloud, cluster_yaml):
+        return SimpleNamespace(launched_resources=SimpleNamespace(cloud=cloud),
+                               cluster_yaml=cluster_yaml)
+
+    records = [
+        {
+            'name': 'modal-a',
+            'handle': handle(clouds.Modal(), '/sky/generated/modal-a.yml')
+        },
+        {
+            'name': 'modal-b',
+            'handle': handle(clouds.Modal(), '/sky/generated/modal-b.yml')
+        },
+        # Non-Modal clusters are skipped without reading their YAML.
+        {
+            'name': 'aws-dev',
+            'handle': handle(clouds.AWS(), '/sky/generated/aws-dev.yml')
+        },
+    ]
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_clusters',
+                        lambda: records)
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_cluster_yaml_dict',
+                        lambda path: yamls[path])
+    config = models.VolumeConfig(name='cache',
+                                 type='modal-volume',
+                                 cloud='modal',
+                                 region=None,
+                                 zone=None,
+                                 name_on_cloud='cache-on-cloud',
+                                 size=None,
+                                 config={})
+
+    assert modal_volume.get_volume_usedby(config) == ([], ['modal-a'])
+
+
 def test_modal_cloud_bucket_mount_specs():
     # pylint: disable=protected-access
 

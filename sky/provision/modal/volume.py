@@ -2,8 +2,7 @@
 
 from typing import Any, Dict, List, Set, Tuple
 
-import yaml
-
+from sky import clouds
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -48,13 +47,17 @@ def _cluster_uses_volume(cluster_record: Dict[str, Any],
     handle = cluster_record.get('handle')
     if handle is None:
         return False
+    launched_resources = getattr(handle, 'launched_resources', None)
+    if not isinstance(getattr(launched_resources, 'cloud', None), clouds.Modal):
+        return False
+    # `handle.cluster_yaml` is the YAML's path, not its contents.
     cluster_yaml = getattr(handle, 'cluster_yaml', None)
     if not cluster_yaml:
         return False
     try:
-        cluster_yaml_obj = yaml.safe_load(cluster_yaml)
+        cluster_yaml_obj = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     except Exception:  # pylint: disable=broad-except
-        logger.debug('Failed to parse cluster YAML for Modal volume used-by.',
+        logger.debug('Failed to read cluster YAML for Modal volume used-by.',
                      exc_info=True)
         return False
     node_config = (cluster_yaml_obj.get('available_node_types',

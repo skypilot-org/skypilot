@@ -1242,6 +1242,49 @@ class TestRunPodVolumeTable:
         assert 'RunPod Network Volumes:' in out
         assert '\n\n' in out
 
+    def test_format_volume_table_renders_every_volume_type(self):
+        # A type without a table branch is grouped but never printed, so
+        # `sky volumes ls` claims there are no volumes.
+        from sky.client.cli.table_utils import format_volume_table
+        from sky.utils import volume as volume_utils
+        for volume_type in volume_utils.VolumeType:
+            out = format_volume_table([{
+                'name': 'v1',
+                'type': volume_type.value,
+                'cloud': 'c',
+                'region': None,
+                'zone': None,
+                'size': None,
+            }],
+                                      show_all=False)
+            assert 'v1' in out, volume_type
+
+
+class TestModalVolumeTable:
+
+    def test_modal_volume_table(self):
+        from sky.client.cli import table_utils as tutils
+        volumes = [{
+            'name': 'cache',
+            'type': 'modal-volume',
+            'cloud': 'modal',
+            'region': None,
+            'zone': None,
+            'size': None,
+            'user_name': 'u',
+            'workspace': 'w',
+            'launched_at': 0,
+            'last_attached_at': None,
+            'status': 'READY',
+            'usedby_clusters': ['c1'],
+            'name_on_cloud': 'cache-abc'
+        }]
+        out = tutils.format_volume_table(volumes, show_all=True)
+        assert out.startswith('Modal Volumes:')
+        assert 'cache' in out
+        assert 'cache-abc' in out
+        assert 'c1' in out
+
 
 class TestVolumesLsByName:
     """`sky volumes ls NAME` narrows the listing, and the refresh with it."""
