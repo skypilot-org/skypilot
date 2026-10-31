@@ -962,7 +962,12 @@ def _start_api_server(deploy: bool = False,
         if enable_basic_auth:
             server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
         _set_metrics_env_var(server_env, metrics, deploy)
-        with open(log_path, 'w', encoding='utf-8') as log_file:
+        with open(log_path, 'a', encoding='utf-8') as log_file:
+            # Flush before Popen so the separator precedes the child's output.
+            log_file.write(f'===== SkyPilot API server starting at '
+                           f'{time.strftime("%Y-%m-%d %H:%M:%S %Z")} '
+                           f'(port {get_local_api_server_port()}) =====\n')
+            log_file.flush()
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
             # causing the child process to be unable to write to the log file.
