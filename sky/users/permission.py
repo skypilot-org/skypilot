@@ -1,4 +1,6 @@
 """Permission service for SkyPilot API Server."""
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import logging
@@ -6,12 +8,25 @@ import os
 import queue
 import threading
 import time
+import typing
 from typing import Dict, Generator, List, Optional, Set, Tuple
 
-import casbin
-from casbin import util as casbin_util
-import sqlalchemy_adapter
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import casbin
+    import casbin.util as casbin_util
+    import sqlalchemy_adapter
+else:
+    casbin = adaptors_common.LazyImport('casbin', import_error_message=_SA_MSG)
+    casbin_util = adaptors_common.LazyImport('casbin.util',
+                                             import_error_message=_SA_MSG)
+    sqlalchemy_adapter = adaptors_common.LazyImport(
+        'sqlalchemy_adapter', import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import models
 from sky import sky_logging

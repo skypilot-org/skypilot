@@ -5,14 +5,12 @@ used in the Recipes feature. The database stores recipes that can be
 pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
+from __future__ import annotations
+
 import json
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
-
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
@@ -21,148 +19,158 @@ from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
 
 logger = sky_logging.init_logger(__name__)
 
 # SQLAlchemy Base
-Base = declarative.declarative_base()
+if sqlalchemy_deps.sqlalchemy_available():
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.ext import declarative
 
-# Table name
-RECIPES_TABLE = 'recipes'
+    Base = declarative.declarative_base()
 
-# SQLAlchemy table definition
-# Note: 'name' is the primary key and unique identifier for recipes
-recipes_table = sqlalchemy.Table(
-    RECIPES_TABLE,
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('description', sqlalchemy.Text),
-    sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('pinned', sqlalchemy.Integer, default=0),
-    sqlalchemy.Column('user_id', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('user_name', sqlalchemy.Text),
-    sqlalchemy.Column('created_at', sqlalchemy.Float),
-    sqlalchemy.Column('updated_at', sqlalchemy.Float),
-    sqlalchemy.Column('updated_by_id', sqlalchemy.Text),
-    sqlalchemy.Column('updated_by_name', sqlalchemy.Text),
-    sqlalchemy.Column('is_editable', sqlalchemy.Integer, default=1),
-    sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
-    # JSON describing where an externally managed recipe comes from (e.g.
-    # {"kind": "git", "url": ..., "ref": ..., "sha": ..., "path": ...}).
-    # NULL for recipes created through the API.
-    sqlalchemy.Column('source', sqlalchemy.Text),
-    sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
-    sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
-    sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
-)
+    # Table name
+    RECIPES_TABLE = 'recipes'
 
-# Directory containing example YAML files
-_EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
+    # SQLAlchemy table definition
+    # Note: 'name' is the primary key and unique identifier for recipes
+    recipes_table = sqlalchemy.Table(
+        RECIPES_TABLE,
+        Base.metadata,
+        sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+        sqlalchemy.Column('description', sqlalchemy.Text),
+        sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('pinned', sqlalchemy.Integer, default=0),
+        sqlalchemy.Column('user_id', sqlalchemy.Text, nullable=False),
+        sqlalchemy.Column('user_name', sqlalchemy.Text),
+        sqlalchemy.Column('created_at', sqlalchemy.Float),
+        sqlalchemy.Column('updated_at', sqlalchemy.Float),
+        sqlalchemy.Column('updated_by_id', sqlalchemy.Text),
+        sqlalchemy.Column('updated_by_name', sqlalchemy.Text),
+        sqlalchemy.Column('is_editable', sqlalchemy.Integer, default=1),
+        sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
+        # JSON describing where an externally managed recipe comes from (e.g.
+        # {"kind": "git", "url": ..., "ref": ..., "sha": ..., "path": ...}).
+        # NULL for recipes created through the API.
+        sqlalchemy.Column('source', sqlalchemy.Text),
+        sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
+        sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
+        sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
+    )
 
-# Default templates: maps filename (without .yaml) to metadata
-# Content is loaded from sky/recipes/examples/{filename}.yaml
-# Note: Recipe names must use letters, numbers, and dashes only
-DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
-    'basic_cluster': {
-        'name': 'basic-cluster',
-        'description': 'A simple cluster with GPU resources',
-        'recipe_type': 'cluster',
-    },
-    'basic_managed_job': {
-        'name': 'basic-managed-job',
-        'description': 'A simple job with recovery',
-        'recipe_type': 'job',
-    },
-    'basic_pool': {
-        'name': 'basic-pool',
-        'description': 'A pool for concurrent jobs',
-        'recipe_type': 'pool',
-    },
-    'basic_volume': {
-        'name': 'basic-volume',
-        'description': 'A starting point for a k8s volume',
-        'recipe_type': 'volume',
-    },
-}
+    # Directory containing example YAML files
+    _EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
 
+    # Default templates: maps filename (without .yaml) to metadata
+    # Content is loaded from sky/recipes/examples/{filename}.yaml
+    # Note: Recipe names must use letters, numbers, and dashes only
+    DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
+        'basic_cluster': {
+            'name': 'basic-cluster',
+            'description': 'A simple cluster with GPU resources',
+            'recipe_type': 'cluster',
+        },
+        'basic_managed_job': {
+            'name': 'basic-managed-job',
+            'description': 'A simple job with recovery',
+            'recipe_type': 'job',
+        },
+        'basic_pool': {
+            'name': 'basic-pool',
+            'description': 'A pool for concurrent jobs',
+            'recipe_type': 'pool',
+        },
+        'basic_volume': {
+            'name': 'basic-volume',
+            'description': 'A starting point for a k8s volume',
+            'recipe_type': 'volume',
+        },
+    }
 
-def _load_example_content(filename: str) -> str:
-    """Load YAML content from an example file.
+    def _load_example_content(filename: str) -> str:
+        """Load YAML content from an example file.
 
-    Args:
-        filename: The filename without .yaml extension.
+        Args:
+            filename: The filename without .yaml extension.
 
-    Returns:
-        The file content as a string.
+        Returns:
+            The file content as a string.
 
-    Raises:
-        FileNotFoundError: If the example file doesn't exist.
-    """
-    filepath = os.path.join(_EXAMPLES_DIR, f'{filename}.yaml')
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return f.read()
+        Raises:
+            FileNotFoundError: If the example file doesn't exist.
+        """
+        filepath = os.path.join(_EXAMPLES_DIR, f'{filename}.yaml')
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
 
+    def _create_table(engine: sqlalchemy.engine.Engine) -> None:
+        """Create tables and run migrations."""
+        # Enable WAL mode for SQLite to avoid locking issues
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
+                not common_utils.is_wsl()):
+            try:
+                with orm.Session(engine) as session:
+                    session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                    session.commit()
+            except sqlalchemy.exc.OperationalError as e:
+                if 'database is locked' not in str(e):
+                    raise
 
-def _create_table(engine: sqlalchemy.engine.Engine) -> None:
-    """Create tables and run migrations."""
-    # Enable WAL mode for SQLite to avoid locking issues
-    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
-            not common_utils.is_wsl()):
-        try:
-            with orm.Session(engine) as session:
-                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+        # Run migrations
+        migration_utils.safe_alembic_upgrade(engine,
+                                             migration_utils.RECIPES_DB_NAME,
+                                             migration_utils.RECIPES_VERSION)
+
+    def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
+        """Insert default templates if the table is empty.
+
+        Loads recipe content from example files in sky/recipes/examples/ and
+        populates the database with the default templates.
+        """
+        with orm.Session(engine) as session:
+            # Check if table is empty
+            # pylint: disable=not-callable
+            count = session.execute(
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(
+                    recipes_table)).scalar()
+            if count == 0:
+                now = time.time()
+                for filename, metadata in DEFAULT_TEMPLATES.items():
+                    try:
+                        content = _load_example_content(filename)
+                    except FileNotFoundError:
+                        logger.warning(
+                            f'Example file not found: {filename}.yaml')
+                        continue
+
+                    session.execute(recipes_table.insert().values(
+                        name=metadata['name'],
+                        description=metadata['description'],
+                        content=content,
+                        recipe_type=metadata['recipe_type'],
+                        pinned=1,
+                        user_id='system',
+                        user_name='SkyPilot',
+                        created_at=now,
+                        updated_at=now,
+                        is_editable=0,
+                        is_pinnable=1,
+                    ))
                 session.commit()
-        except sqlalchemy.exc.OperationalError as e:
-            if 'database is locked' not in str(e):
-                raise
 
-    # Run migrations
-    migration_utils.safe_alembic_upgrade(engine,
-                                         migration_utils.RECIPES_DB_NAME,
-                                         migration_utils.RECIPES_VERSION)
-
-
-def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
-    """Insert default templates if the table is empty.
-
-    Loads recipe content from example files in sky/recipes/examples/ and
-    populates the database with the default templates.
-    """
-    with orm.Session(engine) as session:
-        # Check if table is empty
-        # pylint: disable=not-callable
-        count = session.execute(
-            sqlalchemy.select(
-                sqlalchemy.func.count()).select_from(recipes_table)).scalar()
-        if count == 0:
-            now = time.time()
-            for filename, metadata in DEFAULT_TEMPLATES.items():
-                try:
-                    content = _load_example_content(filename)
-                except FileNotFoundError:
-                    logger.warning(f'Example file not found: {filename}.yaml')
-                    continue
-
-                session.execute(recipes_table.insert().values(
-                    name=metadata['name'],
-                    description=metadata['description'],
-                    content=content,
-                    recipe_type=metadata['recipe_type'],
-                    pinned=1,
-                    user_id='system',
-                    user_name='SkyPilot',
-                    created_at=now,
-                    updated_at=now,
-                    is_editable=0,
-                    is_pinnable=1,
-                ))
-            session.commit()
-
-
-_db_manager = db_utils.DatabaseManager('recipes',
-                                       _create_table,
-                                       post_init_fn=_insert_default_templates)
+    _db_manager = db_utils.DatabaseManager(
+        'recipes', _create_table, post_init_fn=_insert_default_templates)
+else:
+    # Client-only install: enums/helpers below still import. DB APIs
+    # fail with a clear install hint when first used.
+    sqlalchemy = None  # type: ignore
+    orm = None  # type: ignore
+    declarative = None  # type: ignore
+    Base = None  # type: ignore  # pylint: disable=invalid-name
+    _db_manager = None  # type: ignore
 
 # =============================================================================
 # Data classes

@@ -16,6 +16,8 @@ opt-in and instantly revertible. On SQLite (single-node) there are no other
 server instances to coordinate with, and both backends fall back to the local
 advisory/file lock path.
 """
+from __future__ import annotations
+
 import abc
 import logging
 import os
@@ -23,8 +25,14 @@ import socket
 from typing import Optional
 import uuid
 
-import sqlalchemy
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                        import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky.utils import locks
 from sky.utils.db import db_utils
