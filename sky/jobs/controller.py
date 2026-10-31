@@ -3867,6 +3867,8 @@ class ControllerManager:
         # Populated by cancel_job() and consumed by run_job().
         self._cancel_info: Dict[int, Tuple[bool, Optional[int]]] = {}
         self._cancel_info_lock = asyncio.Lock()
+        # Prevent later signals from interrupting cancellation or finalization.
+        self._stopping_jobs: Set[int] = set()
 
         # Jobs this process has cancelled for exceeding a deadline, so the
         # deadline loop does not cancel them again while they tear down.
@@ -4164,82 +4166,99 @@ class ControllerManager:
     async def run_job_loop(self,
                            job_id: int,
                            log_file: str,
-                           pool: Optional[str] = None):
+                           pool: Optional[str] = None,
+                           cancellation_ready: Optional[asyncio.Event] = None):
         """Background task that runs the job loop."""
-        ctx = context.get()
-        assert ctx is not None, 'Context is not initialized'
-        ctx.redirect_log(pathlib.Path(log_file))
-
-        logger.info(f'Starting job loop for {job_id}')
-        logger.info(f'  log_file={log_file}')
-        logger.info(f'  pool={pool}')
-        logger.info(f'From controller {self._controller_uuid}')
-        logger.info(f'  pid={self._pid}')
-
         job_rank = None
-        env_content = await asyncio.to_thread(
-            file_content_utils.get_job_env_content, job_id)
-        if env_content:
-            try:
-                env_vars = dotenv.dotenv_values(stream=io.StringIO(env_content))
-                logger.info('Loading %d environment variables for job %s',
-                            len(env_vars), job_id)
-                if ctx is not None:
-                    for key, value in env_vars.items():
-                        if value is not None:
-                            ctx.override_envs({key: value})
-                            logger.debug('Set environment variable: %s=%s', key,
-                                         value)
-
-                    # Restore config file if needed
-                    await asyncio.to_thread(
-                        file_content_utils.restore_job_config_file, job_id)
-
-                    await asyncio.to_thread(skypilot_config.reload_config)
-
-                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
-                    # available
-                    if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
-                            env_vars['SKYPILOT_JOB_ID_TO_RANK']):
-                        try:
-                            job_id_to_rank = (json.loads(
-                                env_vars['SKYPILOT_JOB_ID_TO_RANK']))
-                            logger.debug(
-                                f'Loaded job_id_to_rank map: {job_id_to_rank}')
-                            job_rank = job_id_to_rank.get(str(job_id))
-                        except json.JSONDecodeError as e:
-                            logger.warning(
-                                'Failed to parse SKYPILOT_JOB_ID_TO_RANK for '
-                                'job %s: %s', job_id, e)
-                    else:
-                        logger.debug(
-                            'SKYPILOT_JOB_ID_TO_RANK not found in environment '
-                            'variables')
-                else:  # pragma: no cover - defensive
-                    logger.error('Context is None, cannot set environment '
-                                 'variables')
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(
-                    'Failed to load environment variables for job %s: '
-                    '%s', job_id, e)
-
-        # Install a fresh per-job usage MessageCollection so the run id and
-        # other identity fields reflect the per-job env we just loaded into
-        # ``ctx``. Without this, in consolidation mode the controller
-        # subprocess inherits a MessageCollection that was created at
-        # module import time (when class-body decorators like
-        # ``@usage_lib.messages.usage.update_runtime('provision')`` in
-        # ``sky/backends/backend.py`` first accessed the proxy) and bound
-        # the run id to whoever first spawned the controller; subsequent
-        # JobController coroutines would all share that one MC instead of
-        # their own per-job state. The override is scoped to this
-        # coroutine's contextvars Context.
-        usage_lib.install_fresh_messages_for_current_context()
-
         cancelling = False
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
+        initialization_exception: Optional[Exception] = None
         try:
+            ctx = context.get()
+            assert ctx is not None, 'Context is not initialized'
+            ctx.redirect_log(pathlib.Path(log_file))
+
+            logger.info(f'Starting job loop for {job_id}')
+            logger.info(f'  log_file={log_file}')
+            logger.info(f'  pool={pool}')
+            logger.info(f'From controller {self._controller_uuid}')
+            logger.info(f'  pid={self._pid}')
+
+            env_content = await db_retries.with_db_retries_async(
+                lambda _: asyncio.to_thread(
+                    file_content_utils.get_job_env_content, job_id),
+                max_retries=None,
+                deadline=float('inf'))
+            if env_content:
+                try:
+                    env_vars = dotenv.dotenv_values(
+                        stream=io.StringIO(env_content))
+                    logger.info('Loading %d environment variables for job %s',
+                                len(env_vars), job_id)
+                    if ctx is not None:
+                        for key, value in env_vars.items():
+                            if value is not None:
+                                ctx.override_envs({key: value})
+                                logger.debug('Set environment variable: %s=%s',
+                                             key, value)
+
+                        # Restore config file if needed
+                        await db_retries.with_db_retries_async(
+                            lambda _: asyncio.to_thread(
+                                file_content_utils.restore_job_config_file,
+                                job_id),
+                            max_retries=None,
+                            deadline=float('inf'))
+
+                        await db_retries.with_db_retries_async(
+                            lambda _: asyncio.to_thread(skypilot_config.
+                                                        reload_config),
+                            max_retries=None,
+                            deadline=float('inf'))
+
+                        # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
+                        # available
+                        if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
+                                env_vars['SKYPILOT_JOB_ID_TO_RANK']):
+                            try:
+                                job_id_to_rank = (json.loads(
+                                    env_vars['SKYPILOT_JOB_ID_TO_RANK']))
+                                logger.debug('Loaded job_id_to_rank map: %s',
+                                             job_id_to_rank)
+                                job_rank = job_id_to_rank.get(str(job_id))
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    'Failed to parse '
+                                    'SKYPILOT_JOB_ID_TO_RANK for job %s: %s',
+                                    job_id, e)
+                        else:
+                            logger.debug('SKYPILOT_JOB_ID_TO_RANK not found in '
+                                         'environment variables')
+                    else:  # pragma: no cover - defensive
+                        logger.error('Context is None, cannot set environment '
+                                     'variables')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(
+                        'Failed to load environment variables for job %s: '
+                        '%s', job_id, e)
+                    raise
+
+            # Install a fresh per-job usage MessageCollection so the run id and
+            # other identity fields reflect the per-job env we just loaded into
+            # ``ctx``. Without this, in consolidation mode the controller
+            # subprocess inherits a MessageCollection that was created at
+            # module import time (when class-body decorators like
+            # ``@usage_lib.messages.usage.update_runtime('provision')`` in
+            # ``sky/backends/backend.py`` first accessed the proxy) and bound
+            # the run id to whoever first spawned the controller; subsequent
+            # JobController coroutines would all share that one MC instead of
+            # their own per-job state. The override is scoped to this
+            # coroutine's contextvars Context.
+            usage_lib.install_fresh_messages_for_current_context()
+            if cancellation_ready is not None:
+                cancellation_ready.set()
+
             controller = JobController(job_id,
                                        self.starting,
                                        self._job_tasks_lock,
@@ -4248,19 +4267,11 @@ class ControllerManager:
                                        job_rank,
                                        job_costs=self.job_costs)
             await controller.load_dag()
-
-            async with self._job_tasks_lock:
-                if job_id in self.job_tasks:
-                    logger.error(f'Job {job_id} already exists in job_tasks')
-                    raise ValueError(f'Job {job_id} already exists')
-
-                # Create the task and store it
-                # This function should return instantly and run the job loop in
-                # the background.
-                task = asyncio.create_task(controller.run())
-                self.job_tasks[job_id] = task
-            await task
+            await controller.run()
         except asyncio.CancelledError:
+            if (cancellation_ready is not None and
+                    not cancellation_ready.is_set()):
+                raise
             logger.info(f'Job {job_id} was cancelled')
 
             async with self._cancel_info_lock:
@@ -4309,9 +4320,11 @@ class ControllerManager:
             # down, we skip gracefully.
             if active_task_ids:
                 try:
-                    # A cancel can only land at an await point, all of which
-                    # are after the controller is constructed.
-                    assert controller is not None
+                    if controller is None:
+                        controller = JobController(job_id, self.starting,
+                                                   self._job_tasks_lock,
+                                                   self._starting_signal, pool,
+                                                   job_rank)
                     await self._download_logs_for_cancelled_job(
                         controller, job_id, active_task_ids, dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
@@ -4324,8 +4337,15 @@ class ControllerManager:
         except Exception as e:
             logger.error(f'Unexpected error in job loop for {job_id}: '
                          f'{common_utils.format_exception(e)}')
+            initialization_exception = e
             raise
         finally:
+            if (cancellation_ready is not None and
+                    not cancellation_ready.is_set()):
+                if initialization_exception is not None:
+                    raise initialization_exception
+                raise asyncio.CancelledError()
+            self._stopping_jobs.add(job_id)
             deadline = (time.monotonic() +
                         jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS)
 
@@ -4400,11 +4420,13 @@ class ControllerManager:
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
                     del self.job_tasks[job_id]
+                self._stopping_jobs.discard(job_id)
 
     async def start_job(
         self,
         job_id: int,
         pool: Optional[str] = None,
+        reservation_ready: Optional[asyncio.Event] = None,
     ):
         """Start a new job.
 
@@ -4421,14 +4443,90 @@ class ControllerManager:
 
         cost_units = await self._claimed_cost_units(job_id, pool)
         async with self._job_tasks_lock:
+            if job_id in self.job_tasks:
+                logger.warning(f'Job {job_id} is already running')
+                return
             self.starting.add(job_id)
             self.job_costs[job_id] = cost_units
-        task = await create_background_task(
-            self.run_job_loop(job_id, log_file, pool))
-        # Release the cost however the job loop ends, including when it fails
-        # before the job is added to job_tasks.
+            if reservation_ready is not None:
+                reservation_ready.set()
+            cancellation_ready = asyncio.Event()
+            task = asyncio.create_task(
+                self.run_job_loop(job_id, log_file, pool, cancellation_ready))
+        async with _background_tasks_lock:
+            _background_tasks.add(task)
+            # TODO(cooperc): Discard needs a lock?
+            task.add_done_callback(_background_tasks.discard)
         task.add_done_callback(lambda _: self.job_costs.pop(job_id, None))
-
+        ready_waiter = asyncio.create_task(cancellation_ready.wait())
+        try:
+            await asyncio.wait((task, ready_waiter),
+                               return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if not ready_waiter.done():
+                ready_waiter.cancel()
+                try:
+                    await ready_waiter
+                except asyncio.CancelledError:
+                    pass
+        if not cancellation_ready.is_set():
+            async with self._job_tasks_lock:
+                self.starting.discard(job_id)
+                self._starting_signal.notify()
+            exception = None if task.cancelled() else task.exception()
+            if exception is not None:
+                logger.error(
+                    f'Job {job_id} failed before cancellation was ready: '
+                    f'{common_utils.format_exception(exception)}')
+            claimed_job = [{
+                'job_id': job_id,
+                'controller_pid': self._pid,
+                'controller_pid_started_at': self._pid_started_at,
+                'schedule_state':
+                    managed_job_state.ManagedJobScheduleState.LAUNCHING,
+            }]
+            try:
+                if exception is None:
+                    reset_ids = await db_retries.with_db_retries_async(
+                        lambda _: asyncio.to_thread(
+                            managed_job_state.reset_jobs_for_recovery_batch,
+                            claimed_job),
+                        max_retries=None,
+                        deadline=float('inf'))
+                    if reset_ids:
+                        logger.info(f'Reset job {job_id} for recovery after '
+                                    'initialization was cancelled.')
+                        await asyncio.sleep(5)
+                else:
+                    reason = (
+                        'Controller initialization failed before the saved '
+                        'job context could be restored. Resources were not '
+                        'cleaned up and may require manual cleanup. Error: '
+                        f'{common_utils.format_exception(exception)}')
+                    failed = await db_retries.with_db_retries_async(
+                        lambda _: asyncio.to_thread(
+                            managed_job_state.
+                            fail_job_controller_initialization, claimed_job[
+                                0], reason),
+                        max_retries=None,
+                        deadline=float('inf'))
+                    if failed:
+                        signal_path = os.path.join(
+                            jobs_constants.CONSOLIDATED_SIGNAL_PATH,
+                            str(job_id))
+                        if os.path.exists(signal_path):
+                            os.remove(signal_path)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to reset job {job_id} for recovery: '
+                             f'{common_utils.format_exception(e)}')
+            return
+        async with self._job_tasks_lock:
+            if task.done():
+                self.starting.discard(job_id)
+                self.job_costs.pop(job_id, None)
+                self._starting_signal.notify()
+            else:
+                self.job_tasks[job_id] = task
         logger.info(f'Job {job_id} started successfully')
 
     async def cancel_job(self):
@@ -4466,15 +4564,18 @@ class ControllerManager:
                             finally:
                                 os.remove(signal_path)
 
-                        # Parse and store graceful cancel info before
-                        # cancelling the task.
-                        graceful, graceful_timeout = managed_job_utils.parse_job_cancel_file(  # pylint: disable=line-too-long
-                            content)
-                        async with self._cancel_info_lock:
-                            self._cancel_info[job_id] = (graceful,
-                                                         graceful_timeout)
-                        task.cancel()
-                        logger.info(f'Job {job_id} cancelled successfully')
+                        if job_id in self._stopping_jobs:
+                            logger.info(f'Job {job_id} is already stopping; '
+                                        'ignoring repeated cancellation signal')
+                        else:
+                            graceful, graceful_timeout = managed_job_utils.parse_job_cancel_file(  # pylint: disable=line-too-long
+                                content)
+                            async with self._cancel_info_lock:
+                                self._cancel_info[job_id] = (graceful,
+                                                             graceful_timeout)
+                            self._stopping_jobs.add(job_id)
+                            task.cancel()
+                            logger.info(f'Job {job_id} cancelled successfully')
             await asyncio.sleep(15)
 
     async def deadline_loop(self):
@@ -4585,7 +4686,7 @@ class ControllerManager:
             return False
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
-            if task is None or task.done():
+            if task is None or task.done() or job_id in self._stopping_jobs:
                 return False
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
@@ -4601,6 +4702,7 @@ class ControllerManager:
                     return False
                 # A deadline is a hard limit: not graceful.
                 self._cancel_info[job_id] = (False, None)
+            self._stopping_jobs.add(job_id)
             task.cancel()
             self._deadline_cancelled.add(job_id)
             return True
@@ -4609,7 +4711,7 @@ class ControllerManager:
         """Whether the job runs here and no cancel is applied or pending."""
         async with self._job_tasks_lock:
             task = self.job_tasks.get(job_id)
-            if task is None or task.done():
+            if task is None or task.done() or job_id in self._stopping_jobs:
                 return False
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
@@ -4743,20 +4845,39 @@ class ControllerManager:
             if str(job_id) in cancels:
                 status = await managed_job_state.get_status_async(job_id)
                 if status == managed_job_state.ManagedJobStatus.PENDING:
-                    logger.info(f'Job {job_id} cancelled')
-                    os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
-                              f'{job_id}')
-                    await managed_job_state.set_cancelling_async(
-                        job_id=job_id,
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=job_id, task_id=None, task=None))
-                    await managed_job_state.set_cancelled_async(
-                        job_id=job_id,
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=job_id, task_id=None, task=None))
-                    continue
+                    cancelled = await db_retries.with_db_retries_async(
+                        lambda _: asyncio.to_thread(
+                            managed_job_state.set_pending_cancelled,
+                            job_id,
+                            controller_pid=self._pid,
+                            controller_pid_started_at=self._pid_started_at),
+                        max_retries=None,
+                        deadline=float('inf'))
+                    if cancelled:
+                        logger.info(f'Job {job_id} cancelled')
+                        os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
+                                  f'{job_id}')
+                        callback = managed_job_utils.event_callback_func(
+                            job_id=job_id, task_id=None, task=None)
+                        await callback('CANCELLED')
+                        continue
 
-            await self.start_job(job_id, pool)
+            reservation_ready = asyncio.Event()
+            start_task = await create_background_task(
+                self.start_job(job_id, pool, reservation_ready))
+            reservation_waiter = asyncio.create_task(reservation_ready.wait())
+            try:
+                await asyncio.wait((start_task, reservation_waiter),
+                                   return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                if not reservation_waiter.done():
+                    reservation_waiter.cancel()
+                    try:
+                        await reservation_waiter
+                    except asyncio.CancelledError:
+                        pass
+            if start_task.done():
+                await start_task
 
 
 async def main(controller_uuid: str):
