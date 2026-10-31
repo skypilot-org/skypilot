@@ -3320,6 +3320,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
         """Helper to create a mock Kubernetes node with labels."""
         mock_node = mock.MagicMock()
         mock_node.metadata.labels = labels or {}
+        mock_node.is_ready.return_value = True
+        mock_node.is_cordoned.return_value = False
         return mock_node
 
     def test_network_tier_none_returns_none(self):
@@ -3946,6 +3948,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
         mock_node = mock.MagicMock()
         mock_node.metadata.labels = labels or {}
         mock_node.status.allocatable = allocatable or {}
+        mock_node.is_ready.return_value = True
+        mock_node.is_cordoned.return_value = False
         return mock_node
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
@@ -4152,18 +4156,19 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
                         })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
 
-        # Should return AWS_EFA type but without efa_count metadata
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
-             None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_aws_efa_detection_node_without_gpu_label(self, mock_get_nodes):
@@ -4208,18 +4213,19 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
 
-        # EFA count is 0, so AWS_EFA is still returned but without efa_count metadata
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
-             None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
 
 class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
@@ -4327,6 +4333,8 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
         node = mock.MagicMock()
         node.metadata.labels = dict(labels)
         node.status.allocatable = dict(allocatable)
+        node.is_ready.return_value = True
+        node.is_cordoned.return_value = False
         return node
 
     def _cold_aws_nodes(self):
@@ -4368,6 +4376,37 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
             net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
         self.assertIsNotNone(meta)
         self.assertEqual(meta['efa_count'], 32)
+
+    def test_matching_gpu_without_efa_uses_catalog(self):
+        node = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertEqual(meta, {'efa_count': 32})
+
+    def test_unready_node_does_not_disable_healthy_efa_node(self):
+        unready = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        unready.is_ready.return_value = False
+        healthy = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                kubernetes.AWS_EFA_RESOURCE_KEY: '32',
+            })
+        net, meta = self._detect([unready, healthy], 8, 'H100')
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertEqual(meta, {'efa_count': 32})
 
     def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
         # A static cluster (no autoscaler) with no GPU node can never schedule
