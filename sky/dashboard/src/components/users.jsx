@@ -286,12 +286,12 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   if (!message) return null;
 
   return (
-    <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
+    <div className="bg-green-tint border border-green-line rounded p-4 mb-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <div className="flex-shrink-0">
             <svg
-              className="h-5 w-5 text-green-400"
+              className="h-5 w-5 text-green-fg-faint"
               viewBox="0 0 20 20"
               fill="currentColor"
             >
@@ -303,7 +303,9 @@ const SuccessDisplay = ({ message, onDismiss }) => {
             </svg>
           </div>
           <div className="ml-3">
-            <p className="text-sm font-medium text-green-800">{message}</p>
+            <p className="text-sm font-medium text-green-fg-stronger">
+              {message}
+            </p>
           </div>
         </div>
         {onDismiss && (
@@ -312,7 +314,7 @@ const SuccessDisplay = ({ message, onDismiss }) => {
               <button
                 type="button"
                 onClick={onDismiss}
-                className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                className="inline-flex rounded-md bg-green-tint p-1.5 text-green-fg-soft hover:bg-green-tint-strong focus:outline-none focus:ring-2 focus:ring-green-solid focus:ring-offset-2 focus:ring-offset-green-tint"
               >
                 <span className="sr-only">Dismiss</span>
                 <svg
@@ -786,7 +788,7 @@ export function Users() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading...</span>
+        <span className="ml-2 text-content-tertiary">Loading...</span>
       </div>
     );
   }
@@ -814,14 +816,14 @@ export function Users() {
         onChange={(e) => {
           setServiceAccountSearchQuery(e.target.value);
         }}
-        className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+        className="h-8 w-full px-3 pr-8 text-sm border border-line-strong rounded-md focus:ring-1 focus:ring-sky-solid-soft focus:border-sky-solid-soft outline-none"
       />
       {serviceAccountSearchQuery && (
         <button
           onClick={() => {
             setServiceAccountSearchQuery('');
           }}
-          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-content-faint hover:text-content-secondary"
           title="Clear search"
         >
           <svg
@@ -850,8 +852,8 @@ export function Users() {
           <button
             className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
               activeMainTab === 'users'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
+                ? 'text-brand border-sky-solid-soft'
+                : 'text-content-tertiary hover:text-content border-transparent'
             }`}
             onClick={() => handleTabChange('users')}
           >
@@ -861,8 +863,8 @@ export function Users() {
             <button
               className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
                 activeMainTab === 'service-accounts'
-                  ? 'text-sky-blue border-sky-500'
-                  : 'text-gray-500 hover:text-gray-700 border-transparent'
+                  ? 'text-brand border-sky-solid-soft'
+                  : 'text-content-tertiary hover:text-content border-transparent'
               }`}
               onClick={() => handleTabChange('service-accounts')}
             >
@@ -880,7 +882,7 @@ export function Users() {
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+              <span className="ml-2 text-content-tertiary">Loading...</span>
             </div>
           )}
           {activeMainTab === 'users' &&
@@ -892,7 +894,7 @@ export function Users() {
                     setShowCreateUser(true);
                   });
                 }}
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+                className="text-brand hover:text-brand-bright flex items-center rounded px-2 py-1 mr-2"
                 title="Create New User"
               >
                 + New User
@@ -907,7 +909,7 @@ export function Users() {
                     setShowImportExportDialog(true);
                   });
                 }}
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+                className="text-brand hover:text-brand-bright flex items-center rounded px-2 py-1 mr-2"
                 title="Import/Export Users"
               >
                 <UploadIcon className="h-4 w-4 mr-1" />
@@ -924,7 +926,7 @@ export function Users() {
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-brand hover:text-brand-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
@@ -985,18 +987,16 @@ export function Users() {
             />
             <div
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
+                deduplicateUsers ? 'bg-sky-solid' : 'bg-surface-stronger'
               }`}
             >
               <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                className={`inline-block h-3 w-3 transform rounded-full bg-surface transition-transform ${
                   deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
                 }`}
               />
             </div>
-            <span className="ml-2 text-sm text-gray-700">
-              Deduplicate users
-            </span>
+            <span className="ml-2 text-sm text-content">Deduplicate users</span>
           </label>
         )}
 
@@ -1015,7 +1015,7 @@ export function Users() {
                 canCreateServiceAccountToken
               );
             }}
-            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+            className="ml-4 bg-sky-solid hover:bg-sky-solid-hover text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
             title="Create Service Account"
           >
             <PlusIcon className="h-4 w-4 mr-2" />
@@ -1108,7 +1108,7 @@ export function Users() {
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
             <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-content">
                 Username
               </label>
               <input
@@ -1121,7 +1121,7 @@ export function Users() {
               />
             </div>
             <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-content">
                 Password
               </label>
               <div className="relative">
@@ -1136,7 +1136,7 @@ export function Users() {
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-content-faint hover:text-content-secondary"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (
@@ -1148,7 +1148,7 @@ export function Users() {
               </div>
             </div>
             <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">Role</label>
+              <label className="text-sm font-medium text-content">Role</label>
               <select
                 className="border rounded px-3 py-2 w-full"
                 value={newUser.role}
@@ -1171,7 +1171,7 @@ export function Users() {
               Cancel
             </button>
             <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
               onClick={handleCreateUser}
               disabled={creating}
             >
@@ -1243,12 +1243,12 @@ export function Users() {
           </DialogHeader>
 
           {/* Tabs */}
-          <div className="flex border-b border-gray-200 mb-4">
+          <div className="flex border-b border-line mb-4">
             <button
               className={`px-4 py-2 text-sm font-medium ${
                 activeTab === 'import'
-                  ? 'border-b-2 border-sky-500 text-sky-600'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'border-b-2 border-sky-solid-soft text-sky-fg'
+                  : 'text-content-tertiary hover:text-content'
               }`}
               onClick={() => setActiveTab('import')}
             >
@@ -1257,8 +1257,8 @@ export function Users() {
             <button
               className={`px-4 py-2 text-sm font-medium ${
                 activeTab === 'export'
-                  ? 'border-b-2 border-sky-500 text-sky-600'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'border-b-2 border-sky-solid-soft text-sky-fg'
+                  : 'text-content-tertiary hover:text-content'
               }`}
               onClick={() => setActiveTab('export')}
             >
@@ -1270,7 +1270,7 @@ export function Users() {
             {activeTab === 'import' ? (
               <>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-content">
                     CSV File
                   </label>
                   <input
@@ -1279,7 +1279,7 @@ export function Users() {
                     onChange={handleFileUpload}
                     className="border rounded px-3 py-2 w-full"
                   />
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-content-tertiary">
                     CSV should have columns: username, password, role
                     <br />
                     Supports both plain text passwords and exported password
@@ -1288,7 +1288,7 @@ export function Users() {
                 </div>
 
                 {importResults && (
-                  <div className="p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+                  <div className="p-3 bg-green-tint border border-green-line rounded text-green-fg-strong text-sm">
                     {importResults.message}
                   </div>
                 )}
@@ -1296,18 +1296,18 @@ export function Users() {
             ) : (
               <>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-content">
                     Export Users to CSV
                   </label>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-content-tertiary">
                     Download all users as a CSV file with password hashes.
                   </p>
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded">
-                    <p className="text-sm text-amber-700">
+                  <div className="p-3 bg-amber-tint border border-amber-line rounded">
+                    <p className="text-sm text-amber-fg-strong">
                       ⚠️ This will export all users with columns: username,
                       password (hashed), role
                     </p>
-                    <p className="text-xs text-amber-600 mt-1">
+                    <p className="text-xs text-amber-fg mt-1">
                       Password hashes can be imported directly for system
                       backups.
                     </p>
@@ -1327,7 +1327,7 @@ export function Users() {
             </button>
             {activeTab === 'import' ? (
               <button
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
                 onClick={handleImportUsers}
                 disabled={importing || !csvFile}
               >
@@ -1335,7 +1335,7 @@ export function Users() {
               </button>
             ) : (
               <button
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
                 onClick={async () => {
                   try {
                     const response = await apiClient.get('/users/export');
@@ -1409,7 +1409,7 @@ export function Users() {
 
           <div className="flex flex-col gap-4 py-4">
             <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-content">
                 New Password
               </label>
               <input
@@ -1435,7 +1435,7 @@ export function Users() {
               variant="default"
               onClick={handleResetPasswordSubmit}
               disabled={resetLoading || !resetPassword}
-              className="bg-sky-600 text-white hover:bg-sky-700"
+              className="bg-sky-solid text-white hover:bg-sky-solid-hover"
             >
               {resetLoading ? 'Resetting...' : 'Reset Password'}
             </Button>
@@ -2286,7 +2286,7 @@ function UsersTable({
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading users...</span>
+        <span className="ml-2 text-content-tertiary">Loading users...</span>
       </div>
     );
   }
@@ -2299,7 +2299,9 @@ function UsersTable({
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading filtered data...</span>
+        <span className="ml-2 text-content-tertiary">
+          Loading filtered data...
+        </span>
       </div>
     );
   }
@@ -2331,7 +2333,7 @@ function UsersTable({
   return (
     <>
       {filteredAndSortedUsers.length > 0 && (
-        <div className="text-sm text-gray-500 mb-2">
+        <div className="text-sm text-content-tertiary mb-2">
           {filteredAndSortedUsers.length}{' '}
           {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
         </div>
@@ -2352,9 +2354,9 @@ function UsersTable({
           aria-label="Batch user actions"
           aria-hidden={selectedUserIds.size === 0}
         >
-          <div className="flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-lg rounded-full">
-            <div className="text-sm text-gray-700 whitespace-nowrap">
-              <span className="font-medium text-sky-blue">
+          <div className="flex items-center gap-3 px-4 py-2 bg-surface border border-line shadow-lg rounded-full">
+            <div className="text-sm text-content whitespace-nowrap">
+              <span className="font-medium text-brand">
                 {selectedUserIds.size}
               </span>{' '}
               selected
@@ -2362,16 +2364,16 @@ function UsersTable({
             <button
               type="button"
               onClick={clearSelection}
-              className="text-sm text-sky-blue hover:text-sky-blue-bright underline whitespace-nowrap"
+              className="text-sm text-brand hover:text-brand-bright underline whitespace-nowrap"
             >
               Clear
             </button>
-            <div className="h-5 w-px bg-gray-200" aria-hidden="true" />
+            <div className="h-5 w-px bg-surface-strong" aria-hidden="true" />
             <button
               type="button"
               onClick={() => openBulkDialog('role')}
               disabled={roleLoading}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              className="bg-sky-solid hover:bg-sky-solid-hover text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               Role
             </button>
@@ -2382,7 +2384,7 @@ function UsersTable({
                 disabled={roleLoading}
                 aria-haspopup="menu"
                 aria-expanded={wsDropdownOpen}
-                className="bg-sky-600 hover:bg-sky-700 text-white inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                className="bg-sky-solid hover:bg-sky-solid-hover text-white inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 <span>Workspaces</span>
                 <svg
@@ -2403,7 +2405,7 @@ function UsersTable({
               {wsDropdownOpen && (
                 <div
                   role="menu"
-                  className="absolute bottom-full right-0 mb-2 bg-white rounded-lg shadow-xl border border-gray-200 z-40 py-1.5 px-1"
+                  className="absolute bottom-full right-0 mb-2 bg-surface rounded-lg shadow-xl border border-line z-40 py-1.5 px-1"
                 >
                   <button
                     type="button"
@@ -2412,9 +2414,9 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('add');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
                   >
-                    <PlusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <PlusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Add to workspaces</span>
                   </button>
                   <button
@@ -2424,9 +2426,9 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('remove');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
                   >
-                    <MinusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <MinusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Remove from workspaces</span>
                   </button>
                 </div>
@@ -2458,14 +2460,14 @@ function UsersTable({
                 )}
                 <TableHead
                   onClick={() => requestSort('usernameDisplay')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                 >
                   Name{getSortDirection('usernameDisplay')}
                 </TableHead>
                 {!deduplicateUsers && (
                   <TableHead
                     onClick={() => requestSort('fullEmailID')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                   >
                     User ID{getSortDirection('fullEmailID')}
                   </TableHead>
@@ -2473,7 +2475,7 @@ function UsersTable({
                 {!deduplicateUsers && !ingressBasicAuthEnabled && (
                   <TableHead
                     onClick={() => requestSort('role')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                   >
                     Role{getSortDirection('role')}
                   </TableHead>
@@ -2483,32 +2485,32 @@ function UsersTable({
                   !externalProxyAuthEnabled && (
                     <TableHead
                       onClick={() => requestSort('userType')}
-                      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                     >
                       Type{getSortDirection('userType')}
                     </TableHead>
                   )}
                 <TableHead
                   onClick={() => requestSort('created_at')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                 >
                   Joined{getSortDirection('created_at')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('gpuCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                 >
                   GPUs{getSortDirection('gpuCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('clusterCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                 >
                   Clusters{getSortDirection('clusterCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('jobCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
@@ -2520,7 +2522,7 @@ function UsersTable({
                       onClick={sortKey ? () => requestSort(sortKey) : undefined}
                       className={`whitespace-nowrap w-1/6${
                         sortKey
-                          ? ' sortable cursor-pointer hover:bg-gray-50'
+                          ? ' sortable cursor-pointer hover:bg-surface-subtle'
                           : ''
                       }${col.header?.className ? ' ' + col.header.className : ''}`}
                     >
@@ -2587,7 +2589,7 @@ function UsersTable({
                                   setCurrentEditingRole(e.target.value)
                                 }
                                 aria-label="Select user role"
-                                className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                                className="block w-auto p-1 border border-line-strong rounded-md shadow-sm focus:outline-none focus:ring-brand focus:border-brand sm:text-sm"
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
@@ -2595,14 +2597,14 @@ function UsersTable({
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
-                                className="text-green-600 hover:text-green-800 p-1"
+                                className="text-green-fg hover:text-green-fg-stronger p-1"
                                 title="Save"
                               >
                                 <CheckIcon className="h-4 w-4" />
                               </button>
                               <button
                                 onClick={handleCancelEdit}
-                                className="text-gray-500 hover:text-gray-700 p-1"
+                                className="text-content-tertiary hover:text-content p-1"
                                 title="Cancel"
                               >
                                 <XIcon className="h-4 w-4" />
@@ -2625,8 +2627,8 @@ function UsersTable({
                                   }
                                   className={
                                     !isSystemUser
-                                      ? 'text-blue-600 hover:text-blue-700 p-1'
-                                      : 'text-gray-300 cursor-not-allowed p-1'
+                                      ? 'text-blue-fg hover:text-blue-fg-strong p-1'
+                                      : 'text-content-faintest cursor-not-allowed p-1'
                                   }
                                   title={
                                     !isSystemUser
@@ -2663,15 +2665,15 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.gpuCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             user.gpuCount > 0
-                              ? 'bg-purple-100 text-purple-600'
-                              : 'bg-gray-100 text-gray-500'
+                              ? 'bg-purple-tint-strong text-purple-fg'
+                              : 'bg-surface-muted text-content-tertiary'
                           }`}
                           title={`Total GPUs: ${user.gpuCount}`}
                         >
@@ -2681,7 +2683,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.clusterCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2689,8 +2691,8 @@ function UsersTable({
                           href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.clusterCount > 0
-                              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                              ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
+                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -2700,7 +2702,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.jobCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2708,8 +2710,8 @@ function UsersTable({
                           href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.jobCount > 0
-                              ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                              ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
+                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -2742,8 +2744,8 @@ function UsersTable({
                                 }
                                 className={
                                   canResetPassword
-                                    ? 'text-blue-600 hover:text-blue-700 p-1'
-                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                    ? 'text-blue-fg hover:text-blue-fg-strong p-1'
+                                    : 'text-content-faintest cursor-not-allowed p-1'
                                 }
                                 title={
                                   !isBasicUser
@@ -2767,8 +2769,8 @@ function UsersTable({
                                 }
                                 className={
                                   !isSystemUser
-                                    ? 'text-red-600 hover:text-red-700 p-1'
-                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                    ? 'text-red-fg hover:text-red-fg-strong p-1'
+                                    : 'text-content-faintest cursor-not-allowed p-1'
                                 }
                                 title={
                                   !isSystemUser
@@ -3273,7 +3275,7 @@ function ServiceAccountTokensView({
         </Card>
       ) : (
         <>
-          <div className="text-sm text-gray-500 mb-2">
+          <div className="text-sm text-content-tertiary mb-2">
             {filteredTokens.length}{' '}
             {filteredTokens.length === 1
               ? 'service account'
@@ -3305,7 +3307,7 @@ function ServiceAccountTokensView({
                       <div className="flex items-center">
                         <span>{token.creator_name || 'Unknown'}</span>
                         {token.creator_user_hash !== userRoleCache?.id && (
-                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-surface-muted text-content-secondary rounded">
                             Other
                           </span>
                         )}
@@ -3320,7 +3322,7 @@ function ServiceAccountTokensView({
                               onChange={(e) =>
                                 setCurrentEditingRole(e.target.value)
                               }
-                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                              className="block w-auto p-1 border border-line-strong rounded-md shadow-sm focus:outline-none focus:ring-brand focus:border-brand sm:text-sm"
                             >
                               <option value="admin">Admin</option>
                               <option value="user">User</option>
@@ -3328,14 +3330,14 @@ function ServiceAccountTokensView({
                             </select>
                             <button
                               onClick={() => handleSaveEdit(token.token_id)}
-                              className="text-green-600 hover:text-green-800 p-1"
+                              className="text-green-fg hover:text-green-fg-stronger p-1"
                               title="Save"
                             >
                               <CheckIcon className="h-4 w-4" />
                             </button>
                             <button
                               onClick={handleCancelEdit}
-                              className="text-gray-500 hover:text-gray-700 p-1"
+                              className="text-content-tertiary hover:text-content p-1"
                               title="Cancel"
                             >
                               <XIcon className="h-4 w-4" />
@@ -3357,7 +3359,7 @@ function ServiceAccountTokensView({
                                     token.primaryRole
                                   )
                                 }
-                                className="text-blue-600 hover:text-blue-700 p-1"
+                                className="text-blue-fg hover:text-blue-fg-strong p-1"
                                 title="Edit role"
                               >
                                 <PenIcon className="h-3 w-3" />
@@ -3370,7 +3372,7 @@ function ServiceAccountTokensView({
                     <TableCell>
                       {token.clusterCount === undefined ? (
                         <span
-                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-surface-muted text-content-faint"
                           title="Counts hidden in server-paginated view"
                         >
                           —
@@ -3380,8 +3382,8 @@ function ServiceAccountTokensView({
                           href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.clusterCount > 0
-                              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                              ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
+                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3392,7 +3394,7 @@ function ServiceAccountTokensView({
                     <TableCell>
                       {token.jobCount === undefined ? (
                         <span
-                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-surface-muted text-content-faint"
                           title="Counts hidden in server-paginated view"
                         >
                           —
@@ -3402,8 +3404,8 @@ function ServiceAccountTokensView({
                           href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.jobCount > 0
-                              ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                              ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
+                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3414,7 +3416,7 @@ function ServiceAccountTokensView({
                     <TableCell>
                       {token.gpuCount === undefined ? (
                         <span
-                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-surface-muted text-content-faint"
                           title="Counts hidden in server-paginated view"
                         >
                           —
@@ -3423,8 +3425,8 @@ function ServiceAccountTokensView({
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             token.gpuCount > 0
-                              ? 'bg-purple-100 text-purple-600'
-                              : 'bg-gray-100 text-gray-500'
+                              ? 'bg-purple-tint-strong text-purple-fg'
+                              : 'bg-surface-muted text-content-tertiary'
                           }`}
                           title={`Total GPUs: ${token.gpuCount}`}
                         >
@@ -3454,7 +3456,7 @@ function ServiceAccountTokensView({
                       {!token.expires_at ? (
                         'Never'
                       ) : new Date(token.expires_at * 1000) < new Date() ? (
-                        <span className="text-red-600">Expired</span>
+                        <span className="text-red-fg">Expired</span>
                       ) : (
                         <TimestampWithTooltip
                           date={new Date(token.expires_at * 1000)}
@@ -3484,7 +3486,7 @@ function ServiceAccountTokensView({
                                     )
                                 );
                               }}
-                              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                              className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                             >
                               <RotateCwIcon className="h-4 w-4" />
                             </button>
@@ -3511,7 +3513,7 @@ function ServiceAccountTokensView({
                                     )
                                 );
                               }}
-                              className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
+                              className="text-red-fg hover:text-red-fg-stronger font-medium inline-flex items-center"
                             >
                               <Trash2Icon className="h-4 w-4" />
                             </button>
@@ -3525,7 +3527,7 @@ function ServiceAccountTokensView({
             </Table>
           </Card>
           {serverPaginated && (
-            <div className="flex items-center justify-between mt-3 text-sm text-gray-600">
+            <div className="flex items-center justify-between mt-3 text-sm text-content-secondary">
               <div>
                 Showing {(page - 1) * limit + 1}-{Math.min(page * limit, total)}{' '}
                 of {total}
@@ -3537,7 +3539,7 @@ function ServiceAccountTokensView({
                     setLimit(Number(e.target.value));
                     setPage(1);
                   }}
-                  className="h-7 px-2 border border-gray-300 rounded text-sm"
+                  className="h-7 px-2 border border-line-strong rounded text-sm"
                   disabled={loading}
                 >
                   {[10, 20, 50, 100, 200].map((opt) => (
@@ -3549,7 +3551,7 @@ function ServiceAccountTokensView({
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={!hasPrev || loading}
-                  className="h-7 px-3 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="h-7 px-3 border border-line-strong rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Previous
                 </button>
@@ -3559,7 +3561,7 @@ function ServiceAccountTokensView({
                 <button
                   onClick={() => setPage((p) => p + 1)}
                   disabled={!hasNext || loading}
-                  className="h-7 px-3 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="h-7 px-3 border border-line-strong rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
                 </button>
@@ -3592,9 +3594,9 @@ function ServiceAccountTokensView({
             {createdTokenInDialog ? (
               /* Token Created Successfully - Show Token */
               <>
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="p-4 bg-green-tint border border-green-line rounded-lg">
                   <div className="flex items-center mb-3">
-                    <h4 className="text-sm font-medium text-green-900">
+                    <h4 className="text-sm font-medium text-green-fg-strongest">
                       ⚠️ Service account created successfully - save this token
                       now!
                     </h4>
@@ -3604,7 +3606,7 @@ function ServiceAccountTokensView({
                     >
                       <button
                         onClick={() => copyToClipboard(createdTokenInDialog)}
-                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                        className="flex items-center text-green-fg hover:text-green-fg-stronger transition-colors duration-200 p-1 ml-2"
                       >
                         {copySuccess ? (
                           <CheckIcon className="w-4 h-4" />
@@ -3614,12 +3616,12 @@ function ServiceAccountTokensView({
                       </button>
                     </CustomTooltip>
                   </div>
-                  <p className="text-sm text-green-700 mb-3">
+                  <p className="text-sm text-green-fg-strong mb-3">
                     This service account token will not be shown again. Please
                     copy and store it securely.
                   </p>
-                  <div className="bg-white border border-green-300 rounded-md p-3">
-                    <code className="text-sm text-gray-800 font-mono break-all block">
+                  <div className="bg-surface border border-green-line-strong rounded-md p-3">
+                    <code className="text-sm text-content-heavy font-mono break-all block">
                       {createdTokenInDialog}
                     </code>
                   </div>
@@ -3629,7 +3631,7 @@ function ServiceAccountTokensView({
               /* Token Creation Form */
               <>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-content">
                     Service Account Name
                   </label>
                   <input
@@ -3644,7 +3646,7 @@ function ServiceAccountTokensView({
                 <div className="grid gap-2">
                   <label
                     htmlFor="create-sa-role-select"
-                    className="text-sm font-medium text-gray-700"
+                    className="text-sm font-medium text-content"
                   >
                     Role
                   </label>
@@ -3670,7 +3672,7 @@ function ServiceAccountTokensView({
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-content">
                     Expiration (days)
                   </label>
                   <input
@@ -3689,7 +3691,7 @@ function ServiceAccountTokensView({
                       })
                     }
                   />
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-content-tertiary">
                     Leave empty or enter 0 to never expire. Maximum 365 days.
                   </p>
                 </div>
@@ -3699,7 +3701,7 @@ function ServiceAccountTokensView({
           <DialogFooter>
             {createdTokenInDialog ? (
               <button
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
                 onClick={() => {
                   setShowCreateDialog(false);
                   setCreatedTokenInDialog(null);
@@ -3720,7 +3722,7 @@ function ServiceAccountTokensView({
                   Cancel
                 </button>
                 <button
-                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
                   onClick={handleCreateToken}
                   disabled={
                     creating || !newToken.token_name.trim() || !newToken.role
@@ -3772,7 +3774,7 @@ function ServiceAccountTokensView({
               Cancel
             </button>
             <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-solid text-white hover:bg-red-solid-hover h-10 px-4 py-2"
               onClick={handleDeleteToken}
               disabled={deleting}
             >
@@ -3813,9 +3815,9 @@ function ServiceAccountTokensView({
             {rotatedTokenInDialog ? (
               /* Token Rotated Successfully - Show Token */
               <>
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="p-4 bg-green-tint border border-green-line rounded-lg">
                   <div className="flex items-center mb-3">
-                    <h4 className="text-sm font-medium text-green-900">
+                    <h4 className="text-sm font-medium text-green-fg-strongest">
                       🔄 Service account token rotated successfully - save this
                       new token now!
                     </h4>
@@ -3825,7 +3827,7 @@ function ServiceAccountTokensView({
                     >
                       <button
                         onClick={() => copyToClipboard(rotatedTokenInDialog)}
-                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                        className="flex items-center text-green-fg hover:text-green-fg-stronger transition-colors duration-200 p-1 ml-2"
                       >
                         {copySuccess ? (
                           <CheckIcon className="w-4 h-4" />
@@ -3835,12 +3837,12 @@ function ServiceAccountTokensView({
                       </button>
                     </CustomTooltip>
                   </div>
-                  <p className="text-sm text-green-700 mb-3">
+                  <p className="text-sm text-green-fg-strong mb-3">
                     This new token replaces the old one. Please copy and store
                     it securely. The old token is now invalid.
                   </p>
-                  <div className="bg-white border border-green-300 rounded-md p-3">
-                    <code className="text-sm text-gray-800 font-mono break-all block">
+                  <div className="bg-surface border border-green-line-strong rounded-md p-3">
+                    <code className="text-sm text-content-heavy font-mono break-all block">
                       {rotatedTokenInDialog}
                     </code>
                   </div>
@@ -3850,7 +3852,7 @@ function ServiceAccountTokensView({
               /* Token Rotation Form */
               <>
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-content">
                     New Expiration (days)
                   </label>
                   <input
@@ -3862,14 +3864,14 @@ function ServiceAccountTokensView({
                     value={rotateExpiration}
                     onChange={(e) => setRotateExpiration(e.target.value)}
                   />
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-content-tertiary">
                     Leave empty to preserve current expiration. Enter number of
                     days for new expiration, or enter 0 to set to never expire.
                     Maximum 365 days.
                   </p>
                 </div>
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded">
-                  <p className="text-sm text-amber-700">
+                <div className="p-3 bg-amber-tint border border-amber-line rounded">
+                  <p className="text-sm text-amber-fg-strong">
                     ⚠️ Any systems using the current token will need to be
                     updated with the new token.
                   </p>
@@ -3880,7 +3882,7 @@ function ServiceAccountTokensView({
           <DialogFooter>
             {rotatedTokenInDialog ? (
               <button
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-600 text-white hover:bg-green-700 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-solid text-white hover:bg-green-solid-hover h-10 px-4 py-2"
                 onClick={() => {
                   setShowRotateDialog(false);
                   setTokenToRotate(null);
@@ -3905,7 +3907,7 @@ function ServiceAccountTokensView({
                   Cancel
                 </button>
                 <button
-                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
                   onClick={handleRotateToken}
                   disabled={rotating}
                 >

@@ -46,15 +46,19 @@ export function PageNotFound() {
         alt=""
         width={150}
         height={113}
+        className="dark:invert"
       />
-      <div style={{ fontSize: 14, lineHeight: '21px', color: '#525252' }}>
+      <div
+        className="text-[#525252] dark:text-content-secondary"
+        style={{ fontSize: 14, lineHeight: '21px' }}
+      >
         This page has wandered off.
       </div>
       <Button
         asChild
         variant="outline"
         size="sm"
-        className="h-8 border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+        className="h-8 border-line-strong bg-surface text-content-strong hover:bg-surface-subtle"
       >
         <Link href="/infra">Go to Infra</Link>
       </Button>

@@ -18,14 +18,16 @@ export function ExpandedDetailsRow({ text, colSpan, innerRef }) {
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
         <div
-          className="p-4 bg-gray-50 rounded-md border border-gray-200"
+          className="p-4 bg-surface-subtle rounded-md border border-line"
           ref={innerRef}
         >
           <div className="flex justify-between items-start">
             <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">Full Details</p>
+              <p className="text-sm font-medium text-content-strong">
+                Full Details
+              </p>
               <p
-                className="mt-1 text-sm text-gray-700"
+                className="mt-1 text-sm text-content"
                 style={{ whiteSpace: 'pre-wrap' }}
               >
                 {/* Details can carry a remediation hint with a docs URL; make
@@ -67,7 +69,7 @@ export function TruncatedDetails({
           ref={buttonRef}
           type="button"
           onClick={handleClick}
-          className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
+          className="text-blue-fg hover:text-blue-fg-stronger font-medium ml-1 flex-shrink-0"
           // isDetailsToggle finds the button by this attribute.
           data-button-type="show-more-less"
         >

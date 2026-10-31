@@ -18,6 +18,7 @@ import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { useSidebar } from '@/components/elements/sidebar';
 import { YamlEditor } from '@/components/ui/yaml-editor';
+import { ThemeToggle } from '@/components/elements/ThemeToggle';
 
 export function Config() {
   const { userRole, restrictConfigToAdmins } = useSidebar();
@@ -172,7 +173,7 @@ export function Config() {
     return (
       <div className="flex items-center justify-center py-16">
         <CircularProgress size={20} />
-        <span className="ml-2 text-gray-500">Loading...</span>
+        <span className="ml-2 text-content-tertiary">Loading...</span>
       </div>
     );
   }
@@ -182,7 +183,7 @@ export function Config() {
   const header = (
     <div className="flex items-center justify-between mb-4 h-8">
       <div className="text-base flex items-center">
-        <span className="text-sky-blue leading-none">SkyPilot API Server</span>
+        <span className="text-brand leading-none">SkyPilot API Server</span>
       </div>
 
       <div className="flex items-center">
@@ -190,7 +191,7 @@ export function Config() {
           {(loading || saving) && (
             <div className="flex items-center mr-4">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">
+              <span className="ml-2 text-content-tertiary">
                 {saving ? 'Applying...' : 'Loading...'}
               </span>
             </div>
@@ -209,7 +210,7 @@ export function Config() {
                 '_blank'
               );
             }}
-            className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
+            className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-brand-solid-hover border border-transparent rounded-md shadow-sm hover:bg-brand-solid focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand mr-4"
           >
             <svg
               className="w-4 h-4 mr-2"
@@ -237,6 +238,21 @@ export function Config() {
     </div>
   );
 
+  // Appearance is a per-browser preference, so it is shown to everyone.
+  const appearance = (
+    <Card className="w-full mb-4">
+      <CardHeader>
+        <CardTitle className="text-base font-normal">Appearance</CardTitle>
+      </CardHeader>
+      <CardContent className="flex items-center justify-between gap-4">
+        <p className="text-sm text-content-secondary">
+          Choose a light or dark theme, or follow your system setting.
+        </p>
+        <ThemeToggle showLabels />
+      </CardContent>
+    </Card>
+  );
+
   // The API server configuration exposes admin-only secrets. Anyone who can't
   // read it (restricted non-admins, or viewers) gets an access-denied card
   // instead of a 403 -- but the header above is still shown.
@@ -244,6 +260,7 @@ export function Config() {
     return (
       <>
         {header}
+        {appearance}
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="text-base font-normal">
@@ -251,7 +268,7 @@ export function Config() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-content-secondary">
               You must be an admin to view the API server configuration.
             </p>
           </CardContent>
@@ -271,13 +288,13 @@ export function Config() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-gray-600 mb-3">
+        <p className="text-sm text-content-secondary mb-3">
           Refer to the{' '}
           <a
             href="https://docs.skypilot.co/en/latest/reference/config.html"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:underline"
+            className="text-blue-fg hover:underline"
           >
             SkyPilot Docs
           </a>{' '}
@@ -286,12 +303,12 @@ export function Config() {
 
         {/* Success Message */}
         {saveSuccess && (
-          <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
+          <div className="bg-green-tint border border-green-line rounded p-4 mb-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <svg
-                    className="h-5 w-5 text-green-400"
+                    className="h-5 w-5 text-green-fg-faint"
                     viewBox="0 0 20 20"
                     fill="currentColor"
                   >
@@ -303,7 +320,7 @@ export function Config() {
                   </svg>
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-green-800">
+                  <p className="text-sm font-medium text-green-fg-stronger">
                     Configuration saved successfully!
                   </p>
                 </div>
@@ -313,7 +330,7 @@ export function Config() {
                   <button
                     type="button"
                     onClick={handleSuccessDismiss}
-                    className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                    className="inline-flex rounded-md bg-green-tint p-1.5 text-green-fg-soft hover:bg-green-tint-strong focus:outline-none focus:ring-2 focus:ring-green-solid focus:ring-offset-2 focus:ring-offset-green-tint"
                   >
                     <span className="sr-only">Dismiss</span>
                     <svg
@@ -359,7 +376,7 @@ export function Config() {
           <Button
             onClick={handleSave}
             disabled={loading || saving}
-            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+            className="inline-flex items-center bg-sky-solid hover:bg-sky-solid-hover text-white"
           >
             {saving ? (
               <>
@@ -381,6 +398,7 @@ export function Config() {
   return (
     <>
       {header}
+      {appearance}
 
       {/* Main Content */}
       <PluginSlot name="settings.config.editor" fallback={editorCard} />

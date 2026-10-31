@@ -1,13 +1,15 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { syntaxHighlighting } from '@codemirror/language';
 import { getNonce } from '@/utils/csp';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 import {
+  yamlColorTheme,
   yamlHighlightStyle,
   yamlGutterTheme,
   yamlTextCursorTheme,
@@ -33,10 +35,15 @@ export function YamlCodeBlock({
   readOnly = false,
   className,
 }) {
+  const { resolvedTheme } = useTheme();
+  const colorTheme = useMemo(
+    () => yamlColorTheme(resolvedTheme === THEME_DARK),
+    [resolvedTheme]
+  );
   const fixed = !!height;
   return (
     <div
-      className={`rounded-md border border-gray-200 overflow-hidden ${fixed ? 'flex flex-col' : ''} ${className || ''}`}
+      className={`rounded-md border border-line overflow-hidden ${fixed ? 'flex flex-col' : ''} ${className || ''}`}
       style={{
         height: fixed ? height : undefined,
         maxHeight: fixed ? undefined : maxHeight,
@@ -72,7 +79,7 @@ export function YamlCodeBlock({
           fontSize: '13px',
           ...(fixed ? { flex: 1, minHeight: 0 } : {}),
         }}
-        theme="light"
+        theme={colorTheme}
       />
     </div>
   );

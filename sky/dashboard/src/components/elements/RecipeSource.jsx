@@ -52,7 +52,7 @@ export function getSourceRepoName(source) {
 }
 
 const GIT_BADGE_CLASS =
-  'inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 text-xs font-medium leading-none text-sky-700 bg-sky-50 border border-sky-200 rounded-full';
+  'inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 text-xs font-medium leading-none text-sky-fg-strong bg-sky-tint border border-sky-line rounded-full';
 
 // "Git" pill marking a git-sourced recipe. Pass `href` to render it as a link.
 export function GitBadge({ href }) {
@@ -69,7 +69,7 @@ export function GitBadge({ href }) {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${className} hover:bg-sky-100`}
+        className={`${className} hover:bg-sky-tint-strong`}
       >
         {content}
       </a>

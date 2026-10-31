@@ -81,7 +81,7 @@ export function EventTable({ events }) {
 
       {/* Pagination controls */}
       {events.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-content">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -99,7 +99,7 @@ export function EventTable({ events }) {
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-content-tertiary absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -119,14 +119,14 @@ export function EventTable({ events }) {
             </div>
             <div className="flex space-x-1">
               <button
-                className="p-1 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1 rounded-full hover:bg-surface-strong disabled:opacity-30 disabled:hover:bg-transparent"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
               >
                 <ChevronLeftIcon className="h-5 w-5" />
               </button>
               <button
-                className="p-1 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1 rounded-full hover:bg-surface-strong disabled:opacity-30 disabled:hover:bg-transparent"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages}
               >
