@@ -13,14 +13,23 @@ To use *Service Account* authentication, follow these steps:
 3. **Generate Service Account Credentials**:
 
 First, you need to get the service account ID and save it to ``$SA_ID`` environment variable.
-You can either get it from the Nebius web console or run the following command:
+You can either get it from the Nebius web console or run the following command,
+where ``<project id>`` is the ID of the project that contains the service account:
 
 .. code-block:: shell
 
   export SA_ID=$(nebius iam service-account get-by-name \
+    --parent-id <project id> \
     --name <service account name> \
     --format json \
     | jq -r ".metadata.id")
+
+.. note::
+
+  Service accounts belong to a project, so ``--parent-id`` is required unless
+  your Nebius CLI profile sets a default parent ID. Without it, the command fails
+  with ``Invalid nid format ''``. To list the projects in your tenant, run
+  ``nebius iam project list --parent-id <tenant id>``.
 
 Then, run the following command to generate the service account credentials:
 
@@ -30,7 +39,7 @@ Then, run the following command to generate the service account credentials:
   --service-account-id $SA_ID \
   --output ~/.nebius/credentials.json
 
-The following script saves the service account credentials to `~/.nebius/credentials.json`:
+This saves the service account credentials to ``~/.nebius/credentials.json``.
 
 See `Nebius documentation on creating authorized keys <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
 
