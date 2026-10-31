@@ -54,11 +54,11 @@ export function capitalizeWords(str) {
  * Map color names to Tailwind text color classes.
  */
 const COLOR_CLASS_MAP = {
-  sky: 'text-sky-600',
-  purple: 'text-purple-600',
-  green: 'text-green-600',
-  orange: 'text-orange-600',
-  gray: 'text-gray-600',
+  sky: 'text-sky-fg',
+  purple: 'text-purple-fg',
+  green: 'text-green-fg',
+  orange: 'text-orange-fg',
+  gray: 'text-content-secondary',
 };
 
 /**
@@ -126,7 +126,7 @@ export function getRecipeTypeInfo(recipeType, pluginRecipeTypes = []) {
     }
   }
   // Add the Tailwind color class
-  info.colorClass = COLOR_CLASS_MAP[info.color] || 'text-gray-600';
+  info.colorClass = COLOR_CLASS_MAP[info.color] || 'text-content-secondary';
   return info;
 }
 

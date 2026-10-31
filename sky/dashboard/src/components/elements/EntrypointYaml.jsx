@@ -38,10 +38,10 @@ export function CopyButton({ text, title, compact = false }) {
       <button
         onClick={onClick}
         title={title}
-        className="ml-2 inline-flex items-center align-middle text-gray-400 hover:text-gray-700 focus:outline-none"
+        className="ml-2 inline-flex items-center align-middle text-content-faint hover:text-content focus:outline-none"
       >
         {copied ? (
-          <CheckIcon className="w-3.5 h-3.5 text-green-600" />
+          <CheckIcon className="w-3.5 h-3.5 text-green-fg" />
         ) : (
           <CopyIcon className="w-3.5 h-3.5" />
         )}
@@ -56,10 +56,10 @@ export function CopyButton({ text, title, compact = false }) {
       <button
         onClick={onClick}
         title={title}
-        className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+        className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
       >
         {copied ? (
-          <CheckIcon className="w-4 h-4 text-green-600" />
+          <CheckIcon className="w-4 h-4 text-green-fg" />
         ) : (
           <CopyIcon className="w-4 h-4" />
         )}
@@ -78,9 +78,9 @@ CopyButton.propTypes = {
 export function EntrypointCommand({ command, className = '' }) {
   return (
     <div
-      className={`bg-gray-50 border border-gray-200 rounded-md p-3 ${className}`}
+      className={`bg-surface-subtle border border-line rounded-md p-3 ${className}`}
     >
-      <code className="text-sm text-gray-800 font-mono break-all">
+      <code className="text-sm text-content-heavy font-mono break-all">
         {command}
       </code>
     </div>
@@ -111,17 +111,21 @@ export function CollapsibleYaml({
           aria-expanded={expanded}
           className={
             compact
-              ? 'flex items-center gap-1 text-left focus:outline-none text-gray-900 hover:text-gray-700 transition-colors duration-200'
-              : 'flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200'
+              ? 'flex items-center gap-1 text-left focus:outline-none text-content-strong hover:text-content transition-colors duration-200'
+              : 'flex items-center text-left focus:outline-none text-content hover:text-content-strong transition-colors duration-200'
           }
         >
           {expanded ? (
             <ChevronDownIcon
-              className={compact ? 'w-4 h-4 text-gray-500' : 'w-4 h-4 mr-1'}
+              className={
+                compact ? 'w-4 h-4 text-content-tertiary' : 'w-4 h-4 mr-1'
+              }
             />
           ) : (
             <ChevronRightIcon
-              className={compact ? 'w-4 h-4 text-gray-500' : 'w-4 h-4 mr-1'}
+              className={
+                compact ? 'w-4 h-4 text-content-tertiary' : 'w-4 h-4 mr-1'
+              }
             />
           )}
           <span className="text-base">{label}</span>
@@ -153,7 +157,9 @@ export function EntrypointAndYaml({ entrypoint, taskYaml }) {
   return (
     <div className="col-span-2">
       <div className="flex items-center">
-        <div className="text-gray-600 font-medium text-base">Entrypoint</div>
+        <div className="text-content-secondary font-medium text-base">
+          Entrypoint
+        </div>
         {entrypoint && <CopyButton text={entrypoint} title="Copy command" />}
       </div>
       <div className="space-y-4 mt-3">

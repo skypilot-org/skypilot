@@ -40,7 +40,7 @@ export function RenameWorkspaceButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex items-center p-1 rounded text-gray-400 hover:text-sky-blue focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-blue disabled:text-gray-300 disabled:cursor-not-allowed',
+        'inline-flex items-center p-1 rounded text-content-faint hover:text-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:text-content-faintest disabled:cursor-not-allowed',
         className
       )}
     >
@@ -124,15 +124,15 @@ export function RenameWorkspaceDialog({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && canSubmit) handleRename();
             }}
-            className="focus-visible:ring-1 focus-visible:ring-sky-blue focus-visible:ring-offset-0"
+            className="focus-visible:ring-1 focus-visible:ring-brand focus-visible:ring-offset-0"
             autoFocus
           />
-          <DialogDescription className="text-xs text-gray-500">
+          <DialogDescription className="text-xs text-content-tertiary">
             {currentName === workspaceId
               ? `Scripts and configs that use "${currentName}" keep working.`
               : `Scripts and configs that use "${currentName}" will stop working, and another workspace can take this name.`}
           </DialogDescription>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-red-fg">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>
@@ -141,7 +141,7 @@ export function RenameWorkspaceDialog({
           <Button
             onClick={handleRename}
             disabled={!canSubmit}
-            className="bg-sky-600 hover:bg-sky-700 text-white"
+            className="bg-sky-solid hover:bg-sky-solid-hover text-white"
           >
             {saving ? 'Renaming...' : 'Rename'}
           </Button>
