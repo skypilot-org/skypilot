@@ -78,6 +78,9 @@ def azure_mgmt_models(name: str):
     elif name == 'network':
         from azure.mgmt.network import models
         return models
+    elif name == 'storage':
+        from azure.mgmt.storage import models
+        return models
 
 
 # We should keep the order of the decorators having 'lru_cache' followed
