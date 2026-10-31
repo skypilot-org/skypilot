@@ -139,6 +139,62 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     assert len(excluded_files) == len(expected_excluded_files)
 
 
+def test_get_excluded_files_from_skyignore_negation():
+    """Test that ! negation patterns in .skyignore re-include files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create test files
+        files = ['a.json', 'b.json', 'config.json', 'keep.txt']
+        for fname in files:
+            with open(os.path.join(tmpdir, fname), 'w') as f:
+                f.write('test')
+
+        skyignore_path = os.path.join(tmpdir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w') as f:
+            f.write('# ignore all json\n*.json\n# but keep config\n!config.json\n')
+
+        excluded = storage_utils.get_excluded_files_from_skyignore(tmpdir)
+        assert 'a.json' in excluded
+        assert 'b.json' in excluded
+        assert 'config.json' not in excluded, \
+            'config.json should be re-included by negation'
+        assert 'keep.txt' not in excluded
+
+
+def test_get_excluded_files_from_skyignore_negation_order():
+    """Test that later exclusion patterns can re-exclude after negation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        files = ['a.json', 'config.json']
+        for fname in files:
+            with open(os.path.join(tmpdir, fname), 'w') as f:
+                f.write('test')
+
+        skyignore_path = os.path.join(tmpdir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w') as f:
+            f.write('*.json\n!config.json\nconfig.*\n')
+
+        excluded = storage_utils.get_excluded_files_from_skyignore(tmpdir)
+        # config.json matched by *.json, re-included by !config.json,
+        # but then re-excluded by config.*
+        assert 'config.json' in excluded
+
+
+def test_get_excluded_files_from_skyignore_negation_empty():
+    """Test that empty negation pattern (!) is safely ignored."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        files = ['a.json', 'b.json']
+        for fname in files:
+            with open(os.path.join(tmpdir, fname), 'w') as f:
+                f.write('test')
+
+        skyignore_path = os.path.join(tmpdir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w') as f:
+            f.write('*.json\n!\n')
+
+        excluded = storage_utils.get_excluded_files_from_skyignore(tmpdir)
+        assert 'a.json' in excluded
+        assert 'b.json' in excluded
+
+
 def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_gitignore(
