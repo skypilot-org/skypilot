@@ -21,6 +21,7 @@ from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
 import urllib.parse
 from urllib.request import Request
 
+import bcrypt
 import cachetools
 import click
 import colorama
@@ -173,10 +174,54 @@ basic_auth_enabled: bool = False
 # Cached client user hash (machine-local identity), computed once.
 client_user_hash: Optional[str] = None
 
-crypt_ctx = passlib_context.CryptContext([
-    'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
-    'ldap_sha1'
-])
+
+class _PasswordContext:
+    """Hashes and verifies basic-auth passwords.
+
+    New passwords are hashed with bcrypt. The other schemes are accepted for
+    hashes made with htpasswd, such as the initial admin user from
+    SKYPILOT_INITIAL_BASIC_AUTH (`htpasswd -nb` defaults to apr_md5_crypt) and
+    users imported from a file.
+
+    bcrypt hashes go through the bcrypt package directly instead of passlib.
+    passlib is unmaintained and its bcrypt backend breaks on bcrypt>=5.0 (its
+    startup self-test hashes a secret longer than 72 bytes, which bcrypt now
+    rejects) and logs a traceback on bcrypt>=4.1.
+    """
+
+    _BCRYPT_PREFIXES = ('$2a$', '$2b$', '$2y$')
+    # bcrypt only uses the first 72 bytes of a password. bcrypt<5.0 dropped
+    # the rest silently and bcrypt>=5.0 raises, so truncate here to keep
+    # hashes created by older versions valid.
+    _BCRYPT_MAX_PASSWORD_BYTES = 72
+
+    def __init__(self) -> None:
+        self._htpasswd_ctx = passlib_context.CryptContext([
+            'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
+            'ldap_sha1'
+        ])
+
+    def _bcrypt_secret(self, password: str) -> bytes:
+        return password.encode('utf-8')[:self._BCRYPT_MAX_PASSWORD_BYTES]
+
+    def hash(self, password: str) -> str:
+        return bcrypt.hashpw(self._bcrypt_secret(password),
+                             bcrypt.gensalt()).decode('ascii')
+
+    def identify(self, password_hash: str) -> Optional[str]:
+        """Returns the scheme of a hash, or None if it is not a known hash."""
+        if password_hash.startswith(self._BCRYPT_PREFIXES):
+            return 'bcrypt'
+        return self._htpasswd_ctx.identify(password_hash)
+
+    def verify(self, password: str, password_hash: str) -> bool:
+        if password_hash.startswith(self._BCRYPT_PREFIXES):
+            return bcrypt.checkpw(self._bcrypt_secret(password),
+                                  password_hash.encode('ascii'))
+        return self._htpasswd_ctx.verify(password, password_hash)
+
+
+crypt_ctx = _PasswordContext()
 
 
 class ApiServerStatus(enum.Enum):
