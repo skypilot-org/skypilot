@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: server_config_test
+templates:
+  - templates/server-config.yaml
+tests:
+  - it: should omit an unset external-proxy groups header
+    set:
+      auth.externalProxy.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["server.yaml"]
+          pattern: 'groups_header_name:'
+
+  - it: should configure the trusted external-proxy groups header
+    set:
+      auth.externalProxy.enabled: true
+      auth.externalProxy.groupsHeaderName: X-Verified-Groups
+    asserts:
+      - matchRegex:
+          path: data["server.yaml"]
+          pattern: 'groups_header_name: "X-Verified-Groups"'
+
+  - it: should configure the built-in ingress groups header
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["server.yaml"]
+          pattern: 'groups_header_name: "X-Auth-Request-Groups"'

@@ -284,6 +284,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "groupsHeaderName": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "headerFormat": {
                             "type": "string"
                         },
@@ -349,6 +355,12 @@
                             ]
                         },
                         "redis-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "scope": {
                             "type": [
                                 "string",
                                 "null"
@@ -571,6 +583,12 @@
                             ]
                         },
                         "redis-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "scope": {
                             "type": [
                                 "string",
                                 "null"
