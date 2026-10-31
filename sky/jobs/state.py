@@ -2894,6 +2894,22 @@ def _load_job_rows(engine: sqlalchemy.engine.Engine,
                         logger.debug('Failed to read original user YAML from '
                                      f'{yaml_path}: {e}')
 
+        # Add compiled DAG YAML content (used by the job re-run feature). Only
+        # populated when the `dag_yaml` field is requested; otherwise the
+        # dependent columns are not selected and this resolves to None.
+        job_dict['dag_yaml'] = job_dict.get('dag_yaml_content')
+        if job_dict['dag_yaml'] is None:
+            # Backwards compatibility - try to read from file path.
+            dag_yaml_path = job_dict.get('dag_yaml_path')
+            if dag_yaml_path:
+                try:
+                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['dag_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    job_id = job_dict.get('job_id')
+                    logger.debug('Failed to read DAG YAML for '
+                                 f'job {job_id} from {dag_yaml_path}: {e}')
+
         jobs.append(job_dict)
     return jobs
 

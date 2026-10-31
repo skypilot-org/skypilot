@@ -2925,6 +2925,8 @@ class TestRequestBodyAllowlistCoverage:
         # Recipe content: YAML content similar to tasks
         'sky.recipes.create',
         'sky.recipes.update',
+        # Job restart: secrets_overrides carries secret values in plaintext
+        'sky.jobs.restart',
     }
 
     def test_all_request_names_covered(self):

@@ -223,6 +223,9 @@ class ManagedJobRecord(ResponseBaseModel):
     start_at: Optional[float] = None
     end_at: Optional[float] = None
     user_yaml: Optional[str] = None
+    # Compiled DAG YAML (post file-mount translation, resolved git commit
+    # baked in). Only populated when explicitly requested; used by job re-run.
+    dag_yaml: Optional[str] = None
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     controller_pid: Optional[int] = None

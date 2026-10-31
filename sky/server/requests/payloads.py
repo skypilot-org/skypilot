@@ -666,6 +666,20 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+class JobsRestartBody(RequestBody):
+    """The request body for the jobs restart endpoint."""
+    # Exactly one of job_id and job_name names the job to restart.
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    name: Optional[str] = None
+    pool: Optional[str] = None
+    # Resources.copy() kwargs, with `cloud` as a string.
+    resources_override: Optional[Dict[str, Any]] = None
+    env_overrides: Optional[List[Tuple[str, str]]] = None
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None
+    num_nodes: Optional[int] = None
+
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
@@ -705,6 +719,14 @@ class JobsQueueV2Body(RequestBody):
     # Time-range filter on submitted_at (epoch seconds).
     submitted_after: Optional[float] = None
     submitted_before: Optional[float] = None
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        if kwargs.get('fields'):
+            # The compiled DAG holds plaintext secrets; it is for in-process
+            # callers (job restart) only, never returned to clients.
+            kwargs['fields'] = [f for f in kwargs['fields'] if f != 'dag_yaml']
+        return kwargs
 
 
 class JobsCancelBody(RequestBody):
