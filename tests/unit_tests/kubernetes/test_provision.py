@@ -6281,22 +6281,82 @@ def test_delete_pod_graceful_keeps_polling_through_transient_errors(
     api.delete_namespaced_pod.assert_called_once()
 
 
-@pytest.mark.parametrize(('has_resource_claims', 'expected_graceful'), [
-    (True, True),
-    (False, False),
+@pytest.mark.parametrize(('termination_wait', 'expected_graceful'), [
+    (60, True),
+    (None, False),
 ])
-def test_terminate_node_passes_claim_state_to_delete(monkeypatch,
-                                                     has_resource_claims,
-                                                     expected_graceful):
+def test_terminate_node_passes_termination_wait_to_delete(
+        monkeypatch, termination_wait, expected_graceful):
     monkeypatch.setattr(instance, '_delete_services', lambda *a, **kw: None)
     recorded = {}
     monkeypatch.setattr(
-        instance, '_delete_pod',
-        lambda *a, **kw: recorded.update(graceful=kw['graceful']))
+        instance, '_delete_pod', lambda *a, **kw: recorded.update(
+            graceful=kw['graceful'], timeout=kw['timeout']))
 
     instance._terminate_node('default',
                              'ctx',
                              'pod',
-                             has_resource_claims=has_resource_claims)
+                             termination_wait=termination_wait)
 
     assert recorded['graceful'] is expected_graceful
+    assert recorded['timeout'] == termination_wait
+
+
+def _pod(annotations=None, grace=None, resource_claims=None):
+    pod = mock.MagicMock()
+    pod.metadata.annotations = annotations
+    pod.spec.termination_grace_period_seconds = grace
+    pod.spec.resource_claims = resource_claims
+    return pod
+
+
+def test_termination_wait_force_deletes_plain_pods():
+    assert instance._termination_wait(_pod()) is None
+
+
+def test_termination_wait_dra_pod_gets_default_bound():
+    pod = _pod(resource_claims=[mock.MagicMock()])
+    assert instance._termination_wait(
+        pod) == instance._TIMEOUT_FOR_POD_TERMINATION
+
+
+_GRACEFUL = {instance.GRACEFUL_TERMINATION_ANNOTATION_KEY: 'true'}
+
+
+def test_termination_wait_annotated_pod_gets_its_grace_period():
+    pod = _pod(annotations=_GRACEFUL, grace=600)
+    assert instance._termination_wait(
+        pod) == 600 + instance._GRACEFUL_TERMINATION_SLACK_SECONDS
+
+
+def test_termination_wait_annotated_pod_is_capped():
+    pod = _pod(annotations=_GRACEFUL, grace=86400)
+    assert instance._termination_wait(
+        pod) == instance._MAX_GRACEFUL_TERMINATION_WAIT_SECONDS
+
+
+def test_termination_wait_annotated_pod_without_grace_uses_default():
+    pod = _pod(annotations=_GRACEFUL, grace=None)
+    assert instance._termination_wait(
+        pod) == instance._TIMEOUT_FOR_POD_TERMINATION
+
+
+@pytest.mark.parametrize('value', ['false', '', 'yes'])
+def test_termination_wait_ignores_other_annotation_values(value):
+    pod = _pod(
+        annotations={instance.GRACEFUL_TERMINATION_ANNOTATION_KEY: value},
+        grace=600)
+    assert instance._termination_wait(pod) is None
+
+
+def test_delete_pod_graceful_uses_given_timeout(monkeypatch):
+    api = _mock_core_api(monkeypatch)
+    waited = {}
+    monkeypatch.setattr(
+        instance, '_wait_for_pod_gone',
+        lambda *a: waited.update(timeout=a[3]) or True)
+
+    instance._delete_pod('default', 'ctx', 'pod', graceful=True, timeout=660)
+
+    assert waited['timeout'] == 660
+    api.delete_namespaced_pod.assert_called_once()
