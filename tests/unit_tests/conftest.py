@@ -1,8 +1,10 @@
 """Shared fixtures for the unit test suite."""
+import os
 import sys
 
 import pytest
 
+from sky.jobs import constants as jobs_constants
 from sky.utils import context
 
 
@@ -32,6 +34,24 @@ def _isolate_context():
         yield
     finally:
         context._CONTEXT.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_jobs_consolidation_signal(monkeypatch):
+    """Keep each unit test from reading the machine's consolidation signal.
+
+    ``sky api start --deploy`` writes this file to ~/.sky. Its presence turns
+    managed jobs consolidation on, which changes the API server's worker
+    sizing and the internal daemons it runs, so tests passed or failed
+    depending on whether the machine had started an API server.
+
+    The path is under os.devnull, so it never exists and cannot be written: a
+    test that needs consolidation on points it at its own tmp_path.
+    """
+    monkeypatch.setattr(
+        jobs_constants, 'JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE',
+        os.path.join(os.devnull,
+                     'jobs_controller_consolidation_reloaded_signal'))
 
 
 @pytest.fixture(autouse=True)
