@@ -130,11 +130,12 @@ class TestVolumeMount:
         assert 'Unsupported ephemeral volume type' in str(exc_info.value)
         assert 'invalid-type' in str(exc_info.value)
 
-    def test_resolve_ephemeral_config_zero_size(self):
-        """Test resolve_ephemeral_config with zero size."""
+    @pytest.mark.parametrize('size', ['0', -1, '-1Gi'])
+    def test_resolve_ephemeral_config_non_positive_size(self, size):
+        """Test resolve_ephemeral_config with non-positive size."""
         path = '/data'
         config = {
-            'size': '0',
+            'size': size,
         }
 
         with pytest.raises(ValueError) as exc_info:
