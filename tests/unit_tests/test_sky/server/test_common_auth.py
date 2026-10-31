@@ -316,5 +316,13 @@ class TestCryptContext:
         assert common.crypt_ctx.verify('s3cret', password_hash)
         assert not common.crypt_ctx.verify('wrong', password_hash)
 
+    def test_verify_legacy_2_prefix_bcrypt(self):
+        # Made with passlib's bcrypt handler using ident='2'.
+        old_hash = ('$2$04$d68bVANrfLADcCGODOAVve'
+                    'ZPbwfsc3dP2862JbDyoAfldEGeUvKbi')
+        assert common.crypt_ctx.identify(old_hash) == 'bcrypt'
+        assert common.crypt_ctx.verify('s3cret', old_hash)
+        assert not common.crypt_ctx.verify('wrong', old_hash)
+
     def test_identify_plain_password(self):
         assert common.crypt_ctx.identify('not-a-hash') is None

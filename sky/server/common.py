@@ -189,7 +189,7 @@ class _PasswordContext:
     rejects) and logs a traceback on bcrypt>=4.1.
     """
 
-    _BCRYPT_PREFIXES = ('$2a$', '$2b$', '$2y$')
+    _BCRYPT_PREFIXES = ('$2$', '$2a$', '$2b$', '$2y$')
     # bcrypt only uses the first 72 bytes of a password. bcrypt<5.0 dropped
     # the rest silently and bcrypt>=5.0 raises, so truncate here to keep
     # hashes created by older versions valid.
@@ -204,6 +204,20 @@ class _PasswordContext:
     def _bcrypt_secret(self, password: str) -> bytes:
         return password.encode('utf-8')[:self._BCRYPT_MAX_PASSWORD_BYTES]
 
+    def _legacy_bcrypt_args(self, password: str,
+                            password_hash: str) -> Tuple[bytes, str]:
+        """Maps a legacy $2$ hash to the $2a$ algorithm, as passlib did.
+
+        The bcrypt package does not accept $2$ hashes. $2$ gives the same
+        result as $2a$ with the password repeated to fill all 72 bytes.
+        """
+        secret = password.encode('utf-8')
+        if secret:
+            repeats = self._BCRYPT_MAX_PASSWORD_BYTES // len(secret) + 1
+            secret = secret * repeats
+        return (secret[:self._BCRYPT_MAX_PASSWORD_BYTES],
+                '$2a$' + password_hash[len('$2$'):])
+
     def hash(self, password: str) -> str:
         return bcrypt.hashpw(self._bcrypt_secret(password),
                              bcrypt.gensalt()).decode('ascii')
@@ -215,6 +229,10 @@ class _PasswordContext:
         return self._htpasswd_ctx.identify(password_hash)
 
     def verify(self, password: str, password_hash: str) -> bool:
+        if password_hash.startswith('$2$'):
+            secret, password_hash = self._legacy_bcrypt_args(
+                password, password_hash)
+            return bcrypt.checkpw(secret, password_hash.encode('ascii'))
         if password_hash.startswith(self._BCRYPT_PREFIXES):
             return bcrypt.checkpw(self._bcrypt_secret(password),
                                   password_hash.encode('ascii'))
