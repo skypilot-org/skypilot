@@ -940,7 +940,7 @@ export async function streamManagedJobLogs({
   }
 }
 
-export async function handleJobAction(action, jobId, cluster) {
+export async function handleJobAction(action, jobId, cluster, workspace) {
   let logStarter = '';
   let logMiddle = '';
   let apiPath = '';
@@ -957,6 +957,18 @@ export async function handleJobAction(action, jobId, cluster) {
         fields: ['status'],
       };
       jobId = 'controller';
+      break;
+    case 'cancel':
+      logStarter = 'Cancelling';
+      logMiddle = 'cancelled';
+      apiPath = 'jobs/cancel';
+      // The server skips jobs outside the caller's active workspace.
+      requestBody = {
+        job_ids: [Number(jobId)],
+        override_skypilot_config: {
+          active_workspace: workspace || 'default',
+        },
+      };
       break;
     default:
       throw new Error(`Invalid action: ${action}`);
@@ -1000,6 +1012,7 @@ export async function handleJobAction(action, jobId, cluster) {
       // Check the status code of the final response
       if (finalResponse.status === 200) {
         showToast(`Job ${jobId} ${logMiddle} successfully.`, 'success');
+        return true;
       } else {
         if (finalResponse.status === 500) {
           try {

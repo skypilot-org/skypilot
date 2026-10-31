@@ -15,7 +15,12 @@ jest.mock('@/lib/cache', () => ({
 }));
 
 import dashboardCache from '@/lib/cache';
-import { useSingleManagedJob, getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
+import {
+  useSingleManagedJob,
+  getManagedJobs,
+  handleJobAction,
+} from '@/data/connectors/jobs';
 
 const jobId = '56164';
 // The one call a job's detail page makes: the job's own rows and every job
@@ -276,6 +281,37 @@ describe('useSingleManagedJob tree in one fetch', () => {
     expect(dashboardCache.get).toHaveBeenCalledWith(
       getManagedJobs,
       expect.arrayContaining([expect.objectContaining({ includeTree: true })])
+    );
+  });
+});
+
+describe('handleJobAction cancel', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('posts jobs/cancel for the job in its workspace', async () => {
+    const fetchImmediate = jest
+      .spyOn(apiClient, 'fetchImmediate')
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => 'req-1' },
+      })
+      .mockResolvedValueOnce({ status: 200 });
+
+    await expect(handleJobAction('cancel', '42', null, 'team-a')).resolves.toBe(
+      true
+    );
+
+    expect(fetchImmediate).toHaveBeenNthCalledWith(1, '/jobs/cancel', {
+      job_ids: [42],
+      override_skypilot_config: { active_workspace: 'team-a' },
+    });
+    expect(fetchImmediate).toHaveBeenNthCalledWith(
+      2,
+      '/api/get?request_id=req-1',
+      undefined,
+      'GET'
     );
   });
 });

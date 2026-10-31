@@ -234,6 +234,9 @@ function ClusterDetails() {
                     onOpenSSHModal={handleConnectClick}
                     onOpenVSCodeModal={handleVSCodeClick}
                     writable={isClusterWorkspaceWritable}
+                    workspace={clusterData.workspace}
+                    managed={clusterData.is_managed}
+                    onTerminated={() => router.push('/clusters')}
                   />
                 </div>
               )}
