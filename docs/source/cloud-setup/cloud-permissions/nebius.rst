@@ -15,7 +15,7 @@ as a user who can manage service accounts and groups in your tenant.
 
 .. important::
 
-   The service account needs the **editor** role in your tenant (step 3 grants
+   The service account needs the **editor** role in your tenant (step 2 grants
    it). Without it, ``sky check nebius`` and launches fail with a permission
    error.
 
@@ -32,8 +32,9 @@ as a user who can manage service accounts and groups in your tenant.
       # Name of the service account to create, or of an existing one.
       export NEBIUS_SA_NAME=skypilot
 
-2. **Create the service account** (skip the first command if it already
-   exists) and look up its ID:
+2. **Create the service account and give it the editor role.** If the
+   account already exists, ``service-account create`` reports that and the
+   rest still runs.
 
    .. code-block:: shell
 
@@ -44,12 +45,7 @@ as a user who can manage service accounts and groups in your tenant.
         --parent-id $NEBIUS_PROJECT_ID \
         --name $NEBIUS_SA_NAME \
         --format jsonpath='{.metadata.id}')
-
-3. **Give it the editor role** by adding it to your tenant's ``editors``
-   group:
-
-   .. code-block:: shell
-
+      # Editor role: add the account to the tenant's editors group.
       export NEBIUS_EDITORS_GROUP_ID=$(nebius iam group get-by-name \
         --parent-id $NEBIUS_TENANT_ID \
         --name editors \
@@ -58,8 +54,8 @@ as a user who can manage service accounts and groups in your tenant.
         --parent-id $NEBIUS_EDITORS_GROUP_ID \
         --member-id $NEBIUS_SA_ID
 
-4. **Generate a key** and save it to ``~/.nebius/credentials.json``, where
-   SkyPilot reads it (`more on authorized keys
+3. **Save its key and your tenant ID** where SkyPilot reads them (`more on
+   authorized keys
    <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_):
 
    .. code-block:: shell
@@ -67,14 +63,9 @@ as a user who can manage service accounts and groups in your tenant.
       nebius iam auth-public-key generate \
         --service-account-id $NEBIUS_SA_ID \
         --output ~/.nebius/credentials.json
-
-5. **Save the tenant ID** where SkyPilot reads it:
-
-   .. code-block:: shell
-
       echo $NEBIUS_TENANT_ID > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-6. **Verify.** SkyPilot prefers an access token in
+4. **Verify.** SkyPilot prefers an access token in
    ``~/.nebius/NEBIUS_IAM_TOKEN.txt`` (the :ref:`installation guide
    <installation>` creates one) over the service account, so remove it first:
 
