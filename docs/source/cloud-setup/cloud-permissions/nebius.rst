@@ -10,50 +10,57 @@ To use *Service Account* authentication, follow these steps:
 
 1. **Create a Service Account** using the Nebius web console.
 2. **Install and configure the Nebius CLI** following the `Nebius documentation <https://docs.nebius.com/cli/configure>`_.
-3. **Generate Service Account Credentials**:
+3. **Set the IDs used below**:
 
-First, you need to get the service account ID and save it to ``$SA_ID`` environment variable.
-You can either get it from the Nebius web console or run the following command,
-where ``<project id>`` is the ID of the project that contains the service account:
+Fill these in once. The commands in the following steps read them, so you can
+copy and paste those commands as is.
+
+.. code-block:: shell
+
+  # Tenant ID: from the web console, or `nebius iam tenant list`.
+  export NEBIUS_TENANT_ID=<tenant id>
+  # Project that contains the service account: from the web console, or
+  # `nebius iam project list --parent-id $NEBIUS_TENANT_ID`.
+  export NEBIUS_PROJECT_ID=<project id>
+  export NEBIUS_SA_NAME=<service account name>
+
+4. **Generate Service Account Credentials**:
+
+Get the service account ID (or copy it from the Nebius web console):
 
 .. code-block:: shell
 
   export SA_ID=$(nebius iam service-account get-by-name \
-    --parent-id <project id> \
-    --name <service account name> \
+    --parent-id $NEBIUS_PROJECT_ID \
+    --name $NEBIUS_SA_NAME \
     --format json \
     | jq -r ".metadata.id")
 
 .. note::
 
-  Service accounts belong to a project, so ``--parent-id`` is required unless
-  your Nebius CLI profile sets a default parent ID. Without it, the command fails
-  with ``Invalid nid format ''``. To list the projects in your tenant, run
-  ``nebius iam project list --parent-id <tenant id>``.
+  Service accounts belong to a project, so the lookup needs ``--parent-id``.
+  Without it, and with no default parent ID in your Nebius CLI profile, the
+  command fails with ``Invalid nid format ''``.
 
-Then, run the following command to generate the service account credentials:
+Then generate the service account credentials:
 
 .. code-block:: shell
 
   nebius iam auth-public-key generate \
-  --service-account-id $SA_ID \
-  --output ~/.nebius/credentials.json
+    --service-account-id $SA_ID \
+    --output ~/.nebius/credentials.json
 
 This saves the service account credentials to ``~/.nebius/credentials.json``.
 
 See `Nebius documentation on creating authorized keys <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
 
-4. **Add the tenant ID information**
-
-Find the tenant ID from the web console, or use ``nebius iam tenant list`` command.
-
-Once the tenant ID is found, run the following command:
+5. **Add the tenant ID information**
 
 .. code-block:: shell
 
-  echo <tenant id> > ~/.nebius/NEBIUS_TENANT_ID.txt
+  echo $NEBIUS_TENANT_ID > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-5. **Verify service account credentials**
+6. **Verify service account credentials**
 
 To verify that the service account credentials are working with SkyPilot, run the following command:
 
