@@ -16,6 +16,9 @@ from sky.utils import ux_utils
 # Default read timeout for nebius SDK
 READ_TIMEOUT = 10
 
+# Budget (seconds) for the credential check, including the token exchange.
+CREDENTIAL_CHECK_TIMEOUT = 30
+
 logger = sky_logging.init_logger(__name__)
 
 _loop_lock = threading.Lock()
@@ -235,6 +238,21 @@ def iam():
     # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.iam import v1 as iam_v1
     return iam_v1
+
+
+def fail_fast_auth_options() -> Dict[str, str]:
+    """Request auth options that surface a failed token exchange at once.
+
+    By default the SDK retries a failed exchange in the background until its
+    15-minute auth timeout, then reports DEADLINE_EXCEEDED instead of the
+    real error (e.g. a public key Nebius does not know).
+    """
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio.token import options as token_options
+    return {
+        token_options.OPTION_RENEW_SYNCHRONOUS: '1',
+        token_options.OPTION_REPORT_ERROR: '1',
+    }
 
 
 def billing():

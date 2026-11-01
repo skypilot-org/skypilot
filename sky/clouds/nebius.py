@@ -530,8 +530,11 @@ class Nebius(clouds.Cloud):
         sdk = nebius.sdk()
         try:
             service = nebius.iam().ProjectServiceClient(sdk)
-            service.list(
-                nebius.iam().ListProjectsRequest(parent_id=tenant_id)).wait()
+            # Without these, a key Nebius rejects keeps `sky check` waiting
+            # for 15 minutes and then reports DEADLINE_EXCEEDED.
+            service.list(nebius.iam().ListProjectsRequest(parent_id=tenant_id),
+                         auth_timeout=nebius.CREDENTIAL_CHECK_TIMEOUT,
+                         auth_options=nebius.fail_fast_auth_options()).wait()
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
