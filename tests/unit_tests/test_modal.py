@@ -1205,6 +1205,7 @@ def test_modal_terminate_instances_idempotent(monkeypatch):
 def test_modal_adaptor_follows_config_file_changes(tmp_path, monkeypatch):
     # modal reads its config once at import; a long-lived API server worker
     # must still see `modal token new` or an uploaded token.
+    pytest.importorskip('modal')
     from sky.adaptors import modal as modal_adaptor
     modal_sdk = modal_adaptor.modal.load_module()
     path = tmp_path / '.modal.toml'
@@ -1235,6 +1236,7 @@ def test_modal_adaptor_keeps_config_if_reload_internals_change(
         tmp_path, monkeypatch):
     # The reload uses private modal internals; if they go away, Modal must
     # keep working with the config it already loaded.
+    pytest.importorskip('modal')
     from sky.adaptors import modal as modal_adaptor
     modal_sdk = modal_adaptor.modal.load_module()
     path = tmp_path / '.modal.toml'
