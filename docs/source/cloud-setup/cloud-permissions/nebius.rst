@@ -15,6 +15,12 @@ where SkyPilot reads it. You need the `Nebius CLI
 <https://docs.nebius.com/cli/configure>`_, signed in as a user who can manage
 service accounts and groups in your tenant.
 
+.. important::
+
+   The service account needs the **editor** role in your tenant, which it gets
+   by joining the tenant's ``editors`` group (step 3). Without it,
+   ``sky check nebius`` or launching clusters fails with a permission error.
+
 1. **Set the IDs used below.** Fill these in once. Every later command reads
    them, so you can paste those commands unchanged.
 
@@ -51,8 +57,9 @@ service accounts and groups in your tenant.
       ``--parent-id``. Without it, and with no default parent ID in your
       Nebius CLI profile, the command fails with ``Invalid nid format ''``.
 
-3. **Give it access.** Add the service account to your tenant's ``editors``
-   group, which lets SkyPilot create and manage VMs, disks, and networks:
+3. **Give it the editor role.** Add the service account to your tenant's
+   ``editors`` group, which lets SkyPilot create and manage VMs, disks, and
+   networks:
 
    .. code-block:: shell
 
