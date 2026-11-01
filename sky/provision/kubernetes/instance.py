@@ -7,7 +7,9 @@ import re
 import sys
 import time
 from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
-                    Set, Tuple, TYPE_CHECKING, Union)
+                    Set, Tuple, Type, TYPE_CHECKING, Union)
+
+import pydantic
 
 from sky import exceptions
 from sky import global_user_state
@@ -37,6 +39,7 @@ from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 if TYPE_CHECKING:
+    from kubernetes.client import V1Deployment
     from kubernetes.client import V1Pod
 
 POLL_INTERVAL = 2
@@ -811,7 +814,7 @@ def _raise_pod_scheduling_errors(
         # the error message from the pod that is already scheduled.
         if pod_status != 'Pending':
             continue
-        pod_name = pod._metadata._name  # pylint: disable=protected-access
+        pod_name = pod.metadata.name
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'
@@ -2115,6 +2118,79 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+_MAX_REPORTED_VALIDATION_ERRORS = 5
+
+
+def _format_validation_errors(error: pydantic.ValidationError,
+                              pod_loc: Tuple[str, ...]) -> str:
+    """Describe validation errors by field path, as written in pod_config.
+
+    Indices into the merged pod spec do not match the user's YAML (SkyPilot
+    merges in its own env vars, volumes and other entries), so lists are
+    shown as `[]`.
+    """
+    details = []
+    for err in error.errors()[:_MAX_REPORTED_VALIDATION_ERRORS]:
+        loc = tuple(err['loc'])
+        if loc[:len(pod_loc)] == pod_loc:
+            loc = loc[len(pod_loc):]
+        path = ''
+        for part in loc:
+            if isinstance(part, int):
+                path += '[]'
+            else:
+                path += f'.{part}' if path else str(part)
+        detail = f'{path}: {err["msg"]}'
+        value = err.get('input')
+        if not isinstance(value, (dict, list)):
+            detail += f' (got {value!r})'
+        details.append(detail)
+    remaining = error.error_count() - len(details)
+    if remaining > 0:
+        details.append(f'... and {remaining} more')
+    return '\n'.join(f'  {detail}' for detail in details)
+
+
+def _validate_request_body(
+    body: Dict[str, Any],
+    model: Union[Type['V1Pod'], Type['V1Deployment']],
+    pod_loc: Tuple[str, ...] = ()
+) -> None:
+    """Validate an outgoing request before sending it.
+
+    Skip validation for legacy clients without Pydantic models. Validate before
+    the API call so response-validation errors are not treated as config errors.
+
+    Args:
+        body: The request body.
+        model: The generated client model for the body.
+        pod_loc: Where the pod from pod_config sits in `body`, e.g.
+            ('spec', 'template') for a Deployment. Stripped from error paths
+            so they match the user's YAML.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: The request is invalid, so this
+            Kubernetes context can never serve it. Failover moves on to other
+            candidates instead of waiting for capacity.
+    """
+    if not hasattr(model, 'model_validate'):
+        # Legacy clients do not perform Pydantic request validation.
+        # This fallback can be removed once the minimum supported Kubernetes
+        # Python client version is 37.
+        return
+    # The API call can raise ValidationError for either the request or response.
+    # Validate here so only invalid requests are reported as config errors.
+    try:
+        model.model_validate(body)
+    except pydantic.ValidationError as e:
+        # `kind` is optional, and a missing one must not mask this error.
+        resource_kind = body.get('kind', 'resource')
+        raise exceptions.ProvisionUnsupportedError(
+            f'Invalid Kubernetes {resource_kind} spec (check '
+            f'kubernetes.pod_config):\n'
+            f'{_format_validation_errors(e, pod_loc)}') from e
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
@@ -2126,6 +2202,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
     Returns: The created Pod object.
     """
+    kubernetes_utils.normalize_pod_resource_quantities(pod_spec['spec'])
+    _validate_request_body(pod_spec, kubernetes.kubernetes.client.V1Pod)
     try:
         # Attempt to create the Pod with the AppArmor annotation
         pod = kubernetes.core_api(context).create_namespaced_pod(
@@ -2682,9 +2760,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
+            kubernetes_utils.normalize_pod_resource_quantities(
+                template_pod_spec['spec'])
             # Propagate the labels to the deployment for identification.
             deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
                 'labels']
+            _validate_request_body(deployment_spec,
+                                   kubernetes.kubernetes.client.V1Deployment,
+                                   pod_loc=('spec', 'template'))
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(

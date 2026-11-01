@@ -261,8 +261,13 @@ def get_ingress_external_ip_and_ports(
         # 2. Use the skypilot.co/external-ip annotation in the service
         # 3. Otherwise return 'localhost'
         ip = None
-        if ingress_service.spec.external_i_ps is not None:
-            ip = ingress_service.spec.external_i_ps[0]
+        # The v36 generator renamed external_i_ps to external_ips.
+        try:
+            external_ips = ingress_service.spec.external_ips
+        except AttributeError:
+            external_ips = ingress_service.spec.external_i_ps
+        if external_ips:
+            ip = external_ips[0]
         elif ingress_service.metadata.annotations is not None:
             ip = ingress_service.metadata.annotations.get(
                 'skypilot.co/external-ip', None)

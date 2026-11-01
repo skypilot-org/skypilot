@@ -1,10 +1,13 @@
 """Tests for Kubernetes provision."""
 
+import copy
 import datetime
 import re
 from typing import Optional
 from unittest import mock
 
+from kubernetes import client as k8s_client
+import pydantic
 import pytest
 import urllib3
 
@@ -22,6 +25,10 @@ from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
 from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
+
+# Client v37+ uses Pydantic models for request and response validation.
+# Only Pydantic client models have the model_validate method.
+_PYDANTIC_CLIENT = hasattr(k8s_client.V1Pod, 'model_validate')
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -131,6 +138,273 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+@pytest.fixture
+def real_client(monkeypatch):
+    """Use real generated APIs with mocked transport and provisioning boundaries."""
+    _patch_create_pods_k8s_boundary(monkeypatch, {}, None)
+    monkeypatch.setattr(kubernetes_utils, 'get_allowed_nodes_config',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+    monkeypatch.setattr(instance.volume, 'check_pvc_usage_for_pod',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(instance.volume, 'create_persistent_volume_claim',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+    with k8s_client.ApiClient() as api_client:
+        send = mock.Mock(side_effect=AssertionError('Unexpected transport'))
+        monkeypatch.setattr(api_client.rest_client, 'request', send)
+        monkeypatch.setattr(kubernetes, 'core_api',
+                            lambda *a, **k: k8s_client.CoreV1Api(api_client))
+        monkeypatch.setattr(kubernetes, 'apps_api',
+                            lambda *a, **k: k8s_client.AppsV1Api(api_client))
+        yield send
+
+
+def _quantity_config(
+        volume_type: Optional[str] = None,
+        deployment: bool = False) -> provision_common.ProvisionConfig:
+    """Build a fresh provisioning config containing numeric quantities."""
+    config = _make_provision_config(count=1)
+    config.node_config['kind'] = 'Pod'  # As in kubernetes-ray.yml.j2.
+    resource_requirements = {
+        'requests': {
+            'cpu': 0.5,
+            'memory': '1Gi',
+            'nvidia.com/gpu': 1
+        },
+        'limits': {
+            'cpu': 2,
+            'nvidia.com/gpu': 1
+        },
+    }
+    config.node_config['spec']['containers'] = [{
+        'name': 'main',
+        'image': 'busybox',
+        'resources': copy.deepcopy(resource_requirements),
+        'ports': [{
+            'containerPort': 8080
+        }],
+    }]
+    config.node_config['spec']['initContainers'] = [{
+        'name': 'init',
+        'image': 'busybox',
+        'resources': {
+            'requests': {
+                'cpu': 0.1
+            }
+        },
+    }]
+    config.node_config['spec']['overhead'] = {'cpu': 0.1}
+    for field in ('containers', 'initContainers'):
+        config.node_config['spec'][field][0]['env'] = [{
+            'name': 'CPU_LIMIT',
+            'valueFrom': {
+                'resourceFieldRef': {
+                    'resource': 'limits.cpu',
+                    'divisor': 1
+                }
+            },
+        }]
+    if volume_type == 'ephemeral':
+        config.node_config['spec']['volumes'] = [{
+            'name': 'scratch',
+            'ephemeral': {
+                'volumeClaimTemplate': {
+                    'spec': {
+                        'accessModes': ['ReadWriteOnce'],
+                        'resources': {
+                            'requests': {
+                                'storage': 1073741824
+                            }
+                        },
+                    },
+                },
+            },
+        }]
+    elif volume_type == 'emptyDir':
+        config.node_config['spec']['volumes'] = [{
+            'name': 'scratch',
+            'emptyDir': {
+                'sizeLimit': 1073741824
+            },
+        }]
+    elif volume_type in ('downwardAPI', 'projected'):
+        source = {
+            'downwardAPI': {
+                'items': [{
+                    'path': 'cpu',
+                    'resourceFieldRef': {
+                        'containerName': 'main',
+                        'resource': 'limits.cpu',
+                        'divisor': 1
+                    },
+                }]
+            }
+        }
+        if volume_type == 'projected':
+            source = {'projected': {'sources': [source]}}
+        config.node_config['spec']['volumes'] = [dict(name='scratch', **source)]
+    if volume_type is not None:
+        config.node_config['spec']['containers'][0]['volumeMounts'] = [{
+            'name': 'scratch',
+            'mountPath': '/scratch',
+        }]
+    if deployment:
+        config.node_config['deployment_spec'] = {
+            'kind': 'Deployment',
+            'metadata': {
+                'name': 'test-deployment'
+            },
+            'spec': {
+                'selector': {
+                    'matchLabels': {
+                        'app': 'test'
+                    }
+                },
+                'template': {
+                    'spec': {}
+                }
+            },
+        }
+        config.node_config['pvc_spec'] = {}
+    return config
+
+
+@pytest.mark.parametrize('deployment', [False, True])
+@pytest.mark.parametrize(
+    'volume_type', [None, 'ephemeral', 'emptyDir', 'downwardAPI', 'projected'])
+def test_create_pods_normalizes_quantities_before_api_validation(
+        real_client, deployment: bool, volume_type: Optional[str]) -> None:
+    config = _quantity_config(volume_type, deployment)
+    original = copy.deepcopy(config.node_config)
+    send = real_client
+    send.side_effect = RuntimeError('request reached transport')
+    with pytest.raises(RuntimeError, match='request reached transport'):
+        instance._create_pods('us', 'test', 'test', config)
+    send.assert_called_once()
+    body = send.call_args.kwargs['body']
+    spec = body['spec']['template']['spec'] if deployment else body['spec']
+    assert spec['containers'][0]['resources'] == {
+        'requests': {
+            'cpu': '0.5',
+            'memory': '1Gi',
+            'nvidia.com/gpu': '1'
+        },
+        'limits': {
+            'cpu': '2',
+            'nvidia.com/gpu': '1'
+        },
+    }
+    assert spec['initContainers'][0]['resources']['requests']['cpu'] == '0.1'
+    assert spec['containers'][0]['ports'][0]['containerPort'] == 8080
+    assert spec['overhead'] == {'cpu': '0.1'}
+    for field in ('containers', 'initContainers'):
+        selector = spec[field][0]['env'][0]['valueFrom']['resourceFieldRef']
+        assert selector['divisor'] == '1'
+    if volume_type == 'ephemeral':
+        claim_spec = spec['volumes'][0]['ephemeral']['volumeClaimTemplate'][
+            'spec']
+        assert claim_spec['resources']['requests']['storage'] == '1073741824'
+    elif volume_type == 'emptyDir':
+        assert spec['volumes'][0]['emptyDir']['sizeLimit'] == '1073741824'
+    elif volume_type in ('downwardAPI', 'projected'):
+        source = spec['volumes'][0]
+        if volume_type == 'projected':
+            source = source['projected']['sources'][0]
+        selector = source['downwardAPI']['items'][0]['resourceFieldRef']
+        assert selector['divisor'] == '1'
+    # In particular, accelerator counts must stay numeric in stored configs:
+    # _create_pods compares them to zero to select runtime classes/tolerations.
+    assert config.node_config == original
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+@pytest.mark.parametrize('deployment', [False, True])
+@pytest.mark.parametrize('case', ['invalid_request', 'invalid_response'])
+def test_create_pods_classifies_validation_errors(real_client, deployment,
+                                                  case):
+    config = _quantity_config(deployment=deployment)
+    send = real_client
+    if case == 'invalid_request':
+        config.node_config['spec']['containers'][0]['ports'][0][
+            'containerPort'] = 'not-a-port'
+    else:
+        # Valid HTTP response, but an invalid model field in its body.
+        send.side_effect = None
+        send.return_value = k8s_client.rest.RESTResponse(
+            urllib3.HTTPResponse(body=b'{"metadata": {"name": []}}',
+                                 status=201,
+                                 headers={'Content-Type': 'application/json'}))
+    original = copy.deepcopy(config.node_config)
+    if case == 'invalid_request':
+        kind = 'Deployment' if deployment else 'Pod'
+        with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
+            instance._create_pods('us', 'test', 'test', config)
+        # The path matches pod_config's layout for Pods and Deployments alike.
+        assert str(exc.value) == (
+            f'Invalid Kubernetes {kind} spec (check kubernetes.pod_config):\n'
+            '  spec.containers[].ports[].containerPort: Input should be a '
+            "valid integer (got 'not-a-port')")
+        send.assert_not_called()
+    else:
+        with pytest.raises(pydantic.ValidationError, match='V1ObjectMeta'):
+            instance._create_pods('us', 'test', 'test', config)
+        send.assert_called_once()
+    assert config.node_config == original
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+def test_validation_error_message_is_bounded():
+    pod = {
+        'kind': 'Pod',
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                # A missing name reports its whole env var as the input, which
+                # is not repeated in the message.
+                'env': [{
+                    'value': 'unnamed'
+                }] + [{
+                    'name': f'VAR{i}',
+                    'value': i
+                } for i in range(5)],
+            }]
+        }
+    }
+    with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
+        instance._validate_request_body(pod, k8s_client.V1Pod)
+    assert str(exc.value) == (
+        'Invalid Kubernetes Pod spec (check kubernetes.pod_config):\n'
+        '  spec.containers[].env[].name: Field required\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 0)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 1)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 2)\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 3)\n'
+        '  ... and 1 more')
+
+
+@pytest.mark.skipif(not _PYDANTIC_CLIENT,
+                    reason='Legacy clients do not perform Pydantic validation.')
+def test_validation_error_without_kind():
+    """`kind` is optional, so its absence must not mask the error."""
+    pod = {'spec': {'containers': [{'name': 'main', 'env': [{'name': 'A'}]}]}}
+    pod['spec']['containers'][0]['env'][0]['value'] = 1
+    with pytest.raises(sky_exceptions.ProvisionUnsupportedError) as exc:
+        instance._validate_request_body(pod, k8s_client.V1Pod)
+    assert str(exc.value) == (
+        'Invalid Kubernetes resource spec (check kubernetes.pod_config):\n'
+        '  spec.containers[].env[].value: Input should be a valid string '
+        '(got 1)')
 
 
 def test_inject_ephemeral_volumes():
@@ -960,6 +1234,38 @@ def test_get_pvc_binding_status_pending_pvc(monkeypatch):
     assert 'storageclass does not support ReadWriteMany' in result
     assert 'kubectl describe pvc' in result
     assert 'test-namespace' in result
+
+
+def test_raise_pod_scheduling_errors_real_pod(monkeypatch):
+    """Generated models must preserve the scheduler's failure reason."""
+    pod = k8s_client.V1Pod(
+        metadata=k8s_client.V1ObjectMeta(name='pending-pod'),
+        spec=k8s_client.V1PodSpec(
+            containers=[k8s_client.V1Container(name='main', image='busybox')]),
+        status=k8s_client.V1PodStatus(phase='Pending'))
+    event_message = '0/1 nodes are available: 1 Insufficient nvidia.com/gpu.'
+    event = k8s_client.CoreV1Event(metadata=k8s_client.V1ObjectMeta(
+        name='scheduling-event',
+        creation_timestamp=datetime.datetime.now(datetime.timezone.utc)),
+                                   involved_object=k8s_client.V1ObjectReference(
+                                       name='pending-pod', kind='Pod'),
+                                   reason='FailedScheduling',
+                                   message=event_message)
+    core_api = mock.Mock()
+    core_api.read_namespaced_pod.return_value = pod
+    core_api.list_namespaced_event.return_value = k8s_client.CoreV1EventList(
+        items=[event])
+    monkeypatch.setattr(kubernetes, 'core_api', lambda *a, **k: core_api)
+    monkeypatch.setattr(kubernetes_utils, 'get_gpu_resource_key',
+                        lambda *a, **k: 'nvidia.com/gpu')
+
+    with pytest.raises(config_lib.KubernetesError,
+                       match='Insufficient nvidia.com/gpu'):
+        instance._raise_pod_scheduling_errors('default', 'test-context', [pod])
+
+    assert core_api.list_namespaced_event.call_args.kwargs[
+        'field_selector'] == (
+            'involvedObject.name=pending-pod,involvedObject.kind=Pod')
 
 
 def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
@@ -5947,7 +6253,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -5990,7 +6305,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -6028,7 +6352,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         result = instance._create_namespaced_pod_with_retries(
             'default', pod_spec, None)
 
@@ -6056,7 +6389,16 @@ class TestCreatePodFinalizerHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *a, **k: FakeApiException)
 
-        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        pod_spec = {
+            'metadata': {
+                'name': 't-reco-head'
+            },
+            'spec': {
+                'containers': [{
+                    'name': 'main'
+                }]
+            }
+        }
         with pytest.raises(AssertionError):
             instance._create_namespaced_pod_with_retries(
                 'default', pod_spec, None)

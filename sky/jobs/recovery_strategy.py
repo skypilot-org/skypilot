@@ -958,6 +958,9 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                3. Every candidate raised ProvisionUnsupportedError, e.g. an
+                invalid Kubernetes pod_config. This is terminal even when
+                raise_on_failure is False, since recovery cannot fix it.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -1316,7 +1319,13 @@ class StrategyExecutor:
                             logger.error(
                                 'Failure happened before provisioning. '
                                 f'Failover reasons: {reasons_str}')
-                            if raise_on_failure:
+                            # Every candidate rejected the request itself, so
+                            # retrying cannot help, even during recovery.
+                            unsupported_only = bool(e.failover_history) and all(
+                                isinstance(err,
+                                           exceptions.ProvisionUnsupportedError)
+                                for err in e.failover_history)
+                            if raise_on_failure or unsupported_only:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None

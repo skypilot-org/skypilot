@@ -3509,15 +3509,17 @@ class PodValidator:
             return None
 
         if isinstance(klass, str):
-            if klass.startswith('list['):
-                match = re.match(r'list\[(.*)\]', klass)
+            # The legacy generator uses list[T]/dict(K, V), v36 uses
+            # dict[K, V], and the v37 Pydantic generator uses List/Dict.
+            if klass.lower().startswith('list['):
+                match = re.match(r'[Ll]ist\[(.*)\]', klass)
                 if match is None:
                     raise ValueError(f'Invalid list type format: {klass}')
                 sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
-            if klass.startswith('dict('):
-                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+            if klass.lower().startswith(('dict(', 'dict[')):
+                match = re.match(r'[Dd]ict[\[(]([^,]*), (.*)[\])]', klass)
                 if match is None:
                     raise ValueError(f'Invalid dict type format: {klass}')
                 sub_kls = match.group(2)
@@ -4923,6 +4925,12 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
         object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
     """
 
+    model = getattr(kubernetes_models, object_type)
+    if hasattr(model, 'model_validate'):
+        # v37 models accept Kubernetes wire names directly. Avoid the
+        # ApiClient.deserialize interface, which also changed in v37.
+        return model.model_validate(object_dict)
+
     class FakeKubeResponse:
 
         def __init__(self, obj):
@@ -4930,6 +4938,61 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 
     fake_kube_response = FakeKubeResponse(object_dict)
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
+
+
+def normalize_pod_resource_quantities(pod_spec: Dict[str, Any]) -> None:
+    """Normalize resource quantities in a PodSpec in place before sending.
+
+    Kubernetes accepts numeric quantities, but the v37 Python client validates
+    request bodies with Pydantic and requires strings. Keep the internal
+    provisioning config numeric; normalize only the final outgoing pod spec.
+    """
+
+    def normalize_quantity_map(quantities):
+        for name, value in quantities.items():
+            # Do not turn invalid null/bool values into strings.
+            if type(value) in (int, float):
+                quantities[name] = str(value)
+
+    def normalize_resource_field_ref(owner):
+        selector = owner.get('resourceFieldRef') or {}
+        divisor = selector.get('divisor')
+        if type(divisor) in (int, float):
+            selector['divisor'] = str(divisor)
+
+    normalize_quantity_map(pod_spec.get('overhead') or {})
+    resource_owners = [pod_spec]
+    for field in ('containers', 'initContainers', 'ephemeralContainers'):
+        containers = pod_spec.get(field) or []
+        resource_owners.extend(containers)
+        for container in containers:
+            for env in container.get('env') or []:
+                normalize_resource_field_ref(env.get('valueFrom') or {})
+    for volume in pod_spec.get('volumes') or []:
+        # Downward API resource selectors can appear in standalone volumes or
+        # within projected volumes, as well as in container environment vars.
+        downward_apis = [volume.get('downwardAPI') or {}]
+        projected = volume.get('projected') or {}
+        downward_apis.extend(
+            source.get('downwardAPI') or {}
+            for source in projected.get('sources') or [])
+        for downward_api in downward_apis:
+            for item in downward_api.get('items') or []:
+                normalize_resource_field_ref(item)
+        empty_dir = volume.get('emptyDir')
+        if empty_dir is not None:
+            size_limit = empty_dir.get('sizeLimit')
+            if type(size_limit) in (int, float):
+                empty_dir['sizeLimit'] = str(size_limit)
+        # Generic ephemeral volumes embed a PVC whose storage quantities are
+        # also validated as strings by the generated Pod/Deployment APIs.
+        ephemeral = volume.get('ephemeral') or {}
+        claim_template = ephemeral.get('volumeClaimTemplate') or {}
+        resource_owners.append(claim_template.get('spec') or {})
+    for owner in resource_owners:
+        resources = owner.get('resources') or {}
+        for field in ('requests', 'limits'):
+            normalize_quantity_map(resources.get(field) or {})
 
 
 def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:

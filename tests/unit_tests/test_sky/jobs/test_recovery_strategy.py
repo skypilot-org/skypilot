@@ -304,6 +304,47 @@ def _patch_launch_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('raise_on_failure', [True, False])
+async def test_unsupported_only_launch_is_terminal_during_recovery(
+        monkeypatch, raise_on_failure):
+    """A request no candidate can serve fails the job, even in recovery."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    unsupported = exceptions.ProvisionUnsupportedError(
+        'Invalid Kubernetes Pod spec (check kubernetes.pod_config)')
+    error = exceptions.ResourcesUnavailableError('Failed to provision',
+                                                 failover_history=[unsupported])
+    executor._await_launch_request = mock.AsyncMock(side_effect=error)
+
+    # Bound the retries so a regression fails rather than looping forever.
+    with pytest.raises(exceptions.ProvisionPrechecksError) as exc:
+        await executor._launch(max_retry=2, raise_on_failure=raise_on_failure)
+
+    assert list(exc.value.reasons) == [unsupported]
+    patches.sdk_launch.assert_called_once()
+    executor._await_launch_request.assert_awaited_once()
+    patches.set_backoff_pending.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_with_capacity_failure_is_retried_in_recovery(
+        monkeypatch):
+    """Another candidate that was merely full may still free up."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    error = exceptions.ResourcesUnavailableError(
+        'Failed to provision',
+        failover_history=[
+            exceptions.ProvisionUnsupportedError('Invalid Kubernetes Pod spec'),
+            exceptions.ResourcesUnavailableError('No capacity'),
+        ])
+    executor._await_launch_request = mock.AsyncMock(side_effect=error)
+
+    assert await executor._launch(max_retry=1, raise_on_failure=False) is None
+    executor._await_launch_request.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     """A parked launch request releases the slot and re-attaches on resume."""
     executor = _make_launch_executor()
