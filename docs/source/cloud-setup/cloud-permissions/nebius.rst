@@ -10,19 +10,17 @@ A service account lets SkyPilot use Nebius without a personal access token,
 which expires. Use one for a shared :ref:`API server
 <sky-api-server-configure-credentials>`, CI, or any long-running setup.
 
-The steps below create the service account, give it access, and save its key
-where SkyPilot reads it. You need the `Nebius CLI
-<https://docs.nebius.com/cli/configure>`_, signed in as a user who can manage
-service accounts and groups in your tenant.
+You need the `Nebius CLI <https://docs.nebius.com/cli/configure>`_, signed in
+as a user who can manage service accounts and groups in your tenant.
 
 .. important::
 
-   The service account needs the **editor** role in your tenant, which it gets
-   by joining the tenant's ``editors`` group (step 3). Without it,
-   ``sky check nebius`` or launching clusters fails with a permission error.
+   The service account needs the **editor** role in your tenant (step 3 grants
+   it). Without it, ``sky check nebius`` and launches fail with a permission
+   error.
 
-1. **Set the IDs used below.** Fill these in once. Every later command reads
-   them, so you can paste those commands unchanged.
+1. **Set the IDs used below.** Fill these in once; you can then paste every
+   later command unchanged.
 
    .. code-block:: shell
 
@@ -34,32 +32,21 @@ service accounts and groups in your tenant.
       # Name of the service account to create, or of an existing one.
       export NEBIUS_SA_NAME=skypilot
 
-2. **Create the service account.** Skip this command if it already exists.
+2. **Create the service account** (skip the first command if it already
+   exists) and look up its ID:
 
    .. code-block:: shell
 
       nebius iam service-account create \
         --parent-id $NEBIUS_PROJECT_ID \
         --name $NEBIUS_SA_NAME
-
-   Then look up its ID:
-
-   .. code-block:: shell
-
-      export SA_ID=$(nebius iam service-account get-by-name \
+      export NEBIUS_SA_ID=$(nebius iam service-account get-by-name \
         --parent-id $NEBIUS_PROJECT_ID \
         --name $NEBIUS_SA_NAME \
         --format jsonpath='{.metadata.id}')
 
-   .. note::
-
-      Service accounts belong to a project, so the lookup needs
-      ``--parent-id``. Without it, and with no default parent ID in your
-      Nebius CLI profile, the command fails with ``Invalid nid format ''``.
-
-3. **Give it the editor role.** Add the service account to your tenant's
-   ``editors`` group, which lets SkyPilot create and manage VMs, disks, and
-   networks:
+3. **Give it the editor role** by adding it to your tenant's ``editors``
+   group:
 
    .. code-block:: shell
 
@@ -69,20 +56,17 @@ service accounts and groups in your tenant.
         --format jsonpath='{.metadata.id}')
       nebius iam group-membership create \
         --parent-id $NEBIUS_EDITORS_GROUP_ID \
-        --member-id $SA_ID
+        --member-id $NEBIUS_SA_ID
 
-4. **Generate a key** and save it where SkyPilot reads it,
-   ``~/.nebius/credentials.json``:
+4. **Generate a key** and save it to ``~/.nebius/credentials.json``, where
+   SkyPilot reads it (`more on authorized keys
+   <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_):
 
    .. code-block:: shell
 
       nebius iam auth-public-key generate \
-        --service-account-id $SA_ID \
+        --service-account-id $NEBIUS_SA_ID \
         --output ~/.nebius/credentials.json
-
-   See the `Nebius documentation on authorized keys
-   <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for
-   more details.
 
 5. **Save the tenant ID** where SkyPilot reads it:
 
@@ -90,23 +74,16 @@ service accounts and groups in your tenant.
 
       echo $NEBIUS_TENANT_ID > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-6. **Verify** that SkyPilot can use the service account:
+6. **Verify.** SkyPilot prefers an access token in
+   ``~/.nebius/NEBIUS_IAM_TOKEN.txt`` (the :ref:`installation guide
+   <installation>` creates one) over the service account, so remove it first:
 
    .. code-block:: shell
 
+      rm -f ~/.nebius/NEBIUS_IAM_TOKEN.txt
       sky check nebius
 
-   Under enabled infra, the output lists ``Nebius`` with ``compute``.
-
-.. important::
-
-   If ``~/.nebius/NEBIUS_IAM_TOKEN.txt`` exists, SkyPilot uses that token
-   instead of the service account. The :ref:`installation guide
-   <installation>` creates this file. Remove it to use the service account:
-
-   .. code-block:: shell
-
-      rm ~/.nebius/NEBIUS_IAM_TOKEN.txt
+   ``Nebius`` should be listed under *Enabled infra*.
 
 Next steps:
 
