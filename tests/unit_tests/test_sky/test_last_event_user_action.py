@@ -45,11 +45,13 @@ def _event(name, reason, at, event_type=_STATUS):
     gus.add_cluster_event(name, None, reason, event_type, transitioned_at=at)
 
 
-def _last(cluster_hash):
+def _last(cluster_hash, name='c'):
+    """The batch reader's answer; for a live cluster, also the single one's."""
     batch = gus._get_last_or_terminal_cluster_event_multiple({cluster_hash})
-    single = gus.get_terminal_or_last_status_change_event(cluster_hash)
-    assert batch.get(cluster_hash) == single
-    return single
+    record = gus.get_cluster_from_name(name)
+    if record is not None:
+        assert record['last_event'] == batch.get(cluster_hash)
+    return batch.get(cluster_hash)
 
 
 class TestGoneCluster:
@@ -98,6 +100,29 @@ class TestGoneCluster:
             gus.remove_cluster('c', terminate=True)
             assert _last(h) == removal
 
+    def test_a_failed_provision_after_a_failed_down_wins(
+            self, tmp_path, monkeypatch):
+        """The down failed, then a relaunch failed and removed the cluster."""
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        failed = f'{gus.PROVISION_FAILED_PREFIX}no capacity'
+        _event('c', _DOWN, now)
+        _event('c', failed, now + 60)
+        gus.remove_cluster('c', terminate=True)
+        assert _last(h) == failed
+
+    def test_a_removal_phrase_mid_text_is_not_a_removal(self, tmp_path,
+                                                        monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        other = f'{gus.CLUSTER_REMOVED_BY_REFRESH} Then relaunched.'
+        _event('c', other, now)
+        _event('c', _HEALTHY, now + 5)
+        gus.remove_cluster('c', terminate=True)
+        assert _last(h) == _HEALTHY
+
     def test_terminal_still_comes_first(self, tmp_path, monkeypatch):
         _fresh_db(tmp_path, monkeypatch)
         h = _launch('c')
@@ -129,6 +154,55 @@ class TestLiveCluster:
         gus.set_cluster_status('c', status_lib.ClusterStatus.STOPPED)
         assert _last(h) == _STOP
 
+    def test_a_failed_stop_on_a_live_cluster_does_not_stick(
+            self, tmp_path, monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        _event('c', _STOP, now + 1)
+        _event('c', _ABNORMAL, now + 3)
+        assert _last(h) == _ABNORMAL
+
+    def test_a_stop_in_the_launch_second_counts(self, tmp_path, monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        launched_at = gus.get_cluster_from_name('c')['launched_at']
+        _event('c', _STOP, launched_at)
+        _event('c', _HEALTHY, launched_at + 3)
+        gus.set_cluster_status('c', status_lib.ClusterStatus.STOPPED)
+        assert _last(h) == _STOP
+
+    def test_a_later_refresh_of_the_stopped_nodes_does_not_replace_it(
+            self, tmp_path, monkeypatch):
+        """A refresh of a stopped spot / autostop cluster records this."""
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        _event('c', _STOP, now + 1)
+        gus.set_cluster_status('c', status_lib.ClusterStatus.STOPPED)
+        _event('c', 'All nodes stopped, cleaning up the cluster.', now + 600)
+        assert _last(h) == _STOP
+
+    def test_the_user_stop_phrase_mid_text_is_not_a_stop(
+            self, tmp_path, monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        _event('c', f'Hook: {_STOP}', now + 1)
+        _event('c', _HEALTHY, now + 3)
+        gus.set_cluster_status('c', status_lib.ClusterStatus.STOPPED)
+        assert _last(h) == _HEALTHY
+
+    def test_a_launch_milestone_is_not_a_last_event(self, tmp_path,
+                                                    monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        h = _launch('c')
+        now = int(time.time())
+        _event('c', _HEALTHY, now)
+        _event('c', 'Provisioned in 30s', now + 5,
+               gus.ClusterEventType.LAUNCH_MILESTONE)
+        assert _last(h) == _HEALTHY
+
     def test_a_stop_before_the_last_launch_does_not_stick(
             self, tmp_path, monkeypatch):
         """Stopped, then started: launched_at moves past the stop."""
@@ -158,5 +232,6 @@ class TestLiveCluster:
 def test_the_matched_texts_have_no_like_wildcards():
     for text in (gus.user_action_event_prefix('terminated'),
                  gus.user_action_event_prefix('stopped'),
-                 gus.CLUSTER_REMOVED_BY_REFRESH, gus._LEGACY_REMOVAL_PREFIX):
+                 gus.CLUSTER_REMOVED_BY_REFRESH, gus._LEGACY_REMOVAL_PREFIX,
+                 gus.PROVISION_FAILED_PREFIX):
         assert '%' not in text and '_' not in text, text

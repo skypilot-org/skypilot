@@ -331,10 +331,11 @@ ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
 # `sky down` / `sky stop` records. A cluster's last event prefers these over a
 # later refresh's status events: they say what ended it.
 CLUSTER_REMOVED_BY_REFRESH = 'Cluster removed by SkyPilot status refresh.'
-# Other removals: a cluster without a YAML file, and the line servers wrote
-# for a removal before CLUSTER_REMOVED_BY_REFRESH.
+# Other removals: a cluster without a YAML file, a failed provision, and the
+# line servers wrote for a removal before CLUSTER_REMOVED_BY_REFRESH.
 CLUSTER_REMOVED_NO_YAML = (
     'Cluster has no YAML file. Removing the cluster from cache.')
+PROVISION_FAILED_PREFIX = 'Provision failed: '
 _LEGACY_REMOVAL_PREFIX = 'All nodes terminated'
 
 
@@ -1482,28 +1483,32 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
-def _last_event_priority() -> Any:
+def _last_event_priority(exists: Any, status: Any, launched_at: Any) -> Any:
     """Rank of an event as a cluster's last event; lowest wins, then newest.
 
     0: TERMINAL. 1: what ended the cluster -- for a cluster no longer in the
-    cluster table, the user's `sky down` or a removal by the status refresh;
-    for a STOPPED one, the user's `sky stop` since its last launch. A status
-    refresh can run during or after these (teardown refreshes first) and write
-    a later status event; that must not replace what ended the cluster.
-    2: any other event. Needs `cluster_table` outer-joined on cluster_hash.
+    cluster table, the user's `sky down` or a removal (status refresh, failed
+    provision); for a STOPPED one, the user's `sky stop` since its last launch.
+    A status refresh can run during or after these (teardown refreshes first)
+    and write a later status event; that must not replace what ended it.
+    2: any other event.
+
+    `exists`, `status` and `launched_at` describe the cluster's row: columns
+    of `cluster_table` outer-joined on cluster_hash, or bound values.
     """
     event = cluster_event_table.c
     removed = sqlalchemy.and_(
-        cluster_table.c.name.is_(None),
+        sqlalchemy.not_(exists),
         sqlalchemy.or_(
             event.reason.like(f'{user_action_event_prefix("terminated")}%'),
             event.reason.like(f'%{CLUSTER_REMOVED_BY_REFRESH}'),
             event.reason.like(f'{_LEGACY_REMOVAL_PREFIX}%'),
+            event.reason.like(f'{PROVISION_FAILED_PREFIX}%'),
             event.reason == CLUSTER_REMOVED_NO_YAML))
     stopped = sqlalchemy.and_(
-        cluster_table.c.status == status_lib.ClusterStatus.STOPPED.value,
+        status == status_lib.ClusterStatus.STOPPED.value,
         event.reason.like(f'{user_action_event_prefix("stopped")}%'),
-        event.transitioned_at >= cluster_table.c.launched_at)
+        event.transitioned_at >= launched_at)
     return sqlalchemy.case(
         (event.type == ClusterEventType.TERMINAL.value, 0),
         (sqlalchemy.and_(event.type == ClusterEventType.STATUS_CHANGE.value,
@@ -1512,19 +1517,26 @@ def _last_event_priority() -> Any:
 
 
 def get_terminal_or_last_status_change_event(
-        cluster_hash: str) -> Optional[str]:
+        cluster_hash: str, status: Optional[str],
+        launched_at: Optional[int]) -> Optional[str]:
+    """The last event of a cluster in the cluster table.
+
+    `status` and `launched_at` are from the cluster's row; passed in, rather
+    than joined, as clusters.cluster_hash has no index.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row = session.query(cluster_event_table.c.reason).outerjoin(
-            cluster_table, cluster_table.c.cluster_hash ==
-            cluster_event_table.c.cluster_hash).filter(
-                cluster_event_table.c.cluster_hash == cluster_hash,
-                cluster_event_table.c.type.in_([
-                    ClusterEventType.TERMINAL.value,
-                    ClusterEventType.STATUS_CHANGE.value
-                ])).order_by(
-                    _last_event_priority(),
-                    cluster_event_table.c.transitioned_at.desc()).first()
+        row = session.query(cluster_event_table.c.reason).filter(
+            cluster_event_table.c.cluster_hash == cluster_hash,
+            cluster_event_table.c.type.in_([
+                ClusterEventType.TERMINAL.value,
+                ClusterEventType.STATUS_CHANGE.value
+            ])).order_by(
+                _last_event_priority(
+                    sqlalchemy.true(),
+                    sqlalchemy.literal(status, sqlalchemy.Text),
+                    sqlalchemy.literal(launched_at, sqlalchemy.Integer)),
+                cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None
     return row.reason
@@ -1540,7 +1552,9 @@ def _get_last_or_terminal_cluster_event_multiple(
         row_number = sqlalchemy.func.row_number().over(
             partition_by=cluster_event_table.c.cluster_hash,
             order_by=[
-                _last_event_priority(),
+                _last_event_priority(cluster_table.c.name.isnot(None),
+                                     cluster_table.c.status,
+                                     cluster_table.c.launched_at),
                 cluster_event_table.c.transitioned_at.desc()
             ]).label('rn')
 
@@ -1551,9 +1565,9 @@ def _get_last_or_terminal_cluster_event_multiple(
                 cluster_table, cluster_table.c.cluster_hash ==
                 cluster_event_table.c.cluster_hash).filter(
                     cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                    cluster_event_table.c.type.notin_([
-                        ClusterEventType.DEBUG.value,
-                        ClusterEventType.LAUNCH_PROGRESS.value,
+                    cluster_event_table.c.type.in_([
+                        ClusterEventType.TERMINAL.value,
+                        ClusterEventType.STATUS_CHANGE.value,
                     ])).subquery()
 
         # Select only the top-ranked event for each cluster
@@ -2690,7 +2704,8 @@ def get_cluster_from_name(
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
     if not summary_response:
-        last_event = get_terminal_or_last_status_change_event(row.cluster_hash)
+        last_event = get_terminal_or_last_status_change_event(
+            row.cluster_hash, row.status, row.launched_at)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
