@@ -3831,7 +3831,7 @@ def get_all_kube_context_names() -> List[str]:
     global _kubeconfig_context_names
     k8s = kubernetes.kubernetes
     # Taken before the parse: a write during it changes the next fingerprint.
-    fingerprint = _kubeconfig_fingerprint()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
     cached = _kubeconfig_context_names
     if cached is not None and cached[0] == fingerprint:
         context_names = list(cached[1])
@@ -3865,27 +3865,6 @@ _cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
 _cluster_uid_cache_lock = threading.Lock()
 
 
-def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
-    """Changes whenever a file on KUBECONFIG is written, replaced or removed.
-
-    Hashes the content rather than comparing stat fields: a same-size rewrite
-    within one timestamp tick, or one that keeps the mtime (`cp -p`), leaves
-    every stat field unchanged. Reading a kubeconfig costs far less than
-    parsing it.
-    """
-    fingerprint: List[Tuple[Any, ...]] = []
-    for path in get_kubeconfig_paths():
-        if not path:
-            continue
-        try:
-            with open(path, 'rb') as f:
-                digest = hashlib.sha256(f.read()).hexdigest()
-            fingerprint.append((path, digest))
-        except OSError:
-            fingerprint.append((path, None))
-    return tuple(fingerprint)
-
-
 def read_cluster_uid(core, timeout: float) -> Optional[str]:
     """Reads the kube-system namespace UID through the given CoreV1Api."""
     namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
@@ -3905,7 +3884,7 @@ def get_cluster_uid(context: Optional[str],
     another cluster.
     """
     now = time.monotonic()
-    fingerprint = _kubeconfig_fingerprint()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
     if use_cache:
         with _cluster_uid_cache_lock:
             cached = _cluster_uid_cache.get(context)
