@@ -63,9 +63,11 @@ const SuccessDisplay = ({ message }) => {
   if (!message) return null;
 
   return (
-    <Alert className="border-green-200 bg-green-50">
-      <CheckIcon className="h-4 w-4 text-green-600" />
-      <AlertDescription className="text-green-800">{message}</AlertDescription>
+    <Alert className="border-green-line bg-green-tint">
+      <CheckIcon className="h-4 w-4 text-green-fg" />
+      <AlertDescription className="text-green-fg-stronger">
+        {message}
+      </AlertDescription>
     </Alert>
   );
 };
@@ -84,7 +86,7 @@ const WorkspaceConfigDescription = ({
 
   if (isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content-tertiary mb-3 italic p-3 bg-sky-tint rounded border border-sky-line">
         Workspace &apos;default&apos; can use all accessible infrastructure.
       </div>
     );
@@ -160,7 +162,7 @@ const WorkspaceConfigDescription = ({
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-configured-not-enabled`}
-              className="block text-amber-700"
+              className="block text-amber-fg-strong"
             >
               {cloudName}
               {detail} is configured but not currently available.
@@ -190,7 +192,7 @@ const WorkspaceConfigDescription = ({
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-default-not-enabled`}
-              className="block text-amber-700"
+              className="block text-amber-fg-strong"
             >
               {cloudName} is configured but not currently available.
             </span>
@@ -215,7 +217,7 @@ const WorkspaceConfigDescription = ({
 
   if (finalDescriptions.length > 0) {
     return (
-      <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content mb-3 p-3 bg-sky-tint rounded border border-sky-line">
         {finalDescriptions}
       </div>
     );
@@ -223,7 +225,7 @@ const WorkspaceConfigDescription = ({
 
   if (!isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-content-tertiary mb-3 italic p-3 bg-sky-tint rounded border border-sky-line">
         This workspace has no specific cloud resource configurations and can use
         all accessible infrastructure.
       </div>
@@ -242,12 +244,14 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   return (
     <span className="inline-flex items-center gap-1">
       {isPrivate ? (
-        <span className={`${base} bg-gray-100 text-gray-700 border-gray-300`}>
+        <span
+          className={`${base} bg-surface-muted text-content border-line-strong`}
+        >
           Private
         </span>
       ) : (
         <span
-          className={`${base} bg-green-100 text-green-700 border-green-300`}
+          className={`${base} bg-green-tint-strong text-green-fg-strong border-green-line-strong`}
         >
           Public
         </span>
@@ -258,7 +262,7 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
           className="text-sm text-muted-foreground"
         >
           <span
-            className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
+            className={`${base} whitespace-nowrap bg-blue-tint-strong text-blue-fg-strong border-blue-line-strong`}
           >
             Read-only
           </span>
@@ -331,10 +335,10 @@ export const DetailedAllowedUsers = ({
   if (allAllowedUsers.length === 0) {
     return (
       <div className="mt-4">
-        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+        <h4 className="mb-2 text-xs text-content-tertiary tracking-wider">
           Allowed Users (0)
         </h4>
-        <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
+        <div className="text-amber-fg text-xs italic p-2 bg-amber-tint rounded border border-amber-line">
           No users configured (workspace may be inaccessible)
         </div>
         {actionsSlot}
@@ -344,18 +348,18 @@ export const DetailedAllowedUsers = ({
 
   return (
     <div className="mt-4">
-      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+      <h4 className="mb-2 text-xs text-content-tertiary tracking-wider">
         Allowed Users ({allAllowedUsers.length})
       </h4>
-      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
+      <div className="space-y-1 max-h-48 overflow-y-auto border border-line rounded">
         {allAllowedUsers.map((username) => {
           const isAdmin = adminIdentities.has(username);
           return (
             <div
               key={username}
-              className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+              className="flex items-center justify-between text-xs p-2 bg-surface-subtle hover:bg-surface-muted border-b border-line-subtle last:border-b-0"
             >
-              <span className="font-medium text-gray-700">{username}</span>
+              <span className="font-medium text-content">{username}</span>
               <PluginSlot
                 name="workspaces.detail.allowedUser.role"
                 context={{
@@ -368,12 +372,12 @@ export const DetailedAllowedUsers = ({
                 wrapperClassName="contents"
                 fallback={
                   isAdmin ? (
-                    <span className="inline-flex items-center text-blue-600">
+                    <span className="inline-flex items-center text-blue-fg">
                       <StarIcon className="w-3 h-3 mr-1" />
                       Admin
                     </span>
                   ) : (
-                    <span className="inline-flex items-center text-gray-600">
+                    <span className="inline-flex items-center text-content-secondary">
                       <User className="w-3 h-3 mr-1" />
                       User
                     </span>
@@ -895,17 +899,17 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         {/* Header with breadcrumb navigation */}
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/workspaces" className="text-sky-blue hover:underline">
+            <Link href="/workspaces" className="text-brand hover:underline">
               Workspaces
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-content-tertiary">›</span>
             <Link
               href={
                 isNewWorkspace
                   ? `/workspace/new`
                   : `/workspaces/${workspaceName}`
               }
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {isNewWorkspace ? 'New Workspace' : displayName}
             </Link>
@@ -924,7 +928,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
               />
             )}
             {hasChanges && (
-              <span className="ml-3 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">
+              <span className="ml-3 px-2 py-1 bg-yellow-tint-strong text-yellow-fg-stronger text-xs rounded">
                 Unsaved changes
               </span>
             )}
@@ -934,7 +938,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             {(loading || saving || statsLoading) && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
+                <span className="ml-2 text-content-tertiary">
                   {saving ? 'Saving...' : 'Loading...'}
                 </span>
               </div>
@@ -945,7 +949,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 <button
                   onClick={handleRefresh}
                   disabled={loading || saving || statsLoading}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                  className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                 >
                   <RotateCwIcon className="w-4 h-4 mr-1.5" />
                   Refresh
@@ -958,7 +962,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     setDeleteState({ ...deleteState, showDialog: true })
                   }
                   disabled={deleteState.deleting || saving}
-                  className="text-red-600 hover:text-red-700 font-medium inline-flex items-center"
+                  className="text-red-fg hover:text-red-fg-strong font-medium inline-flex items-center"
                 >
                   <TrashIcon className="w-4 h-4 mr-1.5" />
                   Delete
@@ -972,7 +976,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         {loading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">
+            <span className="text-content-tertiary">
               Loading workspace configuration...
             </span>
           </div>
@@ -999,7 +1003,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <span className="font-semibold">Workspace:</span>{' '}
                             {displayName}
                             {displayName !== workspaceName && (
-                              <span className="ml-2 text-xs text-gray-500">
+                              <span className="ml-2 text-xs text-content-tertiary">
                                 ID: {workspaceName}
                               </span>
                             )}
@@ -1013,22 +1017,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     </CardHeader>
                     <CardContent className="text-sm pb-2 flex-1">
                       <div className="py-2 flex items-center justify-between">
-                        <div className="flex items-center text-gray-600">
-                          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+                        <div className="flex items-center text-content-secondary">
+                          <ServerIcon className="w-4 h-4 mr-2 text-content-tertiary" />
                           <span>Clusters (Running / Total)</span>
                         </div>
-                        <span className="font-normal text-gray-800">
+                        <span className="font-normal text-content-heavy">
                           {statsLoading
                             ? '...'
                             : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
                         </span>
                       </div>
-                      <div className="py-2 flex items-center justify-between border-t border-gray-100">
-                        <div className="flex items-center text-gray-600">
-                          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+                      <div className="py-2 flex items-center justify-between border-t border-line-subtle">
+                        <div className="flex items-center text-content-secondary">
+                          <BriefcaseIcon className="w-4 h-4 mr-2 text-content-tertiary" />
                           <span>Managed Jobs</span>
                         </div>
-                        <span className="font-normal text-gray-800">
+                        <span className="font-normal text-content-heavy">
                           {statsLoading
                             ? '...'
                             : workspaceStats.managedJobsCount}
@@ -1037,24 +1041,26 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     </CardContent>
 
                     <div className="px-6 pb-6 text-sm pt-3">
-                      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+                      <h4 className="mb-2 text-xs text-content-tertiary tracking-wider">
                         Enabled Infra
                       </h4>
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         {statsLoading ? (
-                          <span className="text-gray-500">Loading...</span>
+                          <span className="text-content-tertiary">
+                            Loading...
+                          </span>
                         ) : workspaceStats.clouds.length > 0 ? (
                           workspaceStats.clouds.map((cloud) => (
                             <div
                               key={cloud}
-                              className="flex items-center text-gray-700"
+                              className="flex items-center text-content"
                             >
-                              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+                              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-fg-soft" />
                               <span>{cloud}</span>
                             </div>
                           ))
                         ) : (
-                          <span className="text-gray-500 italic">
+                          <span className="text-content-tertiary italic">
                             No enabled infrastructure
                           </span>
                         )}
@@ -1110,11 +1116,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       )}
                       <div className="flex-1 flex flex-col">
                         {!isNewWorkspace && isAdmin === false && (
-                          <p className="text-sm text-gray-600 mb-3">
+                          <p className="text-sm text-content-secondary mb-3">
                             Only admins can change this configuration.
                           </p>
                         )}
-                        <p className="text-sm text-gray-600 mb-3">
+                        <p className="text-sm text-content-secondary mb-3">
                           Configure infra-specific settings for this workspace.
                           Leave empty to use all accessible infrastructure.
                           Refer to{' '}
@@ -1122,7 +1128,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             href="https://docs.skypilot.co/en/latest/admin/workspaces.html#configuration"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-600"
+                            className="text-blue-fg"
                           >
                             SkyPilot Docs
                           </a>{' '}
@@ -1131,11 +1137,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                         {/* Example Configuration Section */}
                         <div className="mb-4">
-                          <h4 className="text-sm font-medium text-gray-700 mb-2">
+                          <h4 className="text-sm font-medium text-content mb-2">
                             Example configuration:
                           </h4>
-                          <div className="p-3 bg-gray-50 border rounded-lg">
-                            <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
+                          <div className="p-3 bg-surface-subtle border rounded-lg">
+                            <pre className="text-xs font-mono text-content-secondary whitespace-pre-wrap">
                               {`${displayName || 'my-workspace'}:
   private: true
   # who can read it (default: allowed_users = members only; all = anyone)
@@ -1162,11 +1168,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                         {/* Action buttons */}
                         {canEdit && (
-                          <div className="flex justify-end space-x-3 pt-3 border-gray-200">
+                          <div className="flex justify-end space-x-3 pt-3 border-line">
                             <Button
                               onClick={() => handleSave()}
                               disabled={saving || yamlError || loading}
-                              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+                              className="inline-flex items-center bg-sky-solid hover:bg-sky-solid-hover text-white"
                             >
                               <SaveIcon className="w-4 h-4 mr-1.5" />
                               {saving ? 'Applying...' : 'Apply'}

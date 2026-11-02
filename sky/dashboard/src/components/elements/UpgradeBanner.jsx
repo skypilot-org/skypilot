@@ -11,12 +11,12 @@ export function UpgradeBanner() {
   }
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[60] bg-yellow-50 border-b border-yellow-200">
+    <div className="fixed top-0 left-0 right-0 z-[60] bg-yellow-tint border-b border-yellow-line">
       <div className="max-w-7xl mx-auto py-3 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-center">
           <div className="flex items-center">
             <svg
-              className="h-5 w-5 text-yellow-600 mr-2 animate-spin"
+              className="h-5 w-5 text-yellow-fg mr-2 animate-spin"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"
@@ -35,7 +35,7 @@ export function UpgradeBanner() {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            <span className="text-sm font-medium text-yellow-800">
+            <span className="text-sm font-medium text-yellow-fg-stronger">
               Your SkyPilot deployment is undergoing upgrades. Refresh in a few
               moments.
             </span>

@@ -30,37 +30,289 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --text-strong: 220 17% 27%;
+
+    /* Semantic tokens. Use these through Tailwind (bg-surface, text-content,
+       border-line, text-brand, bg-red-tint, ...) instead of raw palette
+       colors, so both themes work without per-component dark: variants. */
+    --surface: 0 0% 100%;
+    --surface-subtle: 210 20% 98.04%;
+    --surface-muted: 220 14.29% 95.88%;
+    --surface-strong: 220 13.04% 90.98%;
+    --surface-stronger: 216 12.2% 83.92%;
+    --content-strong: 220.91 39.29% 10.98%;
+    --content-heavy: 215 27.91% 16.86%;
+    --content: 216.92 19.12% 26.67%;
+    --content-secondary: 215 13.79% 34.12%;
+    --content-tertiary: 220 8.94% 46.08%;
+    --content-faint: 217.89 10.61% 64.9%;
+    --content-faintest: 216 12.2% 83.92%;
+    --line-subtle: 220 14.29% 95.88%;
+    --line: 220 13.04% 90.98%;
+    --line-strong: 216 12.2% 83.92%;
+    --line-stronger: 217.89 10.61% 64.9%;
+    --brand: 217.93 75.65% 22.55%;
+    --brand-bright: 216.55 74.36% 45.88%;
+    --brand-solid: 217.93 75.65% 22.55%;
+    --brand-solid-hover: 216.55 74.36% 45.88%;
+    --surface-log: 0 0% 96.86%;
+    --surface-code: 0 0% 96.08%;
+    --code-string: 138.46 68.42% 29.8%;
+    --code-gutter: 211.58 9% 58.63%;
+    --red-tint: 0 85.71% 97.25%;
+    --red-tint-strong: 0 93.33% 94.12%;
+    --red-line: 0 96.3% 89.41%;
+    --red-solid-soft: 0 84.24% 60.2%;
+    --red-solid: 0 72.22% 50.59%;
+    --red-solid-hover: 0 73.71% 41.76%;
+    --red-fg-faint: 0 90.6% 70.78%;
+    --red-fg-soft: 0 84.24% 60.2%;
+    --red-fg: 0 72.22% 50.59%;
+    --red-fg-strong: 0 73.71% 41.76%;
+    --red-fg-stronger: 0 70% 35.29%;
+    --green-tint: 138.46 76.47% 96.67%;
+    --green-tint-strong: 140.63 84.21% 92.55%;
+    --green-line: 141 78.95% 85.1%;
+    --green-line-strong: 141.71 76.64% 73.14%;
+    --green-solid-soft: 142.09 70.56% 45.29%;
+    --green-solid: 142.13 76.22% 36.27%;
+    --green-solid-hover: 142.43 71.81% 29.22%;
+    --green-fg-faint: 141.89 69.16% 58.04%;
+    --green-fg-soft: 142.09 70.56% 45.29%;
+    --green-fg: 142.13 76.22% 36.27%;
+    --green-fg-strong: 142.43 71.81% 29.22%;
+    --green-fg-stronger: 142.78 64.23% 24.12%;
+    --green-fg-strongest: 143.81 61.17% 20.2%;
+    --yellow-tint: 54.55 91.67% 95.29%;
+    --yellow-tint-strong: 54.92 96.72% 88.04%;
+    --yellow-line: 52.76 98.31% 76.86%;
+    --yellow-solid-soft: 45.4 93.39% 47.45%;
+    --yellow-fg-soft: 45.4 93.39% 47.45%;
+    --yellow-fg: 40.61 96.12% 40.39%;
+    --yellow-fg-strong: 35.45 91.67% 32.94%;
+    --yellow-fg-stronger: 31.76 80.95% 28.82%;
+    --amber-tint: 48 100% 96.08%;
+    --amber-tint-strong: 48 96.49% 88.82%;
+    --amber-line: 48 96.64% 76.67%;
+    --amber-solid: 32.13 94.62% 43.73%;
+    --amber-solid-hover: 25.96 90.48% 37.06%;
+    --amber-fg-faint: 43.26 96.41% 56.27%;
+    --amber-fg-soft: 37.69 92.13% 50.2%;
+    --amber-fg: 32.13 94.62% 43.73%;
+    --amber-fg-strong: 25.96 90.48% 37.06%;
+    --amber-fg-stronger: 22.73 82.5% 31.37%;
+    --amber-fg-strongest: 21.71 77.78% 26.47%;
+    --orange-tint: 33.33 100% 96.47%;
+    --orange-fg: 20.54 90.24% 48.24%;
+    --orange-fg-strong: 17.47 88.35% 40.39%;
+    --purple-tint: 270 100% 98.04%;
+    --purple-tint-strong: 268.7 100% 95.49%;
+    --purple-fg: 271.48 81.33% 55.88%;
+    --purple-fg-strong: 272.09 71.67% 47.06%;
+    --purple-fg-stronger: 272.89 67.16% 39.41%;
+    --indigo-tint: 225.88 100% 96.67%;
+    --indigo-fg-soft: 238.73 83.53% 66.67%;
+    --indigo-fg: 243.4 75.36% 58.63%;
+    --indigo-fg-strong: 244.52 57.94% 50.59%;
+    --cyan-tint: 183.16 100% 96.27%;
+    --cyan-fg-strong: 192.92 82.28% 30.98%;
+    --pink-tint: 327.27 73.33% 97.06%;
+    --pink-fg-strong: 335.06 77.57% 41.96%;
+    --emerald-tint: 151.76 80.95% 95.88%;
+    --emerald-line: 152.37 76% 80.39%;
+    --emerald-solid: 161.38 93.55% 30.39%;
+    --emerald-fg-soft: 160.12 84.08% 39.41%;
+    --emerald-fg: 161.38 93.55% 30.39%;
+    --emerald-fg-strong: 162.93 93.55% 24.31%;
+    --teal-tint: 166.15 76.47% 96.67%;
+    --blue-tint: 213.75 100% 96.86%;
+    --blue-tint-strong: 214.29 94.59% 92.75%;
+    --blue-line: 213.33 96.92% 87.25%;
+    --blue-line-strong: 211.7 96.36% 78.43%;
+    --blue-solid-soft: 217.22 91.22% 59.8%;
+    --blue-solid: 221.21 83.19% 53.33%;
+    --blue-solid-hover: 224.28 76.33% 48.04%;
+    --blue-fg-faint: 213.12 93.9% 67.84%;
+    --blue-fg-soft: 217.22 91.22% 59.8%;
+    --blue-fg: 221.21 83.19% 53.33%;
+    --blue-fg-strong: 224.28 76.33% 48.04%;
+    --blue-fg-stronger: 225.93 70.73% 40.2%;
+    --blue-fg-strongest: 224.44 64.29% 32.94%;
+    --sky-tint: 204 100% 97.06%;
+    --sky-tint-strong: 204 93.75% 93.73%;
+    --sky-line: 200.6 94.37% 86.08%;
+    --sky-solid-soft: 198.63 88.66% 48.43%;
+    --sky-solid: 200.41 98.01% 39.41%;
+    --sky-solid-hover: 201.27 96.34% 32.16%;
+    --sky-fg-soft: 198.63 88.66% 48.43%;
+    --sky-fg: 200.41 98.01% 39.41%;
+    --sky-fg-strong: 201.27 96.34% 32.16%;
+    --sky-fg-stronger: 200.95 90% 27.45%;
+    --sky-fg-strongest: 202.04 80.33% 23.92%;
+    color-scheme: light;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --background: 215 28.6% 7.8%;
+    --foreground: 214 15% 89%;
+    --card: 215 28.6% 7.8%;
+    --card-foreground: 214 15% 89%;
+    --popover: 213 25% 10.6%;
+    --popover-foreground: 214 15% 89%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --secondary: 214 22% 14.3%;
+    --secondary-foreground: 214 15% 89%;
+    --muted: 214 22% 14.3%;
+    --muted-foreground: 215 12% 63%;
+    --accent: 214 22% 14.3%;
+    --accent-foreground: 214 15% 89%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 215 21% 19.6%;
+    --input: 215 19% 26%;
     --ring: 212.7 26.8% 83.9%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --text-strong: 214 15% 89%;
+    color-scheme: dark;
+    --surface: 215 28.6% 7.8%;
+    --surface-subtle: 213 25% 10.6%;
+    --surface-muted: 214 22% 14.3%;
+    --surface-strong: 215 21% 19.6%;
+    --surface-stronger: 215 19% 26%;
+    --content-strong: 220 14.3% 95.9%;
+    --content-heavy: 214 15% 92%;
+    --content: 214 15% 89%;
+    --content-secondary: 214 14% 77%;
+    --content-tertiary: 215 12% 63%;
+    --content-faint: 215 11% 52%;
+    --content-faintest: 215 10% 42%;
+    --line-subtle: 214 22% 14.3%;
+    --line: 215 21% 19.6%;
+    --line-strong: 215 19% 26%;
+    --line-stronger: 215 16% 35%;
+    --brand: 217 89% 76%;
+    --brand-bright: 214 92% 85%;
+    --brand-solid: 217 68% 38%;
+    --brand-solid-hover: 217 62% 47%;
+    --surface-log: 213 25% 10.6%;
+    --surface-code: 213 25% 10.6%;
+    --code-string: 141.71 76.64% 73.14%;
+    --code-gutter: 215 11% 52%;
+    --red-tint: 0 74.68% 15.49%;
+    --red-tint-strong: 0 66.67% 22.35%;
+    --red-line: 0 70% 35.29%;
+    --red-solid-soft: 0 72.22% 50.59%;
+    --red-solid: 0 73.71% 41.76%;
+    --red-solid-hover: 0 70% 35.29%;
+    --red-fg-faint: 0 72.22% 50.59%;
+    --red-fg-soft: 0 84.24% 60.2%;
+    --red-fg: 0 90.6% 70.78%;
+    --red-fg-strong: 0 93.55% 81.76%;
+    --red-fg-stronger: 0 96.3% 89.41%;
+    --green-tint: 144.88 80.39% 10%;
+    --green-tint-strong: 143.53 68% 14.71%;
+    --green-line: 142.78 64.23% 24.12%;
+    --green-line-strong: 142.43 71.81% 29.22%;
+    --green-solid-soft: 142.13 76.22% 36.27%;
+    --green-solid: 142.43 71.81% 29.22%;
+    --green-solid-hover: 142.78 64.23% 24.12%;
+    --green-fg-faint: 142.13 76.22% 36.27%;
+    --green-fg-soft: 142.09 70.56% 45.29%;
+    --green-fg: 141.89 69.16% 58.04%;
+    --green-fg-strong: 141.71 76.64% 73.14%;
+    --green-fg-stronger: 141 78.95% 85.1%;
+    --green-fg-strongest: 140.63 84.21% 92.55%;
+    --yellow-tint: 26 83.33% 14.12%;
+    --yellow-tint-strong: 27.63 77.55% 19.22%;
+    --yellow-line: 31.76 80.95% 28.82%;
+    --yellow-solid-soft: 40.61 96.12% 40.39%;
+    --yellow-fg-soft: 45.4 93.39% 47.45%;
+    --yellow-fg: 47.95 95.82% 53.14%;
+    --yellow-fg-strong: 50.44 97.85% 63.53%;
+    --yellow-fg-stronger: 52.76 98.31% 76.86%;
+    --amber-tint: 20.91 91.67% 14.12%;
+    --amber-tint-strong: 21.43 84% 19.61%;
+    --amber-line: 22.73 82.5% 31.37%;
+    --amber-solid: 25.96 90.48% 37.06%;
+    --amber-solid-hover: 22.73 82.5% 31.37%;
+    --amber-fg-faint: 32.13 94.62% 43.73%;
+    --amber-fg-soft: 37.69 92.13% 50.2%;
+    --amber-fg: 43.26 96.41% 56.27%;
+    --amber-fg-strong: 45.94 96.69% 64.51%;
+    --amber-fg-stronger: 48 96.64% 76.67%;
+    --amber-fg-strongest: 48 96.49% 88.82%;
+    --orange-tint: 13 81.08% 14.51%;
+    --orange-fg: 27.02 95.98% 60.98%;
+    --orange-fg-strong: 30.66 97.16% 72.35%;
+    --purple-tint: 273.55 86.92% 20.98%;
+    --purple-tint-strong: 273.6 75.76% 25.88%;
+    --purple-fg: 270 95.24% 75.29%;
+    --purple-fg-strong: 269.19 97.37% 85.1%;
+    --purple-fg-stronger: 268.57 100% 91.76%;
+    --indigo-tint: 243.75 47.06% 20%;
+    --indigo-fg-soft: 238.73 83.53% 66.67%;
+    --indigo-fg: 234.45 89.47% 73.92%;
+    --indigo-fg-strong: 229.66 93.55% 81.76%;
+    --cyan-tint: 197 78.95% 14.9%;
+    --cyan-fg-strong: 186.99 92.41% 69.02%;
+    --pink-tint: 336.16 83.91% 17.06%;
+    --pink-fg-strong: 327.41 87.1% 81.76%;
+    --emerald-tint: 165.71 91.3% 9.02%;
+    --emerald-line: 163.15 88.12% 19.8%;
+    --emerald-solid: 162.93 93.55% 24.31%;
+    --emerald-fg-soft: 160.12 84.08% 39.41%;
+    --emerald-fg: 158.11 64.37% 51.57%;
+    --emerald-fg-strong: 156.2 71.6% 66.86%;
+    --teal-tint: 178.6 84.31% 10%;
+    --blue-tint: 226.23 57.01% 20.98%;
+    --blue-tint-strong: 225.37 61.19% 26.27%;
+    --blue-line: 225.93 70.73% 40.2%;
+    --blue-line-strong: 224.28 76.33% 48.04%;
+    --blue-solid-soft: 221.21 83.19% 53.33%;
+    --blue-solid: 224.28 76.33% 48.04%;
+    --blue-solid-hover: 225.93 70.73% 40.2%;
+    --blue-fg-faint: 221.21 83.19% 53.33%;
+    --blue-fg-soft: 217.22 91.22% 59.8%;
+    --blue-fg: 213.12 93.9% 67.84%;
+    --blue-fg-strong: 211.7 96.36% 78.43%;
+    --blue-fg-stronger: 213.33 96.92% 87.25%;
+    --blue-fg-strongest: 214.29 94.59% 92.75%;
+    --sky-tint: 204 80.25% 15.88%;
+    --sky-tint-strong: 203.25 80% 19.61%;
+    --sky-line: 200.95 90% 27.45%;
+    --sky-solid-soft: 200.41 98.01% 39.41%;
+    --sky-solid: 201.27 96.34% 32.16%;
+    --sky-solid-hover: 200.95 90% 27.45%;
+    --sky-fg-soft: 198.63 88.66% 48.43%;
+    --sky-fg: 198.44 93.2% 59.61%;
+    --sky-fg-strong: 199.37 95.49% 73.92%;
+    --sky-fg-stronger: 200.6 94.37% 86.08%;
+    --sky-fg-strongest: 204 93.75% 93.73%;
   }
 }
 
 @layer base {
+  /* Native fields with no background class would otherwise get the browser's
+     dark-scheme gray. :where() keeps this at zero specificity, so any
+     component or utility background still wins. */
+  :where(
+    .dark
+      input:not(
+        [type='checkbox'],
+        [type='radio'],
+        [type='range'],
+        [type='file'],
+        [type='color']
+      ),
+    .dark textarea,
+    .dark select
+  ) {
+    background-color: hsl(var(--surface));
+  }
   * {
     @apply border-border;
   }
@@ -179,8 +431,8 @@
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid #e5e7eb;
-  background: white;
+  border: 1px solid hsl(var(--line));
+  background: hsl(var(--surface));
   font-family: inherit;
   margin: 8px;
   position: relative;
@@ -200,7 +452,7 @@
   font-weight: 600;
   margin: 0 !important;
   padding: 0 !important; /* Remove any default h3 padding */
-  color: #111827;
+  color: hsl(var(--content-strong));
   line-height: 1.25;
   text-align: left;
 }
@@ -217,14 +469,14 @@
   padding: 12px 24px 16px !important;
   font-size: 16px;
   line-height: 1.6 !important;
-  color: #4b5563;
-  background: white;
+  color: hsl(var(--content-secondary));
+  background: hsl(var(--surface));
   margin: 0 !important; /* Remove any default margins */
 }
 
 .shepherd-text p {
   margin-bottom: 12px;
-  color: #6b7280;
+  color: hsl(var(--content-tertiary));
 }
 
 .shepherd-text p:last-child {
@@ -233,12 +485,12 @@
 
 .shepherd-text p:first-child strong {
   font-weight: 600;
-  color: #111827;
+  color: hsl(var(--content-strong));
 }
 
 .shepherd-text hr {
   border: none;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid hsl(var(--line));
   margin: 16px 0;
 }
 
@@ -249,28 +501,28 @@
 
 .shepherd-text li {
   margin-bottom: 4px;
-  color: #6b7280;
+  color: hsl(var(--content-tertiary));
 }
 
 .shepherd-text strong {
-  color: #374151;
+  color: hsl(var(--content));
   font-weight: 500;
 }
 
 .shepherd-text a {
-  color: #3b82f6;
+  color: hsl(var(--blue-fg-soft));
   text-decoration: none;
   font-weight: normal;
   transition: color 0.2s ease;
 }
 
 .shepherd-text a:hover {
-  color: #60a5fa;
+  color: hsl(var(--blue-fg-faint));
   text-decoration: none;
 }
 
 .shepherd-footer {
-  background: white;
+  background: hsl(var(--surface));
   padding: 8px 24px 20px;
   border-radius: 0 0 0.5rem 0.5rem;
   display: flex;
@@ -281,7 +533,7 @@
 
 .shepherd-progress {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: hsl(var(--content-tertiary));
   font-weight: 500;
 }
 
@@ -303,21 +555,21 @@
   padding: 8px 16px;
   min-height: 32px;
   border: none;
-  background: #2563eb;
+  background: hsl(var(--blue-solid));
   color: white;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .shepherd-button:hover {
-  background: #2563eb !important;
+  background: hsl(var(--blue-solid)) !important;
   color: white !important;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
 }
 
 .shepherd-button-secondary {
-  background: white !important;
-  color: #111827 !important;
-  border: 1px solid #e5e7eb !important;
+  background: hsl(var(--surface)) !important;
+  color: hsl(var(--content-strong)) !important;
+  border: 1px solid hsl(var(--line)) !important;
   box-shadow: none !important;
   transition: none !important;
 }
@@ -328,9 +580,9 @@
 .shepherd-element .shepherd-button-secondary:hover,
 .shepherd-element .shepherd-button-secondary:focus,
 .shepherd-element .shepherd-button-secondary:active {
-  background: white !important;
-  color: #111827 !important;
-  border: 1px solid #e5e7eb !important;
+  background: hsl(var(--surface)) !important;
+  color: hsl(var(--content-strong)) !important;
+  border: 1px solid hsl(var(--line)) !important;
   box-shadow: none !important;
   opacity: 1 !important;
   transform: none !important;
@@ -341,7 +593,7 @@
 .shepherd-cancel-icon {
   background: transparent;
   border: none;
-  color: #9ca3af;
+  color: hsl(var(--content-faint));
   width: 24px;
   height: 24px;
   border-radius: 0.375rem;
@@ -356,9 +608,19 @@
   transition: all 0.2s ease;
 }
 
+/* MUI spinners default to a blue that is below 3:1 on dark surfaces. */
+.dark .MuiCircularProgress-colorPrimary {
+  color: hsl(var(--blue-fg));
+}
+
+/* Shepherd colors the glyph itself (translucent gray); lift it on dark. */
+.dark .shepherd-cancel-icon span {
+  color: hsl(var(--content-tertiary));
+}
+
 .shepherd-cancel-icon:hover {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: hsl(var(--surface-muted));
+  color: hsl(var(--content-tertiary));
 }
 
 /* Arrow styling to match tooltip background */
@@ -372,7 +634,7 @@
 
 .shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
   border-width: 6px 6px 0 6px;
-  border-color: white transparent transparent transparent;
+  border-color: hsl(var(--surface)) transparent transparent transparent;
   bottom: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -380,7 +642,7 @@
 
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
   border-width: 0 6px 6px 6px;
-  border-color: transparent transparent white transparent;
+  border-color: transparent transparent hsl(var(--surface)) transparent;
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -388,7 +650,7 @@
 
 .shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
   border-width: 6px 0 6px 6px;
-  border-color: transparent transparent transparent white;
+  border-color: transparent transparent transparent hsl(var(--surface));
   right: -6px;
   top: 50%;
   transform: translateY(-50%);
@@ -396,7 +658,7 @@
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
   border-width: 6px 6px 6px 0;
-  border-color: transparent white transparent transparent;
+  border-color: transparent hsl(var(--surface)) transparent transparent;
   left: -6px;
   top: 50%;
   transform: translateY(-50%);
@@ -411,7 +673,7 @@
   padding: 8px;
   border-radius: 50%;
   background: transparent;
-  color: #6b7280;
+  color: hsl(var(--content-tertiary));
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -420,12 +682,12 @@
 }
 
 .tour-help-button:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: hsl(var(--surface-muted));
+  color: hsl(var(--content));
 }
 
 .tour-help-button:active {
-  background: #e5e7eb;
+  background: hsl(var(--surface-strong));
 }
 
 /* Subtle pulse animation for the help button */
@@ -435,13 +697,13 @@
 
 @keyframes subtle-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+    box-shadow: 0 0 0 0 hsl(var(--blue-solid) / 0.4);
   }
   70% {
-    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+    box-shadow: 0 0 0 6px hsl(var(--blue-solid) / 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+    box-shadow: 0 0 0 0 hsl(var(--blue-solid) / 0);
   }
 }
 
@@ -458,9 +720,9 @@
   left: -4px;
   right: -4px;
   bottom: -4px;
-  border: 2px solid #2563eb;
+  border: 2px solid hsl(var(--blue-solid));
   border-radius: 0.5rem;
-  background: rgba(37, 99, 235, 0.1);
+  background: hsl(var(--blue-solid) / 0.1);
   z-index: -1;
   animation: highlight-pulse 2s ease-in-out infinite;
 }
@@ -478,12 +740,12 @@
 }
 
 /* Tour code block optimizations */
-.shepherd-element .bg-gray-50 {
+.shepherd-element .bg-surface-subtle {
   padding: 8px 12px !important;
   min-height: auto !important;
 }
 
-.shepherd-element .bg-gray-50 pre {
+.shepherd-element .bg-surface-subtle pre {
   margin: 0 !important;
   padding: 0 !important;
   line-height: 1.4 !important;
@@ -493,7 +755,7 @@
   overflow-x: auto !important;
 }
 
-.shepherd-element .bg-gray-50 code.block {
+.shepherd-element .bg-surface-subtle code.block {
   font-size: 14px !important;
   font-family:
     'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;
@@ -548,9 +810,9 @@
   bottom: 0;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.5) 50%,
-    rgba(255, 255, 255, 0) 100%
+    hsl(var(--surface) / 0) 0%,
+    hsl(var(--surface) / 0.5) 50%,
+    hsl(var(--surface) / 0) 100%
   );
   background-size: 200% 100%;
   animation: infra-shimmer 1.5s infinite;
@@ -569,7 +831,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.5);
+  background: hsl(var(--surface) / 0.5);
   backdrop-filter: blur(1px);
   z-index: 5;
   border-radius: inherit;
