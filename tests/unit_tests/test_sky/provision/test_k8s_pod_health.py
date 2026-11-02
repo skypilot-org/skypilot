@@ -261,6 +261,34 @@ class TestCheckNodesHealth:
         }
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_the_cache_fills_in_only_nodes_the_api_could_not_read(
+            self, mock_nis_get, mock_core_api):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (False, False),
+        })
+        readable = _make_k8s_node('node-2', ready=False)
+        readable.spec.taints = [
+            mock.MagicMock(key='node.kubernetes.io/unreachable',
+                           value=None,
+                           effect='NoExecute',
+                           time_added=None)
+        ]
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-2':
+                return readable
+            raise kubernetes.api_exception()(status=403)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-1': 'NotReady',
+            'node-2': 'NotReady (NoExecute taint '
+                      'node.kubernetes.io/unreachable)',
+        }
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
                 return_value=None)
     def test_a_node_that_fails_to_parse_does_not_lose_the_others(
