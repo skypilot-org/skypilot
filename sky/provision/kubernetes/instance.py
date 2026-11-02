@@ -41,6 +41,16 @@ if TYPE_CHECKING:
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
+# Pod annotation that opts a pod into a graceful teardown. Set it (through
+# pod_config or an admission webhook) on pods whose terminationGracePeriodSeconds
+# does real work, e.g. a sidecar that runs node health checks after the main
+# container stops; a zero-grace delete would kill it before it finishes.
+GRACEFUL_TERMINATION_ANNOTATION_KEY = 'skypilot.co/graceful-termination'
+# Slack on top of such a pod's own terminationGracePeriodSeconds, for the
+# kubelet to report the pod gone after the grace period ends.
+_GRACEFUL_TERMINATION_SLACK_SECONDS = 60
+# Upper bound on waiting for such a pod, whatever grace period it asks for.
+_MAX_GRACEFUL_TERMINATION_WAIT_SECONDS = 15 * 60
 _MAX_RETRIES = 3
 _MAX_MISSING_PODS_RETRIES = 5
 _MAX_QUERY_INSTANCES_RETRIES = 5
@@ -2914,11 +2924,11 @@ def _force_delete_pod(namespace: str, context: Optional[str],
         resource_name=pod_name)
 
 
-def _wait_for_pod_gone(namespace: str, context: Optional[str],
-                       pod_name: str) -> bool:
+def _wait_for_pod_gone(namespace: str, context: Optional[str], pod_name: str,
+                       timeout: float) -> bool:
     """Polls until the pod object is gone. False if it is still there."""
     start_time = time.time()
-    while time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION:
+    while time.time() - start_time < timeout:
         try:
             kubernetes.core_api(context).read_namespaced_pod(
                 pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
@@ -2933,8 +2943,11 @@ def _wait_for_pod_gone(namespace: str, context: Optional[str],
     return False
 
 
-def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
-                graceful: bool) -> None:
+def _delete_pod(namespace: str,
+                context: Optional[str],
+                pod_name: str,
+                graceful: bool,
+                timeout: Optional[float] = None) -> None:
     """Deletes a pod, optionally waiting for the kubelet to finish with it.
 
     A zero grace period removes the pod object from etcd immediately, without
@@ -2953,8 +2966,11 @@ def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
     the kubelet only lets that happen once termination is complete. The wait is
     bounded (and independent of ``terminationGracePeriodSeconds``) so that a
     pod the container runtime cannot stop still cannot hang teardown: on
-    timeout we fall back to the force delete.
+    timeout we fall back to the force delete. ``timeout`` overrides the
+    default bound for pods that need longer (see ``_termination_wait``).
     """
+    if timeout is None:
+        timeout = _TIMEOUT_FOR_POD_TERMINATION
     if not graceful:
         _force_delete_pod(namespace, context, pod_name)
         return
@@ -2967,27 +2983,54 @@ def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
         resource_type='pod',
         resource_name=pod_name)
 
-    if _wait_for_pod_gone(namespace, context, pod_name):
+    if _wait_for_pod_gone(namespace, context, pod_name, timeout):
         return
 
     logger.warning(f'Pod {pod_name} did not finish terminating within '
-                   f'{_TIMEOUT_FOR_POD_TERMINATION}s. Force deleting it - '
+                   f'{timeout:.0f}s. Force deleting it - '
                    'devices held by the pod may have to be reclaimed by their '
                    'driver before they can be used again.')
     _force_delete_pod(namespace, context, pod_name)
+
+
+def _termination_wait(pod: Any) -> Optional[float]:
+    """How long teardown waits for a pod deleted gracefully; None to force it.
+
+    Pods with DRA claims get the default bound (see ``_delete_pod``). Pods
+    annotated ``GRACEFUL_TERMINATION_ANNOTATION_KEY: "true"`` get their own
+    ``terminationGracePeriodSeconds`` plus slack, capped, since the work they
+    asked for happens inside that grace period. Every other pod is force
+    deleted.
+    """
+    pod_spec = getattr(pod, 'spec', None)
+    annotations = getattr(getattr(pod, 'metadata', None), 'annotations',
+                          None) or {}
+    if str(annotations.get(GRACEFUL_TERMINATION_ANNOTATION_KEY,
+                           '')).lower() == 'true':
+        grace = getattr(pod_spec, 'termination_grace_period_seconds', None)
+        if not isinstance(grace, (int, float)):
+            grace = 30  # The Kubernetes default.
+        return max(
+            _TIMEOUT_FOR_POD_TERMINATION,
+            min(grace + _GRACEFUL_TERMINATION_SLACK_SECONDS,
+                _MAX_GRACEFUL_TERMINATION_WAIT_SECONDS))
+    if _pod_has_resource_claims(pod):
+        return _TIMEOUT_FOR_POD_TERMINATION
+    return None
 
 
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
                     is_head: bool = False,
-                    has_resource_claims: bool = False) -> None:
+                    termination_wait: Optional[float] = None) -> None:
     """Terminate a pod and its associated services.
 
     Args:
-        has_resource_claims: whether the pod requests DRA devices, in which
-            case it is deleted gracefully rather than force deleted. See
-            ``_delete_pod``.
+        termination_wait: if set, the pod is deleted gracefully and teardown
+            waits up to this many seconds for it to go away before force
+            deleting it; if None, it is force deleted. See ``_delete_pod`` and
+            ``_termination_wait``.
     """
     logger.debug(f'terminate_instances: namespace: {namespace}, context: '
                  f'{context}, pod_name: {pod_name}, is_head: {is_head}')
@@ -3003,7 +3046,11 @@ def _terminate_node(namespace: str,
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    _delete_pod(namespace, context, pod_name, graceful=has_resource_claims)
+    _delete_pod(namespace,
+                context,
+                pod_name,
+                graceful=termination_wait is not None,
+                timeout=termination_wait)
 
 
 def _terminate_deployment(cluster_name: str, namespace: str,
@@ -3066,7 +3113,7 @@ def terminate_instances(
                         context,
                         pod_name,
                         is_head=_is_head(pod),
-                        has_resource_claims=_pod_has_resource_claims(pod))
+                        termination_wait=_termination_wait(pod))
 
     # Run pod termination in parallel
     num_threads = max(1, min(_NUM_THREADS, len(pods)))
