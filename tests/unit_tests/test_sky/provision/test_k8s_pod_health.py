@@ -3,6 +3,8 @@ import datetime
 from typing import Optional
 from unittest import mock
 
+import pytest
+
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as k8s_utils
@@ -287,6 +289,28 @@ class TestCheckNodesHealth:
             'node-2': 'NotReady (NoExecute taint '
                       'node.kubernetes.io/unreachable)',
         }
+
+    @pytest.mark.parametrize('cached', [True, False])
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_a_large_cluster_reads_a_bounded_number_of_nodes(
+            self, mock_nis_get, mock_core_api, cached):
+        """A cluster stuck INIT reads its nodes on every refresh: the API
+        reads stay bounded, and past them only the node cache answers."""
+        names = [f'node-{i:03d}' for i in range(128)]
+        mock_nis_get.return_value = (_make_nodes_info(
+            {n: (False, False) for n in names}) if cached else None)
+        mock_core_api.return_value.read_node.side_effect = (
+            lambda name, **kw: _make_k8s_node(name, ready=False))
+
+        result = _check_nodes_health('ctx', set(names))
+
+        read = sorted(
+            c.args[0]
+            for c in mock_core_api.return_value.read_node.call_args_list)
+        assert read == names[:10]
+        assert len(result) == (128 if cached else 10)
+        assert all(result[n] == 'NotReady' for n in result)
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',

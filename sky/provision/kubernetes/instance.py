@@ -3453,6 +3453,10 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
     return '; '.join(parts)
 
 
+# A cluster stuck INIT reads its pods' nodes on every status refresh.
+_MAX_NODES_READ = 10
+
+
 def _check_nodes_health(
     context: Optional[str],
     node_names: Set[str],
@@ -3461,10 +3465,9 @@ def _check_nodes_health(
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Reads the nodes from the Kubernetes API (as get_missing_node_reason does);
-    a node it cannot read falls back to a registered NodeInfoSource, which
-    knows only NotReady / cordoned. Only called for nodes of pods that already
-    report a problem, so the reads are few.
+    Reads up to _MAX_NODES_READ nodes (by name) from the Kubernetes API, as
+    get_missing_node_reason does; the rest, and any it cannot read, fall back
+    to a registered NodeInfoSource, which knows only NotReady / cordoned.
 
     Args:
         context: Kubernetes context name.
@@ -3483,8 +3486,9 @@ def _check_nodes_health(
         return {}
 
     issues: Dict[str, str] = {}
-    unread = []
-    nodes = _inspect_nodes(sorted(node_names), context, tolerations or [],
+    names = sorted(node_names)
+    unread = names[_MAX_NODES_READ:]
+    nodes = _inspect_nodes(names[:_MAX_NODES_READ], context, tolerations or [],
                            since)
     for name, node in nodes.items():
         if not node.read:
@@ -3501,7 +3505,8 @@ def _check_nodes_health(
         elif node.taints:
             issues[name] = f'tainted{tainted}'
 
-    # E.g. no permission to read nodes: what the plugin's node cache knows.
+    # Past the cap, or no permission to read nodes: what the plugin's node
+    # cache knows.
     node_info = (plugin_extensions.NodeInfoSource.get(context)
                  if unread and context is not None else None)
     if node_info is not None:
