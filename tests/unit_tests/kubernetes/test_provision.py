@@ -3490,15 +3490,14 @@ class TestGetPodMissingReason:
             self._make_event('FinishedWorkload', done, at=30),
             self._make_event('FinishedWorkload', done, at=28),
             self._make_event('FinishedWorkload', done, at=28),
-            self._make_event(
-                'Stopped', 'Preempted to accommodate a workload', at=0),
+            self._make_event('Stopped', 'Exceeded the PodsReady timeout', at=0),
         ])
         recorded = self._keyed_store(gus)
         instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
         assert recorded == [
             f'[kubernetes pod pod-0] FinishedWorkload {done}',
             f'[kubernetes pod pod-0] FinishedWorkload {done}',
-            '[kubernetes pod pod-0] Stopped Preempted to accommodate a workload',
+            '[kubernetes pod pod-0] Stopped Exceeded the PodsReady timeout',
         ]
 
     def test_identical_node_events_in_one_second_do_not_stop_the_walk(
@@ -3556,7 +3555,7 @@ class TestGetPodMissingReason:
             self._make_event(
                 'Scheduled', 'Successfully assigned ns/pod-0 to new', at=310),
             self._make_event(
-                'Stopped', 'Preempted to accommodate a workload', at=100),
+                'Stopped', 'Exceeded the PodsReady timeout', at=100),
             self._make_event(
                 'Scheduled', 'Successfully assigned ns/pod-0 to old', at=0),
         ])
@@ -3601,8 +3600,8 @@ class TestGetPodMissingReason:
         pod's last events fall inside the clock-skew allowance."""
         gus = self._setup(monkeypatch, [
             self._pod_event('Started', 'Started container', 320, 'new'),
-            self._pod_event('Stopped', 'Preempted to accommodate a workload',
-                            270, 'old'),
+            self._pod_event('Stopped', 'Exceeded the PodsReady timeout', 270,
+                            'old'),
         ])
         self._provisioned_at(gus, 300)
         recorded = self._keyed_store(gus)
@@ -3619,8 +3618,8 @@ class TestGetPodMissingReason:
             self._pod_event('Scheduled',
                             'Successfully assigned ns/pod-0 to new', 310,
                             'new'),
-            self._pod_event('Stopped', 'Preempted to accommodate a workload',
-                            270, 'old'),
+            self._pod_event('Stopped', 'Exceeded the PodsReady timeout', 270,
+                            'old'),
         ])
         self._provisioned_at(gus, 300)
         api = mock.MagicMock()
@@ -3662,8 +3661,8 @@ class TestGetPodMissingReason:
         """The predecessor was scheduled inside the clock-skew allowance; the
         current pod was deleted before it was scheduled."""
         gus = self._setup(monkeypatch, [
-            self._pod_event('Stopped', 'Preempted to accommodate a workload',
-                            320, 'new'),
+            self._pod_event('Stopped', 'Exceeded the PodsReady timeout', 320,
+                            'new'),
             self._pod_event('Scheduled',
                             'Successfully assigned ns/pod-0 to old', 270,
                             'old'),
@@ -3672,7 +3671,7 @@ class TestGetPodMissingReason:
         recorded = self._keyed_store(gus)
         instance._get_pod_missing_reason('ctx', 'ns', 'cn', 'pod-0', True)
         assert recorded == [
-            '[kubernetes pod pod-0] Stopped Preempted to accommodate a workload'
+            '[kubernetes pod pod-0] Stopped Exceeded the PodsReady timeout'
         ]
 
     def test_the_bound_is_the_clusters_first_status_event(self, monkeypatch):
@@ -3729,8 +3728,7 @@ class TestGetPodMissingReason:
         current = self._make_event('Killing', 'Stopping container', at=400)
         gus = self._setup(monkeypatch, [
             current,
-            self._make_event(
-                'Stopped', 'Preempted to accommodate a workload', at=0),
+            self._make_event('Stopped', 'Exceeded the PodsReady timeout', at=0),
         ])
         self._provisioned_at(gus, 300)
         self._keyed_store(gus)
