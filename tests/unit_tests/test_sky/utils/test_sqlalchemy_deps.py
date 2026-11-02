@@ -11,6 +11,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CLIENT_SAFE_MODULES = (
     'sky/utils/db/db_utils.py',
     'sky/server/config_db.py',
+    'sky/global_user_state.py',
     'sky/jobs/state.py',
     'sky/serve/serve_state.py',
 )
