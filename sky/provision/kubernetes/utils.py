@@ -3808,6 +3808,10 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
+# (kubeconfig fingerprint, context names parsed from those files).
+_kubeconfig_context_names: Optional[Tuple[Tuple[Any, ...], List[str]]] = None
+
+
 def get_all_kube_context_names() -> List[str]:
     """Get all kubernetes context names available in the environment.
 
@@ -3816,23 +3820,33 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    We should not cache the result of this function as the admin policy may
-    update the contexts.
+    The kubeconfig is parsed again only when a file on KUBECONFIG (or the
+    variable itself) changes, so an admin policy or an upload that rewrites
+    it is seen on the next call.
 
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
     """
+    global _kubeconfig_context_names
     k8s = kubernetes.kubernetes
-    context_names = []
-    try:
-        all_contexts, _ = kubernetes.list_kube_config_contexts()
-        # all_contexts will always have at least one context. If kubeconfig
-        # does not have any contexts defined, it will raise ConfigException.
-        context_names = [context['name'] for context in all_contexts]
-    except k8s.config.config_exception.ConfigException:
-        # If no config found, continue
-        pass
+    # Taken before the parse: a write during it changes the next fingerprint.
+    fingerprint = _kubeconfig_fingerprint()
+    cached = _kubeconfig_context_names
+    if cached is not None and cached[0] == fingerprint:
+        context_names = list(cached[1])
+    else:
+        context_names = []
+        try:
+            all_contexts, _ = kubernetes.list_kube_config_contexts()
+            # all_contexts will always have at least one context. If
+            # kubeconfig does not have any contexts defined, it will raise
+            # ConfigException.
+            context_names = [context['name'] for context in all_contexts]
+        except k8s.config.config_exception.ConfigException:
+            # If no config found, continue
+            pass
+        _kubeconfig_context_names = (fingerprint, list(context_names))
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
@@ -3852,14 +3866,21 @@ _cluster_uid_cache_lock = threading.Lock()
 
 
 def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
-    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
+    """Changes whenever a file on KUBECONFIG is written, replaced or removed.
+
+    Hashes the content rather than comparing stat fields: a same-size rewrite
+    within one timestamp tick, or one that keeps the mtime (`cp -p`), leaves
+    every stat field unchanged. Reading a kubeconfig costs far less than
+    parsing it.
+    """
     fingerprint: List[Tuple[Any, ...]] = []
     for path in get_kubeconfig_paths():
         if not path:
             continue
         try:
-            st = os.stat(path)
-            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+            with open(path, 'rb') as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            fingerprint.append((path, digest))
         except OSError:
             fingerprint.append((path, None))
     return tuple(fingerprint)
