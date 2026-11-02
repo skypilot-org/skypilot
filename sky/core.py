@@ -456,6 +456,7 @@ def cost_report(days: Optional[int] = None,
             'total_cost': (float) cost given resources and usage intervals,
             'cloud': (str) cloud of the cluster,
             'region': (str) region of the cluster,
+            'zone': (str) zone of the cluster, if any,
             'cpus': (str) number of vCPUs of the cluster,
             'memory': (str) memory of the cluster,
             'accelerators': (str) accelerators of the cluster,
@@ -571,12 +572,18 @@ def _update_record_with_resources(
     if resources is None:
         return
     if not dashboard_summary_response:
-        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        fields = ['cloud', 'region', 'zone', 'cpus', 'memory', 'accelerators']
     else:
-        fields = ['cloud']
+        # The dashboard builds the Infra cell as `cloud (zone-or-region)` for
+        # both live and terminated clusters, so the abbreviated payload needs
+        # the location fields but not the resource size fields.
+        fields = ['cloud', 'region', 'zone']
     for field in fields:
         try:
-            record[field] = str(getattr(resources, field))
+            value = getattr(resources, field)
+            # A None zone/region (zone-less clouds, legacy records) must not
+            # become the string 'None' in the payload.
+            record[field] = str(value) if value is not None else None
         except Exception as e:  # pylint: disable=broad-except
             # Ok to skip the fields as this is just for display
             # purposes.
