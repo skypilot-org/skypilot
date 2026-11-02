@@ -1,7 +1,11 @@
 """Unit tests for sky.optimizer."""
 from unittest import mock
 
+import pytest
+
+from sky import clouds
 from sky import dag as dag_lib
+from sky import exceptions
 from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
@@ -17,7 +21,7 @@ def _optimize_ordered_task_with_mock_launchable(dag, launchable_call_indexes):
         fill_calls.append(requested_resources)
         launchable_resources = ([requested_resources] if call_index
                                 in launchable_call_indexes else [])
-        return {requested_resources: launchable_resources}, {}, [], {}
+        return {requested_resources: launchable_resources}, {}, [], {}, {}
 
     def fake_optimize_by_dp(topo_order, node_to_cost_map, minimize_cost):
         del node_to_cost_map, minimize_cost
@@ -119,3 +123,49 @@ def test_ordered_resources_with_docker_login_uses_first_launchable():
 
     assert len(fill_calls) == 2
     assert task.best_resources.accelerators == {'H100': 8}
+
+
+def _optimize_with_no_launchable(unreachable_errors):
+    """Runs the optimizer with no launchable resources for the only task."""
+    with dag_lib.Dag() as dag:
+        task = task_lib.Task(name='no-launchable')
+        task.set_resources(resources_lib.Resources(cpus='4+'))
+    requested_resources = next(iter(task.resources))
+
+    def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
+        del task, blocked_resources, quiet
+        return ({
+            requested_resources: []
+        }, {}, [], {}, {
+            requested_resources: list(unreachable_errors)
+        })
+
+    with mock.patch('sky.optimizer._check_specified_clouds'), \
+            mock.patch('sky.optimizer._fill_in_launchable_resources',
+                       side_effect=fake_fill_in_launchable_resources), \
+            mock.patch('sky.optimizer.sky_check.'
+                       'get_cached_enabled_clouds_or_refresh',
+                       return_value=[clouds.Kubernetes()]):
+        optimizer.Optimizer.optimize(dag, quiet=True)
+
+
+def test_unreachable_infra_is_reported_as_failover_history():
+    """Unreachable infra makes the failure retryable, not infeasible."""
+    unreachable = exceptions.KubeAPIUnreachableError(
+        "Kubernetes context 'ctx1' is unreachable: Timed out")
+
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_no_launchable([unreachable])
+
+    assert e.value.failover_history == [unreachable]
+    assert "'ctx1' is unreachable" in str(e.value)
+    assert 'does not contain any instances' not in str(e.value)
+
+
+def test_infeasible_request_has_no_failover_history():
+    """With every candidate reachable, no fit stays a terminal failure."""
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_no_launchable([])
+
+    assert not e.value.failover_history
+    assert 'does not contain any instances' in str(e.value)

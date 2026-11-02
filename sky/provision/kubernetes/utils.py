@@ -404,6 +404,16 @@ def _is_cloudflare_403_error(exception: Exception) -> bool:
     return False
 
 
+def is_auth_rejection(exception: Optional[BaseException]) -> bool:
+    """Whether the Kubernetes API server rejected the credentials.
+
+    True for a 401 or 403 response, except a transient CloudFlare 403.
+    """
+    return (isinstance(exception, kubernetes.api_exception()) and
+            exception.status in (401, 403) and
+            not _is_cloudflare_403_error(exception))
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -444,8 +454,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
                     # Don't retry on permanent errors like 401 (Unauthorized)
                     # or 403 (Forbidden), unless it's a CloudFlare transient 403
-                    if (isinstance(e, kubernetes.api_exception()) and
-                            e.status in (401, 403) and not is_cloudflare_403):
+                    if is_auth_rejection(e):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.
                         raise exceptions.KubeAPIUnreachableError(
@@ -2892,6 +2901,8 @@ def check_instance_fits(
                 get_accelerator_label_key_values(context, acc_type, acc_count))
             if gpu_label_values is None:
                 gpu_label_values = []
+        except exceptions.KubeAPIUnreachableError:
+            raise
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)

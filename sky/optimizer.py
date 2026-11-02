@@ -294,7 +294,8 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 (launchable_resources, cloud_candidates, fuzzy_candidates,
-                 resource_hints) = (_fill_in_launchable_resources(
+                 resource_hints,
+                 unreachable_errors) = (_fill_in_launchable_resources(
                      task=node,
                      blocked_resources=blocked_resources,
                      quiet=quiet))
@@ -365,6 +366,23 @@ class Optimizer:
                         logger.debug(debug_msg)
                     node_to_cost_map[node][resources] = estimated_cost_or_time
             if not node_to_cost_map[node]:
+                node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
+                                                 r.repr_with_region_zone
+                                                 for r in node.resources)
+                node_unreachable_errors = [
+                    e for errors in unreachable_errors.values() for e in errors
+                ]
+                if node_unreachable_errors:
+                    # Carried as failover history so that callers retry
+                    # instead of failing the request as infeasible.
+                    reasons = '\n'.join(
+                        f'{indent_prefix}{e}' for e in node_unreachable_errors)
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(
+                            'No reachable infra has resources satisfying the '
+                            f'request: {node_resources_reprs}. Infra that '
+                            f'could not be reached:\n{reasons}',
+                            failover_history=node_unreachable_errors)
                 source_hint = 'catalog'
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
@@ -394,9 +412,6 @@ class Optimizer:
                     fuzzy_candidates_str = (
                         f'\nTry one of these offered accelerators: {cyan}'
                         f'{fuzzy_candidates}{reset}')
-                node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
-                                                 r.repr_with_region_zone
-                                                 for r in node.resources)
                 hints_concat = '\n'.join([
                     f'{bold}Resource: {repr(resource)}{reset}\n' +
                     '\n'.join(hint_list)
@@ -1115,7 +1130,7 @@ class Optimizer:
 
         for task in tasks:
             # Get launchable resources for this task
-            launchable_resources, _, _, _ = (_fill_in_launchable_resources(
+            launchable_resources, _, _, _, _ = (_fill_in_launchable_resources(
                 task, blocked_resources=blocked_resources, quiet=quiet))
 
             if not any(launchable_resources.values()):
@@ -1543,7 +1558,7 @@ class Optimizer:
                     # instead of the original loop variable.
                     assert len(local_task.resources) == 1, local_task.resources
                     requested_resources = list(local_task.resources)[0]
-                    launchable_resources_map, _, _, _ = (
+                    launchable_resources_map, _, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
                             blocked_resources=blocked_resources,
@@ -1908,8 +1923,9 @@ def _fill_in_launchable_resources(
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
-                                                List[str]]]:
+           _PerCloudCandidates, List[str], Dict[
+               resources_lib.Resources, List[str]], Dict[
+                   resources_lib.Resources, List[Exception]]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1920,6 +1936,8 @@ def _fill_in_launchable_resources(
         Sorted list of fuzzy candidates (alternative GPU names).
         Dict mapping requested Resources and a list of hints for why the
           resource is unavailable if so.
+        Dict mapping requested Resources to the errors of locations that were
+          skipped because they could not be reached.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1934,6 +1952,8 @@ def _fill_in_launchable_resources(
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
+    unreachable_errors: Dict[resources_lib.Resources,
+                             List[Exception]] = collections.defaultdict(list)
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1959,6 +1979,8 @@ def _fill_in_launchable_resources(
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
                 resource_hints[resources].append(feasible_resources.hint)
+            unreachable_errors[resources].extend(
+                feasible_resources.unreachable_errors)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -2024,7 +2046,7 @@ def _fill_in_launchable_resources(
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
     return launchable, cloud_candidates, list(
-        sorted(all_fuzzy_candidates)), resource_hints
+        sorted(all_fuzzy_candidates)), resource_hints, unreachable_errors
 
 
 # Expose optimize_job_group as a module-level function

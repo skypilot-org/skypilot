@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import inspect
+import pickle
 import types
 from unittest import mock
 
@@ -865,6 +866,47 @@ async def test_resources_unavailable_is_not_an_unknown_error(monkeypatch):
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(
         patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+def _through_request_store(error):
+    """The error as the controller reads it back from the launch request."""
+    return exceptions.deserialize_exception(
+        pickle.loads(pickle.dumps(exceptions.serialize_exception(error))))
+
+
+@pytest.mark.asyncio
+async def test_unreachable_kubernetes_context_retries(monkeypatch):
+    """An unreachable context backs off and retries instead of failing."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    unavailable = exceptions.ResourcesUnavailableError(
+        'No reachable infra has resources satisfying the request',
+        failover_history=[
+            exceptions.KubeAPIUnreachableError(
+                "Kubernetes context 'ctx1' is unreachable: Timed out")
+        ])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_through_request_store(unavailable), None])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+@pytest.mark.asyncio
+async def test_infeasible_request_fails_prechecks(monkeypatch):
+    """No fit on reachable infra is terminal."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    infeasible = exceptions.ResourcesUnavailableError(
+        'Kubernetes cluster does not contain any instances satisfying the '
+        'request')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_through_request_store(infeasible)])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError):
+        await executor._launch(max_retry=None, raise_on_failure=True)
 
 
 @pytest.mark.asyncio

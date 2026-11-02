@@ -494,6 +494,14 @@ class Kubernetes(clouds.Cloud):
                             CUSTOM_NETWORK_TIER, None)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
+                # Unknown is not unsupported: the node-fit check in
+                # regions_with_offering() reports the context as unreachable,
+                # and provisioning checks the features again.
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                    None)
         return unsupported_features
 
     @classmethod
@@ -641,7 +649,17 @@ class Kubernetes(clouds.Cloud):
         region: Optional[str],
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
+        *,
+        unreachable_errors: Optional[List[Exception]] = None,
     ) -> List[clouds.Region]:
+        """See Cloud.regions_with_offering.
+
+        Args:
+            unreachable_errors: If given, gets one KubeAPIUnreachableError for
+                each context that was skipped because it could not be reached.
+                A context that rejects the credentials (401/403) is not
+                included.
+        """
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
 
@@ -688,6 +706,12 @@ class Kubernetes(clouds.Cloud):
                     ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
+                if (unreachable_errors is not None and
+                        not kubernetes_utils.is_auth_rejection(e.__cause__)):
+                    unreachable_errors.append(
+                        exceptions.KubeAPIUnreachableError(
+                            f'Kubernetes context {context!r} is unreachable: '
+                            f'{e}'))
                 continue
             if fits:
                 regions_to_return.append(r)
@@ -1603,6 +1627,7 @@ class Kubernetes(clouds.Cloud):
         # (context) that has enough resources.
         self._warn_on_disk_tier(resources)
         fuzzy_candidate_list: List[str] = []
+        unreachable_errors: List[Exception] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             regions = self.regions_with_offering(
@@ -1611,9 +1636,11 @@ class Kubernetes(clouds.Cloud):
                 use_spot=resources.use_spot,
                 region=resources.region,
                 zone=resources.zone,
-                resources=resources)
+                resources=resources,
+                unreachable_errors=unreachable_errors)
             if not regions:
-                return resources_utils.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources(
+                    [], [], None, unreachable_errors=unreachable_errors)
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
                                                      fuzzy_candidate_list, None)
@@ -1675,9 +1702,11 @@ class Kubernetes(clouds.Cloud):
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
-            resources=resources)
+            resources=resources,
+            unreachable_errors=unreachable_errors)
         if not available_regions:
-            return resources_utils.FeasibleResources([], [], None)
+            return resources_utils.FeasibleResources(
+                [], [], None, unreachable_errors=unreachable_errors)
         # No fuzzy lists for Kubernetes
         # We don't set the resources returned with regions, because the
         # optimizer will further find the valid region (context) for the

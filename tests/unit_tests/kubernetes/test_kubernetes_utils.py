@@ -37,6 +37,38 @@ def test_get_kubernetes_nodes():
             utils.get_kubernetes_nodes(context='test')
 
 
+@pytest.mark.parametrize('status,headers,expected', [
+    (401, None, True),
+    (403, None, True),
+    (403, {
+        'CF-RAY': '98b8076cfae4058d-IAD'
+    }, False),
+    (500, None, False),
+])
+def test_is_auth_rejection(status, headers, expected):
+    error = kubernetes.client.rest.ApiException(status=status)
+    error.headers = headers
+    assert utils.is_auth_rejection(error) is expected
+
+
+def test_is_auth_rejection_non_api_errors():
+    assert utils.is_auth_rejection(None) is False
+    assert utils.is_auth_rejection(TimeoutError('timed out')) is False
+
+
+def test_check_instance_fits_raises_when_unreachable():
+    """An unreachable API is not reported as the GPU being absent."""
+    instance_type = utils.KubernetesInstanceType.from_resources(
+        4, 16, 1, 'H100').name
+    with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+               return_value=[]), \
+            patch('sky.provision.kubernetes.utils.'
+                  'get_accelerator_label_key_values',
+                  side_effect=exceptions.KubeAPIUnreachableError('Timed out')):
+        with pytest.raises(exceptions.KubeAPIUnreachableError):
+            utils.check_instance_fits('ctx', instance_type)
+
+
 def test_get_kubernetes_node_info_capacity_vs_allocatable():
     """A device-plugin withdrawal must be visible in the node info.
 
