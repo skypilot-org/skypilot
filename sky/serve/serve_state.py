@@ -13,10 +13,8 @@ import uuid
 
 import colorama
 
-from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
 from sky.utils.db import sqlalchemy_deps
 
 if typing.TYPE_CHECKING:
@@ -26,8 +24,7 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
     from sky.serve import service_spec
-
-if sqlalchemy_deps.sqlalchemy_available():
+elif sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
     # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db

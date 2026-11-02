@@ -69,8 +69,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('storage_mounts_metadata',
                       sqlalchemy.LargeBinary,
                       server_default=None),
-    sqlalchemy.Column('cluster_ever_up',
-                      sqlalchemy.Integer,
+    sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
                       server_default='0'),
     sqlalchemy.Column('status_updated_at',
                       sqlalchemy.Integer,
@@ -137,31 +136,22 @@ volume_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
-    sqlalchemy.Column('is_ephemeral',
-                      sqlalchemy.Integer,
-                      server_default='0'),
-    sqlalchemy.Column('error_message', sqlalchemy.Text,
-                      server_default=None),
+    sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
     # JSON-encoded lists of pods/clusters using the volume
     sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('usedby_clusters',
-                      sqlalchemy.Text,
-                      server_default=None),
-    sqlalchemy.Column('creation_yaml', sqlalchemy.Text,
-                      server_default=None),
+    sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('creation_yaml', sqlalchemy.Text, server_default=None),
     # Set only while the volume is being resized to a size it does not have
     # yet; `handle`'s size stays the capacity that exists. See
     # models.VolumeResizeStatus.
-    sqlalchemy.Column('resize_status', sqlalchemy.Text,
-                      server_default=None),
+    sqlalchemy.Column('resize_status', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('resize_target_size',
                       sqlalchemy.Text,
                       server_default=None),
     # What the cloud said about the resize, in its own words. What is shown to
     # the user is built from this in volume_list, not stored.
-    sqlalchemy.Column('resize_message',
-                      sqlalchemy.Text,
-                      server_default=None),
+    sqlalchemy.Column('resize_message', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -233,9 +223,7 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('starting_status', sqlalchemy.Text),
     sqlalchemy.Column('ending_status', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('transitioned_at',
-                      sqlalchemy.Integer,
-                      primary_key=True),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
     # The primary key is (cluster_hash, reason, transitioned_at), but the two
@@ -309,9 +297,7 @@ launch_attempt_table = sqlalchemy.Table(
                       sqlalchemy.Float,
                       server_default=None),
     sqlalchemy.Column('admitted', sqlalchemy.Float, server_default=None),
-    sqlalchemy.Column('instances_ready',
-                      sqlalchemy.Float,
-                      server_default=None),
+    sqlalchemy.Column('instances_ready', sqlalchemy.Float, server_default=None),
     # NULL while in flight. 'succeeded' | 'failed' | 'abandoned', where
     # abandoned means the writing process died and the startup sweep closed the
     # row -- only that case counts as a lost metric.
@@ -327,8 +313,7 @@ launch_attempt_table = sqlalchemy.Table(
     sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
                      'attempt_seq'),
     # Retention sweep. Without it the sweep full-scans on every tick.
-    sqlalchemy.Index('ix_launch_attempts_provision_start',
-                     'provision_start'),
+    sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
     # The milestone writers hold the on-cloud name (it is what is stamped on
     # the pods) and look up the in-flight attempt by either name. Without this
     # that branch of the OR cannot be indexed, so the whole lookup degrades to
@@ -344,8 +329,7 @@ launch_attempt_table = sqlalchemy.Table(
     # into the few in-flight rows: 120ms against nothing measurable over 200k
     # rows, once a minute, inside a write transaction that blocks other
     # writers for its duration.
-    sqlalchemy.Index('ix_launch_attempts_open', 'outcome',
-                     'provision_start'),
+    sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
     # The metrics daemon's claim, also once a minute. Its predicate is
     # "closed but not yet observed", and `ix_launch_attempts_open` serves only
     # the first half: leading on `outcome IS NOT NULL` is nearly the whole
@@ -378,16 +362,10 @@ service_account_token_table = sqlalchemy.Table(
     sqlalchemy.Column('token_name', sqlalchemy.Text),
     # Indexed + unique: the auth middleware looks up rows by hash on every
     # request to enforce revocation/rotation/expiration.
-    sqlalchemy.Column('token_hash',
-                      sqlalchemy.Text,
-                      index=True,
-                      unique=True),
+    sqlalchemy.Column('token_hash', sqlalchemy.Text, index=True, unique=True),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
-    sqlalchemy.Column('last_used_at',
-                      sqlalchemy.Integer,
-                      server_default=None),
-    sqlalchemy.Column('expires_at', sqlalchemy.Integer,
-                      server_default=None),
+    sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('creator_user_hash',
                       sqlalchemy.Text),  # Who created this token
     sqlalchemy.Column('service_account_user_id',
@@ -448,6 +426,7 @@ leader_leases_table = sqlalchemy.Table(
     sqlalchemy.Column('expires_at', sqlalchemy.DateTime(timezone=True)),
 )
 
+
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
 
@@ -466,6 +445,7 @@ def _glob_to_similar(glob_pattern):
 
     like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
     return like_pattern
+
 
 def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
@@ -488,6 +468,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
     migration_utils.safe_alembic_upgrade(
         engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
         migration_utils.GLOBAL_USER_STATE_VERSION)
+
 
 @annotation_utils.lru_cache(scope='global', maxsize=1)
 def _sqlite_supports_returning() -> bool:
@@ -515,6 +496,7 @@ def _sqlite_supports_returning() -> bool:
         major, minor = int(version_parts[0]), int(version_parts[1])
         return (major > 3) or (major == 3 and minor >= 35)
 
+
 @annotation_utils.lru_cache(scope='global', maxsize=1)
 def _supports_returning() -> bool:
     """Whether this backend can return the rows a statement just changed.
@@ -540,8 +522,7 @@ def _supports_returning() -> bool:
         return _sqlite_supports_returning()
     return True
 
+
 _db_manager = db_utils.DatabaseManager(
-    'state',
-    create_table,
-    post_init_fn=lambda _: _sqlite_supports_returning())
+    'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine

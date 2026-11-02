@@ -68,5 +68,4 @@ def test_client_safe_modules_have_no_top_level_sqlalchemy_import(relpath):
     assert path.is_file(), path
     assert not _top_level_imports_sqlalchemy(path), (
         f'{relpath} has a top-level sqlalchemy import; use LazyImport or '
-        'gate behind sqlalchemy_available() so client installs stay importable'
-    )
+        'gate behind sqlalchemy_available() so client installs stay importable')

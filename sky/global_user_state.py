@@ -40,19 +40,8 @@ from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
 from sky.utils.db import retries as db_retries
 from sky.utils.db import sqlalchemy_deps
-
-if typing.TYPE_CHECKING:
-    import sqlalchemy
-    from sqlalchemy import orm
-    from sqlalchemy.ext import asyncio as sql_async
-
-    from sky import backends
-    from sky import clouds
-    from sky.clouds import cloud
-    from sky.data import Storage
 
 logger = sky_logging.init_logger(__name__)
 
@@ -174,7 +163,16 @@ def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
         ABNORMAL_STATUS_REASON_PREFIX)
 
 
-if sqlalchemy_deps.sqlalchemy_available():
+if typing.TYPE_CHECKING:
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.ext import asyncio as sql_async
+
+    from sky import backends
+    from sky import clouds
+    from sky.clouds import cloud
+    from sky.data import Storage
+elif sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in global_user_state_db (column 0) to avoid indenting tables.
     # pylint: disable=protected-access
     from sky import global_user_state_db as _gus_db
@@ -783,8 +781,8 @@ def add_or_update_cluster(cluster_name: str,
             conditional_values.update({
                 'workspace': active_workspace,
             })
-        if is_launch and (cluster_row is None or cluster_row.status !=
-                          status_lib.ClusterStatus.UP.value):
+        if is_launch and (cluster_row is None or cluster_row.status
+                          != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
                 'last_creation_yaml': yaml_utils.dump_yaml_str(task_config)
                                       if task_config else None,
@@ -1231,8 +1229,8 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
     # Once for events with type STATUS_CHANGE.
     with orm.Session(engine) as session:
         query = session.query(cluster_event_table).filter(
-            cluster_event_table.c.transitioned_at <
-            time.time() - retention_hours * 3600,
+            cluster_event_table.c.transitioned_at
+            < time.time() - retention_hours * 3600,
             cluster_event_table.c.type == event_type.value)
         logger.debug(f'Deleting {query.count()} cluster events.')
         query.delete()
@@ -2320,9 +2318,9 @@ def get_clusters_from_names(
         Dict mapping ``cluster_name`` to its record, or to ``None`` for
         names that don't exist in the cluster table.
     """
-    result: Dict[str,
-                 Optional[Dict[str,
-                               Any]]] = {name: None for name in cluster_names}
+    result: Dict[str, Optional[Dict[str, Any]]] = {
+        name: None for name in cluster_names
+    }
     if not cluster_names:
         return result
     engine = _db_manager.get_engine()
@@ -3676,8 +3674,8 @@ def update_service_account_token_last_used(token_id: str,
             query = query.filter(
                 sqlalchemy.or_(
                     service_account_token_table.c.last_used_at.is_(None),
-                    service_account_token_table.c.last_used_at <
-                    last_used_at - min_interval_seconds))
+                    service_account_token_table.c.last_used_at
+                    < last_used_at - min_interval_seconds))
         # synchronize_session=False: the session is scoped to this single
         # statement, and the conditional criteria above are not evaluatable
         # in-memory by the default strategy.
@@ -4146,8 +4144,8 @@ def add_cluster_job_spec(cluster_hash: str, job_id: int,
         session.execute(cluster_job_spec_table.delete().where(
             sqlalchemy.and_(
                 cluster_job_spec_table.c.cluster_hash == cluster_hash,
-                cluster_job_spec_table.c.job_id <=
-                job_id - MAX_JOB_SPECS_PER_CLUSTER)))
+                cluster_job_spec_table.c.job_id
+                <= job_id - MAX_JOB_SPECS_PER_CLUSTER)))
         session.commit()
 
 

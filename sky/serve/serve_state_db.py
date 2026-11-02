@@ -45,9 +45,7 @@ services_table = sqlalchemy.Table(
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('uptime', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('policy', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('auto_restart',
-                      sqlalchemy.Integer,
-                      server_default=None),
+    sqlalchemy.Column('auto_restart', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('requested_resources',
                       sqlalchemy.LargeBinary,
                       server_default=None),
@@ -61,19 +59,15 @@ services_table = sqlalchemy.Table(
     sqlalchemy.Column('load_balancing_policy',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('tls_encrypted',
-                      sqlalchemy.Integer,
-                      server_default='0'),
+    sqlalchemy.Column('tls_encrypted', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('pool', sqlalchemy.Integer, server_default='0'),
-    sqlalchemy.Column('controller_pid',
-                      sqlalchemy.Integer,
+    sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
                       server_default=None),
     sqlalchemy.Column('hash', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
     # Pod IP where the controller process is running.
     # Written by the sky.serve.service process at startup.
-    sqlalchemy.Column('controller_ip', sqlalchemy.Text,
-                      server_default=None),
+    sqlalchemy.Column('controller_ip', sqlalchemy.Text, server_default=None),
     # User hash of the user that created the service/pool. Passed in from the
     # API server, since the controller itself may be shared among users.
     sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
@@ -111,6 +105,7 @@ serve_ha_recovery_script_table = sqlalchemy.Table(
     sqlalchemy.Column('script', sqlalchemy.Text),
 )
 
+
 def create_table(engine: sqlalchemy.engine.Engine):
     """Creates the service and replica tables if they do not exist."""
 
@@ -131,8 +126,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    migration_utils.safe_alembic_upgrade(engine,
-                                         migration_utils.SERVE_DB_NAME,
+    migration_utils.safe_alembic_upgrade(engine, migration_utils.SERVE_DB_NAME,
                                          migration_utils.SERVE_VERSION)
+
 
 _db_manager = db_utils.DatabaseManager('serve/services', create_table)
