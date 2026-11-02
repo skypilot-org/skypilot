@@ -272,6 +272,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
     :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
+    :ref:`remote_identity <config-yaml-nebius-remote-identity>`: serviceaccount-e00xxxxxxxxxxx
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
@@ -3266,6 +3267,69 @@ Example:
       - my-training-*: my-training-sg
       - sky-serve-controller-*: my-serving-sg
       - "*": my-default-sg
+
+.. _config-yaml-nebius-remote-identity:
+
+``nebius.remote_identity``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Identity to use for Nebius VMs (optional).
+
+Supported values:
+
+1. **LOCAL_CREDENTIALS** (default): The user's local Nebius credential files
+   are uploaded to Nebius VMs created by SkyPilot.
+
+2. **NO_UPLOAD**: No credentials are uploaded to VMs.
+
+3. **Existing service account ID** (``serviceaccount-...``): The service
+   account is attached to the VMs at creation time (``spec.service_account_id``),
+   and local Nebius credential files are **not** uploaded. They are not
+   uploaded to clusters on other clouds either: once any cluster pattern or
+   region attaches a service account, Nebius credentials are kept off every
+   cluster, as with ``NO_UPLOAD``. Software on the VM,
+   including SkyPilot's autostop, authenticates as this service account. This
+   also enables `workload identity federation
+   <https://docs.nebius.com/iam/wif>`_ to other clouds without copying any
+   credentials to the VMs. The VM's SkyPilot gets the service account's token
+   from the Nebius instance metadata service
+   (``http://metadata.nebius.internal/v1/iam/sa/token``), falling back to the
+   legacy ``/mnt/cloud-metadata/token`` file on older VM images (Nebius removed
+   that mount on 2026-09-30). When using a Docker image (``image_id:
+   docker:...``), the metadata service is reachable as SkyPilot runs the
+   container with host networking.
+
+   Specify it as a ``<string>`` or a ``<list of single-element dict>`` mapping
+   cluster name patterns to service account IDs, as for
+   :ref:`aws.remote_identity <config-yaml-aws-remote-identity>`. If no pattern
+   matches, ``LOCAL_CREDENTIALS`` is used. Service accounts belong to a
+   project, so it can also be set per region under ``region_configs``.
+
+   SkyPilot does not create service accounts on Nebius, so ``SERVICE_ACCOUNT``
+   is not supported. The service account must be in the project the VMs are
+   launched in, and needs permission to stop and delete the cluster's VMs for
+   autostop and autodown to work (e.g. membership in the ``editors`` group).
+   The attached service account of an existing VM cannot be changed; run
+   ``sky down`` before changing this setting for an existing cluster.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1
+    remote_identity: serviceaccount-e00xxxxxxxxxxx
+
+    # Format 2
+    remote_identity:
+      - my-training-*: serviceaccount-e00aaaaaaaaaaa
+      - "*": serviceaccount-e00bbbbbbbbbbb
+
+    # Per region (takes precedence over the above)
+    region_configs:
+      eu-north1:
+        project_id: project-e00xxxxxxxxxxx
+        remote_identity: serviceaccount-e00ccccccccccc
 
 .. _config-yaml-vast:
 

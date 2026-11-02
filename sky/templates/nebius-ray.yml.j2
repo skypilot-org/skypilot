@@ -55,6 +55,9 @@ available_node_types:
       network_tier: {{network_tier}}
       disk_tier: {{disk_tier}}
       disk_encrypted: {{disk_encrypted}}
+      {%- if service_account_id is not none %}
+      service_account_id: {{service_account_id}}
+      {%- endif %}
       filesystems:
         {%- for fs in filesystems %}
         - filesystem_id: {{ fs.filesystem_id }}
@@ -139,6 +142,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line 'if curl ..': on a VM with an attached service account (token from the instance metadata service, or the legacy /mnt/cloud-metadata/token file of older images), remove Nebius credential files a previous launch may have uploaded, so SkyPilot on the VM authenticates as the service account.
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
@@ -169,4 +173,7 @@ setup_commands:
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    {%- if service_account_id is not none %}
+    if curl -sf -m 2 -H Metadata:true http://metadata.nebius.internal/v1/iam/sa/token >/dev/null || [ -f /mnt/cloud-metadata/token ]; then rm -f ~/.nebius/credentials.json ~/.nebius/NEBIUS_IAM_TOKEN.txt; fi;
+    {%- endif %}
     {{ ssh_max_sessions_config }}

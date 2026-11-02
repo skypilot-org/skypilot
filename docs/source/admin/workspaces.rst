@@ -209,6 +209,10 @@ What ``remote_identity`` controls per cloud:
   ``SERVICE_ACCOUNT``, or ``NO_UPLOAD``. Unlike AWS and Kubernetes, GCP cannot
   pin a specific service account email per workspace; the VM uses the default
   SkyPilot service account.
+* **Nebius** — the ID of an existing service account attached to launched VMs
+  (``serviceaccount-...``), or ``LOCAL_CREDENTIALS`` / ``NO_UPLOAD``. Accepts a
+  plain string, or a list of ``{cluster-name-glob: service-account-id}``
+  mappings, also per region under ``region_configs.<region>.remote_identity``.
 
 .. _workspaces-remote-identity-precedence:
 

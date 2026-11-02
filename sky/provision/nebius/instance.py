@@ -186,7 +186,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'use_static_ip_address', False),
             filesystems=config.node_config.get('filesystems', []),
             network_tier=config.node_config.get('network_tier'),
-            security_group_ids=config.node_config.get('SecurityGroupIds'))
+            security_group_ids=config.node_config.get('SecurityGroupIds'),
+            service_account_id=config.node_config.get('service_account_id'))
 
     # When we're creating a brand-new head, launch it synchronously first.
     # utils.launch calls get_or_create_gpu_cluster for InfiniBand presets —

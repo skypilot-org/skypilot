@@ -18,6 +18,7 @@ from sky.provision.nebius import utils
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -25,6 +26,7 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 _INDENT_PREFIX = '    '
+_SERVICE_ACCOUNT_ID_PREFIX = 'serviceaccount-'
 
 _SERVICE_ACCOUNT_DOCS = ('https://docs.skypilot.co/en/latest/cloud-setup/'
                          'cloud-permissions/nebius.html')
@@ -120,6 +122,65 @@ def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
     return path
 
 
+def _get_service_account_id(
+        region: str, cluster_name: str,
+        override_configs: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Returns the service account to attach, from `nebius.remote_identity`.
+
+    Mode names (LOCAL_CREDENTIALS, NO_UPLOAD) return None. SERVICE_ACCOUNT
+    is rejected: SkyPilot does not create service accounts on Nebius.
+    """
+    remote_identity = skypilot_config.get_effective_workspace_region_config(
+        cloud='nebius',
+        region=region,
+        keys=('remote_identity',),
+        default_value=None,
+        override_configs=override_configs)
+    if isinstance(remote_identity, list):
+        remote_identity = next((identity for profile in remote_identity
+                                for pattern, identity in profile.items()
+                                if fnmatch.fnmatchcase(cluster_name, pattern)),
+                               None)
+    if not isinstance(remote_identity, str):
+        return None
+    if (remote_identity.upper() ==
+            schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
+        raise exceptions.InvalidCloudConfigs(
+            '`nebius.remote_identity: SERVICE_ACCOUNT` is not supported: '
+            'SkyPilot does not create service accounts on Nebius. Set it to '
+            'the ID of an existing service account (serviceaccount-...).')
+    if remote_identity.startswith(_SERVICE_ACCOUNT_ID_PREFIX):
+        return remote_identity
+    return None
+
+
+def _is_service_account_configured() -> bool:
+    """Whether `nebius.remote_identity` attaches a service account anywhere.
+
+    Checks the cloud-level value and every region in `region_configs`, for
+    the active workspace and the global config, and any cluster name pattern.
+    """
+    regions = skypilot_config.get_workspace_cloud('nebius').get(
+        'region_configs', None) or {}
+    for region in [None, *regions]:
+        remote_identity = skypilot_config.get_effective_workspace_region_config(
+            cloud='nebius',
+            region=region,
+            keys=('remote_identity',),
+            default_value=None)
+        if isinstance(remote_identity, str):
+            remote_identity = [{'*': remote_identity}]
+        if not isinstance(remote_identity, list):
+            continue
+        for profile in remote_identity:
+            if any(
+                    isinstance(identity, str) and
+                    identity.startswith(_SERVICE_ACCOUNT_ID_PREFIX)
+                    for identity in profile.values()):
+                return True
+    return False
+
+
 @registry.CLOUD_REGISTRY.register
 class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
@@ -144,6 +205,19 @@ class Nebius(clouds.Cloud):
     # our provisioner adds additional `-worker`.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 50
     _regions: List[clouds.Region] = []
+    # An existing service account can be attached to the VMs via
+    # `nebius.remote_identity: serviceaccount-...`.
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
+    @classmethod
+    def excludes_credentials_from_other_clouds(cls) -> bool:
+        """Whether to keep Nebius credentials off clusters on other clouds.
+
+        True when `nebius.remote_identity` attaches a service account, so the
+        local Nebius credentials (e.g. the API server's own) are not handed to
+        any cluster, like `NO_UPLOAD`.
+        """
+        return _is_service_account_configured()
 
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
@@ -422,6 +496,10 @@ class Nebius(clouds.Cloud):
                     f'`nebius.security_group_name` in '
                     f'`~/.sky/config.yaml`.')
 
+        service_account_id = _get_service_account_id(
+            region.name, cluster_name.display_name,
+            resources.cluster_config_overrides)
+
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -439,9 +517,17 @@ class Nebius(clouds.Cloud):
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group_managed_by_skypilot).lower(),
+            'service_account_id': service_account_id,
         }
 
         docker_run_options = []
+
+        if service_account_id is not None:
+            # Let SkyPilot inside the container (e.g. autostop) authenticate
+            # as the attached service account.
+            docker_run_options.append(
+                f'-v {nebius.VM_SERVICE_ACCOUNT_TOKEN_DIR}:'
+                f'{nebius.VM_SERVICE_ACCOUNT_TOKEN_DIR}:ro')
 
         if acc_dict is not None:
             # Nebius cloud's docker runtime information does not contain
