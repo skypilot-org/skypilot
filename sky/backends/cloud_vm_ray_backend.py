@@ -3679,7 +3679,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         global_user_state.add_cluster_event(
                             cluster_name,
                             None,
-                            'Provision failed: ' + str(e),
+                            global_user_state.PROVISION_FAILED_PREFIX + str(e),
                             global_user_state.ClusterEventType.STATUS_CHANGE,
                             nop_if_duplicate=True)
                         global_user_state.remove_cluster(cluster_name,

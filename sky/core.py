@@ -921,9 +921,10 @@ def _user_action_event_reason(action: str) -> str:
     context to name (an in-process caller).
     """
     actor = common_utils.get_current_request_actor()
+    prefix = global_user_state.user_action_event_prefix(action)
     if actor is None:
-        return f'Cluster was {action} by user.'
-    return f'Cluster was {action} by user {actor}.'
+        return f'{prefix}.'
+    return f'{prefix} {actor}.'
 
 
 def user_initiated_down(cluster_name: str,
@@ -1116,11 +1117,6 @@ def stop(cluster_name: str,
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
-    global_user_state.add_cluster_event(
-        cluster_name, status_lib.ClusterStatus.STOPPED,
-        _user_action_event_reason('stopped'),
-        global_user_state.ClusterEventType.STATUS_CHANGE)
-
     backend = backend_utils.get_backend_from_handle(handle)
 
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -1139,6 +1135,12 @@ def stop(cluster_name: str,
                 f'  {_stop_not_supported_message(handle.launched_resources)}.\n'
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
+
+    # After the check: a stop the cloud does not support never started.
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        _user_action_event_reason('stopped'),
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     if graceful:
         _graceful_job_cancel(handle,
