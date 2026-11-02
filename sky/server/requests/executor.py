@@ -377,9 +377,14 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
+            request = api_requests.get_request(request_id,
+                                               fields=['status', 'entrypoint'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
+                return
+            if (isinstance(request.entrypoint, preconditions.GatedEntrypoint)
+                    and not self._precondition_met(
+                        request.entrypoint.precondition, request_element)):
                 return
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
@@ -417,6 +422,27 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    def _precondition_met(self, precondition: preconditions.Precondition,
+                          request_element: Tuple[str, bool, bool]) -> bool:
+        """Whether the precondition of a dequeued request is met.
+
+        If it is not, the request is queued again once it is. The wait runs on
+        this process's request event loop, not in the uvicorn worker that
+        accepted the request, so it survives the death of that worker. A
+        failing check is left to the wait, which fails the request with it.
+        """
+        try:
+            met, _ = event_loop.run(precondition.check()).result()
+        except Exception:  # pylint: disable=broad-except
+            met = False
+        if not met:
+            event_loop.run(
+                self._wait_async_and_reschedule(precondition.wait_async,
+                                                request_element,
+                                                precondition.check_interval,
+                                                retry_suffix=''))
+        return met
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.
@@ -1483,11 +1509,12 @@ async def schedule_request_async(
         schedule_type: The type of scheduling to use for this request, refer to
             `api_requests.ScheduleType` for more details.
         is_skypilot_system: Denote whether the request is from SkyPilot system.
-        precondition: If a precondition is provided, the request will only be
-            scheduled for execution when the precondition is met (returns True).
-            The precondition is waited asynchronously and does not block the
-            caller.
+        precondition: If a precondition is provided, the request runs only
+            once it is met. The request worker checks it when it takes the
+            request off the queue, and waits for it if needed.
     """
+    if precondition is not None:
+        func = preconditions.GatedEntrypoint(precondition, func)
     request_task = await prepare_request_async(request_id,
                                                request_name,
                                                request_body,
@@ -1497,7 +1524,7 @@ async def schedule_request_async(
                                                is_skypilot_system,
                                                auth_user=auth_user)
     await schedule_prepared_request(request_task, ignore_return_value,
-                                    precondition, retryable)
+                                    retryable)
 
 
 async def schedule_internal_daemon_async(
@@ -1534,8 +1561,6 @@ async def schedule_internal_daemon_async(
 
 async def schedule_prepared_request(request_task: api_requests.Request,
                                     ignore_return_value: bool = False,
-                                    precondition: Optional[
-                                        preconditions.Precondition] = None,
                                     retryable: bool = False) -> None:
     """Enqueue a request to the request queue
 
@@ -1543,44 +1568,26 @@ async def schedule_prepared_request(request_task: api_requests.Request,
         request_task: The prepared request task to schedule.
         ignore_return_value: If True, the return value of the function will be
             ignored.
-        precondition: If a precondition is provided, the request will only be
-            scheduled for execution when the precondition is met (returns True).
-            The precondition is waited asynchronously and does not block the
-            caller.
         retryable: Whether the request should be retried if it fails.
     """
-
-    async def enqueue():
-        input_tuple = (request_task.request_id, ignore_return_value, retryable)
-        logger.info(f'Queuing request: {request_task.request_id}')
-        try:
-            await _get_queue(request_task.schedule_type).put_async(input_tuple)
-        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
-            # A PENDING request that never made it onto the queue is
-            # stranded: no worker will pick it up and nothing else moves it to
-            # a terminal state, and a queue backend that recovers stale PENDING
-            # rows would resurrect and execute it long after the caller saw
-            # this error. If the put actually committed despite the error, the
-            # request is either still unclaimed (the FAILED mark lands and the
-            # row is discarded at dequeue) or already claimed by a worker (the
-            # mark is skipped and the claimed run's outcome stands).
-            logger.error(
-                f'Failed to enqueue request {request_task.request_id}: '
-                f'{common_utils.format_exception(e)}')
-            await api_requests.set_request_failed_if_pending_async(
-                request_task.request_id, e)
-            raise
-
-    if precondition is not None:
-        # Schedule precondition wait as a background task so the caller
-        # returns immediately.  The task reference is stored in a
-        # module-level set to prevent garbage collection.
-        task = asyncio.create_task(
-            precondition.wait_async(on_condition_met=enqueue))
-        preconditions.background_tasks.add(task)
-        task.add_done_callback(preconditions.background_tasks.discard)
-    else:
-        await enqueue()
+    input_tuple = (request_task.request_id, ignore_return_value, retryable)
+    logger.info(f'Queuing request: {request_task.request_id}')
+    try:
+        await _get_queue(request_task.schedule_type).put_async(input_tuple)
+    except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+        # A PENDING request that never made it onto the queue is
+        # stranded: no worker will pick it up and nothing else moves it to
+        # a terminal state, and a queue backend that recovers stale PENDING
+        # rows would resurrect and execute it long after the caller saw
+        # this error. If the put actually committed despite the error, the
+        # request is either still unclaimed (the FAILED mark lands and the
+        # row is discarded at dequeue) or already claimed by a worker (the
+        # mark is skipped and the claimed run's outcome stands).
+        logger.error(f'Failed to enqueue request {request_task.request_id}: '
+                     f'{common_utils.format_exception(e)}')
+        await api_requests.set_request_failed_if_pending_async(
+            request_task.request_id, e)
+        raise
 
 
 def start(

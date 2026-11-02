@@ -8,9 +8,8 @@ Preconditions are introduced so that:
 """
 import abc
 import asyncio
-import inspect
 import time
-from typing import Any, Awaitable, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple
 
 from sky import exceptions
 from sky import global_user_state
@@ -26,19 +25,11 @@ _PRECONDITION_TIMEOUT = 60 * 60
 
 logger = sky_logging.init_logger(__name__)
 
-# Strong references to background precondition tasks to prevent GC.
-# asyncio only keeps weak references to tasks, so without this set a
-# long-running precondition wait (up to 1 hour) could be collected.
-background_tasks: set = set()
-
 
 class Precondition(abc.ABC):
     """Abstract base class for a precondition for a request to be executed.
 
-    A Precondition can be waited in either of the following ways:
-    - await Precondition: wait for the precondition to be met.
-    - Precondition.wait_async: wait for the precondition to be met in background
-      and execute the given callback on met.
+    `await precondition` waits for the precondition to be met.
     """
 
     def __init__(self,
@@ -53,22 +44,15 @@ class Precondition(abc.ABC):
         """Make Precondition awaitable."""
         return self._wait().__await__()
 
-    async def wait_async(
-        self,
-        on_condition_met: Optional[Callable[[], Union[None,
-                                                      Awaitable[Any]]]] = None
-    ) -> None:
-        """Wait for the precondition and execute the callback when met.
+    async def wait_async(self, *, is_cancelled: Callable,
+                         fallback_wait_seconds: float) -> bool:
+        """`await self`, with the signature of a continue condition's wait.
 
-        This coroutine blocks until the precondition is met (or times out).
-        Use ``create_task(precondition.wait_async(...))`` to run it in the
-        background without blocking the caller.
+        `_wait` checks for cancellation itself, and fails the request on a
+        timeout or a failing check.
         """
-        met = await self
-        if met and on_condition_met is not None:
-            result = on_condition_met()
-            if inspect.isawaitable(result):
-                await result
+        del is_cancelled, fallback_wait_seconds
+        return await self
 
     @abc.abstractmethod
     async def check(self) -> Tuple[bool, Optional[str]]:
@@ -134,6 +118,23 @@ class Precondition(abc.ABC):
                 return False
 
             await asyncio.sleep(self.check_interval)
+
+
+class GatedEntrypoint:
+    """The entrypoint of a request that runs only once a precondition is met.
+
+    Stored with the request, so the request worker can check the precondition
+    before it runs the request (see `RequestWorker._precondition_met`).
+    """
+
+    def __init__(self, precondition: Precondition, func: Callable) -> None:
+        self.precondition = precondition
+        self.func = func
+        # The request table shows the entrypoint's name.
+        self.__name__ = func.__name__
+
+    def __call__(self, *args, **kwargs) -> Any:
+        return self.func(*args, **kwargs)
 
 
 class RequestSucceededPrecondition(Precondition):
