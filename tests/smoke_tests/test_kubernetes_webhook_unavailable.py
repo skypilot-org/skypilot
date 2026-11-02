@@ -17,25 +17,51 @@ import uuid
 import pytest
 from smoke_tests import smoke_tests_utils
 
-# Printed by pod creation on each retry, as a provisioning warning that is
-# streamed to the launch output.
+import sky
+
+# Printed by pod creation on each retry, as a provisioning warning in the
+# jobs controller log.
 _RETRY_WARNING = 'could not be called while creating a pod'
+
+_wait_cmd = (smoke_tests_utils.
+             get_cmd_wait_until_managed_job_status_contains_matching_job_name)
+
+
+def _wait_for_job_end(job_name: str, expected: str, timeout: int) -> str:
+    """A step that waits for a managed job to end and checks its status.
+
+    Waits for any terminal status, so a job that ends some other way fails
+    the step at once instead of at the timeout.
+    """
+    wait = _wait_cmd(job_name=job_name,
+                     job_status=sky.ManagedJobStatus.terminal_statuses(),
+                     timeout=timeout)
+    return (f'{wait} && q=$(sky jobs queue) && echo "$q" && '
+            f'echo "$q" | grep {job_name} | grep -w {expected}')
 
 
 @pytest.mark.kubernetes
+@pytest.mark.managed_jobs
 @pytest.mark.no_dependency
-def test_kubernetes_launch_while_webhook_unavailable():
-    """An unreachable webhook fails a launch only if it stays down.
+def test_kubernetes_jobs_launch_while_webhook_unavailable():
+    """An unreachable webhook keeps a managed job from starting only while it
+    stays down.
 
-    1. The webhook stays down: the launch fails after the retry budget, and
-       the failover summary names the webhook rather than reporting a lack of
-       resources.
-    2. The webhook comes back while pod creation is retrying: the launch
-       succeeds. The webhook is removed only once the retry warning has been
-       printed, so the launch is known to have hit the outage.
+    1. The webhook stays down: each launch attempt fails after the retry
+       budget with a reason naming the webhook, until
+       job.wait_for_scheduling_timeout cancels the job.
+    2. The webhook comes back while pod creation is retrying: the job runs.
+       The webhook is removed only once the retry warning is in the
+       controller log, so the launch is known to have hit the outage.
     """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: with a separate controller, the '
+                    'controller pod carries the test label too, so the webhook '
+                    'blocks the controller launch rather than the job.')
+
     name = smoke_tests_utils.get_cluster_name()
-    name_down = f'{name}-down'
+    job_down = f'{name}-down'
+    job_up = f'{name}-up'
     # Starts with letters: --config parses the label value as YAML, and an
     # all-digit tag would become an int.
     tag = f'wh{uuid.uuid4().hex[:10]}'
@@ -43,7 +69,6 @@ def test_kubernetes_launch_while_webhook_unavailable():
     webhook = f'{service}.unavailable.skypilot.co'
     webhook_config = service
     label_key = 'skypilot-webhook-test'
-    infra = smoke_tests_utils.AGENT_K8S_INFRA
 
     manifest = textwrap.dedent(f"""\
         apiVersion: v1
@@ -83,50 +108,70 @@ def test_kubernetes_launch_while_webhook_unavailable():
           admissionReviewVersions: [v1]
           timeoutSeconds: 5
     """)
-    # Longer than it takes a launch to reach pod creation, so a missing
-    # warning means the launch never hit the webhook, not that it was slow.
+    # Longer than one launch attempt's 60s of pod creation retries, so the
+    # controller has logged the webhook reason before the job is cancelled.
+    down_task = textwrap.dedent("""\
+        job:
+          wait_for_scheduling_timeout: 120s
+        run: echo should_not_run
+    """)
+    # Longer than it takes a job to reach pod creation, so a missing warning
+    # means the job never hit the webhook, not that it was slow.
     warning_wait_seconds = 300
+    poll_seconds = 3
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as manifest_f:
+                                     delete=False) as manifest_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as down_task_f:
         manifest_f.write(manifest)
         manifest_f.flush()
-        down_log = f'{name}-down.log'
-        recover_log = f'{name}-recover.log'
-        launch_args = (f'{infra} --config kubernetes.pod_config.metadata.'
-                       f'labels.{label_key}={tag} --cpus 1 --memory 2')
+        down_task_f.write(down_task)
+        down_task_f.flush()
+        launch_args = (f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                       f'--config kubernetes.pod_config.metadata.labels.'
+                       f'{label_key}={tag} --cpus 1 --memory 2')
+        down_log = f'{job_down}-controller.log'
+        up_log = f'{job_up}-controller.log'
         test = smoke_tests_utils.Test(
-            'kubernetes_launch_while_webhook_unavailable',
+            'kubernetes_jobs_launch_while_webhook_unavailable',
             [
                 f'kubectl apply -f {manifest_f.name}',
-                # The webhook stays down for the whole launch.
-                f'sky launch -y -c {name_down} {launch_args} '
-                f'> {down_log} 2>&1; rc=$?; cat {down_log}; '
-                f'echo "launch rc=$rc"; [ $rc -ne 0 ] && '
+                # The webhook stays down.
+                f'sky jobs launch -y -d -n {job_down} {launch_args} '
+                f'{down_task_f.name}',
+                _wait_for_job_end(job_down, 'CANCELLED', timeout=400),
+                f'sky jobs logs --controller -n {job_down} --no-follow '
+                f'> {down_log} 2>&1; cat {down_log}; '
                 f'grep -q "{_RETRY_WARNING}" {down_log} && '
                 f'grep -q "Reason: Pod creation in context" {down_log} && '
                 f'grep -q "admission webhook \'{webhook}\' could not be '
                 f'called" {down_log}',
                 # The webhook comes back while the launch is retrying.
-                f': > {recover_log}; '
-                f'( for i in $(seq {warning_wait_seconds}); do '
-                f'grep -q "{_RETRY_WARNING}" {recover_log} && break; '
-                f'sleep 1; done; '
-                f'kubectl delete mutatingwebhookconfiguration {webhook_config} '
-                f') & watcher=$!; '
-                f'sky launch -y -c {name} {launch_args} '
-                f'"echo webhook_recovered_ok" > {recover_log} 2>&1; rc=$?; '
-                f'wait $watcher; cat {recover_log}; echo "launch rc=$rc"; '
-                f'[ $rc -eq 0 ] && grep -q "{_RETRY_WARNING}" {recover_log} '
-                f'&& grep -q webhook_recovered_ok {recover_log}',
+                f'sky jobs launch -y -d -n {job_up} {launch_args} '
+                f'"echo webhook_recovered_ok"',
+                f'start=$SECONDS; while (( SECONDS - start < '
+                f'{warning_wait_seconds} )); do '
+                f'sky jobs logs --controller -n {job_up} --no-follow '
+                f'> {up_log} 2>&1; grep -q "{_RETRY_WARNING}" {up_log} && '
+                f'break; sleep {poll_seconds}; done; cat {up_log}; '
+                f'grep -q "{_RETRY_WARNING}" {up_log} && '
+                f'kubectl delete mutatingwebhookconfiguration '
+                f'{webhook_config}',
+                _wait_for_job_end(job_up, 'SUCCEEDED', timeout=400),
+                f'jid=$(sky jobs queue | grep {job_up} | head -1 | '
+                f'awk \'{{print $1}}\') && echo "job id: $jid" && '
+                f'out=$(sky jobs logs "$jid" --no-follow 2>&1); '
+                f'echo "$out"; echo "$out" | grep -q webhook_recovered_ok',
             ],
             smoke_tests_utils.chain_teardown(
-                f'sky down -y {name} || true',
-                f'sky down -y {name_down} || true',
+                f'sky jobs cancel -y -n {job_down} || true',
+                f'sky jobs cancel -y -n {job_up} || true',
                 f'kubectl delete mutatingwebhookconfiguration {webhook_config} '
                 f'--ignore-not-found',
                 f'kubectl delete service -n default {service} '
-                f'--ignore-not-found', f'rm -f {manifest_f.name} {down_log} '
-                f'{recover_log}'),
+                f'--ignore-not-found',
+                f'rm -f {manifest_f.name} {down_task_f.name} {down_log} '
+                f'{up_log}'),
             timeout=smoke_tests_utils.get_timeout('kubernetes'),
         )
         smoke_tests_utils.run_one_test(test)
