@@ -103,7 +103,7 @@ export default function PluginCatchAllPage() {
       </Head>
       <div className="min-h-[50vh]">
         {mountError ? (
-          <div className="max-w-3xl mx-auto p-6 bg-red-50 text-red-700 rounded-lg border border-red-200">
+          <div className="max-w-3xl mx-auto p-6 bg-red-tint text-red-fg-strong rounded-lg border border-red-line">
             {mountError}
           </div>
         ) : (
@@ -112,7 +112,7 @@ export default function PluginCatchAllPage() {
             {!route && !notFound && (
               <div className="flex justify-center items-center h-64">
                 <CircularProgress size={20} />
-                <span className="ml-2 text-gray-500">
+                <span className="ml-2 text-content-tertiary">
                   {router.isReady
                     ? 'Loading plugin resources...'
                     : 'Preparing plugin route...'}

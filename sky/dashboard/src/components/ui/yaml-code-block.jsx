@@ -36,7 +36,7 @@ export function YamlCodeBlock({
   const fixed = !!height;
   return (
     <div
-      className={`rounded-md border border-gray-200 overflow-hidden ${fixed ? 'flex flex-col' : ''} ${className || ''}`}
+      className={`rounded-md border border-line overflow-hidden ${fixed ? 'flex flex-col' : ''} ${className || ''}`}
       style={{
         height: fixed ? height : undefined,
         maxHeight: fixed ? undefined : maxHeight,

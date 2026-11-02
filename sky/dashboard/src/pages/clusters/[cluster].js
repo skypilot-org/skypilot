@@ -192,13 +192,13 @@ function ClusterDetails() {
       <>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/clusters" className="text-sky-blue hover:underline">
+            <Link href="/clusters" className="text-brand hover:underline">
               Sky Clusters
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-content-tertiary">›</span>
             <Link
               href={`/clusters/${cluster}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {cluster}
             </Link>
@@ -209,7 +209,7 @@ function ClusterDetails() {
               {(clusterDetailsLoading || isRefreshing) && (
                 <div className="flex items-center mr-4">
                   <CircularProgress size={15} className="mt-0" />
-                  <span className="ml-2 text-gray-500">Loading...</span>
+                  <span className="ml-2 text-content-tertiary">Loading...</span>
                 </div>
               )}
               {clusterData && (
@@ -221,7 +221,7 @@ function ClusterDetails() {
                     <button
                       onClick={handleManualRefresh}
                       disabled={clusterDetailsLoading || isRefreshing}
-                      className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                      className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
                     >
                       <RotateCwIcon className="w-4 h-4 mr-1.5" />
                       {!isMobile && <span>Refresh</span>}
@@ -244,7 +244,9 @@ function ClusterDetails() {
         {(clusterDetailsLoading && isInitialLoad) || historyLoading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading cluster details...</span>
+            <span className="text-content-tertiary">
+              Loading cluster details...
+            </span>
           </div>
         ) : clusterData ? (
           <ActiveTab
@@ -272,7 +274,7 @@ function ClusterDetails() {
           />
         ) : (
           <div className="flex justify-center items-center py-12">
-            <span className="text-gray-500">
+            <span className="text-content-tertiary">
               Cluster not found in active clusters or history.
             </span>
           </div>
@@ -427,7 +429,7 @@ function ActiveTab({
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Status
                 </div>
                 <div className="text-base mt-1">
@@ -444,7 +446,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Cluster
                 </div>
                 <div className="text-base mt-1">
@@ -453,7 +455,7 @@ function ActiveTab({
                       content={`Name on ${clusterData.cloud || clusterData.infra?.split('(')[0]?.trim() || 'cloud'}: ${clusterData.cluster_name_on_cloud}`}
                       className="text-sm text-muted-foreground"
                     >
-                      <span className="border-b border-dotted border-gray-400 cursor-help">
+                      <span className="border-b border-dotted border-line-stronger cursor-help">
                         {clusterData.cluster || clusterData.name}
                       </span>
                     </NonCapitalizedTooltip>
@@ -463,7 +465,9 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">User</div>
+                <div className="text-content-secondary font-medium text-base">
+                  User
+                </div>
                 <div className="text-base mt-1">
                   <UserDisplay
                     username={clusterData.user}
@@ -472,7 +476,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   {isHistoricalCluster ? 'Cloud' : 'Infra'}
                 </div>
                 <div className="text-base mt-1">
@@ -491,7 +495,7 @@ function ActiveTab({
                         <span>
                           <Link
                             href="/infra"
-                            className="text-blue-600 hover:underline"
+                            className="text-blue-fg hover:underline"
                           >
                             {clusterData.cloud ||
                               clusterData.infra.split('(')[0].trim()}
@@ -524,7 +528,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Resources
                 </div>
                 <div className="text-base mt-1">
@@ -534,7 +538,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Started
                 </div>
                 <div className="text-base mt-1">
@@ -544,7 +548,7 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-content-secondary font-medium text-base">
                   Last Event
                 </div>
                 <div className="text-base mt-1">
@@ -566,7 +570,7 @@ function ActiveTab({
               {isHistoricalCluster ? (
                 <>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Duration
                     </div>
                     <div className="text-base mt-1">
@@ -574,7 +578,7 @@ function ActiveTab({
                     </div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Cost
                     </div>
                     <div className="text-base mt-1">
@@ -584,7 +588,7 @@ function ActiveTab({
                 </>
               ) : (
                 <div>
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-content-secondary font-medium text-base">
                     Autostop
                   </div>
                   <div className="text-base mt-1">
@@ -602,7 +606,7 @@ function ActiveTab({
                   (e.g., W&B). Only renders once at least one link is known. */}
               {Object.keys(combinedClusterLinks).length > 0 && (
                 <div className="col-span-2">
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-content-secondary font-medium text-base">
                     External Links
                   </div>
                   <div className="text-base mt-1">
@@ -616,7 +620,7 @@ function ActiveTab({
                               href={normalizedUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                              className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
                             >
                               {label}
                             </a>
@@ -808,7 +812,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
         <div className="flex items-center">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+            className="flex items-center text-left focus:outline-none hover:text-content transition-colors duration-200"
           >
             {isExpanded ? (
               <ChevronDownIcon className="w-5 h-5 mr-2" />
@@ -841,7 +845,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
                   </SelectContent>
                 </Select>
               )}
-              <span className="ml-2 text-xs text-gray-500">
+              <span className="ml-2 text-xs text-content-tertiary">
                 (Logs are not streaming; click refresh to fetch the latest
                 logs.)
               </span>
@@ -854,7 +858,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
               <button
                 onClick={handleRefreshLogs}
                 disabled={isLoading}
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                className="text-brand hover:text-brand-bright flex items-center"
               >
                 <RotateCwIcon
                   className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
@@ -872,7 +876,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
               <span>Loading...</span>
             </div>
           ) : displayLines.length === 0 ? (
-            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <div className="bg-surface-log flex items-center justify-center py-4 text-content-tertiary">
               <span>No provision logs available.</span>
             </div>
           ) : (
