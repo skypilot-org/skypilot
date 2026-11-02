@@ -273,3 +273,23 @@ describe('useClusterData ownership scoping (client path)', () => {
     expect(result.current.loading).toBe(false);
   });
 });
+
+describe('getClusterHistory details', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('carries why a terminated cluster went away', async () => {
+    apiClient.fetch.mockResolvedValue([
+      { name: 'gone', status: null, last_event: 'Pod evicted by Kubernetes.' },
+      { name: 'unknown', status: null, last_event: null },
+      { name: 'live', status: 'UP', last_event: 'All nodes up.' },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows.map((r) => r.details)).toEqual([
+      'Pod evicted by Kubernetes.',
+      'No termination reason recorded.',
+      null,
+    ]);
+  });
+});
