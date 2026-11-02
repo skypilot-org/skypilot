@@ -1,19 +1,12 @@
-"""SQLAlchemy schema and DB manager for managed jobs.
+"""SQLAlchemy schema/DB manager for managed jobs (server-only).
 
-Server-only. Imported by ``sky.jobs.state`` when SQLAlchemy is available.
-Table definitions stay at column 0 so schema edits do not re-indent the parent."""
-# pylint: disable=line-too-long
+Imported by ``sky.jobs.state`` when SQLAlchemy is available. Tables stay at
+column 0 so schema edits do not re-indent the parent module.
+"""
+# pylint: disable=line-too-long,unused-import
 from __future__ import annotations
 
-from typing import List, Optional, Set
-
-from sky.utils import common_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
-
-from sky.utils.db import sqlalchemy_deps
-
-sqlalchemy_deps.require_sqlalchemy()
+from typing import Any, List, Optional, Set
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -22,6 +15,18 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
+
+from sky.dag import DagExecution
+from sky.skylet import constants
+from sky.utils import common_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
+
+# Re-exported for sky.jobs.state (annotations / dialect helpers).
+_ = (postgresql, sqlite, sql_async)
+
+sqlalchemy_deps.require_sqlalchemy()
 
 Base = declarative.declarative_base()
 
@@ -530,7 +535,7 @@ def _users_at_launch_limit(
     ManagedJobStatus, ManagedJobScheduleState = _job_status_enums()
     launching_info = job_info_table.alias('launching_info')
 
-    def _has_task_in(statuses: List[ManagedJobStatus]):
+    def _has_task_in(statuses: List[Any]):
         return sqlalchemy.exists().where(
             sqlalchemy.and_(
                 spot_table.c.spot_job_id == launching_info.c.spot_job_id,

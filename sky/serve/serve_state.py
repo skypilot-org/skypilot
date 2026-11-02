@@ -20,13 +20,16 @@ from sky.utils.db import migration_utils
 from sky.utils.db import sqlalchemy_deps
 
 if typing.TYPE_CHECKING:
+    import sqlalchemy
+    from sqlalchemy import orm
     from sqlalchemy.engine import row
 
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
 if sqlalchemy_deps.sqlalchemy_available():
-    # Schema lives in sky.serve.serve_state_db (column 0) to avoid indenting table defs.
+    # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
+    # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db
     sqlalchemy = _serve_db.sqlalchemy
     sqlalchemy_exc = _serve_db.sqlalchemy_exc

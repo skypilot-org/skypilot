@@ -35,7 +35,10 @@ from sky.utils.db import sqlalchemy_deps
 from sky.utils.plugin_extensions import ExternalClusterFailure
 
 if typing.TYPE_CHECKING:
+    import sqlalchemy
+    from sqlalchemy import orm
     from sqlalchemy.engine import row
+    from sqlalchemy.ext import asyncio as sql_async
 
     from sky.schemas.generated import managed_jobsv1_pb2
 else:
@@ -58,6 +61,7 @@ JOB_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in sky.jobs.state_db (column 0) to avoid indenting table defs.
+    # pylint: disable=protected-access
     from sky.jobs import state_db as _jobs_db
     sqlalchemy = _jobs_db.sqlalchemy
     sqlalchemy_exc = _jobs_db.sqlalchemy_exc

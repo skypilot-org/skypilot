@@ -1,22 +1,12 @@
-"""SQLAlchemy schema and DB manager for global user state.
+"""SQLAlchemy schema/DB manager for global user state (server-only).
 
-Server-only. Imported by ``sky.global_user_state`` when SQLAlchemy is available
-(``skypilot[server]`` or a cloud extra). Keep table definitions here at column 0
-so schema edits do not re-indent the parent module."""
-# pylint: disable=line-too-long
+Imported by ``sky.global_user_state`` when SQLAlchemy is available. Tables
+stay at column 0 so schema edits do not re-indent the parent module.
+"""
+# pylint: disable=line-too-long,unused-import
 from __future__ import annotations
 
 import re
-
-from sky.skylet import constants
-from sky.utils import annotations as annotation_utils
-from sky.utils import common_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
-
-from sky.utils.db import sqlalchemy_deps
-
-sqlalchemy_deps.require_sqlalchemy()
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -25,6 +15,18 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
+
+from sky.skylet import constants
+from sky.utils import annotations as annotation_utils
+from sky.utils import common_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
+from sky.utils.db import sqlalchemy_deps
+
+# Re-exported for sky.global_user_state.
+_ = (postgresql, sqlite, sql_async)
+
+sqlalchemy_deps.require_sqlalchemy()
 
 Base = declarative.declarative_base()
 

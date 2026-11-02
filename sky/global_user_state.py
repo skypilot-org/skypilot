@@ -45,6 +45,10 @@ from sky.utils.db import retries as db_retries
 from sky.utils.db import sqlalchemy_deps
 
 if typing.TYPE_CHECKING:
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.ext import asyncio as sql_async
+
     from sky import backends
     from sky import clouds
     from sky.clouds import cloud
@@ -171,7 +175,8 @@ def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
 
 
 if sqlalchemy_deps.sqlalchemy_available():
-    # Schema lives in global_user_state_db (column 0) to avoid indenting table defs.
+    # Schema lives in global_user_state_db (column 0) to avoid indenting tables.
+    # pylint: disable=protected-access
     from sky import global_user_state_db as _gus_db
     sqlalchemy = _gus_db.sqlalchemy
     sqlalchemy_exc = _gus_db.sqlalchemy_exc
