@@ -3465,9 +3465,9 @@ def _check_nodes_health(
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Reads up to _MAX_NODES_READ nodes (by name) from the Kubernetes API, as
-    get_missing_node_reason does; the rest, and any it cannot read, fall back
-    to a registered NodeInfoSource, which knows only NotReady / cordoned.
+    Reads the first _MAX_NODES_READ nodes (by name) from the Kubernetes API;
+    the rest, and any it cannot read, fall back to a registered
+    NodeInfoSource, which knows only NotReady / cordoned.
 
     Args:
         context: Kubernetes context name.

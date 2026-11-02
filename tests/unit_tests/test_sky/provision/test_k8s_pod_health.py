@@ -296,12 +296,18 @@ class TestCheckNodesHealth:
     def test_a_large_cluster_reads_a_bounded_number_of_nodes(
             self, mock_nis_get, mock_core_api, cached):
         """A cluster stuck INIT reads its nodes on every refresh: the API
-        reads stay bounded, and past them only the node cache answers."""
+        reads stay bounded, and past them only the node cache answers, as it
+        does for a node within them the API could not read."""
         names = [f'node-{i:03d}' for i in range(128)]
         mock_nis_get.return_value = (_make_nodes_info(
             {n: (False, False) for n in names}) if cached else None)
-        mock_core_api.return_value.read_node.side_effect = (
-            lambda name, **kw: _make_k8s_node(name, ready=False))
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-000':
+                raise kubernetes.api_exception()(status=403)
+            return _make_k8s_node(name, ready=False)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
 
         result = _check_nodes_health('ctx', set(names))
 
@@ -309,7 +315,8 @@ class TestCheckNodesHealth:
             c.args[0]
             for c in mock_core_api.return_value.read_node.call_args_list)
         assert read == names[:10]
-        assert len(result) == (128 if cached else 10)
+        assert len(result) == (128 if cached else 9)
+        assert ('node-000' in result) == cached
         assert all(result[n] == 'NotReady' for n in result)
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
