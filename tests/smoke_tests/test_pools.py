@@ -69,10 +69,11 @@ _POOL_DOWN = ('sky jobs pool down {pool_name} -y')
 # `pool down` skips a pool in a failed status and prints a `--purge` hint;
 # purge it then so the pool record does not outlive the test.
 _TEARDOWN_POOL = (
-    's=$(sky jobs pool down {pool_name} -y 2>&1); echo "$s"; '
+    's=$(sky jobs pool down {pool_name} -y 2>&1); rc=$?; echo "$s"; '
     'if echo "$s" | grep -q "sky jobs pool down {pool_name} --purge"; then '
     '  sky jobs pool down {pool_name} -y --purge; '
-    'fi')
+    # A subshell exit, so a chain_teardown group runs its later steps.
+    'else (exit $rc); fi')
 
 _CANCEL_POOL_JOBS = ('sky jobs cancel --pool {pool_name} -y')
 
