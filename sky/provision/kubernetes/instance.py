@@ -3461,37 +3461,51 @@ def _check_nodes_health(
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Tries a registered NodeInfoSource first, then falls back to direct
-    Kubernetes API calls.
+    Reads the nodes from the Kubernetes API (as get_missing_node_reason does);
+    a node it cannot read falls back to a registered NodeInfoSource, which
+    knows only NotReady / cordoned. Only called for nodes of pods that already
+    report a problem, so the reads are few.
 
     Args:
         context: Kubernetes context name.
         node_names: Set of node names to check.
         tolerations: The cluster pods' tolerations; NoExecute taints they
-            tolerate are not reported (API path only).
+            tolerate are not reported.
         since: The cluster's launch; older taints are not reported.
 
     Returns:
         Dict mapping node_name -> issue description for unhealthy nodes, e.g.
-        'NotReady (NoExecute taint node.kubernetes.io/unreachable)', or
-        'deleted' (API path only).
+        'NotReady (NoExecute taint node.kubernetes.io/unreachable)',
+        'tainted (NoExecute taint k=v)' or 'deleted'.
         Healthy nodes are omitted.
     """
     if not node_names:
         return {}
 
     issues: Dict[str, str] = {}
+    unread = []
+    nodes = _inspect_nodes(sorted(node_names), context, tolerations or [],
+                           since)
+    for name, node in nodes.items():
+        if not node.read:
+            unread.append(name)
+            continue
+        tainted = (f' (NoExecute taint {", ".join(node.taints)})'
+                   if node.taints else '')
+        if node.state == _NODE_GONE:
+            issues[name] = 'deleted'
+        elif node.state == _NODE_NOT_READY:
+            issues[name] = f'NotReady{tainted}'
+        elif node.state == _NODE_CORDONED:
+            issues[name] = f'cordoned{tainted}'
+        elif node.taints:
+            issues[name] = f'tainted{tainted}'
 
-    # Try NodeInfoSource first; get() safely returns None when no provider
-    # is registered.
-    # Note: if a node is in node_names but not in the result, it's silently
-    # skipped (we don't fall back to the k8s API for missing entries). This
-    # is acceptable since this is diagnostic-only and doesn't affect the
-    # cluster status transition.
-    node_info = plugin_extensions.NodeInfoSource.get(
-        context) if context is not None else None
+    # E.g. no permission to read nodes: what the plugin's node cache knows.
+    node_info = (plugin_extensions.NodeInfoSource.get(context)
+                 if unread and context is not None else None)
     if node_info is not None:
-        for name in node_names:
+        for name in unread:
             info = node_info.node_info_dict.get(name)
             if info is None:
                 continue
@@ -3499,44 +3513,6 @@ def _check_nodes_health(
                 issues[name] = 'NotReady'
             elif info.is_cordoned:
                 issues[name] = 'cordoned'
-        return issues
-
-    # Fallback: direct Kubernetes API (parallelized)
-    def _check_single_node(name: str) -> Optional[Tuple[str, str]]:
-        try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
-            # Name the NoExecute taints that could have evicted the pods with
-            # the node's state; ones the pods tolerate are not a cause.
-            node_spec = getattr(node, 'spec', None)
-            taints = _evicting_taints(node, tolerations or [], since)
-            tainted = (f' (NoExecute taint {", ".join(taints)})'
-                       if taints else '')
-            # Check NotReady first (more severe than cordoned)
-            node_status = getattr(node, 'status', None)
-            for condition in (getattr(node_status, 'conditions', None) or []):
-                if condition.type == 'Ready' and condition.status != 'True':
-                    return (name, f'NotReady{tainted}')
-            # Check if node is cordoned (unschedulable)
-            if getattr(node_spec, 'unschedulable', False):
-                return (name, f'cordoned{tainted}')
-            if taints:
-                return (name, f'tainted{tainted}')
-        except kubernetes.api_exception() as e:
-            # A pod can outlive its node for a moment, until pod GC.
-            if e.status == 404:
-                return (name, 'deleted')
-            logger.debug(f'Failed to read node {name}: {e}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read node {name}: {e}')
-        return None
-
-    results = subprocess_utils.run_in_parallel(_check_single_node,
-                                               sorted(node_names))
-    for result in results:
-        if result is not None:
-            issues[result[0]] = result[1]
-
     return issues
 
 
@@ -3550,7 +3526,7 @@ def get_node_health_for_cluster(
     """Check node health for specific unhealthy pods in a cluster.
 
     Fetches pods to determine which nodes they run on, then checks
-    those nodes' health via NodeInfoSource or the Kubernetes API.
+    those nodes' health via the Kubernetes API (or NodeInfoSource).
 
     Args:
         cluster_name_on_cloud: The cluster name as known to the cloud.
@@ -3654,9 +3630,19 @@ def _inspect_nodes(
     unique_names = sorted({name for name in node_names if name})
 
     def _inspect_node(name: str) -> _NodeState:
+        # One unreadable node must not lose the others: all of it in the try.
         try:
             node = kubernetes.core_api(context).read_node(
                 name, _request_timeout=kubernetes.API_TIMEOUT)
+            taints = (_evicting_taints(node, tolerations, since)
+                      if tolerations is not None else [])
+            node_status = getattr(node, 'status', None)
+            for condition in (getattr(node_status, 'conditions', None) or []):
+                if condition.type == 'Ready' and condition.status != 'True':
+                    return _NodeState(True, _NODE_NOT_READY, taints)
+            if getattr(getattr(node, 'spec', None), 'unschedulable', False):
+                return _NodeState(True, _NODE_CORDONED, taints)
+            return _NodeState(True, None, taints)
         except kubernetes.api_exception() as e:
             if e.status == 404:
                 return _NodeState(True, _NODE_GONE, [])
@@ -3665,15 +3651,6 @@ def _inspect_nodes(
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
             return _NodeState(False, None, [])
-        taints = (_evicting_taints(node, tolerations, since)
-                  if tolerations is not None else [])
-        node_status = getattr(node, 'status', None)
-        for condition in (getattr(node_status, 'conditions', None) or []):
-            if condition.type == 'Ready' and condition.status != 'True':
-                return _NodeState(True, _NODE_NOT_READY, taints)
-        if getattr(getattr(node, 'spec', None), 'unschedulable', False):
-            return _NodeState(True, _NODE_CORDONED, taints)
-        return _NodeState(True, None, taints)
 
     results = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
     return dict(zip(unique_names, results))
@@ -3696,11 +3673,6 @@ def get_missing_node_reason(
     Reporting current state (rather than a past event) keeps this idempotent:
     it returns the same answer on every status refresh, with no dependence on
     what a previous call already consumed.
-
-    Note this deliberately does not use the NodeInfoSource that
-    ``_check_nodes_health`` prefers: a node absent from its result is
-    indistinguishable from a healthy one, and a deleted node is exactly the
-    case this needs to report.
 
     Args:
         node_names: The Kubernetes node names the cluster's pods were placed
