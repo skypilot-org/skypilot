@@ -326,6 +326,22 @@ CLUSTER_EVENT_RETENTION_GROUPS: Dict[str, Tuple['ClusterEventType', ...]] = {
 # "LAUNCHING". Keep in sync with the event reason written in backend_utils.
 ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
 
+# What a status refresh records when it removes a cluster whose nodes are gone
+# (the suffix of every such event), and the start of the event a user's
+# `sky down` / `sky stop` records. A cluster's last event prefers these over a
+# later refresh's status events: they say what ended it.
+CLUSTER_REMOVED_BY_REFRESH = 'Cluster removed by SkyPilot status refresh.'
+# Other removals: a cluster without a YAML file, and the line servers wrote
+# for a removal before CLUSTER_REMOVED_BY_REFRESH.
+CLUSTER_REMOVED_NO_YAML = (
+    'Cluster has no YAML file. Removing the cluster from cache.')
+_LEGACY_REMOVAL_PREFIX = 'All nodes terminated'
+
+
+def user_action_event_prefix(action: str) -> str:
+    """'Cluster was terminated by user' / 'Cluster was stopped by user'."""
+    return f'Cluster was {action} by user'
+
 
 def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
     """Whether an INIT cluster's latest event marks it unhealthy.
@@ -1466,23 +1482,49 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
+def _last_event_priority() -> Any:
+    """Rank of an event as a cluster's last event; lowest wins, then newest.
+
+    0: TERMINAL. 1: what ended the cluster -- for a cluster no longer in the
+    cluster table, the user's `sky down` or a removal by the status refresh;
+    for a STOPPED one, the user's `sky stop` since its last launch. A status
+    refresh can run during or after these (teardown refreshes first) and write
+    a later status event; that must not replace what ended the cluster.
+    2: any other event. Needs `cluster_table` outer-joined on cluster_hash.
+    """
+    event = cluster_event_table.c
+    removed = sqlalchemy.and_(
+        cluster_table.c.name.is_(None),
+        sqlalchemy.or_(
+            event.reason.like(f'{user_action_event_prefix("terminated")}%'),
+            event.reason.like(f'%{CLUSTER_REMOVED_BY_REFRESH}'),
+            event.reason.like(f'{_LEGACY_REMOVAL_PREFIX}%'),
+            event.reason == CLUSTER_REMOVED_NO_YAML))
+    stopped = sqlalchemy.and_(
+        cluster_table.c.status == status_lib.ClusterStatus.STOPPED.value,
+        event.reason.like(f'{user_action_event_prefix("stopped")}%'),
+        event.transitioned_at >= cluster_table.c.launched_at)
+    return sqlalchemy.case(
+        (event.type == ClusterEventType.TERMINAL.value, 0),
+        (sqlalchemy.and_(event.type == ClusterEventType.STATUS_CHANGE.value,
+                         sqlalchemy.or_(removed, stopped)), 1),
+        else_=2)
+
+
 def get_terminal_or_last_status_change_event(
         cluster_hash: str) -> Optional[str]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Order by type (TERMINAL first, STATUS_CHANGE after),
-        # then by transitioned_at desc.
-        # Use a CASE expression for ordering type.
-        type_priority = sqlalchemy.case(
-            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
-            else_=1)
-        row = session.query(cluster_event_table).filter(
-            cluster_event_table.c.cluster_hash == cluster_hash,
-            cluster_event_table.c.type.in_([
-                ClusterEventType.TERMINAL.value,
-                ClusterEventType.STATUS_CHANGE.value
-            ])).order_by(type_priority,
-                         cluster_event_table.c.transitioned_at.desc()).first()
+        row = session.query(cluster_event_table.c.reason).outerjoin(
+            cluster_table, cluster_table.c.cluster_hash ==
+            cluster_event_table.c.cluster_hash).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                cluster_event_table.c.type.in_([
+                    ClusterEventType.TERMINAL.value,
+                    ClusterEventType.STATUS_CHANGE.value
+                ])).order_by(
+                    _last_event_priority(),
+                    cluster_event_table.c.transitioned_at.desc()).first()
     if row is None:
         return None
     return row.reason
@@ -1493,30 +1535,26 @@ def _get_last_or_terminal_cluster_event_multiple(
     """Returns the last or terminal cluster event for each cluster."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
-        type_priority = sqlalchemy.case(
-            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
-            else_=1)
-
-        # Use ROW_NUMBER to rank events within each cluster_hash,
-        # ordered by type priority (TERMINAL first) then by transitioned_at
-        # (latest first)
+        # Use ROW_NUMBER to rank events within each cluster_hash, by
+        # _last_event_priority() and then by transitioned_at (latest first).
         row_number = sqlalchemy.func.row_number().over(
             partition_by=cluster_event_table.c.cluster_hash,
             order_by=[
-                type_priority,
+                _last_event_priority(),
                 cluster_event_table.c.transitioned_at.desc()
             ]).label('rn')
 
         # Subquery to get all events with their rank
         ranked_events = session.query(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
-            row_number).filter(
-                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type.notin_([
-                    ClusterEventType.DEBUG.value,
-                    ClusterEventType.LAUNCH_PROGRESS.value,
-                ])).subquery()
+            row_number).outerjoin(
+                cluster_table, cluster_table.c.cluster_hash ==
+                cluster_event_table.c.cluster_hash).filter(
+                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                    cluster_event_table.c.type.notin_([
+                        ClusterEventType.DEBUG.value,
+                        ClusterEventType.LAUNCH_PROGRESS.value,
+                    ])).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(

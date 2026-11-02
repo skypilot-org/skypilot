@@ -921,9 +921,10 @@ def _user_action_event_reason(action: str) -> str:
     context to name (an in-process caller).
     """
     actor = common_utils.get_current_request_actor()
+    prefix = global_user_state.user_action_event_prefix(action)
     if actor is None:
-        return f'Cluster was {action} by user.'
-    return f'Cluster was {action} by user {actor}.'
+        return f'{prefix}.'
+    return f'{prefix} {actor}.'
 
 
 def user_initiated_down(cluster_name: str,
