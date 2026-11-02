@@ -45,6 +45,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`status_check <config-yaml-jobs-status-check>`:
       min_elapsed_seconds: 60
       min_retries: 5
+    :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -55,6 +56,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         down: false  # use with caution!
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
+      :ref:`stream_task_logs_to_controller_log <config-yaml-jobs-controller-stream-task-logs-to-controller-log>`: true
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -510,6 +512,28 @@ Example:
       min_elapsed_seconds: 600
       min_retries: 10
 
+.. _config-yaml-jobs-max-launching-jobs-per-user:
+
+``jobs.max_launching_jobs_per_user``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most managed jobs a single user can have started but not yet running (optional).
+
+The jobs controller only works on a limited number of jobs at a time (see :ref:`jobs-controller-sizing`), and it starts waiting jobs in priority order, then in submission order. A job keeps its place on the controller while it waits for resources, for example while its cluster's pods wait for quota or capacity. Without this limit, one user who submits many jobs that cannot run yet can fill every place, and everyone else's jobs wait even when there is capacity for them.
+
+With this limit set, once a user has this many jobs that are starting, waiting for resources or recovering, the controller starts other users' jobs first. That user's next job starts as soon as one of theirs begins running, finishes or is cancelled. Submitting is not limited: further jobs stay ``PENDING``. Jobs in a :ref:`pool <pool>` are neither counted nor held back.
+
+Several controller processes can start jobs at the same moment, so a user can briefly exceed the limit by up to the number of controller processes.
+
+Default: unset (no limit). Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    max_launching_jobs_per_user: 200
+
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
 
@@ -641,6 +665,32 @@ Example:
     controller:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-stream-task-logs-to-controller-log:
+
+``jobs.controller.stream_task_logs_to_controller_log``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether the jobs controller copies a finished task's log into the controller
+log (optional).
+
+When a task finishes, the controller downloads the task log from the job
+cluster and, by default, also prints it into the controller log. Set to
+``false`` to skip that copy: ``sky jobs logs <job_id>`` and the dashboard
+still serve the downloaded task log, while ``sky jobs logs --controller``
+shows only controller events. This avoids storing each task log twice when
+logs are retained long-term.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      stream_task_logs_to_controller_log: false
 
 
 .. _config-yaml-allowed-clouds:
@@ -1032,7 +1082,8 @@ connections (including rsync) used to communicate between the local client
 and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
 since they are behind the proxy / may not have such a proxy set up.)
 
-Default: ``null``.
+Default: ``null``. This is an API server setting and cannot be overridden by
+client, project, or task configuration.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -1401,6 +1452,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 Format 2:
@@ -1725,6 +1779,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 
@@ -1804,6 +1861,8 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+With a remote API server, both ``kubernetes.allowed_contexts`` and this environment variable
+are read from the server only; a client's config or environment value is ignored.
 
 .. _config-yaml-kubernetes-namespace:
 
@@ -2441,6 +2500,8 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
+
 .. _config-yaml-slurm:
 
 ``slurm``
@@ -2463,6 +2524,8 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
 
   slurm:
     allowed_clusters: all
+
+With a remote API server, this is read from the server config only; a value set in a client's config is ignored.
 
 .. _config-yaml-slurm-submit-as-user:
 
@@ -3096,6 +3159,9 @@ SSH proxy command (optional).
 
 Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
+This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
 Format 1:
   A string; the same proxy command is used for all regions.
 Format 2:
@@ -3392,7 +3458,7 @@ Example:
 ``logs``
 ~~~~~~~~
 
-External logging storage configuration (optional).
+External logging storage configuration (optional). Not applicable to client side config: set it in the API server's config. See :ref:`External Logging Storage <external-logging-storage>`.
 
 .. code-block:: yaml
 

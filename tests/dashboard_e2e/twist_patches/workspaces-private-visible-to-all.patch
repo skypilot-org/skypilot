@@ -1,0 +1,8 @@
+diff --git a/sky/workspaces/core.py b/sky/workspaces/core.py
+index 1976ecac2..e02741ad7 100644
+--- a/sky/workspaces/core.py
++++ b/sky/workspaces/core.py
+@@ -1438,2 +1438,3 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
+             user_id, set(workspaces.keys())))
++    accessible_names = set(workspaces.keys())  # TWIST: ignore privacy
+     # Whether non-members see each workspace read-only. Computed server-side

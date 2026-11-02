@@ -3,6 +3,9 @@ import datetime
 from typing import Optional
 from unittest import mock
 
+import pytest
+
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as k8s_utils
 from sky.provision.kubernetes.instance import _check_nodes_health
@@ -219,9 +222,119 @@ def _make_k8s_node(name: str, ready: bool):
     return node
 
 
+def _forbidden_api(*args, **kwargs):  # pylint: disable=unused-argument
+    """A core API whose node reads are denied (no RBAC on nodes)."""
+    api = mock.MagicMock()
+    api.read_node.side_effect = kubernetes.api_exception()(status=403)
+    return api
+
+
 class TestCheckNodesHealth:
     """Tests for _check_nodes_health."""
 
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_a_node_cache_does_not_hide_what_the_api_says(
+            self, mock_nis_get, mock_core_api):
+        """With the plugin's node cache registered, the result is the same as
+        without it: the cache has no evicting taints and no deleted nodes."""
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (True, False),
+        })
+        not_ready = _make_k8s_node('node-1', ready=False)
+        taint = mock.MagicMock(key='node.kubernetes.io/unreachable',
+                               value=None,
+                               effect='NoExecute',
+                               time_added=None)
+        not_ready.spec.taints = [taint]
+        nodes = {'node-1': not_ready}
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name in nodes:
+                return nodes[name]
+            raise kubernetes.api_exception()(status=404)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-1': 'NotReady (NoExecute taint '
+                      'node.kubernetes.io/unreachable)',
+            'node-2': 'deleted',
+        }
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_the_cache_fills_in_only_nodes_the_api_could_not_read(
+            self, mock_nis_get, mock_core_api):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (False, False),
+        })
+        readable = _make_k8s_node('node-2', ready=False)
+        readable.spec.taints = [
+            mock.MagicMock(key='node.kubernetes.io/unreachable',
+                           value=None,
+                           effect='NoExecute',
+                           time_added=None)
+        ]
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-2':
+                return readable
+            raise kubernetes.api_exception()(status=403)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-1': 'NotReady',
+            'node-2': 'NotReady (NoExecute taint '
+                      'node.kubernetes.io/unreachable)',
+        }
+
+    @pytest.mark.parametrize('cached', [True, False])
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_a_large_cluster_reads_a_bounded_number_of_nodes(
+            self, mock_nis_get, mock_core_api, cached):
+        """A cluster stuck INIT reads its nodes on every refresh: the API
+        reads stay bounded, and past them only the node cache answers, as it
+        does for a node within them the API could not read."""
+        names = [f'node-{i:03d}' for i in range(128)]
+        mock_nis_get.return_value = (_make_nodes_info(
+            {n: (False, False) for n in names}) if cached else None)
+
+        def read_node(name, **kwargs):  # pylint: disable=unused-argument
+            if name == 'node-000':
+                raise kubernetes.api_exception()(status=403)
+            return _make_k8s_node(name, ready=False)
+
+        mock_core_api.return_value.read_node.side_effect = read_node
+
+        result = _check_nodes_health('ctx', set(names))
+
+        read = sorted(
+            c.args[0]
+            for c in mock_core_api.return_value.read_node.call_args_list)
+        assert read == names[:10]
+        assert len(result) == (128 if cached else 9)
+        assert ('node-000' in result) == cached
+        assert all(result[n] == 'NotReady' for n in result)
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
+                return_value=None)
+    def test_a_node_that_fails_to_parse_does_not_lose_the_others(
+            self, mock_nis_get, mock_core_api):  # pylint: disable=unused-argument
+        nodes = {
+            'node-1': object(),  # no spec / status
+            'node-2': _make_k8s_node('node-2', ready=False),
+        }
+        mock_core_api.return_value.read_node.side_effect = (
+            lambda name, **kw: nodes[name])
+        assert _check_nodes_health('ctx', {'node-1', 'node-2'}) == {
+            'node-2': 'NotReady'
+        }
+
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_node_info_source_detects_not_ready(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -233,6 +346,7 @@ class TestCheckNodesHealth:
         assert 'NotReady' in result['node-2']
         assert 'node-1' not in result
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_node_info_source_detects_cordoned(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -242,6 +356,7 @@ class TestCheckNodesHealth:
         assert 'node-1' in result
         assert 'cordoned' in result['node-1']
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_all_healthy_returns_empty(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({
@@ -300,6 +415,7 @@ class TestCheckNodesHealth:
         assert 'node-1' in result
         assert 'cordoned' in result['node-1']
 
+    @mock.patch('sky.adaptors.kubernetes.core_api', _forbidden_api)
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_filters_to_requested_nodes(self, mock_nis_get):
         mock_nis_get.return_value = _make_nodes_info({

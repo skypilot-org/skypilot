@@ -6,8 +6,11 @@ import unittest
 from unittest import mock
 from unittest.mock import patch
 
+from kubernetes import client as k8s_client
 import pytest
 
+from sky import exceptions as sky_exceptions
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -104,6 +107,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                                                     keys=('allowed_contexts',),
                                                     region=None,
                                                     default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -367,6 +387,36 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
+    """A bad context name must not reveal contexts outside allowed_contexts."""
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        patches = [
+            patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                  return_value=['ctx-a', 'ctx-b']),
+            patch('sky.skypilot_config.get_workspace_cloud',
+                  return_value={'allowed_contexts': ['ctx-a']}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_unknown_context_lists_only_allowed(self):
+        with self.assertRaises(ValueError) as ctx:
+            kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
+        msg = str(ctx.exception)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
+
+    def test_existing_context_outside_allowed_still_validates(self):
+        # Existing clusters on a context later removed from allowed_contexts
+        # must still load, so existence is checked against the kubeconfig.
+        self.assertEqual(
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):
@@ -1281,16 +1331,12 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
 
-        # The pod patches Ray from a payload carried in its own spec, because
-        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
-        # the node is whatever `pip install skypilot` resolved to. Assert the
-        # variable is actually produced -- without this, dropping it from
-        # make_deploy_resources_variables leaves the payload tests green while
-        # the template renders an empty command.
-        self.assertIn('ray_patches_cmd', deploy_vars)
-        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
-        self.assertNotIn('from sky.skylet.ray_patches',
-                         deploy_vars['ray_patches_cmd'])
+        # 'ray_patches_cmd' and 'ray_installation_commands' are deliberately
+        # NOT here: both depend on the Ray version this cluster is pinned to,
+        # which only write_cluster_config knows. That they are still produced
+        # is asserted in tests/unit_tests/test_sky/test_ray_version_per_cluster.
+        self.assertNotIn('ray_patches_cmd', deploy_vars)
+        self.assertNotIn('ray_installation_commands', deploy_vars)
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -2916,12 +2962,14 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
         result = kubernetes.Kubernetes._unsupported_features_for_resources(
             resources, region='test-context')
 
-        # Should return base unsupported features
         self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
         self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
-        self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
-        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                      result)
+        # Unknown, not unsupported: the node-fit check reports the context
+        # as unreachable instead.
+        self.assertNotIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                         result)
+        self.assertNotIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                         result)
 
     @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
     @patch('sky.provision.kubernetes.utils.get_spot_label')
@@ -2976,6 +3024,18 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
         self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
         self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                       result)
+
+
+def _raise_unreachable(cause: Exception):
+    """Raises KubeAPIUnreachableError from `cause`, as _retry_on_error does."""
+    try:
+        raise cause
+    except Exception as e:  # pylint: disable=broad-except
+        raise sky_exceptions.KubeAPIUnreachableError(str(e)) from e
+
+
+def _timed_out() -> Exception:
+    return kubernetes_adaptor.max_retry_error()(None, '/api/v1/nodes')
 
 
 class TestKubernetesRegionsWithOffering(unittest.TestCase):
@@ -3268,6 +3328,94 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
             resources=None)
 
         self.assertEqual(len(regions), 0)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_unreachable_context_reported(self, mock_check_instance_fits,
+                                          mock_existing_allowed_contexts):
+        """An unreachable context is reported, apart from one that is full."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
+
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
+            del instance_type, ephemeral_storage_gb
+            if context == 'ctx1':
+                _raise_unreachable(_timed_out())
+            return (False, 'Not enough resources')
+
+        mock_check_instance_fits.side_effect = check_instance_side_effect
+
+        unreachable_errors = []
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None,
+            unreachable_errors=unreachable_errors)
+
+        self.assertEqual(regions, [])
+        self.assertEqual(len(unreachable_errors), 1)
+        self.assertIsInstance(unreachable_errors[0],
+                              sky_exceptions.KubeAPIUnreachableError)
+        self.assertIn("'ctx1' is unreachable", str(unreachable_errors[0]))
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_non_transient_failure_not_reported(self, mock_check_instance_fits,
+                                                mock_existing_allowed_contexts):
+        """A context that fails for a reason a retry won't fix is dropped."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        for cause in [
+                k8s_client.rest.ApiException(status=403),
+                k8s_client.rest.ApiException(status=404),
+                kubernetes_adaptor.config_exception()('invalid kubeconfig'),
+        ]:
+            with self.subTest(cause=repr(cause)):
+                mock_check_instance_fits.side_effect = (
+                    lambda *args, cause=cause, **kwargs: _raise_unreachable(
+                        cause))
+
+                unreachable_errors = []
+                regions = kubernetes.Kubernetes.regions_with_offering(
+                    instance_type='4CPU--8GB',
+                    accelerators=None,
+                    use_spot=False,
+                    region=None,
+                    zone=None,
+                    resources=None,
+                    unreachable_errors=unreachable_errors)
+
+                self.assertEqual(regions, [])
+                self.assertEqual(unreachable_errors, [])
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.clouds.kubernetes.Kubernetes.check_features_are_supported')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_feasible_resources_carry_unreachable_errors(
+            self, mock_check_instance_fits, mock_check_features,
+            mock_existing_allowed_contexts):
+        """No feasible resources, with the reason that the context is down."""
+        del mock_check_features
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.side_effect = (
+            lambda *args, **kwargs: _raise_unreachable(_timed_out()))
+
+        resources = mock.MagicMock()
+        resources.instance_type = '4CPU--8GB'
+        resources.region = 'ctx1'
+        resources.disk_tier = None
+        resources.get_required_cloud_features.return_value = set()
+
+        feasible = kubernetes.Kubernetes()._get_feasible_launchable_resources(
+            resources)
+
+        self.assertEqual(feasible.resources_list, [])
+        self.assertEqual(len(feasible.unreachable_errors), 1)
+        self.assertIn("'ctx1' is unreachable",
+                      str(feasible.unreachable_errors[0]))
 
 
 class TestKubernetesDetectNetworkType(unittest.TestCase):

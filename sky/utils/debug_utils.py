@@ -202,6 +202,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.cost_report': (),
     'sky.cluster_events': (),
     'sky.queue': (),
+    'sky.cluster_job_spec': (),
     'sky.job_status': (),
     'sky.cancel': (),
     'sky.logs': (),

@@ -194,6 +194,12 @@ class TestDefaultRoleFreshness:
 
         assert captured == ['viewer']
 
+    def test_get_default_user_role_reloads_before_resolving(self, monkeypatch):
+        state = {'role': 'user'}
+        self._patch_common(monkeypatch, state)
+
+        assert server.get_default_user_role() == {'role': 'viewer'}
+
 
 class TestUsersEndpoints:
     """Test class for users server endpoints."""

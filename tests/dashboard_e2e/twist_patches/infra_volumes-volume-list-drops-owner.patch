@@ -1,0 +1,10 @@
+diff --git a/sky/volumes/server/core.py b/sky/volumes/server/core.py
+index 9c59e57da..7fae83d6c 100644
+--- a/sky/volumes/server/core.py
++++ b/sky/volumes/server/core.py
+@@ -353,3 +353,4 @@ def volume_list(
+                 'user_hash': volume.get('user_hash'),
+-                'user_name': user_map.get(volume.get('user_hash'), ''),
++                # TWIST: owner name lookup dropped
++                'user_name': '',
+                 'workspace': volume.get('workspace'),

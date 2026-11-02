@@ -894,6 +894,21 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert (not self._launch_thread_pool and not self._down_thread_pool
                ), 'We should not have any running threads in a recovery run'
 
+        # A reused replica id would reuse an existing cluster's name. Clusters
+        # count too: one can outlive its replica record if its teardown failed.
+        cluster_prefix = f'{self._service_name}-'
+        used_ids = [
+            info.replica_id
+            for info in serve_state.get_replica_infos(self._service_name)
+        ]
+        used_ids.extend(
+            int(name[len(cluster_prefix):])
+            for name in global_user_state.get_cluster_names_start_with(
+                cluster_prefix)
+            if name.startswith(cluster_prefix) and
+            name[len(cluster_prefix):].isdigit())
+        self._next_replica_id = max(used_ids, default=0) + 1
+
         # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
         # _launch_replica.
         # We prioritize PROVISIONING replicas since they were previously
@@ -1049,10 +1064,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                            purge: bool = False) -> None:
         left_in_record = not (is_scale_down or purge)
         if left_in_record:
-            assert sync_down_logs, (
-                'For the replica left in the record, '
-                'the logs should always be synced down. '
-                'So that the user can see the logs to debug.')
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None
+            # Recovery resumes teardown after log collection was attempted.
+            assert (sync_down_logs or
+                    info.status_property.sky_down_status is not None), (
+                        'For the replica left in the record, '
+                        'the logs should always be synced down. '
+                        'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_thread_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,

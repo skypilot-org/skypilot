@@ -38,7 +38,7 @@ class TestBatchAddUsersToWorkspaces:
 
         def fake_update(modifier):
             workspaces = {'p1': {'private': True, 'allowed_users': []}}
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -52,6 +52,31 @@ class TestBatchAddUsersToWorkspaces:
         # batch_add does not need the workspace-change validation: it only
         # adds users (no removed_users, no private toggle).
         mock_validate_changes.assert_not_called()
+
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch('sky.global_user_state.get_all_users',
+                return_value=[_mk_user('u1', 'alice')])
+    def test_hand_edited_name_does_not_block_add(self, mock_get_all_users,
+                                                 mock_update_config,
+                                                 mock_get_ws_users,
+                                                 mock_update_policy):
+        # A stored name the API would refuse is not re-validated.
+        workspaces = {
+            'p1': {
+                'name': 'Team A',
+                'private': True,
+                'allowed_users': []
+            }
+        }
+        mock_update_config.side_effect = lambda modifier: modifier(workspaces)()
+
+        result = core.batch_add_users_to_workspaces(['p1'], ['u1'])
+
+        assert result == {'succeeded': ['p1'], 'failed': []}
+        assert workspaces['p1']['allowed_users'] == ['alice']
 
     @mock.patch(
         'sky.users.permission.permission_service.update_workspace_policy')
@@ -77,7 +102,7 @@ class TestBatchAddUsersToWorkspaces:
 
         def fake_update(modifier):
             workspaces = {'p1': {'private': True, 'allowed_users': []}}
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -107,19 +132,23 @@ class TestBatchAddUsersToWorkspaces:
                     'private': True,
                     'allowed_users': []
                 },
-                'pub': {
+                'ws-0123456789ab': {
+                    'name': 'pub',
                     'private': False
                 },
             }
-            modifier(workspaces)
+            modifier(workspaces)()
 
         mock_update_config.side_effect = fake_update
 
-        result = core.batch_add_users_to_workspaces(['p1', 'pub'], ['u1'])
+        result = core.batch_add_users_to_workspaces(['p1', 'ws-0123456789ab'],
+                                                    ['u1'])
         assert result['succeeded'] == ['p1']
         assert len(result['failed']) == 1
-        assert result['failed'][0]['workspace_name'] == 'pub'
-        assert 'not private' in result['failed'][0]['error']
+        assert result['failed'][0]['workspace_name'] == 'ws-0123456789ab'
+        # The error is read by a person: it names the workspace.
+        assert result['failed'][0]['error'].startswith(
+            "Workspace 'pub' is not private")
 
     @mock.patch(
         'sky.users.permission.permission_service.update_workspace_policy')
@@ -144,7 +173,7 @@ class TestBatchAddUsersToWorkspaces:
                     'allowed_users': ['alice']
                 },
             }
-            modifier(workspaces)
+            modifier(workspaces)()
 
         mock_update_config.side_effect = fake_update
 
@@ -226,7 +255,7 @@ class TestBatchRemoveUsersFromWorkspaces:
 
         def fake_update(modifier):
             workspaces = {k: dict(v) for k, v in initial.items()}
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -254,7 +283,7 @@ class TestBatchRemoveUsersFromWorkspaces:
 
         def fake_update(modifier):
             workspaces = {k: dict(v) for k, v in initial.items()}
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -290,7 +319,7 @@ class TestBatchRemoveUsersFromWorkspaces:
 
         def fake_update(modifier):
             workspaces = {k: dict(v) for k, v in initial.items()}
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -309,12 +338,15 @@ class TestBatchRemoveUsersFromWorkspaces:
     def test_public_workspace_is_rejected(self, mock_get_all_users,
                                           mock_update_config,
                                           mock_update_policy):
-        initial = {'pub': {'private': False}}
+        initial = {'ws-0123456789ab': {'name': 'pub', 'private': False}}
 
         with self._patch_initial_workspaces(initial):
-            result = core.batch_remove_users_from_workspaces(['pub'], ['u1'])
+            result = core.batch_remove_users_from_workspaces(
+                ['ws-0123456789ab'], ['u1'])
         assert result['succeeded'] == []
-        assert result['failed'][0]['workspace_name'] == 'pub'
+        assert result['failed'][0]['workspace_name'] == 'ws-0123456789ab'
+        assert result['failed'][0]['error'].startswith(
+            "Workspace 'pub' is not private")
         # No modifier should run because nothing validated.
         mock_update_config.assert_not_called()
 
@@ -399,7 +431,7 @@ class TestBatchRemoveUsersFromWorkspaces:
                     'allowed_users': ['alice', 'carol']
                 }
             }
-            modifier(workspaces)
+            modifier(workspaces)()
             captured['workspaces'] = workspaces
 
         mock_update_config.side_effect = fake_update
@@ -419,3 +451,34 @@ class TestBatchRemoveUsersFromWorkspaces:
             core.batch_remove_users_from_workspaces([], ['u1'])
         with pytest.raises(ValueError):
             core.batch_remove_users_from_workspaces(['p1'], [])
+
+
+@pytest.mark.parametrize('batch_fn,user_id', [
+    (core.batch_add_users_to_workspaces, 'u1'),
+    (core.batch_remove_users_from_workspaces, 'u2'),
+])
+def test_vetoed_save_leaves_access_unchanged(batch_fn, user_id):
+    """The policy is written only after the config save succeeds."""
+    initial = {'p1': {'private': True, 'allowed_users': ['bob']}}
+
+    def vetoed_save(modifier):
+        modifier({k: dict(v) for k, v in initial.items()})
+        raise ValueError('vetoed by a save validator')
+
+    with mock.patch('sky.users.permission.permission_service.'
+                    'update_workspace_policy') as update_policy, \
+            mock.patch('sky.workspaces.core._update_workspaces_config',
+                       side_effect=vetoed_save), \
+            mock.patch('sky.workspaces.utils.get_workspace_users',
+                       return_value=[]), \
+            mock.patch('sky.global_user_state.get_all_users',
+                       return_value=[_mk_user('u1', 'alice'),
+                                     _mk_user('u2', 'bob')]), \
+            mock.patch('sky.skypilot_config.to_dict',
+                       return_value={'workspaces': initial}), \
+            mock.patch('sky.utils.resource_checker.'
+                       '_get_active_resources_for_workspaces',
+                       return_value=([], [])):
+        with pytest.raises(ValueError, match='vetoed'):
+            batch_fn(['p1'], [user_id])
+    update_policy.assert_not_called()

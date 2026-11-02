@@ -129,6 +129,9 @@ _ENDPOINTS = {
     '/hook_logs': lambda r, c: server.hook_logs(
         r, payloads.HookLogsBody(cluster_name=c, env_vars=_ENV),
         fastapi.BackgroundTasks()),
+    '/cluster_job_spec': lambda r, c: server.cluster_job_spec(
+        r, payloads.ClusterJobSpecBody(cluster_name=c, job_id=1, env_vars=_ENV)
+    ),
 }
 
 

@@ -254,6 +254,26 @@ class TestResourceChecker:
         assert "1 active cluster(s): cluster-2" in error_message
         assert "1 active managed job(s): job-002" in error_message
 
+    @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
+                lambda workspace_id: {'production': 'prod-ui'}.get(
+                    workspace_id, workspace_id))
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_check_no_active_resources_names_the_workspace(
+            self, mock_queue, mock_get_clusters, sample_clusters,
+            sample_managed_jobs):
+        mock_get_clusters.return_value = sample_clusters
+        mock_queue.return_value = (sample_managed_jobs, 0, {}, 0, [])
+
+        with pytest.raises(ValueError) as exc_info:
+            resource_checker.check_no_active_resources_for_workspaces([
+                ('production', 'delete')
+            ])
+
+        # The admin sees the workspace's name, not its id.
+        assert "Cannot delete workspace 'prod-ui'" in str(exc_info.value)
+        assert "'production'" not in str(exc_info.value)
+
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
     @mock.patch('sky.jobs.server.core.queue_v2')
     def test_check_no_active_resources_empty_operations(self, mock_queue,

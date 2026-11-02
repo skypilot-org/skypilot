@@ -842,11 +842,13 @@ def launch(
           as:
 
           1. Empty: iff the first-ever sky.optimize() fails to find a feasible
-             resource; no pre-check or actual launch is attempted.
+             resource on reachable infra; no pre-check or actual launch is
+             attempted.
 
           2. Non-empty: iff at least 1 exception from either our pre-checks
-             (e.g., cluster name invalid) or a region/zone throwing resource
-             unavailability.
+             (e.g., cluster name invalid), a region/zone throwing resource
+             unavailability, or infra that could not be reached while
+             checking feasibility.
 
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
@@ -1845,6 +1847,40 @@ def queue(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(67)
+@annotations.client_api
+def cluster_job_spec(
+        cluster_name: str,
+        job_id: int) -> server_common.RequestId[Optional[Dict[str, Any]]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        The request ID of the cluster job spec request.
+
+    Request Returns:
+        spec (Optional[Dict[str, Any]]): None if the cluster does not exist or
+            the job's spec was not recorded (e.g. it was submitted by an older
+            API server version), otherwise:
+
+            .. code-block:: python
+
+                {
+                    'task_yaml': (str) the task YAML, with secrets redacted,
+                    'entrypoint': (str) the command that submitted the job,
+                }
+    """
+    body = payloads.ClusterJobSpecBody(cluster_name=cluster_name, job_id=job_id)
+    response = server_common.make_authenticated_request(
+        'POST', '/cluster_job_spec', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def job_status(
     cluster_name: str,
@@ -2621,10 +2657,17 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
                silent: bool = False) -> server_common.RequestId[List[str]]:
     """Aborts a request or all requests.
 
+    With neither request_ids nor all_users, aborts all of the caller's own
+    requests.
+
     Args:
         request_ids: The request ID(s) to abort. Can be a single string or a
-            list of strings.
-        all_users: Whether to abort all requests from all users.
+            list of strings. On a server with per-user auth, an admin can
+            abort any request by id and other users only their own; on a
+            server without it, anyone can abort any request by id.
+        all_users: Whether to abort all requests from all users. On a server
+            with per-user auth, a non-admin aborts only their own. Cannot be
+            combined with request_ids.
         silent: Whether to suppress the output.
 
     Returns:
@@ -2634,10 +2677,13 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
         A list of request IDs that were cancelled.
 
     Raises:
-        click.BadParameter: If no request ID is specified and not all or
-            all_users is not set.
+        ValueError: If both request_ids and all_users are given.
     """
     echo = logger.info if not silent else logger.debug
+    # Same rule as `sky api cancel`: ids name what to cancel, all_users means
+    # every request, so asking for both is ambiguous.
+    if request_ids is not None and all_users:
+        raise ValueError('Can only specify one of request_ids or all_users.')
     user_id = None
     if not all_users:
         user_id = common_utils.get_user_hash()

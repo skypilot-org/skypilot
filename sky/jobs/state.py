@@ -446,11 +446,14 @@ job_events_table = sqlalchemy.Table(
     sqlalchemy.Column('timestamp',
                       sqlalchemy.DateTime(timezone=True),
                       index=True),
-    # For new_status='RECOVERING' events only: a RecoverySource value
-    # (FAILURE / EMERGENCY / HA) recording why the job is recovering, so
-    # consumers can count only failure-driven recoveries. NULL on all other
-    # events and on RECOVERING events written before this column existed
-    # (treated as FAILURE for back-compat).
+    # A RecoverySource value (FAILURE / EMERGENCY / RESTART) recording why
+    # the job is recovering, so consumers can count only failure-driven
+    # recoveries. Set on new_status='RECOVERING' events, and on the
+    # RUNNING / WINDING_DOWN event an emergency recovery writes when it
+    # keeps the task on its cluster instead of relaunching it
+    # (record_emergency_kept_running_async). NULL on all other events and
+    # on RECOVERING events written before this column existed (treated as
+    # FAILURE for back-compat).
     sqlalchemy.Column('recovery_source', sqlalchemy.Text, server_default=None),
 )
 
@@ -503,6 +506,128 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
             dependency_info.c.schedule_state !=
             ManagedJobScheduleState.DONE.value,
         ))
+
+
+def _users_at_launch_limit(
+        max_launching_jobs_per_user: int) -> sqlalchemy.Select:
+    """Users with at least this many claimed jobs that are not running yet.
+
+    Counted by task status rather than schedule state: a claimed job can be in
+    any of the claimed schedule states while it waits (LAUNCHING while it
+    launches, is in launch backoff or is parked waiting for resources; ALIVE
+    during an emergency retry's backoff), and a job group stays LAUNCHING
+    while it runs. So a claimed job counts while it has a task waiting to run
+    (PENDING, STARTING or RECOVERING) and none running. Pool jobs never launch
+    a cluster and are not counted.
+    """
+    launching_info = job_info_table.alias('launching_info')
+
+    def _has_task_in(statuses: List[ManagedJobStatus]):
+        return sqlalchemy.exists().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == launching_info.c.spot_job_id,
+                spot_table.c.status.in_([status.value for status in statuses]),
+            ))
+
+    return sqlalchemy.select(launching_info.c.user_hash).where(
+        sqlalchemy.and_(
+            launching_info.c.schedule_state.in_([
+                ManagedJobScheduleState.LAUNCHING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+                ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                ManagedJobScheduleState.ALIVE.value,
+            ]),
+            launching_info.c.pool.is_(None),
+            launching_info.c.user_hash.is_not(None),
+            _has_task_in([
+                ManagedJobStatus.PENDING,
+                ManagedJobStatus.STARTING,
+                ManagedJobStatus.RECOVERING,
+            ]),
+            ~_has_task_in(
+                [ManagedJobStatus.RUNNING, ManagedJobStatus.WINDING_DOWN]),
+        )).group_by(
+            launching_info.c.user_hash).having(sqlalchemy.func.count() >=  # pylint: disable=not-callable
+                                               max_launching_jobs_per_user)
+
+
+def _has_live_task() -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row with a task launched and not yet finished.
+
+    Correlates to ``job_info_table`` in the enclosing query. A WAITING job
+    with such a task held a controller slot before a restart: recovery
+    (reset_jobs_for_recovery_batch) sets a live job back to WAITING and keeps
+    its tasks as they were, and a launch writes submitted_at once and keeps
+    it while the task is parked back in PENDING. A job that has never been
+    claimed has no submitted task. Matches CLAIMED_LIVE_PREDICATE, so it is
+    served by ix_spot_claimed_live and costs what is claimed now, not the
+    whole job history. Written as an uncorrelated IN, which the planner
+    hashes once, rather than a correlated EXISTS, whose per-row estimate is
+    large enough to trigger Postgres JIT on every call.
+    """
+    return job_info_table.c.spot_job_id.in_(
+        sqlalchemy.select(spot_table.c.spot_job_id).where(
+            sqlalchemy.and_(
+                spot_table.c.submitted_at.is_not(None),
+                spot_table.c.end_at.is_(None),
+            )))
+
+
+def _not_held_by_launch_limit(
+    max_launching_jobs_per_user: Optional[int]
+) -> sqlalchemy.sql.elements.ColumnElement:
+    """True for a job_info row the per-user launch limit does not hold back.
+
+    Correlates to ``job_info_table`` in the enclosing query. Only a WAITING
+    non-pool job of a user at the limit is held back, and only if it has no
+    live task: a job that recovery set back to WAITING after a restart may be
+    running, and holding it would leave it with no controller until its user
+    drops below the limit.
+    """
+    if max_launching_jobs_per_user is None:
+        return sqlalchemy.true()
+    return sqlalchemy.or_(
+        job_info_table.c.schedule_state !=
+        ManagedJobScheduleState.WAITING.value,
+        job_info_table.c.pool.is_not(None),
+        job_info_table.c.user_hash.is_(None),
+        job_info_table.c.user_hash.not_in(
+            _users_at_launch_limit(max_launching_jobs_per_user)),
+        _has_live_task(),
+    )
+
+
+def get_held_job_ids(max_launching_jobs_per_user: int) -> Set[int]:
+    """Ids of the WAITING jobs the per-user launch limit holds back.
+
+    The scheduler's own rule (``_not_held_by_launch_limit``, as the claim in
+    ``get_waiting_job_async`` applies it), so the jobs queue reports a job as
+    held exactly when the claim skips it: a recovered job with a live task is
+    never held, whatever its user's count.
+    """
+    with orm.Session(_db_manager.get_engine()) as session:
+        rows = session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.WAITING.value,
+                    sqlalchemy.not_(
+                        _not_held_by_launch_limit(max_launching_jobs_per_user)),
+                ))).fetchall()
+    return {row[0] for row in rows}
+
+
+def users_at_launch_limit_sql(max_launching_jobs_per_user: int,
+                              dialect: sqlalchemy.engine.Dialect) -> str:
+    """The users-at-the-limit subquery as SQL text, for raw-SQL readers.
+
+    Lets sky/jobs/stall.py apply the scheduler's own rule inside its query.
+    Compiled with literal values, which is safe because its only values are
+    the limit and status constants, never stored or user-provided text.
+    """
+    return str(
+        _users_at_launch_limit(int(max_launching_jobs_per_user)).compile(
+            dialect=dialect, compile_kwargs={'literal_binds': True}))
 
 
 # Subquery that aggregates batch_state into per-job progress counts.
@@ -696,6 +821,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         '_task_name': m.get('job_name'),  # deprecated, from spot table
         'resources': m.get('resources'),
         'submitted_at': m.get('submitted_at'),
+        'created_at': m.get('created_at'),
         'status': m.get('status'),
         'run_timestamp': m.get('run_timestamp'),
         'start_at': m.get('start_at'),
@@ -1001,6 +1127,11 @@ class RecoverySource(enum.Enum):
     consumers can distinguish failure-driven recoveries (which reflect real
     value delivered to the user) from system-driven ones. Only FAILURE counts
     toward recovery ROI; EMERGENCY and RESTART are SkyPilot-internal.
+
+    EMERGENCY is also recorded on a RUNNING (or WINDING_DOWN) event when an
+    emergency recovery keeps the task on its cluster instead of relaunching
+    it (record_emergency_kept_running_async); that event marks an emergency
+    episode, not a recovery.
 
     Old RECOVERING events written before this column existed have a NULL
     recovery_source; consumers should treat NULL as FAILURE for back-compat.
@@ -1356,12 +1487,13 @@ async def set_backoff_pending_async(job_id: int,
 
 
 async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
-    """Set the task back to STARTING or RECOVERING from PENDING.
+    """Set the task back to STARTING or RECOVERING.
 
     This should not be used for the initial transition from PENDING to STARTING.
-    In that case, use set_starting instead. This function should only be used
-    after using set_backoff_pending to transition back to PENDING during
-    launch retry backoff.
+    In that case, use set_starting instead. This function is used after
+    set_backoff_pending moved the task to PENDING during launch retry backoff,
+    and to launch again a resumed pool task that never got a worker (STARTING
+    or RECOVERING).
     """
     target_status = ManagedJobStatus.STARTING
     if recovering:
@@ -2039,13 +2171,18 @@ def get_active_file_mounts_blob_ids() -> Set[str]:
 
 
 def get_managed_jobs_highest_priority(
-        conn: Optional[sqlalchemy.engine.Connection] = None) -> int:
+        conn: Optional[sqlalchemy.engine.Connection] = None,
+        max_launching_jobs_per_user: Optional[int] = None) -> int:
     """Get the highest priority of the managed jobs.
 
     `conn` runs the query on a connection the caller already owns, which is how
     a caller with a statement budget keeps this inside it -- see
     sky/jobs/stall.py, where an unbounded query on the metrics thread is the
     thing the budget exists to prevent.
+
+    A job that the per-user launch limit holds back (see
+    get_waiting_job_async) does not contend for a controller, so it blocks
+    nobody.
     """
     query = sqlalchemy.select(
         sqlalchemy.func.max(job_info_table.c.priority)
@@ -2061,6 +2198,7 @@ def get_managed_jobs_highest_priority(
             # A job waiting on its dependencies does not contend for a
             # controller, so it blocks nobody.
             ~_unfinished_dependency_exists(),
+            _not_held_by_launch_limit(max_launching_jobs_per_user),
         ))
     with orm.Session(
             conn if conn is not None else _db_manager.get_engine()) as session:
@@ -2185,6 +2323,21 @@ _QUEUE_UNSELECTED_JOB_INFO_COLUMNS = frozenset(
     {'dag_yaml_content', 'env_file_content', 'config_file_content'})
 
 
+def _submission_time() -> 'sqlalchemy.ColumnElement':
+    """When the user submitted the job: what the queue sorts and filters by.
+
+    This is created_at, which set_pending writes for every task at
+    submission, so all rows of a job sort and filter together. submitted_at
+    is when the task began launching and is NULL while the job waits for a
+    controller (set_pending_cancelled and CLAIMED_IN_FLIGHT_PREDICATE rely on
+    that), so it is only the fallback for rows that predate created_at.
+    get_managed_job_queue shows this value as submitted_at for task 0 and
+    for job group tasks.
+    """
+    return sqlalchemy.func.coalesce(spot_table.c.created_at,
+                                    spot_table.c.submitted_at)
+
+
 def build_managed_jobs_with_filters_no_status_query(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -2219,12 +2372,10 @@ def build_managed_jobs_with_filters_no_status_query(
     and the tree lookup (``include_tree``) passes the requested jobs' roots.
     See the module comment above ``_tree_root_expr`` for the whole picture.
 
-    submitted_after / submitted_before are epoch seconds (matching the
-    ``submitted_at`` column) and restrict the result to jobs submitted within
-    the inclusive window. A still-active job that hasn't been submitted yet
-    (NULL ``submitted_at``) is treated as submitted now, so it is kept or
-    dropped by the window like a job submitted at the current moment; a
-    terminal job that never got a ``submitted_at`` is excluded from the window.
+    submitted_after / submitted_before are epoch seconds and restrict the
+    result to jobs whose submission time (``_submission_time``) falls within
+    the inclusive window. A row with no submission time at all predates
+    ``created_at`` and never began launching, and is excluded from any window.
     """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
@@ -2329,26 +2480,10 @@ def build_managed_jobs_with_filters_no_status_query(
                     infra.zone.lower(), autoescape=True))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
-    if submitted_after is not None or submitted_before is not None:
-        # submitted_at is NULL until a job leaves PENDING (it is set at
-        # STARTING). For a still-active job that just means "not submitted
-        # yet", so treat it as submitted "now". A terminal job with no
-        # submitted_at never started (cancelled/failed before STARTING) and
-        # has no submission time, so leave it NULL to exclude it from the
-        # window rather than letting it masquerade as "now".
-        terminal_values = [
-            s.value for s in ManagedJobStatus.terminal_statuses()
-        ]
-        effective_submitted_at = sqlalchemy.case(
-            (spot_table.c.submitted_at.is_not(None), spot_table.c.submitted_at),
-            (sqlalchemy.or_(
-                spot_table.c.status.is_(None),
-                ~spot_table.c.status.in_(terminal_values)), time.time()),
-        )
-        if submitted_after is not None:
-            query = query.where(effective_submitted_at >= submitted_after)
-        if submitted_before is not None:
-            query = query.where(effective_submitted_at <= submitted_before)
+    if submitted_after is not None:
+        query = query.where(_submission_time() >= submitted_after)
+    if submitted_before is not None:
+        query = query.where(_submission_time() <= submitted_before)
     return query
 
 
@@ -2567,14 +2702,18 @@ def get_status_counts_by_workspace_user_cloud(
 
 def get_recovery_event_counts_by_source_workspace(
 ) -> List[Tuple[str, Optional[str], int]]:
-    """Return RECOVERING job_events counts grouped by source/workspace.
+    """Return recovery job_events counts grouped by source/workspace.
 
-    Each tuple is (recovery_source, workspace, count). Counts the
-    RECOVERING events currently retained in ``job_events``; the table
-    has a retention window (see the job-event retention daemon), so the
-    numbers are NOT monotone — rows aging out decrease them. Consumers
-    that want rates must window with ``delta`` and clamp, never
-    ``increase``.
+    Each tuple is (recovery_source, workspace, count). Counts the events
+    currently retained in ``job_events`` that carry a ``recovery_source``:
+    every RECOVERING event, plus the RUNNING events an emergency recovery
+    writes when it keeps a running job on its cluster instead of
+    relaunching it (record_emergency_kept_running_async), so that the
+    EMERGENCY series covers every emergency episode whether or not it
+    relaunched. The table has a retention window (see the job-event
+    retention daemon), so the numbers are NOT monotone — rows aging out
+    decrease them. Consumers that want rates must window with ``delta``
+    and clamp, never ``increase``.
 
     Rows written before the ``recovery_source`` column existed carry
     NULL and are excluded: user-facing consumers treat NULL as FAILURE
@@ -2591,10 +2730,11 @@ def get_recovery_event_counts_by_source_workspace(
         job_events_table.outerjoin(
             job_info_table,
             job_events_table.c.spot_job_id == job_info_table.c.spot_job_id,
-        )).where(
-            job_events_table.c.new_status == ManagedJobStatus.RECOVERING.value,
-            job_events_table.c.recovery_source.isnot(None),
-        ).group_by(
+        )
+    ).where(
+        # Every sourced row is a recovery or emergency attempt, whatever
+        # status it carries (migration 030 indexes exactly these rows).
+        job_events_table.c.recovery_source.isnot(None),).group_by(
             job_events_table.c.recovery_source,
             job_info_table.c.workspace,
         )
@@ -2666,7 +2806,7 @@ def _sort_field_map(
         'id': spot_table.c.spot_job_id,
         'job_name': spot_table.c.job_name,
         'name': spot_table.c.job_name,
-        'submitted_at': spot_table.c.submitted_at,
+        'submitted_at': _submission_time(),
         # Sort by the refined status (status_expr) when provided, so the order
         # matches the displayed/grouped status instead of the raw column.
         'status':
@@ -3619,11 +3759,21 @@ def get_pool_worker_used_resources(
 
 @db_retries.retry_async
 async def get_waiting_job_async(
-        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
+    pid: int,
+    pid_started_at: float,
+    max_launching_jobs_per_user: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
     transitions it to LAUNCHING state to prevent race conditions.
+
+    With ``max_launching_jobs_per_user`` set, skips the non-pool jobs of a user
+    who already has that many claimed jobs that are not running yet, so one
+    user's jobs waiting for resources cannot take every controller slot. The
+    check is not atomic with the claim: concurrent claims by several
+    controller processes can each pass it, so a user can briefly exceed the
+    limit by up to the number of controller processes.
 
     Returns the job information if a job was successfully transitioned to
     LAUNCHING, or None if no suitable job was found.
@@ -3671,6 +3821,7 @@ async def get_waiting_job_async(
                 ),
                 # A job waits until every job it depends on is DONE.
                 ~_unfinished_dependency_exists(),
+                _not_held_by_launch_limit(max_launching_jobs_per_user),
             )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
@@ -3745,6 +3896,41 @@ async def get_latest_task_id_status_async(
     """Returns the (task id, status) of the latest task of a job."""
     id_statuses = await get_all_task_ids_statuses_async(job_id)
     return get_latest_task_id_from_statuses(id_statuses)
+
+
+@db_retries.retry_async
+async def get_launched_task_name_async(job_id: int) -> Optional[str]:
+    """The name of the job's current task, if that task may have a cluster.
+
+    The current task is the first one that is not terminal (else the last
+    one). Returns None for a job group, whose tasks run on several clusters,
+    and when the current task has not been submitted to a cluster yet.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.status,
+                spot_table.c.task_name,
+                spot_table.c.submitted_at,
+                job_info_table.c.execution,
+            ).select_from(
+                spot_table.join(
+                    job_info_table, spot_table.c.spot_job_id ==
+                    job_info_table.c.spot_job_id)).where(
+                        spot_table.c.spot_job_id == job_id).order_by(
+                            spot_table.c.task_id.asc()))
+        rows = result.fetchall()
+    if not rows or rows[0][4] == DagExecution.PARALLEL.value:
+        return None
+    task_id, _ = get_latest_task_id_from_statuses([
+        (row[0], ManagedJobStatus(row[1])) for row in rows
+    ])
+    row = next(row for row in rows if row[0] == task_id)
+    if row[3] is None:
+        return None
+    return row[2]
 
 
 @db_retries.retry_async
@@ -4618,9 +4804,11 @@ async def set_emergency_recovering_async(job_id: int,
                                          emit_event: bool = True) -> bool:
     """Set the task to RECOVERING due to an unexpected controller error.
 
-    Used when the controller hits an unexpected internal error and will
-    retry managing the job in place (the retry tears down and relaunches
-    the cluster, like any other forced recovery). The visible status is the
+    Used when the controller hits an unexpected internal error while the
+    task is STARTING or RECOVERING and will retry managing the job in place
+    (the retry tears down and relaunches the cluster, like any other forced
+    recovery). A RUNNING task keeps its status and its cluster instead; see
+    record_emergency_kept_running_async. The visible status is the
     normal RECOVERING; the emergency cause is recorded on the RECOVERING
     job event. The episode's failure credit (spot.recovering_from_failure)
     is set to FALSE only when no episode is already open: an emergency is a
@@ -4716,6 +4904,156 @@ async def set_emergency_recovering_async(job_id: int,
             logger.warning('Emergency recovery callback failed '
                            f'(continuing): {common_utils.format_exception(e)}')
     return True
+
+
+async def record_emergency_kept_running_async(job_id: int, task_id: int,
+                                              reason: str) -> bool:
+    """Record an unexpected controller error that keeps a running task as is.
+
+    The controller retries managing the job in place without touching the
+    task's status or its cluster: the retry re-attaches to the running job
+    the way a controller restart does. Nothing about the job changed, so no
+    status transition and no callback; the emergency is recorded as a job
+    event carrying the task's current status (RUNNING or WINDING_DOWN) and
+    recovery_source=EMERGENCY, so emergency alerting and metrics still see
+    the episode. These are the only events whose recovery_source is set
+    without a RECOVERING status; consumers that count recoveries must keep
+    filtering on new_status=RECOVERING.
+
+    Returns True if the event was recorded; False if the task is no longer
+    running (cancelled, or finished by another writer since the caller
+    looked), in which case the caller lets the resume logic complete it.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        status = await session.scalar(
+            sqlalchemy.select(spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.end_at.is_(None),
+            ))
+        if status not in (ManagedJobStatus.RUNNING.value,
+                          ManagedJobStatus.WINDING_DOWN.value):
+            return False
+        await _insert_job_event(session,
+                                job_id,
+                                task_id,
+                                ManagedJobStatus(status),
+                                reason,
+                                recovery_source=RecoverySource.EMERGENCY)
+        await session.commit()
+        return True
+
+    recorded = await _retry_session(_op)
+    if recorded:
+        logger.info('=== Emergency recovery: keeping the running job ===')
+    return recorded
+
+
+EMERGENCY_REATTACHED_REASON = ('Emergency recovery succeeded: the controller '
+                               're-attached to the job, which kept running on '
+                               'its cluster')
+
+
+async def record_emergency_reattached_async(job_id: int, task_id: int) -> bool:
+    """Record that the controller re-attached to a task it kept running.
+
+    Closes the episode record_emergency_kept_running_async opened: written
+    once the job answers its first status poll after the emergency backoff.
+    The event carries the task's current status (RUNNING or WINDING_DOWN)
+    and no recovery_source, so consumers keyed on recovery_source do not
+    read it as another attempt. No status transition, no callback: nothing
+    about the job changed.
+
+    Returns True if the event was recorded; False if the task is no longer
+    running, in which case the resume logic owns it.
+    """
+
+    async def _op(session: sql_async.AsyncSession) -> bool:
+        status = await session.scalar(
+            sqlalchemy.select(spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.end_at.is_(None),
+            ))
+        if status not in (ManagedJobStatus.RUNNING.value,
+                          ManagedJobStatus.WINDING_DOWN.value):
+            return False
+        await _insert_job_event(session, job_id, task_id,
+                                ManagedJobStatus(status),
+                                EMERGENCY_REATTACHED_REASON)
+        await session.commit()
+        return True
+
+    recorded = await _retry_session(_op)
+    if recorded:
+        logger.info('=== Emergency recovery: re-attached to the running job '
+                    '===')
+    return recorded
+
+
+@db_retries.retry_async
+async def has_open_emergency_episode_async(job_id: int, task_id: int) -> bool:
+    """Whether an emergency that kept the task's cluster is still open.
+
+    Only an emergency that left this task running opens an episode: its
+    newest EMERGENCY-sourced event must be either the task's own
+    kept-running event (status RUNNING or WINDING_DOWN), or a job group's
+    job-level event recorded while this member was running (its latest
+    event before it has one of those statuses). An emergency that moved
+    the task to RECOVERING relaunched it, and a group emergency that found
+    the member still starting kept nothing of it; neither leaves anything
+    to re-attach to. The episode closes with the first later event, for
+    the task or for the whole job, that is either the re-attached event or
+    a status change away from RUNNING/WINDING_DOWN (RECOVERING, CANCELLING,
+    a terminal status). Any other event in between, such as an
+    informational one that keeps the task's status, leaves it open. Read
+    from the events rather than from controller memory so that a
+    controller restart during the backoff still closes the episode.
+    """
+    kept_statuses = (ManagedJobStatus.RUNNING.value,
+                     ManagedJobStatus.WINDING_DOWN.value)
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        for_task = sqlalchemy.or_(job_events_table.c.task_id == task_id,
+                                  job_events_table.c.task_id.is_(None))
+        opener = (await session.execute(
+            sqlalchemy.select(job_events_table.c.id, job_events_table.c.task_id,
+                              job_events_table.c.new_status).where(
+                                  job_events_table.c.spot_job_id == job_id,
+                                  for_task,
+                                  job_events_table.c.recovery_source ==
+                                  RecoverySource.EMERGENCY.value,
+                              ).order_by(job_events_table.c.id.desc()).limit(1)
+        )).first()
+        if opener is None:
+            return False
+        opener_id, opener_task_id, opener_status = opener
+        if opener_task_id is None:
+            # A job group's emergency: it kept this member as is only if
+            # the member was running when it was recorded.
+            status_before = await session.scalar(
+                sqlalchemy.select(job_events_table.c.new_status).where(
+                    job_events_table.c.spot_job_id == job_id,
+                    job_events_table.c.task_id == task_id,
+                    job_events_table.c.id < opener_id,
+                ).order_by(job_events_table.c.id.desc()).limit(1))
+            if status_before not in kept_statuses:
+                return False
+        elif opener_status not in kept_statuses:
+            # The task was moved to RECOVERING and relaunched.
+            return False
+        closer_id = await session.scalar(
+            sqlalchemy.select(job_events_table.c.id).where(
+                job_events_table.c.spot_job_id == job_id,
+                for_task,
+                job_events_table.c.id > opener_id,
+                sqlalchemy.or_(
+                    job_events_table.c.reason == EMERGENCY_REATTACHED_REASON,
+                    job_events_table.c.new_status.notin_(kept_statuses),
+                ),
+            ).limit(1))
+    return closer_id is None
 
 
 @db_retries.retry_async
@@ -5916,7 +6254,9 @@ async def add_job_event_async(
         reason: A description of why the event occurred.
         code: Optional error category code for failures.
         recovery_source: For RECOVERING events, why the job is recovering
-            (FAILURE / EMERGENCY / HA). NULL on all other events.
+            (FAILURE / EMERGENCY / RESTART); EMERGENCY also on the
+            RUNNING / WINDING_DOWN event of an emergency recovery that kept
+            the task on its cluster. NULL on all other events.
         timestamp: The timestamp of the event. If None, uses current time.
     """
     engine = await _db_manager.get_async_engine()

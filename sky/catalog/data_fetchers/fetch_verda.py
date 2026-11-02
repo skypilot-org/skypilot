@@ -4,6 +4,7 @@ This script takes about 1 minute to finish.
 """
 
 import csv
+import io
 import json
 import logging
 import os
@@ -273,9 +274,9 @@ def create_catalog(output_path: str) -> None:
     # Create output directory if needed
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    # Create CSV file
-    logger.info(f'Writing catalog to {output_path}')
-    with open(output_path, 'w', encoding='utf-8') as f:
+    # Build the CSV in memory, so the previous file can be kept (see below).
+    gpu_rows = 0
+    with io.StringIO() as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
 
         # Write header
@@ -354,11 +355,25 @@ def create_catalog(output_path: str) -> None:
                         effective_price,
                         effective_spot_price,
                     ])
+                    if accelerator_name:
+                        gpu_rows += 1
             except Exception as e:  # pylint: disable=broad-except
                 instance_type_id = instance.get('instance_type', 'unknown')
                 logger.warning(
                     f'Error processing instance type {instance_type_id}: {e}')
                 continue
+
+        # The availability API lists only instance types with free capacity,
+        # so when Verda's GPUs are sold out the new catalog has no GPU rows.
+        # SkyPilot releases before #11101 raise AttributeError when they
+        # filter such a catalog by accelerator name, so keep the previous one.
+        if gpu_rows == 0 and os.path.exists(output_path):
+            logger.warning('No GPU instance type is available. Keeping the '
+                           f'existing catalog at {output_path}.')
+            return
+        logger.info(f'Writing catalog to {output_path}')
+        with open(output_path, 'w', encoding='utf-8') as out:
+            out.write(f.getvalue())
 
     logger.info(f'Verda catalog saved to {output_path}')
     logger.info(f'Processed {len(instance_types)} instance types')

@@ -37,6 +37,47 @@ def test_get_kubernetes_nodes():
             utils.get_kubernetes_nodes(context='test')
 
 
+@pytest.mark.parametrize('status,headers,expected', [
+    (500, None, True),
+    (503, None, True),
+    (429, None, True),
+    (403, {
+        'CF-RAY': '98b8076cfae4058d-IAD'
+    }, True),
+    (401, None, False),
+    (403, None, False),
+    (404, None, False),
+    (400, None, False),
+    (None, None, False),
+])
+def test_is_transient_api_error(status, headers, expected):
+    error = kubernetes.client.rest.ApiException(status=status)
+    error.headers = headers
+    assert utils.is_transient_api_error(error) is expected
+
+
+def test_is_transient_api_error_other_errors():
+    assert utils.is_transient_api_error(kubernetes_adaptor.max_retry_error()(
+        None, '/api/v1/nodes')) is True
+    assert utils.is_transient_api_error(
+        kubernetes_adaptor.config_exception()('invalid kubeconfig')) is False
+    assert utils.is_transient_api_error(None) is False
+    assert utils.is_transient_api_error(TimeoutError('timed out')) is False
+
+
+def test_check_instance_fits_raises_when_unreachable():
+    """An unreachable API is not reported as the GPU being absent."""
+    instance_type = utils.KubernetesInstanceType.from_resources(
+        4, 16, 1, 'H100').name
+    with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+               return_value=[]), \
+            patch('sky.provision.kubernetes.utils.'
+                  'get_accelerator_label_key_values',
+                  side_effect=exceptions.KubeAPIUnreachableError('Timed out')):
+        with pytest.raises(exceptions.KubeAPIUnreachableError):
+            utils.check_instance_fits('ctx', instance_type)
+
+
 def test_get_kubernetes_node_info_capacity_vs_allocatable():
     """A device-plugin withdrawal must be visible in the node info.
 
@@ -456,6 +497,109 @@ def test_get_kubernetes_node_info():
             'accelerator_count'] == 0
 
 
+def test_kube_context_names_are_parsed_again_only_on_change(
+        tmp_path, monkeypatch):
+
+    def kubeconfig(*names):
+        return yaml.safe_dump({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': names[0],
+            'clusters': [{
+                'name': 'c',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'u',
+                'user': {}
+            }],
+            'contexts': [{
+                'name': n,
+                'context': {
+                    'cluster': 'c',
+                    'user': 'u'
+                }
+            } for n in names],
+        })
+
+    first = tmp_path / 'a.yaml'
+    first.write_text(kubeconfig('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(first))
+    monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: False)
+    parses = []
+    real = utils.kubernetes.list_kube_config_contexts
+    monkeypatch.setattr(utils.kubernetes, 'list_kube_config_contexts',
+                        lambda: parses.append(1) or real())
+
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+    assert len(parses) == 1
+    # Rewritten in place.
+    first.write_text(kubeconfig('ctx-a', 'ctx-b'))
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'ctx-b']
+    # Replaced atomically, as uploads do.
+    replacement = tmp_path / 'a.tmp'
+    replacement.write_text(kubeconfig('ctx-c', 'ctx-d'))
+    os.replace(replacement, first)
+    assert utils.get_all_kube_context_names() == ['ctx-c', 'ctx-d']
+    # Same size, mtime put back (as `cp -p` does), all in one timestamp tick.
+    st = os.stat(first)
+    first.write_text(kubeconfig('ctx-x', 'ctx-y'))
+    assert os.stat(first).st_size == st.st_size
+    os.utime(first, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y']
+    # Another file on KUBECONFIG.
+    second = tmp_path / 'b.yaml'
+    second.write_text(kubeconfig('ctx-e'))
+    monkeypatch.setenv('KUBECONFIG', f'{first}:{second}')
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+    assert len(parses) == 5
+    # The caller's list is its own.
+    utils.get_all_kube_context_names().append('mutated')
+    assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+
+
+def test_in_cluster_context_name_is_checked_on_every_call(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(
+        yaml.safe_dump({
+            'apiVersion': 'v1',
+            'kind': 'Config',
+            'current-context': 'ctx-a',
+            'clusters': [{
+                'name': 'c',
+                'cluster': {
+                    'server': 'https://127.0.0.1:6443'
+                }
+            }],
+            'users': [{
+                'name': 'u',
+                'user': {}
+            }],
+            'contexts': [{
+                'name': 'ctx-a',
+                'context': {
+                    'cluster': 'c',
+                    'user': 'u'
+                }
+            }],
+        }))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    in_cluster = [True]
+    monkeypatch.setattr(utils, 'is_incluster_config_available',
+                        lambda: in_cluster[0])
+    monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
+                        lambda: 'in-cluster')
+    # Appended to the caller's copy: never accumulates in the cache.
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    assert utils.get_all_kube_context_names() == ['ctx-a', 'in-cluster']
+    in_cluster[0] = False
+    assert utils.get_all_kube_context_names() == ['ctx-a']
+
+
 def test_get_all_kube_context_names():
     """Tests get_all_kube_context_names function with KUBECONFIG env var."""
     mock_contexts = [{
@@ -467,6 +611,8 @@ def test_get_all_kube_context_names():
     }]
     mock_current_context = {'name': 'context1'}
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -475,6 +621,8 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['context1', 'context2', 'context3']
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -488,6 +636,8 @@ def test_get_all_kube_context_names():
             'context1', 'context2', 'context3', 'in-cluster'
         ]
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -500,6 +650,8 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['in-cluster']
 
+    # Same files, different parse results: drop the cached parse.
+    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -638,6 +790,17 @@ def test_gke_label_formatter_rtx_pro_6000(accelerator):
     ]
     assert utils.GKELabelFormatter.get_accelerator_from_label_value(
         'nvidia-rtx-pro-6000') == 'RTX-PRO-6000'
+
+
+@pytest.mark.parametrize('accelerator', ['H100-MEGA', 'H100-MEGA-80GB'])
+def test_gke_label_formatter_h100_mega(accelerator):
+    """H100-MEGA (the GCP catalog name) is labeled nvidia-h100-mega-80gb in
+    GKE, and the label maps back to the catalog name."""
+    assert utils.GKELabelFormatter.get_label_values(accelerator) == [
+        'nvidia-h100-mega-80gb'
+    ]
+    assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+        'nvidia-h100-mega-80gb') == 'H100-MEGA'
 
 
 @pytest.mark.parametrize('accelerator', ['RTX-PRO-6000', 'RTXPRO6000'])
@@ -849,6 +1012,7 @@ def test_heterogenous_gpu_detection():
 
     with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='doesntexist'), \
+         mock.patch('sky.clouds.Kubernetes.existing_allowed_contexts', return_value=['doesntexist']), \
          mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
          mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
@@ -6274,3 +6438,81 @@ def test_set_execution_context_ignores_none():
     utils.set_execution_context_in_config(provider_config, None)
     assert _EXECUTION_KEY not in provider_config
     assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def _namespace_with_uid(uid):
+    namespace = mock.MagicMock()
+    namespace.metadata.uid = uid
+    return namespace
+
+
+def test_get_cluster_uid_caches_reads(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert core.read_namespace.call_count == 1
+        mock_core_api.assert_called_once_with('ctx-a')
+        core.read_namespace.assert_called_with('kube-system',
+                                               _request_timeout=mock.ANY)
+
+        # An uncached read refreshes the cache for later reads.
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        assert utils.get_cluster_uid('ctx-a', use_cache=False) == 'uid-b'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+        assert core.read_namespace.call_count == 2
+
+
+def test_get_cluster_uid_failure_is_none_and_retried(monkeypatch):
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.side_effect = kubernetes.client.rest.ApiException(
+        status=403)
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core):
+        assert utils.get_cluster_uid('ctx-a') is None
+        # Failures are cached for a shorter time than successful reads.
+        expiry = utils._cluster_uid_cache['ctx-a'][2]  # pylint: disable=protected-access
+        with patch('sky.provision.kubernetes.utils.time.monotonic',
+                   return_value=expiry + 1):
+            core.read_namespace.side_effect = None
+            core.read_namespace.return_value = _namespace_with_uid('uid-a')
+            assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+
+
+def test_get_cluster_uid_in_cluster_never_falls_back_to_kubeconfig(monkeypatch):
+    """None would fall back to the kubeconfig current-context."""
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    in_cluster = kubernetes_adaptor.in_cluster_context_name()
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core) as mock_core_api:
+        assert utils.get_cluster_uid(in_cluster) == 'uid-a'
+        mock_core_api.assert_called_once_with(in_cluster)
+
+
+def test_get_cluster_uid_rereads_after_kubeconfig_changes(
+        monkeypatch, tmp_path):
+    """A rewritten kubeconfig may point the context at another cluster."""
+    monkeypatch.setattr(utils, '_cluster_uid_cache', {})
+    kubeconfig = tmp_path / 'config'
+    kubeconfig.write_text('a')
+    monkeypatch.setenv('KUBECONFIG', str(kubeconfig))
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _namespace_with_uid('uid-a')
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api',
+               return_value=core):
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert utils.get_cluster_uid('ctx-a') == 'uid-a'
+        assert core.read_namespace.call_count == 1
+
+        core.read_namespace.return_value = _namespace_with_uid('uid-b')
+        replacement = tmp_path / 'config.new'
+        replacement.write_text('bb')
+        os.replace(replacement, kubeconfig)
+        assert utils.get_cluster_uid('ctx-a') == 'uid-b'
+        assert core.read_namespace.call_count == 2

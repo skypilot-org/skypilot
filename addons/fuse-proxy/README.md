@@ -55,10 +55,9 @@ if [ -z "$FOURSMOUNE3_PATH" ]; then
     echo "Error: fusemount3 binary not found"
     exit 1
 fi
-# The -original suffix is crucial: the server will enter the mnt namespace of application container and find the original fusermount binary
-# by searching `fusermount-original` executable in PATH.
-cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
 # Mask the fusermount/fusemount3 binary by the shim provided by fusermount-server.
+# The server does the mount itself with system calls, so no original fusermount
+# needs to be kept in the application container.
 ln -sf /var/run/fusermount/fusermount-shim "$FUSERMOUNT_PATH"
 ln -sf /var/run/fusermount/fusermount-shim "$FOURSMOUNE3_PATH"
 ```
@@ -71,8 +70,8 @@ ln -sf /var/run/fusermount/fusermount-shim "$FOURSMOUNE3_PATH"
 2. The FUSE adapter executes `fusermount-shim` (instead of the regular `fusermount`)
 3. `fusermount-shim` forwards the request to the privileged daemon pod
 4. The daemon pod:
-   - Identifies the caller's mnt namespace
-   - Performs the mount operation using `nsenter` and real `fusermount` in the caller's mnt namespace
+   - Identifies the caller's mnt namespace from the descriptor the shim passes
+   - Opens `/dev/fuse` in its own namespace and runs `sky-fuse-helper`, which joins the caller's mnt namespace and performs the mount with system calls (no binary from the caller's container is executed)
    - Returns the mounted file descriptor back to the FUSE adapter
 
 ```mermaid
@@ -86,12 +85,13 @@ sequenceDiagram
     fusermount-shim->>+shim-server: RPC
     box pink Daemon Pod (Privileged)
     participant shim-server
-    participant fusermount
+    participant sky-fuse-helper
     end
-    Note over shim-server,fusermount: Set mnt namespace
-    shim-server->>fusermount: exec
-    fusermount->>fusermount: mount(/dev/fuse)
-    fusermount->>shim-server: send fd
+    shim-server->>shim-server: open(/dev/fuse)
+    shim-server->>sky-fuse-helper: exec with ns + fuse fd
+    Note over sky-fuse-helper: setns to caller's mnt namespace
+    sky-fuse-helper->>sky-fuse-helper: mount(2)
+    sky-fuse-helper->>shim-server: exit
     shim-server->>fusermount-shim: return fd
     fusermount-shim->>Fuse Adapter: send fd
     Fuse Adapter->>Fuse Adapter: start working

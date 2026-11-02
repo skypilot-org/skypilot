@@ -20,8 +20,10 @@ from sky.serve import constants as serve_constants
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import registry
+from sky.utils import yaml_utils
 
 _DEFAULT_AUTOSTOP = {
     'down': False,
@@ -655,6 +657,88 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     assert 'cudoctl' in combined_commands
 
 
+def _controller_config(consolidated, user_config, monkeypatch):
+    """The config a jobs controller gets for `user_config`."""
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    monkeypatch.setattr('sky.utils.controller_utils.is_jobs_consolidation_mode',
+                        lambda: consolidated)
+    controller = controller_utils.Controllers.from_type('jobs')
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', user_config)
+    saved_config = yaml_utils.read_yaml(result['local_user_config_path'])
+    os.unlink(result['local_user_config_path'])
+    return saved_config
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_workspace_names(consolidated: bool, monkeypatch):
+    """A dedicated controller (maybe an older wheel) gets no workspace names.
+    A consolidated one (same version as the server) keeps them, so its config
+    matches the server's. Both hold the active workspace as its id."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'team-a',
+            'workspaces': {
+                'team-a': {
+                    'name': 'proj-a',
+                    'private': False
+                }
+            },
+        }, monkeypatch)
+
+    expected = {'private': False}
+    if consolidated:
+        expected['name'] = 'proj-a'
+    assert saved_config['workspaces'] == {'team-a': expected}
+    assert saved_config['active_workspace'] == 'team-a'
+    assert 'active_workspace_id' not in saved_config
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_pins_id_for_policy_set_name(consolidated: bool,
+                                                       monkeypatch):
+    """An admin policy may set `active_workspace` to a name; the controller
+    gets the id in either mode."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'proj-a',
+            'workspaces': {
+                'ws-0123456789ab': {
+                    'name': 'proj-a'
+                },
+                'team-b': {}
+            },
+        }, monkeypatch)
+
+    assert saved_config['active_workspace'] == 'ws-0123456789ab'
+
+
+@pytest.mark.parametrize('consolidated', [False, True])
+def test_controller_config_keeps_an_id_over_a_clashing_name(
+        consolidated: bool, monkeypatch):
+    """A hand edit named another workspace after the active workspace's id;
+    the replayed config still holds that id."""
+    saved_config = _controller_config(
+        consolidated, {
+            'active_workspace': 'team-a',
+            'workspaces': {
+                'team-a': {
+                    'name': 'archive'
+                },
+                'ws-0123456789ab': {
+                    'name': 'team-a'
+                }
+            },
+        }, monkeypatch)
+
+    assert saved_config['active_workspace'] == 'team-a'
+    with skypilot_config.replace_skypilot_config_in_process(
+            config_utils.Config(saved_config)):
+        assert skypilot_config.get_active_workspace() == 'team-a'
+
+
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     """Test that api_server config is removed from user config sent to controller."""
@@ -1170,6 +1254,29 @@ def test_download_and_stream_job_log_does_not_split_on_carriage_return(
     # The carriage returns are preserved verbatim. Pre-fix (universal
     # newlines) this would have been emitted as 'prog-a\nprog-b\nprog-c\n'.
     assert 'prog-a\rprog-b\rprog-c\n' in out
+
+
+def test_download_and_stream_job_log_stream_to_console_false(tmp_path):
+    """With stream_to_console=False the log is synced and persisted but not
+    copied into the controller log."""
+    run_log = (_MARKER.encode() + b'1 nodes.\n'
+               b'REPRINT-CONTENT-SENTINEL\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    called = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        result = controller_utils.download_and_stream_job_log(
+            backend,
+            handle,
+            local_dir,
+            on_downloaded=called.append,
+            stream_to_console=False)
+
+    assert result is not None
+    assert result.endswith(os.path.join('synced', 'run.log'))
+    assert called == [result]
+    assert 'REPRINT-CONTENT-SENTINEL' not in captured.getvalue()
 
 
 def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):

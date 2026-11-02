@@ -106,6 +106,7 @@ from sky.client.sdk import api_status
 from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
+from sky.client.sdk import cluster_job_spec
 from sky.client.sdk import cost_report
 from sky.client.sdk import create_debug_dump
 from sky.client.sdk import down
@@ -237,6 +238,7 @@ __all__ = [
     'tail_logs',
     'download_logs',
     'job_status',
+    'cluster_job_spec',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',

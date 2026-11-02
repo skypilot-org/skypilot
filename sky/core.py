@@ -208,7 +208,11 @@ def status(
         include_handle=include_handle)
 
     status_responses = []
+    workspaces = skypilot_config.get_nested(('workspaces',), {})
     for cluster in clusters:
+        if cluster.get('workspace') is not None:
+            cluster['workspace_name'] = skypilot_config.get_workspace_name(
+                cluster['workspace'], workspaces)
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))
@@ -452,6 +456,7 @@ def cost_report(days: Optional[int] = None,
             'total_cost': (float) cost given resources and usage intervals,
             'cloud': (str) cloud of the cluster,
             'region': (str) region of the cluster,
+            'zone': (str) zone of the cluster, if any,
             'cpus': (str) number of vCPUs of the cluster,
             'memory': (str) memory of the cluster,
             'accelerators': (str) accelerators of the cluster,
@@ -567,12 +572,18 @@ def _update_record_with_resources(
     if resources is None:
         return
     if not dashboard_summary_response:
-        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        fields = ['cloud', 'region', 'zone', 'cpus', 'memory', 'accelerators']
     else:
-        fields = ['cloud']
+        # The dashboard builds the Infra cell as `cloud (zone-or-region)` for
+        # both live and terminated clusters, so the abbreviated payload needs
+        # the location fields but not the resource size fields.
+        fields = ['cloud', 'region', 'zone']
     for field in fields:
         try:
-            record[field] = str(getattr(resources, field))
+            value = getattr(resources, field)
+            # A None zone/region (zone-less clouds, legacy records) must not
+            # become the string 'None' in the payload.
+            record[field] = str(value) if value is not None else None
         except Exception as e:  # pylint: disable=broad-except
             # Ok to skip the fields as this is just for display
             # purposes.
@@ -917,9 +928,10 @@ def _user_action_event_reason(action: str) -> str:
     context to name (an in-process caller).
     """
     actor = common_utils.get_current_request_actor()
+    prefix = global_user_state.user_action_event_prefix(action)
     if actor is None:
-        return f'Cluster was {action} by user.'
-    return f'Cluster was {action} by user {actor}.'
+        return f'{prefix}.'
+    return f'{prefix} {actor}.'
 
 
 def user_initiated_down(cluster_name: str,
@@ -1112,11 +1124,6 @@ def stop(cluster_name: str,
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
-    global_user_state.add_cluster_event(
-        cluster_name, status_lib.ClusterStatus.STOPPED,
-        _user_action_event_reason('stopped'),
-        global_user_state.ClusterEventType.STATUS_CHANGE)
-
     backend = backend_utils.get_backend_from_handle(handle)
 
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -1135,6 +1142,12 @@ def stop(cluster_name: str,
                 f'  {_stop_not_supported_message(handle.launched_resources)}.\n'
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
+
+    # After the check: a stop the cloud does not support never started.
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.STOPPED,
+        _user_action_event_reason('stopped'),
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     if graceful:
         _graceful_job_cancel(handle,
@@ -1387,6 +1400,30 @@ def queue(cluster_name: str,
 
     jobs = _get_job_queue(handle, backend, user_hash, all_jobs)
     return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
+
+
+@usage_lib.entrypoint
+def cluster_job_spec(cluster_name: str,
+                     job_id: int) -> Optional[Dict[str, Any]]:
+    """Gets the task YAML and entrypoint a cluster job was submitted with.
+
+    Read from the API server's database, so it does not need the cluster to
+    be UP.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: id of the job on the cluster.
+
+    Returns:
+        A dict with 'task_yaml' (str) and 'entrypoint' (str), or None if the
+        cluster does not exist or the job's spec was not recorded (e.g. it was
+        submitted by an older API server version, or to a cluster launched by
+        a jobs or serve controller).
+    """
+    cluster_hash = global_user_state.get_cluster_hash(cluster_name)
+    if cluster_hash is None:
+        return None
+    return global_user_state.get_cluster_job_spec(cluster_hash, job_id)
 
 
 @usage_lib.entrypoint
@@ -1728,7 +1765,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> List[str]:
+                   expand: bool = False,
+                   workspace_ref: Optional[str] = None) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
@@ -1741,7 +1779,8 @@ def enabled_clouds(workspace: Optional[str] = None,
         workspaces_core.check_workspace_permission(
             common_utils.get_current_user(),
             workspace,
-            action=workspace_constants.WORKSPACE_ACTION_READ)
+            action=workspace_constants.WORKSPACE_ACTION_READ,
+            workspace_ref=workspace_ref)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):
@@ -1771,6 +1810,17 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def enabled_clouds_for_request(workspace: Optional[str] = None,
+                               expand: bool = False) -> List[str]:
+    """`GET /enabled_clouds`: `workspace` is an id or a name."""
+    if workspace is None:
+        return enabled_clouds(expand=expand)
+    return enabled_clouds(
+        workspace=skypilot_config.resolve_workspace_ref(workspace),
+        expand=expand,
+        workspace_ref=workspace)
+
+
 def enabled_clouds_batch(workspaces: List[str],
                          expand: bool = False) -> Dict[str, List[str]]:
     """Returns enabled clouds for multiple workspaces in a single call.

@@ -21,7 +21,20 @@ def _write(path, size):
 
 
 @pytest.fixture
-def roots(tmp_path, monkeypatch):
+def charged(monkeypatch):
+    """Treats every filesystem as charged to this container.
+
+    The tests write under pytest's tmp_path. Where /tmp is its own mount,
+    as on GitHub's ubuntu-26.04 runners, the real check finds a device
+    other than the root filesystem's and the scan skips the walk. Tests of
+    the check itself call it directly or patch it after this fixture.
+    """
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral',
+                        lambda mountpoint, sources, device: True)
+
+
+@pytest.fixture
+def roots(tmp_path, monkeypatch, charged):
     """Two real roots plus one that does not exist."""
     present = tmp_path / 'present'
     other = tmp_path / 'other'
@@ -357,6 +370,7 @@ def test_a_vanished_entry_is_not_an_unreadable_one(roots):
     assert local_disk._count_unreadable(OSError(errno.EACCES, 'denied')) == 1
 
 
+@pytest.mark.usefixtures('charged')
 def test_a_root_inside_another_root_is_measured_once(tmp_path, monkeypatch):
     """Overlapping roots would count every byte in the overlap twice.
 

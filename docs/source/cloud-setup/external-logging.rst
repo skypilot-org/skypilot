@@ -10,7 +10,7 @@ The supported logging services are:
 - ``gcp``: :ref:`GCP Cloud Logging <external-logging-storage-gcp>`
 - ``otlp``: :ref:`Any OpenTelemetry (OTLP) endpoint <external-logging-storage-otlp>`, e.g., an OpenTelemetry Collector or an observability backend with OTLP ingest
 
-To enable external logging storage, set the following in your SkyPilot config:
+To enable external logging storage, set the following in the SkyPilot config of your API server: ``~/.sky/config.yaml`` for a :ref:`local API server <sky-api-server-local>`, or the API server's config at ``http://<api-server-url>/dashboard/config`` for a :ref:`remote API server <sky-api-server-remote>`:
 
 .. code-block:: yaml
 
@@ -20,6 +20,10 @@ To enable external logging storage, set the following in your SkyPilot config:
         ...  # Service-specific options; see below.
 
 Each logging service might have its own configuration options under the ``logs.<store>`` dict.
+
+.. note::
+
+    ``logs`` is a server-side setting. The API server ignores ``logs`` in the config a client sends with its requests (for example, the ``~/.sky/config.yaml`` on a user's machine that connects to a remote API server), and logs a warning that the key will be ignored.
 
 .. note::
 

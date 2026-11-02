@@ -49,6 +49,10 @@ import {
   NonCapitalizedTooltip,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  getWorkspaceName,
+  invalidateWorkspaceCaches,
+} from '@/hooks/useWorkspacesConfig';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -67,6 +71,11 @@ import {
 } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getUserRole as fetchUserRole } from '@/data/connectors/users';
+import {
+  RenameWorkspaceButton,
+  RenameWorkspaceDialog,
+} from '@/components/elements/RenameWorkspaceDialog';
 import Link from 'next/link';
 
 // Workspace-aware API functions - use cached global data and filter by workspace
@@ -295,7 +304,7 @@ export function Workspaces() {
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
-    key: 'name',
+    key: 'displayName',
     direction: 'asc',
   });
 
@@ -324,6 +333,8 @@ export function Workspaces() {
   // User role cache
   const [userRoleCache, setUserRoleCache] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
+  // Id of the workspace being renamed, or null.
+  const [renameTarget, setRenameTarget] = useState(null);
 
   // Top-level error and success states
   const [topLevelError, setTopLevelError] = useState(null);
@@ -361,6 +372,27 @@ export function Workspaces() {
       throw error;
     }
   };
+
+  // Known up front (not only on click) so admin-only controls can render.
+  // Seeds the same cache; a failure leaves them hidden.
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserRole()
+      .then((data) => {
+        if (!cancelled) {
+          setUserRoleCache({
+            role: data?.role,
+            name: data?.name,
+            timestamp: Date.now(),
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to fetch user role:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const isAdmin = userRoleCache?.role === 'admin';
 
   // Function to handle permission check with smooth UX
   // `allowNonAdmin`: optional async predicate that can let a non-admin through.
@@ -531,7 +563,10 @@ export function Workspaces() {
         // Initialize workspace details with zeros - UI will show spinners for counts
         const initialWorkspaceDetails = configuredWorkspaceNames
           .map((wsName) => ({
+            // `name` is the workspace id (links, stats, API calls);
+            // `displayName` is what users see.
             name: wsName,
+            displayName: getWorkspaceName(fetchedWorkspacesConfig, wsName),
             totalClusterCount: 0,
             runningClusterCount: 0,
             managedJobsCount: 0,
@@ -539,7 +574,7 @@ export function Workspaces() {
               ? enabledCloudsMap[wsName]
               : [],
           }))
-          .sort((a, b) => a.name.localeCompare(b.name));
+          .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
         setWorkspaceDetails(initialWorkspaceDetails);
 
@@ -665,7 +700,7 @@ export function Workspaces() {
       const searchLower = searchQuery.toLowerCase().trim();
       filtered = workspaceDetails.filter((workspace) => {
         // Check workspace name
-        if (workspace.name.toLowerCase().includes(searchLower)) {
+        if (workspace.displayName.toLowerCase().includes(searchLower)) {
           return true;
         }
 
@@ -720,7 +755,7 @@ export function Workspaces() {
 
       // Show success message at top level
       setTopLevelSuccess(
-        `Workspace "${deleteState.workspaceToDelete}" deleted successfully!`
+        `Workspace "${getWorkspaceName(rawWorkspacesData, deleteState.workspaceToDelete)}" deleted successfully!`
       );
 
       setDeleteState({
@@ -731,8 +766,8 @@ export function Workspaces() {
       });
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
-      dashboardCache.invalidate(getWorkspaces);
-      dashboardCache.invalidate(getClusters);
+      invalidateWorkspaceCaches();
+      dashboardCache.invalidateFunction(getClusters);
       dashboardCache.invalidateFunction(getManagedJobs);
 
       await fetchData({ showLoadingIndicators: true });
@@ -954,9 +989,9 @@ export function Workspaces() {
                 <TableRow>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                    onClick={() => handleSort('name')}
+                    onClick={() => handleSort('displayName')}
                   >
-                    Workspace{getSortDirection('name')}
+                    Workspace{getSortDirection('displayName')}
                   </TableHead>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -1004,7 +1039,7 @@ export function Workspaces() {
                     return (
                       <TableRow
                         key={workspace.name}
-                        className="hover:bg-gray-50"
+                        className="group hover:bg-gray-50"
                       >
                         <TableCell className="">
                           <button
@@ -1012,8 +1047,14 @@ export function Workspaces() {
                             disabled={roleLoading}
                             className="text-blue-600 hover:text-blue-600 hover:underline text-left"
                           >
-                            {workspace.name}
+                            {workspace.displayName}
                           </button>
+                          {isAdmin && workspace.name !== 'default' && (
+                            <RenameWorkspaceButton
+                              onClick={() => setRenameTarget(workspace.name)}
+                              className="ml-1 align-middle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                            />
+                          )}
                           <span className="ml-2">
                             <WorkspaceBadge
                               isPrivate={isPrivate}
@@ -1026,7 +1067,7 @@ export function Workspaces() {
                             onClick={() => {
                               router.push({
                                 pathname: '/clusters',
-                                query: { workspace: workspace.name },
+                                query: { workspace: workspace.displayName },
                               });
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -1045,7 +1086,7 @@ export function Workspaces() {
                             onClick={() => {
                               router.push({
                                 pathname: '/jobs',
-                                query: { workspace: workspace.name },
+                                query: { workspace: workspace.displayName },
                               });
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -1209,8 +1250,11 @@ export function Workspaces() {
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete workspace &quot;
-              {deleteState.workspaceToDelete}&quot;? This action cannot be
-              undone.
+              {getWorkspaceName(
+                rawWorkspacesData,
+                deleteState.workspaceToDelete
+              )}
+              &quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 
@@ -1232,6 +1276,20 @@ export function Workspaces() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {renameTarget && (
+        <RenameWorkspaceDialog
+          workspaceId={renameTarget}
+          config={rawWorkspacesData?.[renameTarget]}
+          workspacesConfig={rawWorkspacesData}
+          onClose={() => setRenameTarget(null)}
+          onRenamed={(newName) => {
+            setRenameTarget(null);
+            setTopLevelSuccess(`Workspace renamed to "${newName}".`);
+            fetchData({ showLoadingIndicators: false });
+          }}
+        />
+      )}
     </div>
   );
 }

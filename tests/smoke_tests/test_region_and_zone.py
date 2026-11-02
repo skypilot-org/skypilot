@@ -19,10 +19,10 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_region_and_zone.py --generic-cloud aws
 
+import os
 import pathlib
 import shlex
 import tempfile
-import textwrap
 import time
 
 import jinja2
@@ -32,7 +32,6 @@ from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import clouds
-from sky import skypilot_config
 from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import controller_utils
@@ -60,66 +59,85 @@ def test_aws_region():
     smoke_tests_utils.run_one_test(test)
 
 
+# ssh_proxy_command runs as a server-side SSH ProxyCommand during
+# provisioning, so it is server-owned: a client override is ignored. The proxy
+# is set in the server config, which requires a local-server restart.
 @pytest.mark.aws
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
-    with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(
-            textwrap.dedent(f"""\
-        aws:
-            ssh_proxy_command: ssh -W '[%h]:%p' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
-        """))
-        f.write(
-            textwrap.dedent(f"""\
-            api_server:
-                endpoint: {smoke_tests_utils.get_api_server_url()}
-            """))
-        f.flush()
+    proxy_config = smoke_tests_utils.write_api_server_config({
+        'aws': {
+            'ssh_proxy_command':
+                (f"ssh -W '[%h]:%p' -o StrictHostKeyChecking=no "
+                 f'-o UserKnownHostsFile=/dev/null jump-{name}')
+        }
+    })
 
-        jobs_controller_proxy_test_cmds = []
-        jobs_controller_proxy_test_cmds_down = ''
-        # Disable controller related tests for consolidation mode, as there will
-        # not be any controller VM to launch.
-        if not smoke_tests_utils.server_side_is_consolidation_mode():
-            jobs_controller_proxy_test_cmds = [
-                # Start a small job to make sure the controller is created.
-                f'sky jobs launch -n {name}-0 --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
-                # Wait other tests to create the job controller first, so that
-                # the job controller is not launched with proxy command.
-                smoke_tests_utils.
-                get_cmd_wait_until_cluster_status_contains_wildcard(
-                    cluster_name_wildcard='sky-jobs-controller-*',
-                    cluster_status=[sky.ClusterStatus.UP],
-                    timeout=300),
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky jobs launch -n {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} -yd echo hi',
-                smoke_tests_utils.
-                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=name,
-                    job_status=[
-                        sky.ManagedJobStatus.SUCCEEDED,
-                        sky.ManagedJobStatus.RUNNING,
-                        sky.ManagedJobStatus.STARTING
-                    ],
-                    timeout=300),
-            ]
-            jobs_controller_proxy_test_cmds_down = f'sky jobs cancel -y -n {name}'
+    jobs_controller_proxy_test_cmds = []
+    jobs_controller_proxy_test_cmds_down = []
+    # Disable controller related tests for consolidation mode, as there will
+    # not be any controller VM to launch.
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        jobs_controller_proxy_test_cmds = [
+            # The controller is already up (created before the proxy restart),
+            # so this job reuses it instead of launching a controller through
+            # the proxy. The controller clears aws.ssh_proxy_command for its
+            # own launches, so the job's worker is not proxied either.
+            f'sky jobs launch -n {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} -yd echo hi',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.SUCCEEDED,
+                    sky.ManagedJobStatus.RUNNING, sky.ManagedJobStatus.STARTING
+                ],
+                timeout=300),
+        ]
+        # `--name` is single-valued, so cancel each job separately.
+        jobs_controller_proxy_test_cmds_down = [
+            f'sky jobs cancel -y -n {name}',
+            f'sky jobs cancel -y -n {name}-0',
+        ]
 
-        test = smoke_tests_utils.Test(
-            'aws_with_ssh_proxy_command',
-            [
-                f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
-                # Use jump config
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; '
-                f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
-                f'sky logs {name} 1 --status',
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky exec {name} echo hi',
-                f'sky logs {name} 2 --status',
-                *jobs_controller_proxy_test_cmds,
-            ],
-            f'sky down -y {name} jump-{name}; {jobs_controller_proxy_test_cmds_down}',
-            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        )
-        smoke_tests_utils.run_one_test(test)
+    controller_warmup_cmds = []
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        controller_warmup_cmds = [
+            # Create the job controller before the proxy is in effect, so the
+            # controller itself is not launched through the proxy command.
+            f'sky jobs launch -n {name}-0 --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
+            smoke_tests_utils.
+            get_cmd_wait_until_cluster_status_contains_wildcard(
+                cluster_name_wildcard='sky-jobs-controller-*',
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ]
+
+    test = smoke_tests_utils.Test(
+        'aws_with_ssh_proxy_command',
+        [
+            *controller_warmup_cmds,
+            # Launch the jump host before the proxy is configured, so it is
+            # reached directly.
+            f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
+            # Put the proxy in the server config and restart; subsequent
+            # launches reach the target through jump-{name}.
+            smoke_tests_utils.restart_api_server_with_config(proxy_config),
+            f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} echo hi',
+            f'sky logs {name} 2 --status',
+            *jobs_controller_proxy_test_cmds,
+        ],
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name} jump-{name}',
+            *jobs_controller_proxy_test_cmds_down,
+            smoke_tests_utils.RESTORE_API_SERVER_CONFIG),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)
+    os.unlink(proxy_config)
 
 
 @pytest.mark.gcp

@@ -24,6 +24,12 @@ provider:
     # The kubecontext used to connect to the Kubernetes cluster.
     context: {{k8s_context}}
 
+{%- if k8s_cluster_uid %}
+    # UID of the kube-system namespace of the cluster `context` pointed at
+    # on launch; checked against the context on later operations.
+    cluster_uid: '{{k8s_cluster_uid}}'
+{%- endif %}
+
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
 
@@ -1790,6 +1796,7 @@ available_node_types:
           {% if k8s_fuse_device_required %}
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
+            readOnly: true
           {% endif %}
           {% if k8s_enable_docker_all %}
           - name: docker-sock

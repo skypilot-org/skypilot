@@ -192,6 +192,17 @@ _LAUNCH_DOUBLE_CHECK_DELAY = 1
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
+
+# Where a cluster records the Ray version its nodes were set up with. Lives
+# under 'provider' because Ray's cluster schema sets additionalProperties=False
+# at the top level, so a new top-level key would fail `ray up` validation on
+# the clouds still using the Ray autoscaler.
+_RAY_VERSION_KEY = 'sky_ray_version'
+# What a cluster created before that marker existed is running. Every such
+# cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
+# TODO(hailong): one-shot migration constant; drop it once no marker-less
+# clusters remain (every cluster launched from this release on carries one).
+_LEGACY_RAY_VERSION = '2.9.3'
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -220,6 +231,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # and our latest code need this field to be set to distinguish the node, so
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
+    # Kubernetes clusters launched before the UID was recorded, or whose
+    # kube-system was unreadable at launch, record it on their next launch.
+    ('provider', 'cluster_uid'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'IamInstanceProfile'),
@@ -242,6 +256,12 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # The security group name includes a hostname-derived hash
     # (user_and_hostname_hash) that varies across API server restart
     ('provider', 'security_group'),
+    # The Ray version marker appears on a cluster the first time it is
+    # launched by a SkyPilot that writes one. Including it would cost every
+    # pre-existing cluster its `sky launch --fast` skip exactly once, for a
+    # key that records what the cluster already runs. A real version change
+    # still moves the hash, through the install commands themselves.
+    ('provider', _RAY_VERSION_KEY),
 ]
 
 # Filenames in `file_mounts` whose content sha256 should NOT participate in the
@@ -571,6 +591,96 @@ class FileMountHelper(object):
         return ' && '.join(commands)
 
 
+def _ray_version_for_cluster(cluster_name: str,
+                             old_yaml_content: Optional[str]) -> str:
+    """The Ray version to render for this cluster.
+
+    Whether to move to a new Ray is a property of the *cluster*, not of each
+    node. Deciding it per node lets a worker upgrade on its own while the head
+    keeps the old version: the head's `ray status` guard succeeds and skips the
+    install, a worker's cannot (it dials 127.0.0.1, where only the head has a
+    GCS), and the two end up on different Rays.
+
+    So a cluster keeps the version it was set up with, and only moves when the
+    whole cluster is starting from scratch and nothing can disagree.
+    """
+    if old_yaml_content is None:
+        # A new cluster.
+        return constants.SKY_REMOTE_RAY_VERSION
+    status = global_user_state.get_status_from_cluster_name(cluster_name)
+    if status is None or status == status_lib.ClusterStatus.STOPPED:
+        # Nothing is running to disagree with, so the whole cluster can move
+        # together. This is what lets an existing cluster ever pick up a new
+        # Ray: `sky stop` followed by `sky start`.
+        #
+        # Deliberately not INIT: that also covers a cluster whose launch failed
+        # partway, whose nodes may still be running the old Ray. Upgrading
+        # those is how the mismatch gets recreated.
+        return constants.SKY_REMOTE_RAY_VERSION
+    old_config = yaml_utils.safe_load(old_yaml_content)
+    if not isinstance(old_config, dict):
+        return constants.SKY_REMOTE_RAY_VERSION
+    # `provider:` with nothing under it parses to None, not {}.
+    recorded = (old_config.get('provider') or {}).get(_RAY_VERSION_KEY)
+    # Clusters created before the marker existed carry no record, and are all
+    # on the legacy version.
+    return recorded if recorded else _LEGACY_RAY_VERSION
+
+
+def _log_pinned_ray_version(cluster_name: str, ray_version: str,
+                            cloud: clouds.Cloud,
+                            resources: 'resources_lib.Resources',
+                            region: Optional[str]) -> None:
+    """Say why the cluster is not on the Ray this SkyPilot ships.
+
+    How to move it depends on the cloud: `sky stop` + `sky start` is the only
+    in-place path, and a good many clouds -- Kubernetes, Slurm, RunPod, Lambda,
+    and AWS/GCP for spot, among others -- cannot stop at all, so there the
+    version is fixed for the life of the cluster.
+
+    `region` is passed through because asking Kubernetes without one makes it
+    enumerate every allowed context and probe each cluster's API, none of which
+    the STOP answer depends on.
+    """
+    if ray_version == constants.SKY_REMOTE_RAY_VERSION:
+        return
+    preamble = (f'Cluster {cluster_name!r} stays on Ray {ray_version}; this '
+                f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
+    controller = controller_utils.Controllers.from_prefix(cluster_name)
+    if controller is not None:
+        # `sky stop` rejects controllers (core.stop); the CLI's `sky down`
+        # refuses one that still has work.
+        if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+            idle = 'no managed jobs in progress and no pools'
+        else:
+            idle = 'no services'
+        logger.info(f'{preamble} A controller moves to it the next time it '
+                    'is launched after an autostop or autodown, or when '
+                    f'recreated: `sky down {cluster_name}` once it has '
+                    f'{idle}.')
+        return
+    try:
+        cloud.check_features_are_supported(
+            resources, {clouds.CloudImplementationFeatures.STOP}, region)
+    except exceptions.NotSupportedError:
+        logger.info(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
+                    f'that version until it is recreated (`sky down '
+                    f'{cluster_name}`, then `sky launch`).')
+        return
+    except Exception:  # pylint: disable=broad-except
+        # Deciding the wording is not worth failing a launch over. The check
+        # reaches the cloud on some providers -- Kubernetes probes every
+        # allowed context -- so it can fail for reasons that have nothing to
+        # do with the question being asked.
+        logger.debug(
+            f'{preamble} Could not tell whether {cloud} can stop a '
+            'cluster.',
+            exc_info=True)
+        return
+    logger.info(f'{preamble} Run `sky stop {cluster_name}` and `sky start '
+                f'{cluster_name}` to move the whole cluster to it.')
+
+
 def _replace_yaml_dicts(
         new_yaml: str, old_yaml: str, restore_key_names: Set[str],
         restore_key_names_exceptions: Sequence[Tuple[str, ...]]) -> str:
@@ -858,6 +968,16 @@ def write_cluster_config(
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
+    if (isinstance(cloud, clouds.Kubernetes) and
+            not isinstance(to_provision.kubernetes_identity, str) and
+            not common.is_controller_name(cluster_name) and
+            clouds.Kubernetes.task_requests_none(
+                region.name, to_provision.cluster_config_overrides)):
+        # The task's NONE beats a per-context identity here too: a pod with no
+        # API identity must not be handed the kubeconfig either. A fixed
+        # in-process identity and controllers ignore it, as in
+        # make_deploy_resources_variables.
+        remote_identity = schemas.RemoteIdentityOptions.NONE.value
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
         # excluded_clouds set, but we must also check if the cloud supports
@@ -919,7 +1039,8 @@ def write_cluster_config(
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
-    logging_agent = logs.get_logging_agent()
+    logging_agent = logs.get_logging_agent(cloud=str(cloud).lower(),
+                                           region=region.name)
     if logging_agent:
         for k, v in logging_agent.get_credential_file_mounts().items():
             assert k not in credentials, f'{k} already in credentials'
@@ -1207,6 +1328,13 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
+    # Read the stored YAML before rendering, not just after (where
+    # _replace_yaml_dicts uses it): an existing cluster has to be rendered with
+    # the Ray version it already runs, or its nodes end up disagreeing.
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    ray_version = _ray_version_for_cluster(cluster_name, old_yaml_content)
+    _log_pinned_ray_version(cluster_name, ray_version, cloud, to_provision,
+                            region.name)
     variables = dict(
         resources_vars,
         **{
@@ -1274,9 +1402,17 @@ def write_cluster_config(
             'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
             'ray_skypilot_installation_commands':
                 (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
-                    '{sky_wheel_hash}',
-                    wheel_hash).replace('{cloud}',
-                                        str(cloud).lower())),
+                    '{sky_wheel_hash}', wheel_hash).replace(
+                        '{cloud}',
+                        str(cloud).lower()).replace('{ray_version}',
+                                                    ray_version)),
+            # Kubernetes installs Ray from the pod args rather than from
+            # setup_commands, so it needs the same string separately. Built
+            # here, not in Kubernetes.make_deploy_resources_variables, because
+            # only this scope knows which Ray version this cluster is pinned to.
+            'ray_installation_commands':
+                (constants.RAY_INSTALLATION_COMMANDS.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',
@@ -1302,7 +1438,14 @@ def write_cluster_config(
             # cluster, so that ray autoscaler can access cloud SDK and CLIs
             # on remote
             'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-            'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+            # The Ray this cluster is pinned to: what to install.
+            'ray_version': ray_version,
+            # ray_patches_cmd carries its own version check: the patches
+            # shipped in the wheel target SKY_REMOTE_RAY_VERSION, not this
+            # cluster's pinned ray_version, and applying them to a different
+            # Ray is what corrupts it.
+            'ray_patches_cmd': instance_setup.ray_patches_cmd(
+                constants.SKY_REMOTE_RAY_VERSION),
             # Command for waiting ray cluster to be ready on head.
             'ray_head_wait_initialized_command':
                 instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
@@ -1392,8 +1535,8 @@ def write_cluster_config(
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
-    # Restore the old yaml content for backward compatibility.
-    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    # Restore the old yaml content for backward compatibility. old_yaml_content
+    # was read before rendering, since _ray_version_for_cluster needs it too.
     if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
@@ -1409,6 +1552,13 @@ def write_cluster_config(
     # correctly. See #8232.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
+
+    # Record the Ray version this cluster is set up with, so a later launch
+    # renders the same one rather than whatever SKY_REMOTE_RAY_VERSION has
+    # become. Written after the restore above, which would otherwise put back
+    # the old 'provider' block wholesale and discard it.
+    yaml_config.setdefault('provider', {})[_RAY_VERSION_KEY] = ray_version
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
@@ -2290,6 +2440,63 @@ def check_owner_identity(cluster_name: str) -> None:
     _check_owner_identity_with_record(cluster_name, record)
 
 
+def _get_kubernetes_provider_config(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+) -> Optional[Dict[str, Any]]:
+    if handle.cluster_yaml is None:
+        return None
+    try:
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to load the cluster yaml {handle.cluster_yaml}: '
+                     f'{e}')
+        return None
+    if not isinstance(config, dict):
+        return None
+    provider_config = config.get('provider')
+    return provider_config if isinstance(provider_config, dict) else None
+
+
+def _check_kubernetes_cluster_target(cluster_name: str, cloud: clouds.Cloud,
+                                     context: str,
+                                     recorded_uid: Optional[str]) -> None:
+    """Checks that `context` still reaches the cluster the pods run on.
+
+    A Kubernetes cluster is operated through the context recorded at launch,
+    so it stays accessible as long as that context exists and points at the
+    same cluster, whichever credentials or route the context uses.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the context is gone or
+            now points at a different cluster.
+    """
+    context_names = kubernetes_utils.get_all_kube_context_names()
+    if not context_names:
+        # No Kubernetes credentials at all: nothing to check against.
+        return
+    purge_hint = ('If the cluster no longer exists, remove its record with '
+                  f'`sky down --purge {cluster_name}`.')
+    if context not in context_names:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) was launched on Kubernetes '
+                f'context {context!r}, which is not available. Check your '
+                'kubeconfig file and make sure the context is available. '
+                f'{purge_hint}')
+    if recorded_uid is None:
+        return
+    current_uid = kubernetes_utils.get_cluster_uid(context)
+    if current_uid is not None and current_uid != recorded_uid:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) was launched on a different '
+                f'Kubernetes cluster than the one context {context!r} points '
+                f'at now (the {kubernetes_utils.CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace UID is {current_uid!r}, {recorded_uid!r} at '
+                'launch). Check your kubeconfig file and make sure the '
+                f'context points at the original cluster. {purge_hint}')
+
+
 def _check_owner_identity_with_record(cluster_name: str,
                                       record: Dict[str, Any]) -> None:
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
@@ -2301,18 +2508,28 @@ def _check_owner_identity_with_record(cluster_name: str,
     cluster_workspace = record.get('workspace',
                                    constants.SKYPILOT_DEFAULT_WORKSPACE)
     if active_workspace != cluster_workspace:
+        cluster_label = workspaces_core.workspace_label_for_caller(
+            cluster_workspace)
+        active_name = skypilot_config.get_workspace_name(active_workspace)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{colorama.Fore.YELLOW}'
                 f'The cluster {cluster_name!r} is in workspace '
-                f'{cluster_workspace!r}, but the active workspace is '
-                f'{active_workspace!r}.{colorama.Fore.RESET}')
+                f'{cluster_label!r}, but the active workspace is '
+                f'{active_name!r}.{colorama.Fore.RESET}')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
     is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
-    user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+    if is_k8s_cloud and owner_identity is not None:
+        provider_config = _get_kubernetes_provider_config(handle) or {}
+        context = provider_config.get('context')
+        if context is not None:
+            _check_kubernetes_cluster_target(cluster_name, cloud, context,
+                                             provider_config.get('cluster_uid'))
+            return
+    user_identities = cloud.get_user_identities()
 
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
@@ -2631,6 +2848,167 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
+_CLUSTER_REMOVED_BY_REFRESH = global_user_state.CLUSTER_REMOVED_BY_REFRESH
+# A refresh that re-enters after a failed cleanup must not overwrite the cause
+# it recorded (by then the evidence may have expired), nor a user's own
+# `sky down`. Setting duplicate_regex turns off add_cluster_event's exact-text
+# check, so this has to match every text _get_terminated_cluster_reason
+# writes, as well as the line servers wrote before it existed.
+_TERMINATED_CLUSTER_EVENT_REGEX = (
+    f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$|^' +
+    re.escape(global_user_state.user_action_event_prefix('terminated')) +
+    '|^All nodes terminated')
+
+_NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
+_PARTIAL_LOSS_REASON = 'one or more nodes terminated'
+
+
+def _first_sentence(text: str) -> str:
+    lines = text.strip().splitlines()
+    sentence = lines[0].split('. ', 1)[0].rstrip('.') if lines else ''
+    return f'{sentence}.' if sentence else ''
+
+
+def _get_terminated_cluster_reason(
+        record: Dict[str, Any],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        launched_resources: 'resources_lib.Resources',
+        external_cluster_failures: Optional[List[Dict[str, Any]]]) -> str:
+    """The event reason for a cluster whose nodes are all gone.
+
+    Says who or what removed the nodes and why, first: the dashboard's Details
+    cell shows only the start. Best-effort throughout; when nothing explains
+    the removal it says so rather than guess.
+    """
+    is_k8s = isinstance(launched_resources.cloud, clouds.Kubernetes)
+    autostop = record['autostop']
+    cause = None
+    ray_config = None
+    if is_k8s:
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the cluster YAML of '
+                         f'{handle.cluster_name!r}: {e}')
+    provider_config = (ray_config or {}).get('provider')
+
+    # Autodown. Off Kubernetes, skylet terminates the VMs itself, which a
+    # refresh sees as AUTOSTOPPING; on Kubernetes the pods can be gone before
+    # any refresh does, so skylet leaves an Event breadcrumb that outlives them
+    # (instance.py::emit_autostop_event_best_effort). Looked up whatever the
+    # recorded autostop: a refresh that catches the autodown half way (Ray
+    # already down, head pod terminating) marks the cluster abnormal and
+    # resets autostop to -1.
+    autodowned = (record['status'] == status_lib.ClusterStatus.AUTOSTOPPING and
+                  record['to_down'])
+    # Whether the breadcrumb was looked for and is not there. The lookup
+    # returns None on API errors too, and the Event can expire or fail to emit.
+    no_autodown_record = False
+    if not autodowned and provider_config is not None:
+        autodowned = k8s_instance.get_cluster_autostop_event(
+            provider_config,
+            handle.cluster_name_on_cloud,
+            since=record['launched_at']) is not None
+        no_autodown_record = not autodowned
+    if autodowned:
+        idle = f' ({autostop} min)' if autostop >= 0 else ''
+        cause = f'Autodowned by SkyPilot after idle timeout{idle}.'
+
+    if cause is None:
+        k8s_cause = None
+        cluster_info = handle.cached_cluster_info
+        if provider_config is not None and cluster_info is not None:
+            launched_at = record.get('launched_at')
+            try:
+                k8s_cause = k8s_instance.get_cluster_termination_cause(
+                    provider_config, {
+                        pod: infos[0].node_name if infos else None
+                        for pod, infos in cluster_info.instances.items()
+                    },
+                    tolerations=_k8s_pod_tolerations(ray_config),
+                    since=(datetime.fromtimestamp(launched_at, tz=timezone.utc)
+                           if launched_at is not None else None))
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to find why the pods of '
+                             f'{handle.cluster_name!r} are gone: {e}')
+        failures = [
+            sentence for sentence in dict.fromkeys(
+                _first_sentence(f.get('failure_reason') or '')
+                for f in external_cluster_failures or []) if sentence
+        ]
+        reported = None
+        if failures:
+            reported = failures[0]
+            if len(failures) > 1:
+                reported += f' (+{len(failures) - 1} more).'
+        if k8s_cause is not None:
+            cause = k8s_cause
+            if reported is not None:
+                cause += f' Preceded by: {reported}'
+        elif reported is not None:
+            cause = f'Reported failure: {reported}'
+
+    launched_at = record.get('launched_at')
+    # Autodown is likely only if it could have fired (the cluster is older
+    # than its idle limit) and nothing says it did not. A missing Kubernetes
+    # breadcrumb argues against it, but the lookup can miss, so the configured
+    # autodown is still noted.
+    could_autodown = (autostop >= 0 and record['to_down'] and
+                      (launched_at is None or
+                       time.time() - launched_at >= autostop * 60))
+    likely_autodowned = (f'Likely autodowned by SkyPilot (idle {autostop} '
+                         'min)')
+
+    if (cause is None and record['status'] == status_lib.ClusterStatus.INIT):
+        latest = global_user_state.get_last_cluster_event_of_type_multiple(
+            {record['cluster_hash']}, [
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            ]).get(record['cluster_hash'])
+        if global_user_state.is_unhealthy_init_reason(latest):
+            assert latest is not None
+            # The reason itself can span lines (a pod's last known state).
+            why = ' '.join(
+                latest[len(global_user_state.ABNORMAL_STATUS_REASON_PREFIX
+                          ):].split('. Transitioned to INIT')[0].split())
+            what = 'pods' if is_k8s else 'nodes'
+            if (could_autodown and not no_autodown_record and
+                    not launched_resources.use_spot and
+                    why.startswith('ray cluster is unhealthy')):
+                # A refresh that lands mid-autodown (Ray stopped, every VM
+                # still up) records the cluster as unhealthy this way; lost
+                # nodes point elsewhere, a spot preemption above all.
+                cause = (f'{likely_autodowned}; was unhealthy ({why}) before '
+                         f'its {what} disappeared.')
+            else:
+                cause = (f'Was unhealthy ({why}), then its {what} '
+                         'disappeared; no direct cause found.')
+
+    if cause is None:
+        # Nothing names a cause. Lead with what the cluster's own setup makes
+        # likely, as the refresh's warning for a vanished cluster does: the
+        # table cell shows only the start of the text.
+        if could_autodown and not no_autodown_record:
+            cause = f'{likely_autodowned}; no direct cause found.'
+        elif launched_resources.use_spot:
+            cause = 'Likely spot preemption; no direct cause found.'
+        else:
+            cause = _NO_TERMINATION_CAUSE
+        if could_autodown and no_autodown_record:
+            cause = (f'{cause[:-1]} (autodown was set, but left no '
+                     'record).')
+    return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
+
+
+def _k8s_pod_tolerations(
+        ray_config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    node_config = ((ray_config or {}).get('available_node_types',
+                                          {}).get('ray_head_default',
+                                                  {}).get('node_config', {}))
+    return node_config.get('spec', {}).get('tolerations') or []
+
+
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
@@ -2671,7 +3049,7 @@ def _update_cluster_status(
         global_user_state.add_cluster_event(
             cluster_name,
             None,
-            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.CLUSTER_REMOVED_NO_YAML,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.remove_cluster(cluster_name, terminate=True)
@@ -2697,18 +3075,24 @@ def _update_cluster_status(
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
-        rc, output, stderr = runner.run(
-            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        cmd = instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND
+        rc, output, stderr = runner.run(cmd,
+                                        stream_logs=False,
+                                        require_outputs=True,
+                                        separate_stderr=True)
         if rc:
             raise exceptions.CommandError(
-                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                f'Failed to check ray cluster\'s healthiness.\n'
+                rc, cmd, f'Failed to check ray cluster\'s healthiness.\n'
                 '-- stdout --\n'
                 f'{output}\n', stderr)
-        return (*_count_healthy_nodes_from_ray(output), output, stderr)
+        match = instance_setup.RAY_ALIVE_NODES_PATTERN.search(output)
+        if match is None:
+            raise exceptions.CommandError(
+                rc, cmd, 'Failed to read the alive node count from the ray '
+                f'cluster.\n-- stdout --\n{output}\n', stderr)
+        # The head is one of them; the caller compares head + workers.
+        alive = int(match.group(1))
+        return (min(alive, 1), max(alive - 1, 0), output, stderr)
 
     ray_status_details: Optional[str] = None
 
@@ -2809,7 +3193,11 @@ def _update_cluster_status(
                     if wait_for_retry():
                         continue
                     break
-                if ready_head + ready_workers == total_nodes:
+                # The cloud already reported every node up. Nodes removed by a
+                # resize stay alive in the GCS for ~30s, so `==` would set
+                # INIT after every scale-down; `>=` instead misses a node
+                # dying within those ~30s until the next refresh.
+                if ready_head + ready_workers >= total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
                              f'{i}: ray status not showing all nodes '
@@ -3060,10 +3448,34 @@ def _update_cluster_status(
         ray_cluster_unhealthy = all_nodes_up
 
         # For Kubernetes clusters with unhealthy pods, check node health
-        # to provide better diagnostics (e.g., "node X is NotReady").
+        # to provide better diagnostics (e.g., "node X is NotReady"). Not only
+        # when Ray is unhealthy: a pod evicted from a failed node is Failed or
+        # Terminating, and its node is the cause.
+        # A cluster already INIT is reported again only with something new.
+        # Pods missing: only the first time they are seen missing (the cluster
+        # stays INIT with them gone until it is downed or relaunched, and a
+        # later refresh no longer looks them up, so it would overwrite their
+        # cause), and only on a cluster that was up (not an interrupted
+        # launch). Otherwise: when a pod names a cause (see the gate below).
+        first_loss = some_nodes_terminated
+        if some_nodes_terminated and status == status_lib.ClusterStatus.INIT:
+            last_event = global_user_state.get_last_cluster_event(
+                record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.STATUS_CHANGE)
+            first_loss = (
+                bool(record.get('cluster_ever_up')) and
+                not (last_event or '').startswith(
+                    f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX}'
+                    f' {_PARTIAL_LOSS_REASON}'))
+        report_again = (first_loss if some_nodes_terminated else any(
+            k8s_instance.pod_reason_identifies_cause(reason)
+            for _, reason in node_statuses.values()))
+
         node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
-        if (ray_cluster_unhealthy and
-                isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        # On a cluster already INIT the lookup would be discarded unless the
+        # event is reported again.
+        if (isinstance(launched_resources.cloud, clouds.Kubernetes) and
+            (status != status_lib.ClusterStatus.INIT or report_again)):
             unhealthy_pods = [
                 pod_name for pod_name, (_, reason) in node_statuses.items()
                 if reason is not None
@@ -3072,9 +3484,15 @@ def _update_cluster_status(
                 try:
                     ray_config = global_user_state.get_cluster_yaml_dict(
                         handle.cluster_yaml)
+                    launched_at = record.get('launched_at')
                     node_health = k8s_instance.get_node_health_for_cluster(
-                        handle.cluster_name_on_cloud, ray_config['provider'],
-                        unhealthy_pods)
+                        handle.cluster_name_on_cloud,
+                        ray_config['provider'],
+                        unhealthy_pods,
+                        tolerations=_k8s_pod_tolerations(ray_config),
+                        since=(datetime.fromtimestamp(launched_at,
+                                                      tz=timezone.utc)
+                               if launched_at is not None else None))
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node health for '
                                  f'{cluster_name!r}: {e}')
@@ -3140,34 +3558,46 @@ def _update_cluster_status(
                          status_lib.ClusterStatus.STOPPED)
         ]
         if some_nodes_terminated:
-            init_reason = 'one or more nodes terminated'
-            # Say where the node went. The pods are gone, so their live status
-            # explains nothing, but the Kubernetes nodes they were placed on
-            # still do: a node that no longer exists, or that is NotReady or
-            # cordoned, points at a cluster/cloud-side failure rather than a
-            # user-initiated teardown. K8s-only; other clouds keep the generic
-            # reason. Best-effort -- fall back to the generic message when the
-            # nodes are unknown or all look fine.
-            #
-            # Skipped once the cluster is already INIT, mirroring the guard on
-            # the event write below: a cluster stays INIT with the pod missing
-            # until it is downed or relaunched, so without this we would poll
-            # the K8s API once per node every refresh to build a string that
-            # is then discarded.
-            if (status != status_lib.ClusterStatus.INIT and
-                    not status_reason and
+            init_reason = _PARTIAL_LOSS_REASON
+            # Say where the missing pods went: their deletion events and the
+            # nodes they were placed on (a node that no longer exists, is
+            # NotReady or carries an evicting taint points at a cluster/cloud-
+            # side failure). Reported next to what the surviving pods say.
+            # K8s-only; best-effort; once (first_loss above).
+            if (first_loss and
                     isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
-                    node_names = (cluster_info.get_node_names()
-                                  if cluster_info is not None else None)
-                    if node_names:
-                        ray_config = global_user_state.get_cluster_yaml_dict(
-                            handle.cluster_yaml)
-                        if ray_config and 'provider' in ray_config:
-                            status_reason = (
-                                k8s_instance.get_missing_node_reason(
-                                    node_names, ray_config['provider']) or '')
+                    # Only the pods that are gone: a node whose pods still run
+                    # did not lose any.
+                    pod_nodes = ({
+                        pod: (infos[0].node_name if infos else None)
+                        for pod, infos in cluster_info.instances.items()
+                        if pod not in node_statuses
+                    } if cluster_info is not None else {})
+                    loss_config = (global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml) if pod_nodes else None)
+                    if loss_config and 'provider' in loss_config:
+                        launched_at = record.get('launched_at')
+                        since = (datetime.fromtimestamp(launched_at,
+                                                        tz=timezone.utc)
+                                 if launched_at is not None else None)
+                        tolerations = _k8s_pod_tolerations(loss_config)
+                        loss_reason = (
+                            k8s_instance.get_cluster_termination_cause(
+                                loss_config['provider'],
+                                pod_nodes,
+                                tolerations=tolerations,
+                                since=since) or
+                            k8s_instance.get_missing_node_reason(
+                                [n for n in pod_nodes.values() if n],
+                                loss_config['provider'],
+                                tolerations=tolerations,
+                                since=since))
+                        if loss_reason:
+                            status_reason = '; '.join(
+                                r for r in (loss_reason.rstrip('.'),
+                                            status_reason) if r)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node state for '
                                  f'{cluster_name!r}: {e}')
@@ -3319,8 +3749,10 @@ def _update_cluster_status(
             identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
-        # Skip if already INIT, unless this refresh explained why.
-        if (status != status_lib.ClusterStatus.INIT or identified_cause):
+        # Skip if already INIT, unless this refresh has something new (see
+        # report_again; a recovered cause also counts when no pod is missing).
+        if (status != status_lib.ClusterStatus.INIT or report_again or
+            (identified_cause and not some_nodes_terminated)):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,
@@ -3358,51 +3790,40 @@ def _update_cluster_status(
             include_user_info=include_user_info,
             summary_response=summary_response)
 
-    verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
-
-    # For Kubernetes, recover an autodown that completed between two refreshes.
-    # On k8s, autostop is implemented as autodown (pod termination); if skylet
-    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
-    # would otherwise record only the generic cleanup event below. Skylet leaves
-    # a durable Event breadcrumb
-    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
-    # deleted pods, so read it back and attribute the termination to autostop.
-    # nop_if_duplicate keeps the timeline clean in the non-race case where
-    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
-    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
-    # cannot exist and the lookup is pointless.
-    if (record['autostop'] >= 0 and to_terminate and
-            isinstance(launched_resources.cloud, clouds.Kubernetes)):
-        try:
-            ray_config = global_user_state.get_cluster_yaml_dict(
-                handle.cluster_yaml)
-            if ray_config and 'provider' in ray_config:
-                autostop_event = k8s_instance.get_cluster_autostop_event(
-                    ray_config['provider'],
-                    handle.cluster_name_on_cloud,
-                    since=record['launched_at'])
-                if autostop_event is not None:
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        None,
-                        'Cluster was autodowned (idle timeout).',
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        nop_if_duplicate=True,
-                        transitioned_at=autostop_event.get('transitioned_at'))
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug('Failed to record autodown event for '
-                         f'{cluster_name!r}: {e}')
-
-    global_user_state.add_cluster_event(
-        cluster_name,
-        None,
-        f'All nodes {verb}, cleaning up the cluster.',
-        global_user_state.ClusterEventType.STATUS_CHANGE,
-        # This won't do anything for a terminated cluster, but it's needed for a
-        # stopped cluster.
-        nop_if_duplicate=True,
-    )
+    if to_terminate:
+        # A refresh re-entering after a failed cleanup has already recorded
+        # why; skip the Kubernetes lookups it would only throw away.
+        last_event = global_user_state.get_last_cluster_event(
+            record['cluster_hash'],
+            global_user_state.ClusterEventType.STATUS_CHANGE)
+        if last_event is None or not re.search(_TERMINATED_CLUSTER_EVENT_REGEX,
+                                               last_event):
+            try:
+                reason = _get_terminated_cluster_reason(
+                    record, handle, launched_resources,
+                    external_cluster_failures)
+            except Exception as e:  # pylint: disable=broad-except
+                # Explaining the removal must never block the cleanup below.
+                logger.debug(f'Failed to explain why {cluster_name!r} is '
+                             f'gone: {e}')
+                reason = (f'{_NO_TERMINATION_CAUSE} '
+                          f'{_CLUSTER_REMOVED_BY_REFRESH}')
+            global_user_state.add_cluster_event(
+                cluster_name,
+                None,
+                reason,
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                nop_if_duplicate=True,
+                duplicate_regex=_TERMINATED_CLUSTER_EVENT_REGEX)
+    else:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            'All nodes stopped, cleaning up the cluster.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True,
+        )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(
         cluster_name,
@@ -3909,6 +4330,25 @@ def _get_glob_clusters(
 _MAX_NAMES_IN_SUMMARY = 3
 
 
+def _pod_reason_parts(reasons: Dict[str, str]) -> List[str]:
+    """'<pod> is not ready (<reason>)', grouping pods with the same reason."""
+    by_reason: Dict[str, List[str]] = {}
+    for pod_name, reason in reasons.items():
+        by_reason.setdefault(reason, []).append(pod_name)
+    parts = []
+    for reason, pods in by_reason.items():
+        names = sorted(pods)
+        if len(names) == 1:
+            parts.append(f'{names[0]} is not ready ({reason})')
+        else:
+            shown = names[:_MAX_NAMES_IN_SUMMARY]
+            name_list = ', '.join(shown)
+            if len(names) > _MAX_NAMES_IN_SUMMARY:
+                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    return parts
+
+
 def _summarize_pod_reasons(
     node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
     total_pods: int,
@@ -3917,7 +4357,8 @@ def _summarize_pod_reasons(
     """Summarize per-pod reasons into a concise grouped message.
 
     Groups issues by root cause:
-    1. Node-level issues (from node_health dict, deduplicated by node)
+    1. Node-level issues (from node_health dict, deduplicated by node),
+       followed by the reasons of the pods on those nodes
     2. Pod-level issues (grouped by reason, pod names from dict keys)
 
     Args:
@@ -3932,20 +4373,19 @@ def _summarize_pod_reasons(
         A summarized string, or '' if no reasons found.
     """
     parts = []
+    node_explained_pods = set()
 
-    # 1. Node-level summary (from structured data)
+    # 1. Node-level summary (from structured data), with what the node's pods
+    # report: the node says where, the pod says how it went.
     if node_health:
         # Group by issue type (e.g., all NotReady together)
         by_issue: Dict[str, List[str]] = {}
-        affected_by_issue: Dict[str, int] = {}
         for node_name, info in node_health.items():
             by_issue.setdefault(info.issue, []).append(node_name)
-            affected_by_issue[info.issue] = (
-                affected_by_issue.get(info.issue, 0) + len(info.pods))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
-            affected = affected_by_issue[issue]
+            affected = sum(len(node_health[n].pods) for n in names)
             if len(names) == 1:
                 part = f'node {names[0]} is {issue}'
             else:
@@ -3956,33 +4396,29 @@ def _summarize_pod_reasons(
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
             part += f', affecting {affected} out of {total_pods} pods'
+            # The node is named above, so drop it from the pods' reasons (they
+            # then group); with several nodes, name each pod's node instead.
+            reasons = {}
+            for node_name in names:
+                for pod_name in node_health[node_name].pods:
+                    node_explained_pods.add(pod_name)
+                    reason = node_statuses.get(pod_name, (None, None))[1]
+                    if reason:
+                        label = (pod_name if len(names) == 1 else
+                                 f'{pod_name} on {node_name}')
+                        reasons[label] = reason.replace(f' on node {node_name}',
+                                                        '')
+            if reasons:
+                part += ': ' + '; '.join(_pod_reason_parts(reasons))
             parts.append(part)
 
-    # Collect pod names that are already explained by node issues
-    node_explained_pods = set()
-    if node_health:
-        for info in node_health.values():
-            node_explained_pods.update(info.pods)
-
     # 2. Pod-level summary (pods not already explained by node issues)
-    pod_issues: Dict[str, List[str]] = {}
-    for pod_name, (_, reason) in node_statuses.items():
-        if reason is None:
-            continue
-        if pod_name in node_explained_pods:
-            continue
-        pod_issues.setdefault(reason, []).append(pod_name)
-
-    for reason, pods in pod_issues.items():
-        names = sorted(pods)
-        if len(names) == 1:
-            parts.append(f'{names[0]} is not ready ({reason})')
-        else:
-            shown = names[:_MAX_NAMES_IN_SUMMARY]
-            name_list = ', '.join(shown)
-            if len(names) > _MAX_NAMES_IN_SUMMARY:
-                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
-            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    parts.extend(
+        _pod_reason_parts({
+            pod_name: reason
+            for pod_name, (_, reason) in node_statuses.items()
+            if reason is not None and pod_name not in node_explained_pods
+        }))
 
     return '; '.join(parts)
 
@@ -4103,8 +4539,8 @@ def get_clusters(
             names.
         all_users: If True, return clusters from all users. If False, only
             return clusters from the current user.
-        include_credentials: If True, include cluster ssh credentials in the
-            return value.
+        include_credentials: If True, include ssh credentials in the records of
+            the clusters the current user owns.
         _include_is_managed: Whether to force include clusters created by the
             controller.
 
@@ -4174,12 +4610,17 @@ def get_clusters(
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add the credentials to the record.
+        """Add the credentials to the records of clusters the caller owns.
 
         This is useful for the client side to setup the ssh config of the
-        cluster.
+        cluster. The credentials carry the cluster owner's SSH private key, so
+        the records of other users' clusters get none.
         """
-        records_with_handle = _get_records_with_handle(records)
+        caller_user_hash = common_utils.get_current_user().id
+        records_with_handle = [
+            record for record in _get_records_with_handle(records)
+            if record['user_hash'] == caller_user_hash
+        ]
         if len(records_with_handle) == 0:
             return
 

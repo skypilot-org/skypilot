@@ -899,6 +899,8 @@ The number of active jobs that the controller supports is based on available mem
 
   - The default controller supports up to **600 jobs** running in parallel.
 
+  A job keeps its place under this limit while it waits for resources. On a shared deployment, set :ref:`jobs.max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>` so that one user's jobs waiting for resources cannot take every place.
+
 The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size. Each additional ~3.6 GiB of controller memory adds capacity for 8 concurrent launches and 200 concurrently running jobs.
 
 Increase CPU modestly as memory grows to keep controller responsiveness high, but note that the hard parallelism limits are driven by available memory.

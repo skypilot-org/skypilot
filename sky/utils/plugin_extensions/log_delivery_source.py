@@ -1,15 +1,17 @@
 """External log delivery source interface for plugins.
 
-When a logging agent is configured and a log reader is registered, the
-controller skips keeping a local copy of a job's logs. That decision is
-made from the server's config alone, not from whether a given cluster's
-logs were actually delivered.
+When a logging agent is configured for a cluster's placement and a log
+reader is registered, the controller skips keeping a local copy of a job's
+logs, and a followed tail of a running managed job reads the external store
+instead of the cluster. Those decisions are made from the server's config
+alone, not from whether a given cluster's logs were actually delivered.
 
 This extension point lets a registered source report, per cluster, a
 reason the logs were not delivered. Core SkyPilot consults it before
-dropping the local copy: a reported reason keeps the copy (and logs why);
-no reason skips it as before. Not registering a source keeps the previous
-behavior.
+dropping the local copy and before following a running job from the store:
+a reported reason keeps the copy (and logs why) and streams the running job
+from its cluster; no reason skips the copy and follows the store. Not
+registering a source keeps the previous behavior.
 
 Example usage in a plugin:
     from sky.utils.plugin_extensions import LogDeliverySource
@@ -48,16 +50,23 @@ class LogDeliverySource:
     SkyPilot queries it without knowing which plugin (if any) provides it.
 
     The answer is deliberately one-sided: a source reports only that the
-    logs were *not* delivered. Everything else (no source registered, no
-    record for the cluster, the check itself failing) reads as "no reason
-    to doubt delivery" and preserves the previous behavior, so a broken
-    source degrades to the default semantics.
+    logs were *not* delivered. Everything else (no source registered, a
+    source returning None, the check itself failing) reads as delivered and
+    preserves the previous behavior, so a broken source degrades to the
+    default semantics. For the same reason, a source should return a reason
+    while it does not yet know whether a cluster's logs are delivered (e.g.
+    early in a run, before it has a record for the cluster), rather than
+    None: otherwise a viewer may follow a store that has none of the logs.
 
     Implementations must answer quickly and must not block. The check runs
-    once per managed job task, on the job-finalization path, in a worker
-    thread drawn from a pool the rest of the controller shares -- so a
-    source that hangs does not just delay one job, it holds a thread others
-    are waiting for. Exceptions are contained (see below); a hang is not.
+    at two points:
+    - once per managed job task, on the job-finalization path, in a worker
+      thread drawn from a pool the rest of the controller shares;
+    - when a followed tail of a running managed job task starts, once per
+      viewer, in an API server request thread.
+    A source that hangs does not just delay one job or viewer, it holds a
+    thread others are waiting for. Exceptions are contained (see below); a
+    hang is not.
     """
 
     _undelivered_reason_func: Optional[UndeliveredReasonFunc] = None
@@ -70,8 +79,8 @@ class LogDeliverySource:
 
         Args:
             undelivered_reason: Function returning a human-readable reason
-                why the cluster's logs did not reach the external store, or
-                None when there is no evidence against delivery. Must return
+                why the cluster's logs did not (or may not yet) reach the
+                external store, or None when they are delivered. Must return
                 promptly and must not block -- see the class docstring.
                 Signature: (cluster_name: Optional[str],
                             cluster_name_on_cloud: Optional[str])

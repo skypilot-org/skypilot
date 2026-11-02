@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import tarfile
 import time
@@ -336,16 +337,53 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
 
+# `ray status` keeps a node under `Active:` after the GCS has marked it dead
+# (on Ray 2.56.1 it never drops off), so counting its node lines over-reports
+# after any node loss -- a resize-down, a preemption, a replaced worker. Ask
+# the GCS node table instead (state 0 is ALIVE). A bare GcsClient rather than
+# ray.init(): that starts a driver and a worker and leaves their logs on the
+# head per check, which a status refresh would pile up. Its per-node value is
+# a dict on Ray 2.9.3 and a GcsNodeInfo message on 2.56.1.
+# Nothing listening on the port prints the "Ray cluster is not found" line
+# that `ray status` printed up to Ray 2.9.3 and the health check keys on.
+_ALIVE_NODES_PY = (
+    'import os, socket, sys; '
+    'a = os.environ["RAY_ADDRESS"]; h, p = a.rsplit(":", 1); '
+    's = socket.socket(); s.settimeout(5); '
+    's.connect_ex((h, int(p))) == 0 or '
+    'sys.exit(print("Ray cluster is not found at", a) or 1); '
+    's.close(); '
+    'from ray._raylet import GcsClient; '
+    'ns = GcsClient(address=a).get_all_node_info(timeout=10).values(); '
+    'st = [n["state"] if isinstance(n, dict) else n.state for n in ns]; '
+    'print("SKY_ALIVE_NODES", st.count(0), len(st))')
+RAY_ALIVE_NODE_COUNT_COMMAND = (
+    f'{_RAY_PORT_COMMAND}; '
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '
+    f'-c {shlex.quote(_ALIVE_NODES_PY)}')
+# Parses RAY_ALIVE_NODE_COUNT_COMMAND's output: alive count, total count.
+RAY_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
+                                     re.MULTILINE)
+
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 # Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
 # the constants.RAY_STATUS literal — the probe picks a dynamic port.
+_RAY_HEAD_WAIT_TIMEOUT_SECONDS = 120
+# After `ray start --head`, `ray status` exits non-zero until the GCS is up,
+# then exits 0 printing "No cluster status." until the autoscaler first
+# reports (a few seconds, on both Ray 2.9.3 and 2.56.1). Wait past both.
+# Deadline rather than an iteration count, because a failing `ray status`
+# takes ~35s to return on 2.56.1.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'_sky_deadline=$(( $(date +%s) + {_RAY_HEAD_WAIT_TIMEOUT_SECONDS} )); '
+    'while [ $(date +%s) -lt $_sky_deadline ]; do '
+    '_sky_ray_status=$(RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
     f'{constants.SKY_REMOTE_RAY_PORT}}} '
-    f'{constants.SKY_RAY_CMD} status | grep -q "No cluster status."`; do '
-    'sleep 0.5; '
+    f'{constants.SKY_RAY_CMD} status 2>&1) && '
+    'case "$_sky_ray_status" in *"No cluster status."*) ;; *) break ;; esac; '
     'echo "Waiting ray cluster to be initialized"; '
+    'sleep 0.5; '
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.

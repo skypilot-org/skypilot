@@ -64,10 +64,13 @@ def force_caller_scope_cancel_body(
     """Bind `POST /api/cancel` to the caller unless they are an admin.
 
     A non-admin caller may only cancel their own requests, regardless of the
-    ``user_id`` they put in the body. Admins (and no-auth servers) keep the
-    client-supplied value, so ``--all-users`` (``user_id=None`` => every
-    request) still works for them. The strictly-read-only viewer role may not
-    cancel anything at all.
+    ``user_id`` they put in the body. Admins (and no-auth servers) may cancel
+    any request they name by id, whatever ``user_id`` the client sent: older
+    clients send their own user hash along with the ids, which would hide
+    every other user's request. Without ids they keep the client-supplied
+    value, so ``--all-users`` (``user_id=None`` => every request) and
+    ``--all`` (their own) still work. The strictly-read-only viewer role may
+    not cancel anything at all.
     """
     if _is_viewer(request):
         raise fastapi.HTTPException(
@@ -75,6 +78,8 @@ def force_caller_scope_cancel_body(
     scope = request_owner_scope(request)
     if scope is not None:
         request_cancel_body.user_id = scope
+    elif request_cancel_body.request_ids is not None:
+        request_cancel_body.user_id = None
     return request_cancel_body
 
 

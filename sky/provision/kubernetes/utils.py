@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
@@ -403,6 +404,21 @@ def _is_cloudflare_403_error(exception: Exception) -> bool:
     return False
 
 
+def is_transient_api_error(exception: Optional[BaseException]) -> bool:
+    """Whether a failed Kubernetes API call may succeed if retried later.
+
+    True for connection errors and timeouts, 429, 5xx and a CloudFlare 403.
+    False for other 4xx responses and kubeconfig errors.
+    """
+    if isinstance(exception, kubernetes.max_retry_error()):
+        return True
+    if isinstance(exception, kubernetes.api_exception()):
+        status = exception.status or 0
+        return (status == 429 or status >= 500 or
+                _is_cloudflare_403_error(exception))
+    return False
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -560,6 +576,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
+    elif accelerator == 'H100-MEGA':
+        # H100-MEGA is named as H100-MEGA-80GB in GKE.
+        accelerator = 'H100-MEGA-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB',
                        'B200'):
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
@@ -743,10 +762,12 @@ class GKELabelFormatter(GPULabelFormatter):
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
             if acc == 'H100-80GB':
-                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
-                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
-                # to distinguish between a3-high and a3-mega instances
+                # H100 can be either H100-80GB (a3-high) or H100-MEGA-80GB
+                # (a3-mega) in GKE. Map both to their catalog names, which
+                # keep the two instance families distinct.
                 return 'H100'
+            elif acc == 'H100-MEGA-80GB':
+                return 'H100-MEGA'
             elif acc == 'H200-141GB':
                 return 'H200'
             return acc
@@ -2107,6 +2128,21 @@ def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
     return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
 
 
+def disruption_reason(reason: str, message: str, pod: Any) -> str:
+    """A pod's DisruptionTarget condition, with the node it was on.
+
+    The condition says how the pod was disrupted (taint manager, eviction API,
+    scheduler preemption) but not where; the node is what a user checks next.
+    """
+    text = f'Disrupted: {reason}'
+    if message:
+        text += f' ({message})'
+    node = getattr(getattr(pod, 'spec', None), 'node_name', None)
+    if isinstance(node, str) and node:
+        text += f' on node {node}'
+    return text
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2128,10 +2164,7 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
                     summary += f' ({message})'
                 return summary
             if condition.type == 'DisruptionTarget':
-                summary = f'Disrupted: {reason}'
-                if message:
-                    summary += f' ({message})'
-                return summary
+                return disruption_reason(reason, message, pod)
 
     # Pod-level kubelet reason (e.g. 'Evicted' for ephemeral-storage / disk /
     # memory pressure, 'Preempted', 'Shutdown'). This is the authoritative
@@ -2330,7 +2363,7 @@ def event_last_observed(event: Any) -> Optional[float]:
 # the paths where when the launch started is the only bound available. It is
 # deliberately small, because anything larger reaches back into the previous
 # pod.
-_POD_EVENT_CLOCK_SKEW_SECONDS = 60
+POD_EVENT_CLOCK_SKEW_SECONDS = 60
 
 # Pod-event reasons that name *why* a pod was deleted, mapped to
 # (decisiveness, how the reason is reported). The events are ranked by
@@ -2374,8 +2407,8 @@ _POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
 _POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
 
 
-def _events_since(events: List[Any],
-                  since: Optional[datetime.datetime]) -> List[Any]:
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
     """The events that can be evidence about the pod that exists now.
 
     Events the API server left without a usable timestamp are kept: not
@@ -2384,7 +2417,7 @@ def _events_since(events: List[Any],
     """
     if since is None:
         return events
-    cutoff = since.timestamp() - _POD_EVENT_CLOCK_SKEW_SECONDS
+    cutoff = since.timestamp() - POD_EVENT_CLOCK_SKEW_SECONDS
     kept = []
     for event in events:
         observed_at = event_last_observed(event)
@@ -2412,18 +2445,42 @@ def reason_from_pod_events(
     held the same pod name before it. ``events`` are expected newest-first,
     which is what decides between two events of equal rank.
     """
+    event = pod_deletion_event(events, since)
+    if event is None:
+        return None
+    reported_as = _POD_DELETION_EVENT_REASONS[event.reason][1]
+    message = (event.message or '').strip()
+    return f'{reported_as}: {message}' if message else reported_as
+
+
+def is_cancelled_taint_eviction(reason: Optional[str],
+                                message: Optional[str]) -> bool:
+    """A taint eviction that did not happen.
+
+    The taint manager emits it when the taint is lifted before the pod's
+    tolerationSeconds run out, or when something else deletes the pod first.
+    """
+    return (reason == 'TaintManagerEviction' and
+            (message or '').startswith('Cancelling deletion'))
+
+
+def pod_deletion_event(events: List[Any],
+                       since: Optional[datetime.datetime] = None) -> Any:
+    """The event that best names why a pod was deleted, or None.
+
+    The event behind ``reason_from_pod_events``, for callers that word the
+    cause themselves.
+    """
     best_rank = 0
-    best_reason: Optional[str] = None
-    for event in _events_since(events, since):
-        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
-        if ranked is None:
+    best_event = None
+    for event in events_since(events, since):
+        if is_cancelled_taint_eviction(event.reason, event.message):
             continue
-        rank, reported_as = ranked
-        if rank > best_rank:
-            best_rank = rank
-            message = (event.message or '').strip()
-            best_reason = f'{reported_as}: {message}' if message else reported_as
-    return best_reason
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is not None and ranked[0] > best_rank:
+            best_rank = ranked[0]
+            best_event = event
+    return best_event
 
 
 def last_pod_event_context(
@@ -2437,7 +2494,7 @@ def last_pod_event_context(
     for what they are -- the last thing said about it -- and the caller still
     says plainly that no cause could be derived.
     """
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         # Events arrive newest-first.
         if (event.type == 'Warning' or
                 event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
@@ -2886,6 +2943,8 @@ def check_instance_fits(
                 get_accelerator_label_key_values(context, acc_type, acc_count))
             if gpu_label_values is None:
                 gpu_label_values = []
+        except exceptions.KubeAPIUnreachableError:
+            raise
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -3802,6 +3861,10 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
+# (kubeconfig fingerprint, context names parsed from those files).
+_kubeconfig_context_names: Optional[Tuple[Tuple[Any, ...], List[str]]] = None
+
+
 def get_all_kube_context_names() -> List[str]:
     """Get all kubernetes context names available in the environment.
 
@@ -3810,26 +3873,90 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    We should not cache the result of this function as the admin policy may
-    update the contexts.
+    The kubeconfig is parsed again only when a file on KUBECONFIG (or the
+    variable itself) changes, so an admin policy or an upload that rewrites
+    it is seen on the next call.
 
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
     """
+    global _kubeconfig_context_names
     k8s = kubernetes.kubernetes
-    context_names = []
-    try:
-        all_contexts, _ = kubernetes.list_kube_config_contexts()
-        # all_contexts will always have at least one context. If kubeconfig
-        # does not have any contexts defined, it will raise ConfigException.
-        context_names = [context['name'] for context in all_contexts]
-    except k8s.config.config_exception.ConfigException:
-        # If no config found, continue
-        pass
+    # Taken before the parse: a write during it changes the next fingerprint.
+    fingerprint = kubernetes.kubeconfig_fingerprint()
+    cached = _kubeconfig_context_names
+    if cached is not None and cached[0] == fingerprint:
+        context_names = list(cached[1])
+    else:
+        context_names = []
+        try:
+            all_contexts, _ = kubernetes.list_kube_config_contexts()
+            # all_contexts will always have at least one context. If
+            # kubeconfig does not have any contexts defined, it will raise
+            # ConfigException.
+            context_names = [context['name'] for context in all_contexts]
+        except k8s.config.config_exception.ConfigException:
+            # If no config found, continue
+            pass
+        _kubeconfig_context_names = (fingerprint, list(context_names))
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
+
+
+# kube-system exists in every cluster and is never recreated, so its UID
+# identifies the cluster a context points at, whatever the credentials or the
+# route (direct, proxy, tunnel) used to reach it.
+CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+_CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
+_CLUSTER_UID_CACHE_TTL_SECONDS = 300
+_CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
+# context -> (kubeconfig fingerprint, uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
+                                              float]] = {}
+_cluster_uid_cache_lock = threading.Lock()
+
+
+def read_cluster_uid(core, timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
+                                    _request_timeout=timeout)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def get_cluster_uid(context: Optional[str],
+                    use_cache: bool = True) -> Optional[str]:
+    """Returns the UID of the cluster `context` points at.
+
+    Returns None when kube-system cannot be read (e.g. no RBAC grant, the
+    cluster is unreachable). Results are cached per process until a file on
+    KUBECONFIG changes, since a rewritten kubeconfig may point `context` at
+    another cluster.
+    """
+    now = time.monotonic()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
+    if use_cache:
+        with _cluster_uid_cache_lock:
+            cached = _cluster_uid_cache.get(context)
+        if (cached is not None and cached[0] == fingerprint and
+                now < cached[2]):
+            return cached[1]
+    uid: Optional[str] = None
+    try:
+        # The in-cluster name, unlike None, never falls back to kubeconfig.
+        uid = read_cluster_uid(kubernetes.core_api(context),
+                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
+                     f'namespace UID of context {context!r}: {e}')
+    ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
+           if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
+    with _cluster_uid_cache_lock:
+        _cluster_uid_cache[context] = (fingerprint, uid, time.monotonic() + ttl)
+    return uid
 
 
 @annotations.lru_cache(scope='request')
@@ -4498,6 +4625,26 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
+    """The settings in a ``pod_config`` spec that hand the pod an API identity.
+
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
+    whether NONE can apply share this one list.
+    """
+    conflicts = [
+        f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                             'serviceAccount') if key in spec
+    ]
+    if spec.get('automountServiceAccountToken') is True:
+        conflicts.append('pod_config.spec.automountServiceAccountToken')
+    for volume in spec.get('volumes') or []:
+        sources = (volume.get('projected') or {}).get('sources') or []
+        if any('serviceAccountToken' in src for src in sources):
+            conflicts.append(f'pod_config.spec.volumes[{volume.get("name")}]'
+                             ' (projected serviceAccountToken)')
+    return conflicts
 
 
 def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],

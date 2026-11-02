@@ -2025,6 +2025,70 @@ class Task:
             return config
         return self._to_yaml_config()
 
+    def to_submitted_yaml_config(self) -> Dict[str, Any]:
+        """The YAML this task was submitted with, secrets redacted.
+
+        INTERNAL: this method is internal-facing.
+
+        The user-specified YAML (see `to_yaml_config`) as written, except for
+        the parts that CLI/SDK overrides change after the file is read --
+        `--env`, `--secret`, resource flags such as `--cpus`, `--name`,
+        `--num-nodes` and `--git-url` / `--git-ref` -- which are taken from
+        this task, since they are what tells two submissions of the same file
+        apart. Tasks without a user-specified YAML (e.g. an inline
+        command) are serialized from the task itself.
+        """
+        if self._user_specified_yaml is None:
+            return self._to_yaml_config(redact_secrets=True)
+        config = yaml_utils.safe_load(self._user_specified_yaml)
+        redact_task_yaml_dict(config)
+        effective = self._to_yaml_config(redact_secrets=True)
+
+        if self.envs:
+            config['envs'] = dict(self.envs)
+
+        # Secrets come in dict, list (references) and mixed forms; take them
+        # from the task's own serialization, which emits whichever is valid.
+        if self.secrets:
+            for key in ('secrets', 'managed_secrets'):
+                # Assigning an existing key keeps its place in the YAML.
+                if key in effective:
+                    config[key] = effective[key]
+                else:
+                    config.pop(key, None)
+
+        # Keep the user's resources as written unless an override changed
+        # them, so a plain submission shows the file unchanged. Compared as
+        # plain data, not by building `Resources` from the user's YAML: that
+        # has side effects (deprecation warnings written into the user's
+        # output, catalog loads). A mismatch in form alone (e.g. `A100:1` vs
+        # `{A100: 1}`) just shows the task's own, equivalent serialization.
+        effective_resources = effective.get('resources')
+        if (effective_resources is not None and _plain(
+                config.get('resources') or {}) != _plain(effective_resources)):
+            config['resources'] = effective_resources
+            # The task keeps a legacy `resources.autostop.hook` as a
+            # `config.hooks` entry, which its resources no longer carry.
+            effective_hooks = (effective.get('config') or {}).get('hooks')
+            if effective_hooks and not (config.get('config') or
+                                        {}).get('hooks'):
+                config['config'] = dict(config.get('config') or {})
+                config['config']['hooks'] = effective_hooks
+
+        # `--name` / `--num-nodes`.
+        if self.name is not None and self.name != config.get('name'):
+            config['name'] = self.name
+        if self.num_nodes != config.get('num_nodes', 1):
+            config['num_nodes'] = self.num_nodes
+        # `--git-url` / `--git-ref` make the workdir a git repo, which reads
+        # the same anywhere. A local workdir is left as the user wrote it: on
+        # the API server it has been rewritten to the uploaded copy's path,
+        # which means nothing to the user (the entrypoint keeps `--workdir`).
+        if (isinstance(self.workdir, dict) and
+                self.workdir != config.get('workdir')):
+            config['workdir'] = dict(self.workdir)
+        return config
+
     def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         config = {}
 
@@ -2229,6 +2293,18 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+
+def _plain(value: Any) -> Any:
+    """`value` with every scalar as a string, to compare YAML data by content.
+
+    `cpus: 2` and `cpus: '2'` read the same to the user.
+    """
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return None if value is None else str(value)
 
 
 def _resources_to_config(resources: Union[List['resources_lib.Resources'],

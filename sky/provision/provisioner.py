@@ -772,30 +772,20 @@ def _post_provision_setup(
                                                 **ssh_credentials)
         head_runner = runners[0]
 
-        def is_ray_cluster_healthy(ray_status_output: str,
+        def is_ray_cluster_healthy(alive_nodes_output: str,
                                    expected_num_nodes: int) -> bool:
-            """Parse the output of `ray status` to get #active nodes.
+            """Whether exactly the expected number of nodes are alive.
 
-            The output of `ray status` looks like:
-            Node status
-            ---------------------------------------------------------------
-            Active:
-              1 node_291a8b849439ad6186387c35dc76dc43f9058108f09e8b68108cf9ec
-              1 node_0945fbaaa7f0b15a19d2fd3dc48f3a1e2d7c97e4a50ca965f67acbfd
-            Pending:
-            (no pending nodes)
-            Recent failures:
-            (no failures)
+            Not `ray status`: it keeps a dead node under `Active:`, so a
+            worker whose Ray stopped looked connected and was never
+            restarted. Exact, not `>=`: a false "healthy" skips the worker
+            start, while a false "unhealthy" only re-runs one guarded by
+            no_restart.
             """
-            start = ray_status_output.find('Active:')
-            end = ray_status_output.find('Pending:', start)
-            if start == -1 or end == -1:
-                return False
-            num_active_nodes = 0
-            for line in ray_status_output[start:end].split('\n'):
-                if line.strip() and not line.startswith('Active:'):
-                    num_active_nodes += 1
-            return num_active_nodes == expected_num_nodes
+            match = instance_setup.RAY_ALIVE_NODES_PATTERN.search(
+                alive_nodes_output)
+            return match is not None and int(
+                match.group(1)) == expected_num_nodes
 
         def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
             head_ray_needs_restart = True
@@ -804,11 +794,17 @@ def _post_provision_setup(
 
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_ALIVE_NODE_COUNT_COMMAND,
                 stream_logs=False,
-                require_outputs=True)
+                require_outputs=True,
+                separate_stderr=True)
+            # The port is printed before the GCS is asked, so a probe that
+            # fails because Ray is still coming up still names the port.
+            found, payload = message_utils.decode_payload(
+                stdout, raise_for_mismatch=False)
+            if found:
+                ray_port = payload['ray_port']
             if not returncode:
-                ray_port = message_utils.decode_payload(stdout)['ray_port']
                 logger.debug(f'Ray cluster on head is up with port {ray_port}.')
 
             head_ray_needs_restart = bool(returncode)
@@ -902,7 +898,9 @@ def _post_provision_setup(
             logger.debug('Ray cluster is ready. Skip starting ray cluster on '
                          'worker nodes.')
 
-        logging_agent = logs.get_logging_agent()
+        agent_cloud = str(launched_resources.cloud).lower()
+        logging_agent = logs.get_logging_agent(cloud=agent_cloud,
+                                               region=launched_resources.region)
         if logging_agent:
             status.update(
                 ux_utils.spinner_message('Setting up logging agent',
