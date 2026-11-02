@@ -3473,7 +3473,8 @@ def _check_nodes_health(
 
     Returns:
         Dict mapping node_name -> issue description for unhealthy nodes, e.g.
-        'NotReady (NoExecute taint node.kubernetes.io/unreachable)'.
+        'NotReady (NoExecute taint node.kubernetes.io/unreachable)', or
+        'deleted' (API path only).
         Healthy nodes are omitted.
     """
     if not node_names:
@@ -3521,6 +3522,11 @@ def _check_nodes_health(
                 return (name, f'cordoned{tainted}')
             if taints:
                 return (name, f'tainted{tainted}')
+        except kubernetes.api_exception() as e:
+            # A pod can outlive its node for a moment, until pod GC.
+            if e.status == 404:
+                return (name, 'deleted')
+            logger.debug(f'Failed to read node {name}: {e}')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
         return None

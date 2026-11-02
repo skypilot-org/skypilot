@@ -4395,15 +4395,18 @@ def _summarize_pod_reasons(
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
             part += f', affecting {affected} out of {total_pods} pods'
-            # The node is already named, so drop it from the pods' reasons.
+            # The node is named above, so drop it from the pods' reasons (they
+            # then group); with several nodes, name each pod's node instead.
             reasons = {}
             for node_name in names:
                 for pod_name in node_health[node_name].pods:
                     node_explained_pods.add(pod_name)
                     reason = node_statuses.get(pod_name, (None, None))[1]
                     if reason:
-                        reasons[pod_name] = reason.replace(
-                            f' on node {node_name}', '')
+                        label = (pod_name if len(names) == 1 else
+                                 f'{pod_name} on {node_name}')
+                        reasons[label] = reason.replace(f' on node {node_name}',
+                                                        '')
             if reasons:
                 part += ': ' + '; '.join(_pod_reason_parts(reasons))
             parts.append(part)

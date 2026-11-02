@@ -12,6 +12,7 @@ from unittest import mock
 
 from sky import backends
 from sky import clouds
+from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -306,7 +307,10 @@ class TestNodeTaints:
 
     def _check(self, monkeypatch, node, tolerations=()):
         api = mock.Mock()
-        api.read_node.return_value = node
+        if isinstance(node, Exception):
+            api.read_node.side_effect = node
+        else:
+            api.read_node.return_value = node
         monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
                             lambda *a, **kw: api)
         monkeypatch.setattr(k8s_instance.plugin_extensions.NodeInfoSource,
@@ -336,6 +340,14 @@ class TestNodeTaints:
             'operator': 'Exists',
             'effect': 'NoExecute'
         }]) == {}
+
+    def test_a_deleted_node(self, monkeypatch):
+        gone = kubernetes.api_exception()(status=404)
+        assert self._check(monkeypatch, gone) == {'n1': 'deleted'}
+
+    def test_an_unreadable_node_is_not_reported(self, monkeypatch):
+        forbidden = kubernetes.api_exception()(status=403)
+        assert self._check(monkeypatch, forbidden) == {}
 
     def test_an_untolerated_taint_on_a_ready_node(self, monkeypatch):
         node = self._node(True, [('drain', 'now')])
@@ -389,3 +401,21 @@ class TestDisruptionNamesTheNode:
             self._pod('TerminationTarget'), 'c')
         assert reason.startswith('Preempted by Kueue: DeletionByTaintManager '
                                  '(Taint manager: deleting).\n')
+
+
+def test_nodes_sharing_an_issue_keep_each_pods_node():
+    reason = 'Disrupted: DeletionByTaintManager on node {}'
+    statuses = {
+        f'pod-{i}': (status_lib.ClusterStatus.INIT, reason.format(f'n{i}'))
+        for i in range(16)
+    }
+    node_health = {
+        f'n{i}': k8s_instance.NodeHealthInfo('NotReady', [f'pod-{i}'])
+        for i in range(16)
+    }
+    summary = backend_utils._summarize_pod_reasons(statuses, 16, node_health)
+    # Grouped, so capped: each shown pod names its node, the rest are counted.
+    assert summary == (
+        '16 nodes are NotReady (n0, n1, n10 + 13 more), affecting 16 out of '
+        '16 pods: 16 pods not ready (pod-0 on n0, pod-1 on n1, pod-10 on n10 '
+        '+ 13 more): Disrupted: DeletionByTaintManager')
