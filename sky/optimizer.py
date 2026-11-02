@@ -239,7 +239,9 @@ class Optimizer:
         topo_order: List[task_lib.Task],
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
-        quiet: bool = False
+        quiet: bool = False,
+        earlier_unreachable_errors: Optional[Dict[task_lib.Task,
+                                                  List[Exception]]] = None,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -247,6 +249,11 @@ class Optimizer:
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
         The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
+
+        Args:
+            earlier_unreachable_errors: For tasks with ordered resources, the
+                unreachable errors of the choices tried before the one in the
+                task, reported if the task has no launchable resources.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -299,6 +306,10 @@ class Optimizer:
                      task=node,
                      blocked_resources=blocked_resources,
                      quiet=quiet))
+                if earlier_unreachable_errors:
+                    unreachable_errors = (
+                        earlier_unreachable_errors.get(node, []) +
+                        unreachable_errors)
                 node_to_candidate_map[node] = cloud_candidates
                 # Has to call the printing after the launchable resources are
                 # computed, because the missing fields of the resources are
@@ -366,9 +377,6 @@ class Optimizer:
                         logger.debug(debug_msg)
                     node_to_cost_map[node][resources] = estimated_cost_or_time
             if not node_to_cost_map[node]:
-                if unreachable_errors:
-                    with ux_utils.print_exception_no_traceback():
-                        raise _unreachable_infra_error(node, unreachable_errors)
                 source_hint = 'catalog'
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
@@ -413,10 +421,22 @@ class Optimizer:
                 resource_hints_string = (
                     f'Hint: Check Per Resource Hint\n{hints_formatted}'
                     if hints_formatted else '')
+                if unreachable_errors:
+                    # The same context is checked once per requested resource.
+                    unreachable_errors = list(
+                        {str(e): e for e in unreachable_errors}.values())
+                    unreachable_str = '\n'.join(
+                        f'{indent_prefix}{e}' for e in unreachable_errors)
+                    summary = (
+                        'No reachable infra has resources satisfying the '
+                        f'request: {node_resources_reprs}.\nInfra that could '
+                        f'not be reached:\n{unreachable_str}')
+                else:
+                    summary = (f'{source_hint.capitalize()} does not contain '
+                               'any instances satisfying the request: '
+                               f'{node_resources_reprs}.')
                 error_msg = (
-                    f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request: '
-                    f'{node_resources_reprs}.'
+                    f'{summary}'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky gpus list{reset} '
@@ -425,7 +445,11 @@ class Optimizer:
                     'enabled clouds.\n'
                     f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(error_msg)
+                    # Unreachable infra is carried as failover history so
+                    # that callers retry instead of failing the request as
+                    # infeasible.
+                    raise exceptions.ResourcesUnavailableError(
+                        error_msg, failover_history=unreachable_errors)
         return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
@@ -1531,13 +1555,14 @@ class Optimizer:
 
         graph = dag.get_graph()
         local_dag = copy.deepcopy(dag) if has_resources_ordered else dag
+        earlier_unreachable_errors: Dict[
+            task_lib.Task, List[Exception]] = collections.defaultdict(list)
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
             if isinstance(task.resources, list):
                 # For ordered resources, we try the resources in the order
                 # specified by the user.
                 local_task = local_dag.tasks[task_id]
-                ordered_unreachable_errors: List[Exception] = []
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
@@ -1555,19 +1580,17 @@ class Optimizer:
                          quiet=False))
                     if launchable_resources_map.get(requested_resources, []):
                         break
-                    ordered_unreachable_errors.extend(unreachable_errors)
-                else:
-                    if ordered_unreachable_errors:
-                        with ux_utils.print_exception_no_traceback():
-                            raise _unreachable_infra_error(
-                                task, ordered_unreachable_errors)
+                    earlier_unreachable_errors[local_task].extend(
+                        unreachable_errors)
 
         local_graph = local_dag.get_graph()
         local_topo_order = list(nx.topological_sort(local_graph))
         local_node_to_cost_map, local_node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(local_topo_order,
-                                                   minimize_cost,
-                                                   blocked_resources))
+            Optimizer._estimate_nodes_cost_or_time(
+                local_topo_order,
+                minimize_cost,
+                blocked_resources,
+                earlier_unreachable_errors=earlier_unreachable_errors))
         if local_dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 local_topo_order, local_node_to_cost_map, minimize_cost)
@@ -1637,22 +1660,6 @@ class DummyResources(resources_lib.Resources):
 
     def get_cost(self, seconds):
         return 0
-
-
-def _unreachable_infra_error(
-    task: task_lib.Task, unreachable_errors: List[Exception]
-) -> exceptions.ResourcesUnavailableError:
-    """No reachable infra fits the task, but unreachable infra might."""
-    resources_reprs = ', '.join(
-        f'{task.num_nodes}x ' + r.repr_with_region_zone for r in task.resources)
-    indent_prefix = ' ' * len('Hint: ')
-    reasons = '\n'.join(f'{indent_prefix}{e}' for e in unreachable_errors)
-    # Carried as failover history so that callers retry instead of failing the
-    # request as infeasible.
-    return exceptions.ResourcesUnavailableError(
-        'No reachable infra has resources satisfying the request: '
-        f'{resources_reprs}. Infra that could not be reached:\n{reasons}',
-        failover_history=unreachable_errors)
 
 
 def _filter_out_blocked_launchable_resources(

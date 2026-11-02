@@ -133,6 +133,44 @@ def test_ordered_resources_with_docker_login_uses_first_launchable():
     assert task.best_resources.accelerators == {'H100': 8}
 
 
+def _unreachable(context):
+    return exceptions.KubeAPIUnreachableError(
+        f"Kubernetes context '{context}' is unreachable: Timed out")
+
+
+def _optimize_with_mock_fill_in(dag, fill_in_results):
+    """Runs the optimizer; each fill-in call returns the next result.
+
+    A result is (launchable, fuzzy_candidates, unreachable_errors) for the
+    task's only requested resources.
+    """
+    results = iter(fill_in_results)
+
+    def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
+        del blocked_resources, quiet
+        requested_resources = next(iter(task.resources))
+        launchable, fuzzy_candidates, unreachable_errors = next(results)
+        launchable_resources = [requested_resources] if launchable else []
+        return ({
+            requested_resources: launchable_resources
+        }, {}, list(fuzzy_candidates), {}, list(unreachable_errors))
+
+    with mock.patch('sky.optimizer._check_specified_clouds'), \
+            mock.patch('sky.optimizer._fill_in_launchable_resources',
+                       side_effect=fake_fill_in_launchable_resources), \
+            mock.patch('sky.optimizer.sky_check.'
+                       'get_cached_enabled_clouds_or_refresh',
+                       return_value=[clouds.Kubernetes()]):
+        optimizer.Optimizer.optimize(dag, quiet=True)
+
+
+def _single_task_dag():
+    with dag_lib.Dag() as dag:
+        task = task_lib.Task(name='no-launchable')
+        task.set_resources(resources_lib.Resources(cpus='4+'))
+    return dag
+
+
 def _ordered_task(name):
     with dag_lib.Dag() as dag:
         task = task_lib.Task(name=name)
@@ -147,13 +185,63 @@ def _ordered_task(name):
     return dag, task
 
 
+def test_unreachable_infra_is_reported_as_failover_history():
+    """Unreachable infra makes the failure retryable, not infeasible."""
+    unreachable = _unreachable('ctx1')
+
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_mock_fill_in(_single_task_dag(),
+                                    [(False, [], [unreachable])])
+
+    assert e.value.failover_history == [unreachable]
+    assert 'No reachable infra has resources' in str(e.value)
+    assert "'ctx1' is unreachable" in str(e.value)
+    assert 'does not contain any instances' not in str(e.value)
+
+
+def test_unreachable_infra_keeps_the_usual_hints():
+    """The accelerator candidates and hints are kept next to the outage."""
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_mock_fill_in(
+            _single_task_dag(), [(False, ['A100:1'], [_unreachable('ctx1')])])
+
+    assert 'Try one of these offered accelerators' in str(e.value)
+    assert 'sky gpus list' in str(e.value)
+    assert "'ctx1' is unreachable" in str(e.value)
+
+
+def test_unreachable_errors_are_deduplicated():
+    """A context checked once per requested resource is reported once."""
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_mock_fill_in(
+            _single_task_dag(),
+            [(False, [], [_unreachable('ctx1'),
+                          _unreachable('ctx1')])])
+
+    assert len(e.value.failover_history) == 1
+    assert str(e.value).count("'ctx1' is unreachable") == 1
+
+
+def test_infeasible_request_has_no_failover_history():
+    """With every candidate reachable, no fit stays a terminal failure."""
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_with_mock_fill_in(_single_task_dag(), [(False, [], [])])
+
+    assert not e.value.failover_history
+    assert 'does not contain any instances' in str(e.value)
+
+
 def test_ordered_resources_unreachable_then_infeasible_is_retryable():
     """An earlier unreachable choice keeps the failure retryable."""
     dag, _ = _ordered_task('ordered-unreachable-then-infeasible')
 
+    # The prepass tries both choices; the estimate checks the last one again.
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
-        _optimize_ordered_task_with_mock_launchable(
-            dag, launchable_call_indexes=set(), unreachable_call_indexes={0})
+        _optimize_with_mock_fill_in(dag, [
+            (False, [], [_unreachable('ctx0')]),
+            (False, [], []),
+            (False, [], []),
+        ])
 
     assert len(e.value.failover_history) == 1
     assert "'ctx0' is unreachable" in str(e.value)
@@ -168,45 +256,3 @@ def test_ordered_resources_unreachable_then_launchable_uses_later_choice():
 
     assert len(fill_calls) == 2
     assert task.best_resources.accelerators == {'L4': 4}
-
-
-def _optimize_with_no_launchable(unreachable_errors):
-    """Runs the optimizer with no launchable resources for the only task."""
-    with dag_lib.Dag() as dag:
-        task = task_lib.Task(name='no-launchable')
-        task.set_resources(resources_lib.Resources(cpus='4+'))
-    requested_resources = next(iter(task.resources))
-
-    def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
-        del task, blocked_resources, quiet
-        return ({requested_resources: []}, {}, [], {}, list(unreachable_errors))
-
-    with mock.patch('sky.optimizer._check_specified_clouds'), \
-            mock.patch('sky.optimizer._fill_in_launchable_resources',
-                       side_effect=fake_fill_in_launchable_resources), \
-            mock.patch('sky.optimizer.sky_check.'
-                       'get_cached_enabled_clouds_or_refresh',
-                       return_value=[clouds.Kubernetes()]):
-        optimizer.Optimizer.optimize(dag, quiet=True)
-
-
-def test_unreachable_infra_is_reported_as_failover_history():
-    """Unreachable infra makes the failure retryable, not infeasible."""
-    unreachable = exceptions.KubeAPIUnreachableError(
-        "Kubernetes context 'ctx1' is unreachable: Timed out")
-
-    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
-        _optimize_with_no_launchable([unreachable])
-
-    assert e.value.failover_history == [unreachable]
-    assert "'ctx1' is unreachable" in str(e.value)
-    assert 'does not contain any instances' not in str(e.value)
-
-
-def test_infeasible_request_has_no_failover_history():
-    """With every candidate reachable, no fit stays a terminal failure."""
-    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
-        _optimize_with_no_launchable([])
-
-    assert not e.value.failover_history
-    assert 'does not contain any instances' in str(e.value)
