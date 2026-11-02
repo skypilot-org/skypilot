@@ -24,7 +24,8 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
     from sky.serve import service_spec
-elif sqlalchemy_deps.sqlalchemy_available():
+
+if sqlalchemy_deps.sqlalchemy_available():  # pylint: disable=used-before-assignment
     # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
     # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db

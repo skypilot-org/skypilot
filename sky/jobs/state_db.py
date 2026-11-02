@@ -480,8 +480,8 @@ def _unfinished_dependency_exists() -> sqlalchemy.sql.elements.ColumnElement:
             job_info_table.c.spot_job_id,
             dependency_info.c.spot_job_id ==
             job_dependencies_table.c.depends_on_job_id,
-            dependency_info.c.schedule_state
-            != ManagedJobScheduleState.DONE.value,
+            dependency_info.c.schedule_state !=
+            ManagedJobScheduleState.DONE.value,
         ))
 
 
@@ -566,8 +566,8 @@ def _not_held_by_launch_limit(
         return sqlalchemy.true()
     _, ManagedJobScheduleState = _job_status_enums()
     return sqlalchemy.or_(
-        job_info_table.c.schedule_state
-        != ManagedJobScheduleState.WAITING.value,
+        job_info_table.c.schedule_state !=
+        ManagedJobScheduleState.WAITING.value,
         job_info_table.c.pool.is_not(None),
         job_info_table.c.user_hash.is_(None),
         job_info_table.c.user_hash.not_in(
