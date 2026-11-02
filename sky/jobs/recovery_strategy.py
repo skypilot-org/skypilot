@@ -1342,9 +1342,13 @@ class StrategyExecutor:
                                 timeout_minutes = (
                                     self.UNREACHABLE_INFRA_TIMEOUT_SECONDS //
                                     60)
+                                unreachable_str = '; '.join(
+                                    dict.fromkeys(
+                                        str(err) for err in e.failover_history))
                                 reason = exceptions.ResourcesUnavailableError(
                                     'The infra stayed unreachable for '
-                                    f'{timeout_minutes} minutes. {e}')
+                                    f'{timeout_minutes} minutes: '
+                                    f'{unreachable_str}')
                                 logger.error(
                                     'Giving up the launch: '
                                     f'{common_utils.format_exception(reason)}')
