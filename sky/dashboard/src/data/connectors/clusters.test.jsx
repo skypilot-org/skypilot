@@ -293,3 +293,46 @@ describe('getClusterHistory details', () => {
     ]);
   });
 });
+
+describe('getClusterHistory infra', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('builds infra as cloud (zone) for terminated clusters', async () => {
+    apiClient.fetch.mockResolvedValue([
+      {
+        name: 'zoned',
+        status: null,
+        cloud: 'AWS',
+        region: 'us-east-1',
+        zone: 'us-east-1a',
+      },
+      {
+        name: 'region-only',
+        status: null,
+        cloud: 'GCP',
+        region: 'us-central1',
+        zone: null,
+      },
+      {
+        name: 'no-infra',
+        status: null,
+        cloud: null,
+        region: null,
+        zone: null,
+      },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows.map((r) => r.infra)).toEqual([
+      'AWS (us-east-1a)',
+      'GCP (us-central1)',
+      'Unknown',
+    ]);
+    expect(rows.map((r) => r.full_infra)).toEqual([
+      'AWS (us-east-1a)',
+      'GCP (us-central1)',
+      'Unknown',
+    ]);
+  });
+});

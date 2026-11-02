@@ -239,6 +239,18 @@ export async function getClusterHistory(
         cloud = cluster.resources.cloud;
       }
 
+      // Prefer the zone over the region for the infra display, matching the
+      // active-cluster connector. Falls back to the region when the cluster
+      // was launched in a cloud without zones (or the record predates zone
+      // capture in the history DB).
+      let regionOrZone = cluster.zone || cluster.region || '';
+      // For SSH Node Pools, strip the 'ssh-' prefix from region display
+      // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)",
+      // matching the active-cluster connector.
+      if (cloud === 'SSH' && regionOrZone.startsWith('ssh-')) {
+        regionOrZone = regionOrZone.substring(4);
+      }
+
       // Get user name - need to look up from user_hash if needed
       let user_name = cluster.user_name || '-';
 
@@ -253,9 +265,9 @@ export async function getClusterHistory(
         user_hash: cluster.user_hash,
         cluster_hash: cluster.cluster_hash,
         cloud: cloud,
-        region: '',
-        infra: cloud,
-        full_infra: cloud,
+        region: cluster.region || '',
+        infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
+        full_infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
         resources_str: cluster.resources_str,
         resources_str_full: cluster.resources_str_full,
         time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
