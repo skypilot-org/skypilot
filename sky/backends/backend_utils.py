@@ -2848,15 +2848,16 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
-_CLUSTER_REMOVED_BY_REFRESH = 'Cluster removed by SkyPilot status refresh.'
+_CLUSTER_REMOVED_BY_REFRESH = global_user_state.CLUSTER_REMOVED_BY_REFRESH
 # A refresh that re-enters after a failed cleanup must not overwrite the cause
 # it recorded (by then the evidence may have expired), nor a user's own
 # `sky down`. Setting duplicate_regex turns off add_cluster_event's exact-text
 # check, so this has to match every text _get_terminated_cluster_reason
 # writes, as well as the line servers wrote before it existed.
-_TERMINATED_CLUSTER_EVENT_REGEX = (f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$'
-                                   '|^Cluster was terminated by user'
-                                   '|^All nodes terminated')
+_TERMINATED_CLUSTER_EVENT_REGEX = (
+    f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$|^' +
+    re.escape(global_user_state.user_action_event_prefix('terminated')) +
+    '|^All nodes terminated')
 
 _NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
 _PARTIAL_LOSS_REASON = 'one or more nodes terminated'
@@ -3048,7 +3049,7 @@ def _update_cluster_status(
         global_user_state.add_cluster_event(
             cluster_name,
             None,
-            'Cluster has no YAML file. Removing the cluster from cache.',
+            global_user_state.CLUSTER_REMOVED_NO_YAML,
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
         global_user_state.remove_cluster(cluster_name, terminate=True)
