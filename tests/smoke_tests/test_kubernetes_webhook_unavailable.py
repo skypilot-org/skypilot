@@ -36,8 +36,10 @@ def test_kubernetes_launch_while_webhook_unavailable():
     """
     name = smoke_tests_utils.get_cluster_name()
     name_down = f'{name}-down'
-    tag = uuid.uuid4().hex[:12]
-    service = f'sky-wh-test-{tag}'
+    # Starts with letters: --config parses the label value as YAML, and an
+    # all-digit tag would become an int.
+    tag = f'wh{uuid.uuid4().hex[:10]}'
+    service = f'sky-{tag}'
     webhook = f'{service}.unavailable.skypilot.co'
     webhook_config = service
     label_key = 'skypilot-webhook-test'
@@ -81,27 +83,17 @@ def test_kubernetes_launch_while_webhook_unavailable():
           admissionReviewVersions: [v1]
           timeoutSeconds: 5
     """)
-    config = textwrap.dedent(f"""\
-        kubernetes:
-          pod_config:
-            metadata:
-              labels:
-                {label_key}: {tag}
-    """)
     # Longer than it takes a launch to reach pod creation, so a missing
     # warning means the launch never hit the webhook, not that it was slow.
     warning_wait_seconds = 300
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as manifest_f, \
-         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as cfg_f:
+                                     delete=False) as manifest_f:
         manifest_f.write(manifest)
         manifest_f.flush()
-        cfg_f.write(config)
-        cfg_f.flush()
         down_log = f'{name}-down.log'
         recover_log = f'{name}-recover.log'
-        launch_args = f'{infra} --config {cfg_f.name} --cpus 1 --memory 2'
+        launch_args = (f'{infra} --config kubernetes.pod_config.metadata.'
+                       f'labels.{label_key}={tag} --cpus 1 --memory 2')
         test = smoke_tests_utils.Test(
             'kubernetes_launch_while_webhook_unavailable',
             [
@@ -133,8 +125,7 @@ def test_kubernetes_launch_while_webhook_unavailable():
                 f'kubectl delete mutatingwebhookconfiguration {webhook_config} '
                 f'--ignore-not-found',
                 f'kubectl delete service -n default {service} '
-                f'--ignore-not-found',
-                f'rm -f {manifest_f.name} {cfg_f.name} {down_log} '
+                f'--ignore-not-found', f'rm -f {manifest_f.name} {down_log} '
                 f'{recover_log}'),
             timeout=smoke_tests_utils.get_timeout('kubernetes'),
         )
