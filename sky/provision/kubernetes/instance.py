@@ -3456,6 +3456,8 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
 def _check_nodes_health(
     context: Optional[str],
     node_names: Set[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
@@ -3465,9 +3467,13 @@ def _check_nodes_health(
     Args:
         context: Kubernetes context name.
         node_names: Set of node names to check.
+        tolerations: The cluster pods' tolerations; NoExecute taints they
+            tolerate are not reported (API path only).
+        since: The cluster's launch; older taints are not reported.
 
     Returns:
-        Dict mapping node_name -> issue description for unhealthy nodes.
+        Dict mapping node_name -> issue description for unhealthy nodes, e.g.
+        'NotReady (NoExecute taint node.kubernetes.io/unreachable)'.
         Healthy nodes are omitted.
     """
     if not node_names:
@@ -3499,15 +3505,22 @@ def _check_nodes_health(
         try:
             node = kubernetes.core_api(context).read_node(
                 name, _request_timeout=kubernetes.API_TIMEOUT)
+            # Name the NoExecute taints that could have evicted the pods with
+            # the node's state; ones the pods tolerate are not a cause.
+            node_spec = getattr(node, 'spec', None)
+            taints = _evicting_taints(node, tolerations or [], since)
+            tainted = (f' (NoExecute taint {", ".join(taints)})'
+                       if taints else '')
             # Check NotReady first (more severe than cordoned)
             node_status = getattr(node, 'status', None)
             for condition in (getattr(node_status, 'conditions', None) or []):
                 if condition.type == 'Ready' and condition.status != 'True':
-                    return (name, 'NotReady')
+                    return (name, f'NotReady{tainted}')
             # Check if node is cordoned (unschedulable)
-            node_spec = getattr(node, 'spec', None)
             if getattr(node_spec, 'unschedulable', False):
-                return (name, 'cordoned')
+                return (name, f'cordoned{tainted}')
+            if taints:
+                return (name, f'tainted{tainted}')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
         return None
@@ -3525,6 +3538,8 @@ def get_node_health_for_cluster(
     cluster_name_on_cloud: str,
     provider_config: Dict[str, Any],
     unhealthy_pod_names: List[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, NodeHealthInfo]:
     """Check node health for specific unhealthy pods in a cluster.
 
@@ -3562,7 +3577,7 @@ def get_node_health_for_cluster(
     if not unique_nodes:
         return {}
 
-    node_issues = _check_nodes_health(context, unique_nodes)
+    node_issues = _check_nodes_health(context, unique_nodes, tolerations, since)
     if not node_issues:
         return {}
 
@@ -3722,10 +3737,11 @@ def get_cluster_termination_cause(
         since: Optional[datetime.datetime]) -> Optional[str]:
     """Who removed a cluster's pods, and why; None when nothing says.
 
-    For a cluster all of whose pods are gone. Worded actor first, because a
-    table cell shows only the start of it. Combines the pods' own deletion
-    events (see kubernetes_utils.pod_deletion_event) with the current state of
-    the nodes they ran on. ``pod_nodes`` maps each pod to the node it ran on.
+    For pods that are gone (all of a cluster's, or some). Worded actor
+    first, because a table cell shows only the start of it. Combines the pods'
+    own deletion events (see kubernetes_utils.pod_deletion_event) with the
+    current state of the nodes they ran on. ``pod_nodes`` maps each pod to
+    the node it ran on.
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
@@ -3852,9 +3868,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 termination_reason += f' ({message})'
         # Generic disruption.
         elif condition.type == 'DisruptionTarget':
-            termination_reason = f'Disrupted: {reason}'
-            if message:
-                termination_reason += f' ({message})'
+            termination_reason = kubernetes_utils.disruption_reason(
+                reason, message, pod)
 
         if condition.last_transition_time is not None:
             latest_timestamp = max(latest_timestamp,
