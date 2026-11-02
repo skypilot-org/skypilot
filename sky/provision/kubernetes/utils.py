@@ -2380,8 +2380,8 @@ _POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
 _POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
 
 
-def _events_since(events: List[Any],
-                  since: Optional[datetime.datetime]) -> List[Any]:
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
     """The events that can be evidence about the pod that exists now.
 
     Events the API server left without a usable timestamp are kept: not
@@ -2446,7 +2446,7 @@ def pod_deletion_event(events: List[Any],
     """
     best_rank = 0
     best_event = None
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         if is_cancelled_taint_eviction(event.reason, event.message):
             continue
         ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
@@ -2467,7 +2467,7 @@ def last_pod_event_context(
     for what they are -- the last thing said about it -- and the caller still
     says plainly that no cause could be derived.
     """
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         # Events arrive newest-first.
         if (event.type == 'Warning' or
                 event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
@@ -3832,6 +3832,10 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
+# (kubeconfig fingerprint, context names parsed from those files).
+_kubeconfig_context_names: Optional[Tuple[Tuple[Any, ...], List[str]]] = None
+
+
 def get_all_kube_context_names() -> List[str]:
     """Get all kubernetes context names available in the environment.
 
@@ -3840,23 +3844,33 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    We should not cache the result of this function as the admin policy may
-    update the contexts.
+    The kubeconfig is parsed again only when a file on KUBECONFIG (or the
+    variable itself) changes, so an admin policy or an upload that rewrites
+    it is seen on the next call.
 
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
     """
+    global _kubeconfig_context_names
     k8s = kubernetes.kubernetes
-    context_names = []
-    try:
-        all_contexts, _ = kubernetes.list_kube_config_contexts()
-        # all_contexts will always have at least one context. If kubeconfig
-        # does not have any contexts defined, it will raise ConfigException.
-        context_names = [context['name'] for context in all_contexts]
-    except k8s.config.config_exception.ConfigException:
-        # If no config found, continue
-        pass
+    # Taken before the parse: a write during it changes the next fingerprint.
+    fingerprint = kubernetes.kubeconfig_fingerprint()
+    cached = _kubeconfig_context_names
+    if cached is not None and cached[0] == fingerprint:
+        context_names = list(cached[1])
+    else:
+        context_names = []
+        try:
+            all_contexts, _ = kubernetes.list_kube_config_contexts()
+            # all_contexts will always have at least one context. If
+            # kubeconfig does not have any contexts defined, it will raise
+            # ConfigException.
+            context_names = [context['name'] for context in all_contexts]
+        except k8s.config.config_exception.ConfigException:
+            # If no config found, continue
+            pass
+        _kubeconfig_context_names = (fingerprint, list(context_names))
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
@@ -3873,20 +3887,6 @@ _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
 _cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
                                               float]] = {}
 _cluster_uid_cache_lock = threading.Lock()
-
-
-def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
-    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
-    fingerprint: List[Tuple[Any, ...]] = []
-    for path in get_kubeconfig_paths():
-        if not path:
-            continue
-        try:
-            st = os.stat(path)
-            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
-        except OSError:
-            fingerprint.append((path, None))
-    return tuple(fingerprint)
 
 
 def read_cluster_uid(core, timeout: float) -> Optional[str]:
@@ -3908,7 +3908,7 @@ def get_cluster_uid(context: Optional[str],
     another cluster.
     """
     now = time.monotonic()
-    fingerprint = _kubeconfig_fingerprint()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
     if use_cache:
         with _cluster_uid_cache_lock:
             cached = _cluster_uid_cache.get(context)
