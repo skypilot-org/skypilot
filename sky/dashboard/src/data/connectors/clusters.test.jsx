@@ -335,4 +335,21 @@ describe('getClusterHistory infra', () => {
       'Unknown',
     ]);
   });
+
+  it('shows the cluster name (region), not the partition (zone), for Slurm', async () => {
+    // Partition names commonly collide across Slurm clusters, so the infra
+    // display prefers the region — mirroring InfraInfo.formatted_str().
+    apiClient.fetch.mockResolvedValue([
+      {
+        name: 'slurm-cluster',
+        status: null,
+        cloud: 'Slurm',
+        region: 'my-hpc-cluster',
+        zone: 'gpu-partition',
+      },
+    ]);
+    const rows = await getClusterHistory();
+    expect(rows[0].infra).toBe('Slurm (my-hpc-cluster)');
+    expect(rows[0].full_infra).toBe('Slurm (my-hpc-cluster)');
+  });
 });

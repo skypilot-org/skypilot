@@ -239,11 +239,17 @@ export async function getClusterHistory(
         cloud = cluster.resources.cloud;
       }
 
-      // Prefer the zone over the region for the infra display, matching the
-      // active-cluster connector. Falls back to the region when the cluster
-      // was launched in a cloud without zones (or the record predates zone
-      // capture in the history DB).
-      let regionOrZone = cluster.zone || cluster.region || '';
+      // Mirror `InfraInfo.formatted_str()`: prefer the zone over the region
+      // for the infra display, EXCEPT for Slurm, where the zone is the
+      // partition — partition names commonly collide across Slurm clusters,
+      // so show the cluster name (region) instead. Falls back to the region
+      // when the cluster was launched in a cloud without zones (or the
+      // record predates zone capture in the history DB).
+      let regionOrZone =
+        (cloud === 'Slurm' ? cluster.region : cluster.zone) ||
+        cluster.region ||
+        cluster.zone ||
+        '';
       // For SSH Node Pools, strip the 'ssh-' prefix from region display
       // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)",
       // matching the active-cluster connector.

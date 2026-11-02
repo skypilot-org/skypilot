@@ -8,7 +8,6 @@ import pytest
 import sqlalchemy
 
 from sky import clouds as clouds_lib
-from sky import resources as resources_lib
 from sky import core
 from sky import global_user_state
 from sky import models
@@ -225,11 +224,10 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_includes_zone(self):
         """Records carry the launch resources' zone for infra display."""
-        launched = resources_lib.Resources(
-            cloud=clouds_lib.AWS(),
-            instance_type='m5.xlarge',
-            region='us-east-1',
-            zone='us-east-1a')
+        launched = resources_lib.Resources(cloud=clouds_lib.AWS(),
+                                           instance_type='m5.xlarge',
+                                           region='us-east-1',
+                                           zone='us-east-1a')
         with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[_history_record(0, launched)]):
             result = core.cost_report(days=30)
@@ -240,11 +238,10 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_summary_response_includes_zone(self):
         """The abbreviated dashboard payload keeps the zone field."""
-        launched = resources_lib.Resources(
-            cloud=clouds_lib.AWS(),
-            instance_type='m5.xlarge',
-            region='us-east-1',
-            zone='us-east-1a')
+        launched = resources_lib.Resources(cloud=clouds_lib.AWS(),
+                                           instance_type='m5.xlarge',
+                                           region='us-east-1',
+                                           zone='us-east-1a')
         with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[_history_record(0, launched)]):
             result = core.cost_report(dashboard_summary_response=True)
@@ -266,11 +263,10 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_region_only_keeps_region_without_none_zone(self):
         """A zone-less launch keeps its region and does not stringify None."""
-        launched = resources_lib.Resources(
-            cloud=clouds_lib.GCP(),
-            instance_type='n2-standard-8',
-            region='us-central1',
-            zone=None)
+        launched = resources_lib.Resources(cloud=clouds_lib.GCP(),
+                                           instance_type='n2-standard-8',
+                                           region='us-central1',
+                                           zone=None)
         with mock.patch('sky.global_user_state.iter_clusters_from_history',
                         return_value=[_history_record(0, launched)]):
             result = core.cost_report(dashboard_summary_response=True)
