@@ -2128,6 +2128,21 @@ def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
     return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
 
 
+def disruption_reason(reason: str, message: str, pod: Any) -> str:
+    """A pod's DisruptionTarget condition, with the node it was on.
+
+    The condition says how the pod was disrupted (taint manager, eviction API,
+    scheduler preemption) but not where; the node is what a user checks next.
+    """
+    text = f'Disrupted: {reason}'
+    if message:
+        text += f' ({message})'
+    node = getattr(getattr(pod, 'spec', None), 'node_name', None)
+    if isinstance(node, str) and node:
+        text += f' on node {node}'
+    return text
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2149,10 +2164,7 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
                     summary += f' ({message})'
                 return summary
             if condition.type == 'DisruptionTarget':
-                summary = f'Disrupted: {reason}'
-                if message:
-                    summary += f' ({message})'
-                return summary
+                return disruption_reason(reason, message, pod)
 
     # Pod-level kubelet reason (e.g. 'Evicted' for ephemeral-storage / disk /
     # memory pressure, 'Preempted', 'Shutdown'). This is the authoritative

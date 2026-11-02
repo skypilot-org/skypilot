@@ -2860,6 +2860,7 @@ _TERMINATED_CLUSTER_EVENT_REGEX = (
     '|^All nodes terminated')
 
 _NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
+_PARTIAL_LOSS_REASON = 'one or more nodes terminated'
 
 
 def _first_sentence(text: str) -> str:
@@ -3447,10 +3448,34 @@ def _update_cluster_status(
         ray_cluster_unhealthy = all_nodes_up
 
         # For Kubernetes clusters with unhealthy pods, check node health
-        # to provide better diagnostics (e.g., "node X is NotReady").
+        # to provide better diagnostics (e.g., "node X is NotReady"). Not only
+        # when Ray is unhealthy: a pod evicted from a failed node is Failed or
+        # Terminating, and its node is the cause.
+        # A cluster already INIT is reported again only with something new.
+        # Pods missing: only the first time they are seen missing (the cluster
+        # stays INIT with them gone until it is downed or relaunched, and a
+        # later refresh no longer looks them up, so it would overwrite their
+        # cause), and only on a cluster that was up (not an interrupted
+        # launch). Otherwise: when a pod names a cause (see the gate below).
+        first_loss = some_nodes_terminated
+        if some_nodes_terminated and status == status_lib.ClusterStatus.INIT:
+            last_event = global_user_state.get_last_cluster_event(
+                record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.STATUS_CHANGE)
+            first_loss = (
+                bool(record.get('cluster_ever_up')) and
+                not (last_event or '').startswith(
+                    f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX}'
+                    f' {_PARTIAL_LOSS_REASON}'))
+        report_again = (first_loss if some_nodes_terminated else any(
+            k8s_instance.pod_reason_identifies_cause(reason)
+            for _, reason in node_statuses.values()))
+
         node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
-        if (ray_cluster_unhealthy and
-                isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        # On a cluster already INIT the lookup would be discarded unless the
+        # event is reported again.
+        if (isinstance(launched_resources.cloud, clouds.Kubernetes) and
+            (status != status_lib.ClusterStatus.INIT or report_again)):
             unhealthy_pods = [
                 pod_name for pod_name, (_, reason) in node_statuses.items()
                 if reason is not None
@@ -3459,9 +3484,15 @@ def _update_cluster_status(
                 try:
                     ray_config = global_user_state.get_cluster_yaml_dict(
                         handle.cluster_yaml)
+                    launched_at = record.get('launched_at')
                     node_health = k8s_instance.get_node_health_for_cluster(
-                        handle.cluster_name_on_cloud, ray_config['provider'],
-                        unhealthy_pods)
+                        handle.cluster_name_on_cloud,
+                        ray_config['provider'],
+                        unhealthy_pods,
+                        tolerations=_k8s_pod_tolerations(ray_config),
+                        since=(datetime.fromtimestamp(launched_at,
+                                                      tz=timezone.utc)
+                               if launched_at is not None else None))
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node health for '
                                  f'{cluster_name!r}: {e}')
@@ -3527,48 +3558,46 @@ def _update_cluster_status(
                          status_lib.ClusterStatus.STOPPED)
         ]
         if some_nodes_terminated:
-            init_reason = 'one or more nodes terminated'
-            # Say where the node went. The pods are gone, so their live status
-            # explains nothing, but the Kubernetes nodes they were placed on
-            # still do: a node that no longer exists, or that is NotReady or
-            # cordoned, points at a cluster/cloud-side failure rather than a
-            # user-initiated teardown. K8s-only; other clouds keep the generic
-            # reason. Best-effort -- fall back to the generic message when the
-            # nodes are unknown or all look fine.
-            #
-            # Skipped once the cluster is already INIT, mirroring the guard on
-            # the event write below: a cluster stays INIT with the pod missing
-            # until it is downed or relaunched, so without this we would poll
-            # the K8s API once per node every refresh to build a string that
-            # is then discarded.
-            if (status != status_lib.ClusterStatus.INIT and
-                    not status_reason and
+            init_reason = _PARTIAL_LOSS_REASON
+            # Say where the missing pods went: their deletion events and the
+            # nodes they were placed on (a node that no longer exists, is
+            # NotReady or carries an evicting taint points at a cluster/cloud-
+            # side failure). Reported next to what the surviving pods say.
+            # K8s-only; best-effort; once (first_loss above).
+            if (first_loss and
                     isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
-                    # Only the nodes of the pods that are gone: a node whose
-                    # pods still run did not lose any.
-                    node_names = ([
-                        infos[0].node_name
+                    # Only the pods that are gone: a node whose pods still run
+                    # did not lose any.
+                    pod_nodes = ({
+                        pod: (infos[0].node_name if infos else None)
                         for pod, infos in cluster_info.instances.items()
-                        if pod not in node_statuses and infos and
-                        infos[0].node_name
-                    ] if cluster_info is not None else None)
-                    if node_names:
-                        ray_config = global_user_state.get_cluster_yaml_dict(
-                            handle.cluster_yaml)
-                        if ray_config and 'provider' in ray_config:
-                            launched_at = record.get('launched_at')
-                            status_reason = (
-                                k8s_instance.get_missing_node_reason(
-                                    node_names,
-                                    ray_config['provider'],
-                                    tolerations=_k8s_pod_tolerations(
-                                        ray_config),
-                                    since=(datetime.fromtimestamp(
-                                        launched_at, tz=timezone.utc) if
-                                           launched_at is not None else None))
-                                or '')
+                        if pod not in node_statuses
+                    } if cluster_info is not None else {})
+                    loss_config = (global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml) if pod_nodes else None)
+                    if loss_config and 'provider' in loss_config:
+                        launched_at = record.get('launched_at')
+                        since = (datetime.fromtimestamp(launched_at,
+                                                        tz=timezone.utc)
+                                 if launched_at is not None else None)
+                        tolerations = _k8s_pod_tolerations(loss_config)
+                        loss_reason = (
+                            k8s_instance.get_cluster_termination_cause(
+                                loss_config['provider'],
+                                pod_nodes,
+                                tolerations=tolerations,
+                                since=since) or
+                            k8s_instance.get_missing_node_reason(
+                                [n for n in pod_nodes.values() if n],
+                                loss_config['provider'],
+                                tolerations=tolerations,
+                                since=since))
+                        if loss_reason:
+                            status_reason = '; '.join(
+                                r for r in (loss_reason.rstrip('.'),
+                                            status_reason) if r)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node state for '
                                  f'{cluster_name!r}: {e}')
@@ -3720,8 +3749,10 @@ def _update_cluster_status(
             identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
-        # Skip if already INIT, unless this refresh explained why.
-        if (status != status_lib.ClusterStatus.INIT or identified_cause):
+        # Skip if already INIT, unless this refresh has something new (see
+        # report_again; a recovered cause also counts when no pod is missing).
+        if (status != status_lib.ClusterStatus.INIT or report_again or
+            (identified_cause and not some_nodes_terminated)):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,
@@ -4299,6 +4330,25 @@ def _get_glob_clusters(
 _MAX_NAMES_IN_SUMMARY = 3
 
 
+def _pod_reason_parts(reasons: Dict[str, str]) -> List[str]:
+    """'<pod> is not ready (<reason>)', grouping pods with the same reason."""
+    by_reason: Dict[str, List[str]] = {}
+    for pod_name, reason in reasons.items():
+        by_reason.setdefault(reason, []).append(pod_name)
+    parts = []
+    for reason, pods in by_reason.items():
+        names = sorted(pods)
+        if len(names) == 1:
+            parts.append(f'{names[0]} is not ready ({reason})')
+        else:
+            shown = names[:_MAX_NAMES_IN_SUMMARY]
+            name_list = ', '.join(shown)
+            if len(names) > _MAX_NAMES_IN_SUMMARY:
+                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    return parts
+
+
 def _summarize_pod_reasons(
     node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
     total_pods: int,
@@ -4307,7 +4357,8 @@ def _summarize_pod_reasons(
     """Summarize per-pod reasons into a concise grouped message.
 
     Groups issues by root cause:
-    1. Node-level issues (from node_health dict, deduplicated by node)
+    1. Node-level issues (from node_health dict, deduplicated by node),
+       followed by the reasons of the pods on those nodes
     2. Pod-level issues (grouped by reason, pod names from dict keys)
 
     Args:
@@ -4322,20 +4373,19 @@ def _summarize_pod_reasons(
         A summarized string, or '' if no reasons found.
     """
     parts = []
+    node_explained_pods = set()
 
-    # 1. Node-level summary (from structured data)
+    # 1. Node-level summary (from structured data), with what the node's pods
+    # report: the node says where, the pod says how it went.
     if node_health:
         # Group by issue type (e.g., all NotReady together)
         by_issue: Dict[str, List[str]] = {}
-        affected_by_issue: Dict[str, int] = {}
         for node_name, info in node_health.items():
             by_issue.setdefault(info.issue, []).append(node_name)
-            affected_by_issue[info.issue] = (
-                affected_by_issue.get(info.issue, 0) + len(info.pods))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
-            affected = affected_by_issue[issue]
+            affected = sum(len(node_health[n].pods) for n in names)
             if len(names) == 1:
                 part = f'node {names[0]} is {issue}'
             else:
@@ -4346,33 +4396,29 @@ def _summarize_pod_reasons(
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
             part += f', affecting {affected} out of {total_pods} pods'
+            # The node is named above, so drop it from the pods' reasons (they
+            # then group); with several nodes, name each pod's node instead.
+            reasons = {}
+            for node_name in names:
+                for pod_name in node_health[node_name].pods:
+                    node_explained_pods.add(pod_name)
+                    reason = node_statuses.get(pod_name, (None, None))[1]
+                    if reason:
+                        label = (pod_name if len(names) == 1 else
+                                 f'{pod_name} on {node_name}')
+                        reasons[label] = reason.replace(f' on node {node_name}',
+                                                        '')
+            if reasons:
+                part += ': ' + '; '.join(_pod_reason_parts(reasons))
             parts.append(part)
 
-    # Collect pod names that are already explained by node issues
-    node_explained_pods = set()
-    if node_health:
-        for info in node_health.values():
-            node_explained_pods.update(info.pods)
-
     # 2. Pod-level summary (pods not already explained by node issues)
-    pod_issues: Dict[str, List[str]] = {}
-    for pod_name, (_, reason) in node_statuses.items():
-        if reason is None:
-            continue
-        if pod_name in node_explained_pods:
-            continue
-        pod_issues.setdefault(reason, []).append(pod_name)
-
-    for reason, pods in pod_issues.items():
-        names = sorted(pods)
-        if len(names) == 1:
-            parts.append(f'{names[0]} is not ready ({reason})')
-        else:
-            shown = names[:_MAX_NAMES_IN_SUMMARY]
-            name_list = ', '.join(shown)
-            if len(names) > _MAX_NAMES_IN_SUMMARY:
-                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
-            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+    parts.extend(
+        _pod_reason_parts({
+            pod_name: reason
+            for pod_name, (_, reason) in node_statuses.items()
+            if reason is not None and pod_name not in node_explained_pods
+        }))
 
     return '; '.join(parts)
 
