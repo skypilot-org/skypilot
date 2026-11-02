@@ -8,6 +8,7 @@ Requires SQLAlchemy via ``skypilot[server]`` (or a cloud extra that includes
 """
 from __future__ import annotations
 
+import threading
 import typing
 from typing import Any, Optional
 
@@ -40,6 +41,7 @@ else:
 Base: Any = None  # pylint: disable=invalid-name
 config_yaml_table: Any = None
 _db_manager: Optional[db_utils.DatabaseManager] = None
+_ENSURE_LOCK = threading.Lock()
 
 
 def ensure_config_db_schema() -> None:
@@ -51,25 +53,28 @@ def ensure_config_db_schema() -> None:
     global Base, config_yaml_table, _db_manager  # pylint: disable=invalid-name
     if _db_manager is not None:
         return
-    sqlalchemy_deps.require_sqlalchemy()
+    with _ENSURE_LOCK:
+        if _db_manager is not None:
+            return
+        sqlalchemy_deps.require_sqlalchemy()
 
-    Base = declarative.declarative_base()
-    config_yaml_table = sqlalchemy.Table(
-        'config_yaml',
-        Base.metadata,
-        sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-        sqlalchemy.Column('value', sqlalchemy.Text),
-    )
+        Base = declarative.declarative_base()
+        config_yaml_table = sqlalchemy.Table(
+            'config_yaml',
+            Base.metadata,
+            sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('value', sqlalchemy.Text),
+        )
 
-    def _create_table(engine: 'Engine') -> None:
-        """Initialize the config database with migrations."""
-        migration_utils.safe_alembic_upgrade(
-            engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-            migration_utils.SKYPILOT_CONFIG_VERSION)
+        def _create_table(engine: 'Engine') -> None:
+            """Initialize the config database with migrations."""
+            migration_utils.safe_alembic_upgrade(
+                engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
+                migration_utils.SKYPILOT_CONFIG_VERSION)
 
-    # Config YAML is only stored when using Postgres; no sqlite db_name.
-    _db_manager = db_utils.DatabaseManager(db_name='config',
-                                           create_table_fn=_create_table)
+        # Config YAML is only stored when using Postgres; no sqlite db_name.
+        _db_manager = db_utils.DatabaseManager(db_name='config',
+                                               create_table_fn=_create_table)
 
 
 def get_engine() -> 'Engine':

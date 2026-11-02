@@ -48,6 +48,7 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
@@ -879,6 +880,9 @@ def _start_api_server(deploy: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
+    # Local API server needs the DB/ORM stack. Fail with the install hint
+    # before spawning a process that would crash without SQLAlchemy.
+    sqlalchemy_deps.require_sqlalchemy()
     check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
     assert server_url in get_available_local_api_server_urls(), (

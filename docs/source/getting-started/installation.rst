@@ -64,7 +64,9 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
       pip install skypilot
 
-      # install dependencies for the clouds you want to use
+      # Client/CLI only: no SQLAlchemy. Local API server or cloud backends need:
+      #   pip install "skypilot[server]"
+      # or a cloud extra (includes server deps):
       pip install "skypilot[kubernetes,aws,gcp]"
 
 
@@ -142,6 +144,10 @@ Run locally or connect to a remote API server
 SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
 
 **To run SkyPilot locally:**
+
+The default ``pip install skypilot`` is client/CLI only (no SQLAlchemy). A local
+API server needs ``pip install "skypilot[server]"`` (or any cloud extra such as
+``skypilot[kubernetes]``, which already includes server deps).
 
 Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the necessary dependencies for the clouds you want to use.
 

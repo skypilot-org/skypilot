@@ -8,6 +8,7 @@ Import this module from DB-backed modules so missing or too-old SQLAlchemy
 raises a clear install hint instead of a bare ``ModuleNotFoundError`` or an
 obscure 1.x API failure.
 """
+import functools
 import importlib.metadata
 
 from packaging import version as version_lib
@@ -24,6 +25,7 @@ SQLALCHEMY_INSTALL_MSG = (
     '(or a cloud extra such as "skypilot[kubernetes]").')
 
 
+@functools.lru_cache(maxsize=1)
 def sqlalchemy_available() -> bool:
     """Return True if a supported SQLAlchemy (``>= 2.0.16``) is importable.
 

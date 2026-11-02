@@ -80,7 +80,9 @@ Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can co
 to connect to it.
 We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See `uv <https://docs.astral.sh/uv/>`_ or `conda <https://docs.conda.io/en/latest/>`_ for creating an environment with different python versions.
 
-:ref:`Install <installation>` the SkyPilot client on your local machine:
+:ref:`Install <installation>` the SkyPilot client on your local machine.
+Client-only installs do not need SQLAlchemy; use plain ``skypilot`` (not
+``skypilot[server]``) when you only talk to a remote API server:
 
 .. code-block:: console
 
