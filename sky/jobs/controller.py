@@ -413,6 +413,21 @@ def _has_pending_cancel_signal(job_id: int) -> bool:
         os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH, str(job_id)))
 
 
+def _stream_task_logs_to_controller_log() -> bool:
+    """Whether finished task logs are copied into the controller log."""
+    return skypilot_config.get_nested(
+        ('jobs', 'controller', 'stream_task_logs_to_controller_log'), True)
+
+
+def _user_job_failure_reason(job_id: int) -> str:
+    """Failure reason for a failed user job, pointing at the log that holds
+    the task output."""
+    if _stream_task_logs_to_controller_log():
+        return ('To see the details, run: '
+                f'sky jobs logs --controller {job_id}')
+    return f'To see the details, run: sky jobs logs {job_id}'
+
+
 # How many times to retry the emergency-recovery bookkeeping when it fails
 # with something other than a transient database error. A database outage
 # is retried for as long as it lasts (each individual DB call inside the
@@ -752,7 +767,8 @@ class JobController:
                 managed_job_logs_dir,
                 job_ids=[str(job_id_on_pool_cluster)]
                 if job_id_on_pool_cluster is not None else None,
-                on_downloaded=_persist_local_log_file)
+                on_downloaded=_persist_local_log_file,
+                stream_to_console=_stream_task_logs_to_controller_log())
         if log_file is None:
             logger.warning(
                 f'No log file was downloaded for job {self._job_id}, '
@@ -1910,9 +1926,7 @@ class JobController:
                             f'{common_utils.format_exception(e)}',
                             exc_info=True)
 
-                    failure_reason = (
-                        'To see the details, run: '
-                        f'sky jobs logs --controller {self._job_id}')
+                    failure_reason = _user_job_failure_reason(self._job_id)
 
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)

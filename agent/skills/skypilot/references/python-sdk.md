@@ -113,11 +113,13 @@ task; support for pipelines/general DAGs are in experimental branches.
       as:
 
       1. Empty: iff the first-ever sky.optimize() fails to find a feasible
-         resource; no pre-check or actual launch is attempted.
+         resource on reachable infra; no pre-check or actual launch is
+         attempted.
 
       2. Non-empty: iff at least 1 exception from either our pre-checks
-         (e.g., cluster name invalid) or a region/zone throwing resource
-         unavailability.
+         (e.g., cluster name invalid), a region/zone throwing resource
+         unavailability, or infra that could not be reached while
+         checking feasibility.
 
     exceptions.CommandError: any ssh command error.
     exceptions.NoCloudAccessError: if all clouds are disabled.
