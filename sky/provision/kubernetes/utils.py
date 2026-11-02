@@ -404,6 +404,21 @@ def _is_cloudflare_403_error(exception: Exception) -> bool:
     return False
 
 
+def is_transient_api_error(exception: Optional[BaseException]) -> bool:
+    """Whether a failed Kubernetes API call may succeed if retried later.
+
+    True for connection errors and timeouts, 429, 5xx and a CloudFlare 403.
+    False for other 4xx responses and kubeconfig errors.
+    """
+    if isinstance(exception, kubernetes.max_retry_error()):
+        return True
+    if isinstance(exception, kubernetes.api_exception()):
+        status = exception.status or 0
+        return (status == 429 or status >= 500 or
+                _is_cloudflare_403_error(exception))
+    return False
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -2916,6 +2931,8 @@ def check_instance_fits(
                 get_accelerator_label_key_values(context, acc_type, acc_count))
             if gpu_label_values is None:
                 gpu_label_values = []
+        except exceptions.KubeAPIUnreachableError:
+            raise
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)

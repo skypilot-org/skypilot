@@ -37,6 +37,47 @@ def test_get_kubernetes_nodes():
             utils.get_kubernetes_nodes(context='test')
 
 
+@pytest.mark.parametrize('status,headers,expected', [
+    (500, None, True),
+    (503, None, True),
+    (429, None, True),
+    (403, {
+        'CF-RAY': '98b8076cfae4058d-IAD'
+    }, True),
+    (401, None, False),
+    (403, None, False),
+    (404, None, False),
+    (400, None, False),
+    (None, None, False),
+])
+def test_is_transient_api_error(status, headers, expected):
+    error = kubernetes.client.rest.ApiException(status=status)
+    error.headers = headers
+    assert utils.is_transient_api_error(error) is expected
+
+
+def test_is_transient_api_error_other_errors():
+    assert utils.is_transient_api_error(kubernetes_adaptor.max_retry_error()(
+        None, '/api/v1/nodes')) is True
+    assert utils.is_transient_api_error(
+        kubernetes_adaptor.config_exception()('invalid kubeconfig')) is False
+    assert utils.is_transient_api_error(None) is False
+    assert utils.is_transient_api_error(TimeoutError('timed out')) is False
+
+
+def test_check_instance_fits_raises_when_unreachable():
+    """An unreachable API is not reported as the GPU being absent."""
+    instance_type = utils.KubernetesInstanceType.from_resources(
+        4, 16, 1, 'H100').name
+    with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+               return_value=[]), \
+            patch('sky.provision.kubernetes.utils.'
+                  'get_accelerator_label_key_values',
+                  side_effect=exceptions.KubeAPIUnreachableError('Timed out')):
+        with pytest.raises(exceptions.KubeAPIUnreachableError):
+            utils.check_instance_fits('ctx', instance_type)
+
+
 def test_get_kubernetes_node_info_capacity_vs_allocatable():
     """A device-plugin withdrawal must be visible in the node info.
 
