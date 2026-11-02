@@ -861,6 +861,9 @@ def test_default_workspace_cannot_be_deleted_and_rename_is_admin_only(
     page = open_as(user, '/dashboard/workspaces')
     expect(_row(page, alpha.name),
            f'workspace {alpha.name} must be listed').to_be_visible()
+    # Rename renders once the role is known; absent before then either way.
+    page.recorder.wait_for_response('/users/role',
+                                    'the workspaces page must load the role')
     expect(page.get_by_role('button', name='Rename workspace'),
            'a non-admin must not be offered Rename').to_have_count(0)
 

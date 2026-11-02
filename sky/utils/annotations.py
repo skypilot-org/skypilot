@@ -3,7 +3,7 @@
 import functools
 import threading
 import time
-from typing import Callable, List, Literal, TypeVar
+from typing import Callable, Dict, List, Literal, Optional, TypeVar
 import weakref
 
 import cachetools
@@ -124,7 +124,9 @@ def thread_local_ttl_cache(maxsize=32, ttl=60 * 55):
     return decorator
 
 
-def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
+def lru_cache(scope: Literal['global', 'request'],
+              *lru_cache_args,
+              keep_if: Optional[Callable[[], bool]] = None,
               **lru_cache_kwargs) -> Callable:
     """LRU cache decorator for functions.
 
@@ -134,6 +136,10 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
     Args:
         scope: Whether the cache is global or request-specific, i.e. needs to be
             reloaded for a new request.
+        keep_if: Request scope only. A sync handler's refresh
+            (``clear_request_level_cache(sync_refresh=True)``) keeps the cache
+            while this returns True; the executor's per-request clear does not
+            consult it. Called once per refresh, so it may record state.
         lru_cache_args: Arguments for functools.lru_cache.
         lru_cache_kwargs: Keyword arguments for functools.lru_cache.
     """
@@ -145,6 +151,8 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
+            if keep_if is not None:
+                cached_func.keep_if = keep_if  # type: ignore[attr-defined]
             return _register_functions_need_reload_cache(cached_func)
 
     return decorator
@@ -170,15 +178,29 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
     return decorator
 
 
-def clear_request_level_cache():
-    """Clear the request-level cache."""
+def clear_request_level_cache(sync_refresh: bool = False):
+    """Clear the request-level cache.
+
+    Args:
+        sync_refresh: A sync handler's refresh rather than a new executor
+            request: caches whose ``keep_if`` returns True are kept.
+    """
     alive_entries = []
+    # Each keep_if is evaluated once per clear, however many caches share it.
+    kept: Dict[int, bool] = {}
     with _FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
         for entry in _FUNCTIONS_NEED_RELOAD_CACHE:
             func = entry()
             if func is None:
                 # Has been GC'ed, drop the reference.
                 continue
-            func.cache_clear()
             alive_entries.append(entry)
+            keep_if = getattr(func, 'keep_if', None) if sync_refresh else None
+            if callable(keep_if):
+                if id(keep_if) not in kept:
+                    # pylint: disable-next=not-callable
+                    kept[id(keep_if)] = keep_if()
+                if kept[id(keep_if)]:
+                    continue
+            func.cache_clear()
         _FUNCTIONS_NEED_RELOAD_CACHE[:] = alive_entries
