@@ -366,7 +366,7 @@ class TestOptimizeSameInfra:
 
         # Mock _fill_in_launchable_resources to return empty resources
         with patch('sky.optimizer._fill_in_launchable_resources') as mock_fill:
-            mock_fill.return_value = ({}, None, None, None)
+            mock_fill.return_value = ({}, None, None, None, None)
 
             with pytest.raises(
                     exceptions.ResourcesUnavailableError) as exc_info:
@@ -411,9 +411,9 @@ class TestOptimizeSameInfra:
         def mock_fill(task, blocked_resources, quiet):
             call_count[0] += 1
             if task == task1:
-                return ({resources1: [resources1]}, None, None, None)
+                return ({resources1: [resources1]}, None, None, None, None)
             else:
-                return ({resources2: [resources2]}, None, None, None)
+                return ({resources2: [resources2]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -456,7 +456,7 @@ class TestOptimizeSameInfra:
         resources.get_cost = MagicMock(return_value=1.0)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({resources: [resources]}, None, None, None)
+            return ({resources: [resources]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -528,7 +528,7 @@ class TestInterConnectionPlacement:
         dag = self._make_dag([task1, task2], inter_connection=True)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [k8s_res, aws_res]}, None, None, None)
+            return ({'any': [k8s_res, aws_res]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -549,7 +549,7 @@ class TestInterConnectionPlacement:
         dag = self._make_dag([task], inter_connection=True)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [aws_res]}, None, None, None)
+            return ({'any': [aws_res]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -587,7 +587,7 @@ class TestInterConnectionPlacement:
 
         def mock_fill(task, blocked_resources, quiet):
             res = res_a if task == task1 else res_b
-            return ({'any': [res]}, None, None, None)
+            return ({'any': [res]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -613,7 +613,7 @@ class TestInterConnectionPlacement:
         dag = self._make_dag([task1, task2], inter_connection=None)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [res]}, None, None, None)
+            return ({'any': [res]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -637,7 +637,7 @@ class TestInterConnectionPlacement:
         dag = self._make_dag([task1, task2], inter_connection=False)
 
         def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [shared]}, None, None, None)
+            return ({'any': [shared]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -667,8 +667,8 @@ class TestInterConnectionPlacement:
             if task == pinned:
                 # The region pin constrains candidate generation: no
                 # candidates outside ctx-blah exist for this task.
-                return ({'any': [res_blah]}, None, None, None)
-            return ({'any': [res_blah, res_other]}, None, None, None)
+                return ({'any': [res_blah]}, None, None, None, None)
+            return ({'any': [res_blah, res_other]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -695,8 +695,8 @@ class TestInterConnectionPlacement:
 
         def mock_fill(task, blocked_resources, quiet):
             if task == pinned:
-                return ({'any': [res_blah]}, None, None, None)
-            return ({'any': [res_other]}, None, None, None)
+                return ({'any': [res_blah]}, None, None, None, None)
+            return ({'any': [res_other]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -1341,7 +1341,7 @@ class TestSelectBestInfraDistinctCloudInstances:
             # THIS task's instance back to it, not another task's.
             per_task_k8s_res[task.name] = k8s_res
             requested = MagicMock(spec=resources_lib.Resources)
-            return ({requested: [k8s_res, aws_res]}, None, None, None)
+            return ({requested: [k8s_res, aws_res]}, None, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
