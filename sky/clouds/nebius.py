@@ -26,7 +26,40 @@ if typing.TYPE_CHECKING:
 
 _INDENT_PREFIX = '    '
 
+_SERVICE_ACCOUNT_DOCS = ('https://docs.skypilot.co/en/latest/cloud-setup/'
+                         'cloud-permissions/nebius.html')
+
 logger = sky_logging.init_logger(__name__)
+
+
+def _describe_credentials_load_error(e: Exception) -> str:
+    """One line for an error raised while the SDK loads the credentials file.
+
+    The SDK raises plain JSON/key/value errors here, which would otherwise be
+    shown as a full traceback.
+    """
+    if isinstance(e, json.JSONDecodeError):
+        return f'not valid JSON ({e})'
+    if isinstance(e, KeyError):
+        return f'missing field {e}'
+    return str(e) or type(e).__name__
+
+
+def _describe_request_error(e: Exception) -> Tuple[str, str]:
+    """Returns (status code name, one-line message) for a Nebius RequestError.
+
+    The SDK's own rendering also appends the trace ID and every nested
+    service error, which makes the reason hard to read.
+    """
+    status = getattr(e, 'status', None)
+    code = getattr(status, 'code', None)
+    code_name = getattr(code, 'name', str(code))
+    message = getattr(status, 'message', None)
+    text = f'{code_name}: {message}' if message else code_name
+    request_id = getattr(status, 'request_id', '')
+    if request_id:
+        text += f' (request ID: {request_id})'
+    return code_name, text
 
 
 def nebius_profile_in_aws_cred_and_config() -> bool:
@@ -512,31 +545,52 @@ class Nebius(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
-        token_cred_msg = (
-            f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
-            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
-
+        credentials_msg = (
+            f'{_INDENT_PREFIX}Set up a service account key at '
+            f'{nebius.credentials_path()} (see {_SERVICE_ACCOUNT_DOCS}), or '
+            'save an access token:\n'
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > '
+            f'{nebius.iam_token_path()}')
         tenant_msg = (
-            f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX}Save your tenant ID (from the web console, or '
+            '`nebius iam tenant list`):\n'
+            f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID > '
+            f'{nebius.tenant_id_path()}')
         if not nebius.is_token_or_cred_file_exist():
-            return False, f'{token_cred_msg}'
+            return False, f'Nebius credentials not found.\n{credentials_msg}'
         tenant_id = nebius.get_tenant_id()
         if tenant_id is None:
-            return False, f'{tenant_msg}'
-        sdk = nebius.sdk()
+            return False, f'Nebius tenant ID not found.\n{tenant_msg}'
+        try:
+            # Parses the credentials file, so a malformed one fails here.
+            sdk = nebius.sdk()
+        except Exception as e:  # pylint: disable=broad-except
+            return False, (
+                f'Failed to load Nebius credentials from '
+                f'{nebius.credentials_path()}: '
+                f'{_describe_credentials_load_error(e)}\n{credentials_msg}')
         try:
             service = nebius.iam().ProjectServiceClient(sdk)
-            service.list(
-                nebius.iam().ListProjectsRequest(parent_id=tenant_id)).wait()
+            # Without these, a key Nebius rejects keeps `sky check` waiting
+            # for 15 minutes and then reports DEADLINE_EXCEEDED.
+            service.list(nebius.iam().ListProjectsRequest(parent_id=tenant_id),
+                         auth_timeout=nebius.CREDENTIAL_CHECK_TIMEOUT,
+                         auth_options=nebius.fail_fast_auth_options()).wait()
         except nebius.request_error() as e:
-            return False, (
-                f'{e.status} \n'  # First line is indented by 4 spaces
-                f'{token_cred_msg} \n'
-                f'{tenant_msg}')
+            code_name, error = _describe_request_error(e)
+            if code_name == 'PERMISSION_DENIED':
+                hint = (f'{_INDENT_PREFIX}The service account needs the editor '
+                        f'role in tenant {tenant_id}: add it to the tenant\'s '
+                        f'editors group (see {_SERVICE_ACCOUNT_DOCS}).')
+            elif code_name == 'NOT_FOUND':
+                hint = (f'{_INDENT_PREFIX}Check the tenant ID in '
+                        f'{nebius.tenant_id_path()}.\n{tenant_msg}')
+            elif code_name in ('UNAUTHENTICATED', 'INVALID_ARGUMENT'):
+                hint = (f'{_INDENT_PREFIX}Nebius rejected the credentials.\n'
+                        f'{credentials_msg}')
+            else:
+                hint = f'{credentials_msg}\n{tenant_msg}'
+            return False, f'{error}\n{hint}'
         return True, None
 
     @classmethod

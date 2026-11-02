@@ -64,7 +64,16 @@ _TERMINATE_INSTANCE = (
     '--instance-ids $id && '
     'echo "Instance terminated"')
 
-_TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
+_POOL_DOWN = ('sky jobs pool down {pool_name} -y')
+
+# `pool down` skips a pool in a failed status and prints a `--purge` hint;
+# purge it then so the pool record does not outlive the test.
+_TEARDOWN_POOL = (
+    's=$(sky jobs pool down {pool_name} -y 2>&1); rc=$?; echo "$s"; '
+    'if echo "$s" | grep -q "sky jobs pool down {pool_name} --purge"; then '
+    '  sky jobs pool down {pool_name} -y --purge; '
+    # A subshell exit, so a chain_teardown group runs its later steps.
+    'else (exit $rc); fi')
 
 _CANCEL_POOL_JOBS = ('sky jobs cancel --pool {pool_name} -y')
 
@@ -1622,7 +1631,7 @@ def test_pools_double_launch(generic_cloud: str):
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                       pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
-                _TEARDOWN_POOL.format(pool_name=pool_name),
+                _POOL_DOWN.format(pool_name=pool_name),
                 # Wait until the pool is fully shut down; re-applying while it
                 # is still shutting down is rejected. A fixed sleep is too
                 # short on clouds with slow teardown (e.g. Nebius).
@@ -1810,7 +1819,7 @@ def test_pool_down_single_pool(generic_cloud: str):
                         job_name=job_name),
                     wait_until_job_status(job_name, ['RUNNING'],
                                           timeout=timeout),
-                    _TEARDOWN_POOL.format(pool_name=pool_name),
+                    _POOL_DOWN.format(pool_name=pool_name),
                     # Wait a bit for cancellation to propagate
                     'sleep 10',
                     wait_until_job_status(
