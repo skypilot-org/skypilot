@@ -1206,6 +1206,13 @@ class RetryingVmProvisioner(object):
                 cluster_config_file = config_dict['ray']
 
                 launched_resources = to_provision.copy(region=region.name)
+                if (launched_resources.num_nodes is not None and
+                        launched_resources.num_nodes != num_nodes):
+                    # Keep a per-resources node count consistent with
+                    # launched_nodes (e.g., after a resize), as it is reused
+                    # when relaunching on the same placement.
+                    launched_resources = launched_resources.copy(
+                        num_nodes=num_nodes)
                 if zones and len(zones) == 1:
                     launched_resources = launched_resources.copy(
                         zone=zones[0].name)
@@ -1971,16 +1978,16 @@ class RetryingVmProvisioner(object):
                         failover_history=failover_history) from last_error
                 # An INIT cluster should have been terminated by
                 # _retry_zones(), so it can be retried on other resources.
+                num_nodes_str = backend_utils.get_task_num_nodes_str(
+                    task, all_candidates=True)
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
-                        f'{task.num_nodes}x {task.resources}'))
+                        f'{num_nodes_str}x {task.resources}'))
                 # Retry with the current, potentially "smaller" resources:
                 # to_provision == the current new resources (e.g., V100:1),
                 # which may be "smaller" than the original (V100:8).
-                # num_nodes is not part of a Resources so must be updated
-                # separately.
-                num_nodes = task.num_nodes
+                # num_nodes is updated below, after re-optimizing.
                 prev_cluster_status = None
                 prev_handle = None
 
@@ -2013,6 +2020,9 @@ class RetryingVmProvisioner(object):
             assert task in self._dag.tasks, 'Internal logic error.'
             assert best_resources is not None, task
             to_provision = best_resources
+            # The newly chosen resources may set a different node count
+            # (per-candidate `num_nodes`).
+            num_nodes = task.num_nodes_for(to_provision)
         return config_dict
 
 
@@ -3342,9 +3352,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # For the validation comparison, optionally treat the node count as
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
-        fit_num_nodes = (handle.launched_nodes
-                         if skip_num_nodes_check else task.num_nodes)
-        for resource in task.resources:
+        # Resources candidates may set their own node counts. Prefer one that
+        # uses the whole cluster, then fall back to the first that fits. On
+        # resize, keep the task's order: the cluster's size is what changes.
+        candidates = list(task.resources)
+        if not skip_num_nodes_check:
+            candidates.sort(
+                key=lambda r: task.num_nodes_for(r) != handle.launched_nodes)
+        for resource in candidates:
+            fit_num_nodes = (handle.launched_nodes if skip_num_nodes_check else
+                             task.num_nodes_for(resource))
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -3353,7 +3370,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 valid_resource = resource
                 break
             else:
-                requested_resource_list.append(f'{task.num_nodes}x {resource}')
+                requested_resource_list.append(
+                    f'{task.num_nodes_for(resource)}x {resource}')
 
         if valid_resource is None:
             for example_resource in task.resources:
@@ -3649,7 +3667,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'possible launchable resources.'
                         f'{colorama.Style.RESET_ALL}'
                         ' Relax the task\'s resource requirements: '
-                        f'{task.num_nodes}x {list(task.resources)[0]}')
+                        f'{task.num_nodes_for(list(task.resources)[0])}x '
+                        f'{list(task.resources)[0]}')
                     if e.no_failover:
                         error_message = str(e)
 
@@ -4705,8 +4724,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # mode.
             # In this case, we reset the resources for the task, so that the
             # detached setup does not need to wait for the task resources to be
-            # ready (which is not used for setup anyway).
-            valid_resource = resources_lib.Resources()
+            # ready (which is not used for setup anyway). Keep the node count
+            # of the chosen resources, unless the task sets its own.
+            valid_resource = resources_lib.Resources(
+                num_nodes=None if task.num_nodes_on_task else task.num_nodes)
         else:
             # Check the task resources vs the cluster resources. Since
             # `sky exec` will not run the provision and _check_existing_cluster
@@ -4731,7 +4752,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+        # task_copy's only resources is the candidate matched to the cluster,
+        # whose node count may differ from the other candidates'.
+        num_actual_nodes = task_copy.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
@@ -6288,7 +6311,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _handle_resize_pre_provision(
         self,
         handle: CloudVmRayResourceHandle,
-        task: task_lib.Task,
+        requested_nodes: int,
         cluster_name: str,
         cluster_status: Optional[status_lib.ClusterStatus] = None,
     ) -> None:
@@ -6301,7 +6324,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         For scale-up or same-size: no-op (bulk_provision handles it).
         """
         current_nodes = handle.launched_nodes
-        requested_nodes = task.num_nodes
 
         if requested_nodes >= current_nodes:
             # Scale-up or no-op: nothing to do pre-provision.
@@ -6466,14 +6488,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-node hardware (instance type, accelerators, region,
                 # zone, ports, etc.) matches the existing cluster to prevent
                 # ending up with a mixed-resource cluster.
-                self.check_resources_fit_cluster(handle,
-                                                 task,
-                                                 skip_num_nodes_check=True)
+                matched_resource = self.check_resources_fit_cluster(
+                    handle, task, skip_num_nodes_check=True)
+                # Resize to the node count of the candidate that matches the
+                # cluster's hardware. task.num_nodes would be the smallest
+                # candidate count, as no candidate is chosen yet.
+                resize_num_nodes = task.num_nodes_for(matched_resource)
                 # Then run resize-specific pre-provision logic (e.g. verify
                 # no running jobs and terminate workers for scale-down).
                 self._handle_resize_pre_provision(
                     handle,
-                    task,
+                    resize_num_nodes,
                     cluster_name,
                     cluster_status=prev_cluster_status)
             else:
@@ -6701,7 +6726,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
-            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
+            num_nodes = (resize_num_nodes if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
@@ -6759,7 +6784,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
             to_provision,
-            task.num_nodes,
+            task.num_nodes_for(to_provision),
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,

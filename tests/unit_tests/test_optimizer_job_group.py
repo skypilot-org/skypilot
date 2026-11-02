@@ -168,6 +168,7 @@ class TestJobGroupOptimizer:
         task = MagicMock(spec=task_lib.Task)
         task.estimate_runtime = MagicMock(return_value=3600)
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         common_infras = [(mock_aws_cloud, 'us-east-1')]
         task_candidates = {
@@ -192,6 +193,7 @@ class TestJobGroupOptimizer:
         task.estimate_runtime = MagicMock(return_value=3600)
         task.time_estimator_func = MagicMock()
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         # us-east-1 costs 1.0, us-west-2 costs 1.5
         common_infras = [(mock_aws_cloud, 'us-east-1'),
@@ -221,11 +223,13 @@ class TestJobGroupOptimizer:
         task1.estimate_runtime = MagicMock(return_value=3600)
         task1.time_estimator_func = MagicMock()
         task1.num_nodes = 1
+        task1.num_nodes_for.return_value = task1.num_nodes
 
         task2 = MagicMock(spec=task_lib.Task)
         task2.estimate_runtime = MagicMock(return_value=7200)
         task2.time_estimator_func = MagicMock()
         task2.num_nodes = 2
+        task2.num_nodes_for.return_value = task2.num_nodes
 
         common_infras = [(mock_aws_cloud, 'us-east-1'),
                          (mock_aws_cloud, 'us-west-2')]
@@ -441,11 +445,13 @@ class TestOptimizeSameInfra:
         task1.name = 'task-1'
         task1.estimate_runtime = MagicMock(return_value=3600)
         task1.num_nodes = 1
+        task1.num_nodes_for.return_value = task1.num_nodes
 
         task2 = MagicMock(spec=task_lib.Task)
         task2.name = 'task-2'
         task2.estimate_runtime = MagicMock(return_value=3600)
         task2.num_nodes = 1
+        task2.num_nodes_for.return_value = task2.num_nodes
 
         dag.tasks = [task1, task2]
 
@@ -515,6 +521,7 @@ class TestInterConnectionPlacement:
         task.resources = resources if resources is not None else []
         task.estimate_runtime = MagicMock(return_value=3600)
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
         return task
 
     def test_required_filters_candidates_to_kubernetes(self, mock_k8s_cloud,
@@ -987,6 +994,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'data-server'
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_kubernetes_cloud
@@ -1018,6 +1026,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'trainer'
         task.num_nodes = 2
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_kubernetes_cloud
@@ -1048,6 +1057,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'service'
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_kubernetes_cloud
@@ -1079,6 +1089,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'compute'
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_aws_cloud
@@ -1110,6 +1121,7 @@ class TestPrintJobGroupPlan:
             task = MagicMock(spec=task_lib.Task)
             task.name = name
             task.num_nodes = 1 if i < 2 else 2
+            task.num_nodes_for.return_value = task.num_nodes
 
             resources = MagicMock(spec=resources_lib.Resources)
             resources.cloud = mock_kubernetes_cloud
@@ -1138,6 +1150,7 @@ class TestPrintJobGroupPlan:
         task_with_resources = MagicMock(spec=task_lib.Task)
         task_with_resources.name = 'has-resources'
         task_with_resources.num_nodes = 1
+        task_with_resources.num_nodes_for.return_value = task_with_resources.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_kubernetes_cloud
@@ -1168,6 +1181,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'spot-task'
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = mock_aws_cloud
@@ -1195,6 +1209,7 @@ class TestPrintJobGroupPlan:
         task = MagicMock(spec=task_lib.Task)
         task.name = 'no-instance-type'
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
 
         resources = MagicMock(spec=resources_lib.Resources)
         resources.cloud = cloud
@@ -1255,6 +1270,7 @@ class TestSelectBestInfraDistinctCloudInstances:
         task.name = name
         task.time_estimator_func = None
         task.num_nodes = 1
+        task.num_nodes_for.return_value = task.num_nodes
         return task
 
     def _candidates_for_task(self):
