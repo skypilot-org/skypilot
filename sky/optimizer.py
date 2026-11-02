@@ -369,20 +369,17 @@ class Optimizer:
                 node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
                                                  r.repr_with_region_zone
                                                  for r in node.resources)
-                node_unreachable_errors = [
-                    e for errors in unreachable_errors.values() for e in errors
-                ]
-                if node_unreachable_errors:
+                if unreachable_errors:
                     # Carried as failover history so that callers retry
                     # instead of failing the request as infeasible.
                     reasons = '\n'.join(
-                        f'{indent_prefix}{e}' for e in node_unreachable_errors)
+                        f'{indent_prefix}{e}' for e in unreachable_errors)
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             'No reachable infra has resources satisfying the '
                             f'request: {node_resources_reprs}. Infra that '
                             f'could not be reached:\n{reasons}',
-                            failover_history=node_unreachable_errors)
+                            failover_history=unreachable_errors)
                 source_hint = 'catalog'
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
@@ -1923,9 +1920,8 @@ def _fill_in_launchable_resources(
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates, List[str], Dict[
-               resources_lib.Resources, List[str]], Dict[
-                   resources_lib.Resources, List[Exception]]]:
+           _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
+                                                List[str]], List[Exception]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1936,8 +1932,8 @@ def _fill_in_launchable_resources(
         Sorted list of fuzzy candidates (alternative GPU names).
         Dict mapping requested Resources and a list of hints for why the
           resource is unavailable if so.
-        Dict mapping requested Resources to the errors of locations that were
-          skipped because they could not be reached.
+        Errors of the locations that were skipped because they could not be
+          reached.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1952,8 +1948,7 @@ def _fill_in_launchable_resources(
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
-    unreachable_errors: Dict[resources_lib.Resources,
-                             List[Exception]] = collections.defaultdict(list)
+    unreachable_errors: List[Exception] = []
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1979,8 +1974,7 @@ def _fill_in_launchable_resources(
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
                 resource_hints[resources].append(feasible_resources.hint)
-            unreachable_errors[resources].extend(
-                feasible_resources.unreachable_errors)
+            unreachable_errors.extend(feasible_resources.unreachable_errors)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and

@@ -21,7 +21,7 @@ def _optimize_ordered_task_with_mock_launchable(dag, launchable_call_indexes):
         fill_calls.append(requested_resources)
         launchable_resources = ([requested_resources] if call_index
                                 in launchable_call_indexes else [])
-        return {requested_resources: launchable_resources}, {}, [], {}, {}
+        return {requested_resources: launchable_resources}, {}, [], {}, []
 
     def fake_optimize_by_dp(topo_order, node_to_cost_map, minimize_cost):
         del node_to_cost_map, minimize_cost
@@ -134,11 +134,7 @@ def _optimize_with_no_launchable(unreachable_errors):
 
     def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
         del task, blocked_resources, quiet
-        return ({
-            requested_resources: []
-        }, {}, [], {}, {
-            requested_resources: list(unreachable_errors)
-        })
+        return ({requested_resources: []}, {}, [], {}, list(unreachable_errors))
 
     with mock.patch('sky.optimizer._check_specified_clouds'), \
             mock.patch('sky.optimizer._fill_in_launchable_resources',
