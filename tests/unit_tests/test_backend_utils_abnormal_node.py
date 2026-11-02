@@ -51,7 +51,8 @@ def _run(node_statuses,
          termination_cause=None,
          last_event=None,
          missing_node_reason=None,
-         cloud=None):
+         cloud=None,
+         ever_up=True):
     """Drive _update_cluster_status; return (INIT events, k8s mocks)."""
     handle = _handle(launched_nodes, instances, cloud)
     record = {
@@ -61,6 +62,7 @@ def _run(node_statuses,
         'autostop': -1,
         'to_down': False,
         'launched_at': time.time() - 3600,
+        'cluster_ever_up': ever_up,
     }
     events = []
 
@@ -233,6 +235,43 @@ class TestPartialLoss:
             '(details: cluster is unhealthy).'
         ]
 
+    def test_a_reported_loss_is_not_overwritten_by_the_next_refresh(self):
+        """The next refresh no longer looks the missing pod up; writing what
+        the survivor says would bury the loss cause."""
+        events, k8s = _run(
+            {'pod-0': (status_lib.ClusterStatus.INIT, 'Error (exit code 3)')},
+            launched_nodes=2,
+            instances=self._INSTANCES,
+            status=status_lib.ClusterStatus.INIT,
+            termination_cause=self._CAUSE,
+            last_event=(
+                f'{_ABNORMAL} one or more nodes terminated (Pod evicted '
+                'by Kubernetes: NoExecute taint k=v on node n1; pod-0 '
+                'is not ready (Error (exit code 3))). Transitioned to '
+                'INIT (details: cluster is unhealthy).'))
+        assert not events
+        k8s.cause.assert_not_called()
+        k8s.health.assert_not_called()
+
+    def test_a_first_loss_on_an_init_cluster_reads_the_nodes(self):
+        _, k8s = _run(
+            {'pod-0': (status_lib.ClusterStatus.INIT, 'pod not ready (x)')},
+            launched_nodes=2,
+            instances=self._INSTANCES,
+            status=status_lib.ClusterStatus.INIT,
+            last_event=f'{_ABNORMAL} ray cluster is unhealthy')
+        k8s.health.assert_called_once()
+
+    def test_an_interrupted_launch_is_not_reported_as_a_loss(self):
+        events, k8s = _run(self._UP,
+                           launched_nodes=2,
+                           instances=self._INSTANCES,
+                           status=status_lib.ClusterStatus.INIT,
+                           last_event='Provisioning on Kubernetes',
+                           ever_up=False)
+        assert not events
+        k8s.cause.assert_not_called()
+
     def test_no_cause_found_still_closes_the_gate(self):
         """Written once, generic, so later refreshes stop polling."""
         events, _ = _run(self._UP,
@@ -283,6 +322,12 @@ class TestNodeTaints:
                            self._node(False, [(_TAINT, None)])) == {
                                'n1': f'NotReady (NoExecute taint {_TAINT})'
                            }
+
+    def test_a_cordoned_node_names_its_evicting_taint(self, monkeypatch):
+        node = self._node(True, [('drain', 'now')], unschedulable=True)
+        assert self._check(monkeypatch, node) == {
+            'n1': 'cordoned (NoExecute taint drain=now)'
+        }
 
     def test_a_tolerated_taint_is_not_named(self, monkeypatch):
         node = self._node(True, [('nvidia.com/gpu', 'present')])

@@ -2859,6 +2859,7 @@ _TERMINATED_CLUSTER_EVENT_REGEX = (f'{re.escape(_CLUSTER_REMOVED_BY_REFRESH)}$'
                                    '|^All nodes terminated')
 
 _NO_TERMINATION_CAUSE = 'Nodes disappeared; no cause found.'
+_PARTIAL_LOSS_REASON = 'one or more nodes terminated'
 
 
 def _first_sentence(text: str) -> str:
@@ -3449,13 +3450,31 @@ def _update_cluster_status(
         # to provide better diagnostics (e.g., "node X is NotReady"). Not only
         # when Ray is unhealthy: a pod evicted from a failed node is Failed or
         # Terminating, and its node is the cause.
+        # A cluster already INIT is reported again only with something new.
+        # Pods missing: only the first time they are seen missing (the cluster
+        # stays INIT with them gone until it is downed or relaunched, and a
+        # later refresh no longer looks them up, so it would overwrite their
+        # cause), and only on a cluster that was up (not an interrupted
+        # launch). Otherwise: when a pod names a cause (see the gate below).
+        first_loss = some_nodes_terminated
+        if some_nodes_terminated and status == status_lib.ClusterStatus.INIT:
+            last_event = global_user_state.get_last_cluster_event(
+                record['cluster_hash'],
+                event_type=global_user_state.ClusterEventType.STATUS_CHANGE)
+            first_loss = (
+                bool(record.get('cluster_ever_up')) and
+                not (last_event or '').startswith(
+                    f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX}'
+                    f' {_PARTIAL_LOSS_REASON}'))
+        report_again = (first_loss if some_nodes_terminated else any(
+            k8s_instance.pod_reason_identifies_cause(reason)
+            for _, reason in node_statuses.values()))
+
         node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
-        # On a cluster already INIT the event is written only when a pod names
-        # a cause (gate below); otherwise the lookup would be discarded.
+        # On a cluster already INIT the lookup would be discarded unless the
+        # event is reported again.
         if (isinstance(launched_resources.cloud, clouds.Kubernetes) and
-            (status != status_lib.ClusterStatus.INIT or any(
-                k8s_instance.pod_reason_identifies_cause(reason)
-                for _, reason in node_statuses.values()))):
+            (status != status_lib.ClusterStatus.INIT or report_again)):
             unhealthy_pods = [
                 pod_name for pod_name, (_, reason) in node_statuses.items()
                 if reason is not None
@@ -3537,28 +3556,14 @@ def _update_cluster_status(
             if s not in (status_lib.ClusterStatus.UP,
                          status_lib.ClusterStatus.STOPPED)
         ]
-        partial_loss_reported = False
         if some_nodes_terminated:
-            init_reason = 'one or more nodes terminated'
+            init_reason = _PARTIAL_LOSS_REASON
             # Say where the missing pods went: their deletion events and the
             # nodes they were placed on (a node that no longer exists, is
             # NotReady or carries an evicting taint points at a cluster/cloud-
             # side failure). Reported next to what the surviving pods say.
-            # K8s-only; best-effort.
-            #
-            # On a cluster already INIT, only the first time pods are seen
-            # missing: the cluster stays INIT with them missing until it is
-            # downed or relaunched, so later refreshes would poll the K8s API
-            # for the same answer every time.
-            partial_loss_reported = True
-            if status == status_lib.ClusterStatus.INIT:
-                last_event = global_user_state.get_last_cluster_event(
-                    record['cluster_hash'],
-                    event_type=global_user_state.ClusterEventType.STATUS_CHANGE)
-                partial_loss_reported = not (last_event or '').startswith(
-                    f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} '
-                    f'{init_reason}')
-            if (partial_loss_reported and
+            # K8s-only; best-effort; once (first_loss above).
+            if (first_loss and
                     isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
@@ -3743,10 +3748,10 @@ def _update_cluster_status(
             identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
-        # Skip if already INIT, unless this refresh explained why or first saw
-        # pods missing.
-        if (status != status_lib.ClusterStatus.INIT or identified_cause or
-                partial_loss_reported):
+        # Skip if already INIT, unless this refresh has something new (see
+        # report_again; a recovered cause also counts when no pod is missing).
+        if (status != status_lib.ClusterStatus.INIT or report_again or
+            (identified_cause and not some_nodes_terminated)):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,
