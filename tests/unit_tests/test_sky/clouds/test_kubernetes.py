@@ -10,6 +10,7 @@ from kubernetes import client as k8s_client
 import pytest
 
 from sky import exceptions as sky_exceptions
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -3025,6 +3026,18 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
                       result)
 
 
+def _raise_unreachable(cause: Exception):
+    """Raises KubeAPIUnreachableError from `cause`, as _retry_on_error does."""
+    try:
+        raise cause
+    except Exception as e:  # pylint: disable=broad-except
+        raise sky_exceptions.KubeAPIUnreachableError(str(e)) from e
+
+
+def _timed_out() -> Exception:
+    return kubernetes_adaptor.max_retry_error()(None, '/api/v1/nodes')
+
+
 class TestKubernetesRegionsWithOffering(unittest.TestCase):
     """Test cases for Kubernetes.regions_with_offering method."""
 
@@ -3328,8 +3341,7 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
                                        ephemeral_storage_gb=None):
             del instance_type, ephemeral_storage_gb
             if context == 'ctx1':
-                raise sky_exceptions.KubeAPIUnreachableError(
-                    'Timed out when trying to get node info')
+                _raise_unreachable(_timed_out())
             return (False, 'Not enough resources')
 
         mock_check_instance_fits.side_effect = check_instance_side_effect
@@ -3352,35 +3364,32 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
 
     @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
     @patch('sky.provision.kubernetes.utils.check_instance_fits')
-    def test_auth_rejection_not_reported(self, mock_check_instance_fits,
-                                         mock_existing_allowed_contexts):
-        """A context that rejects the credentials is not reported."""
+    def test_non_transient_failure_not_reported(self, mock_check_instance_fits,
+                                                mock_existing_allowed_contexts):
+        """A context that fails for a reason a retry won't fix is dropped."""
         mock_existing_allowed_contexts.return_value = ['ctx1']
+        for cause in [
+                k8s_client.rest.ApiException(status=403),
+                k8s_client.rest.ApiException(status=404),
+                kubernetes_adaptor.config_exception()('invalid kubeconfig'),
+        ]:
+            with self.subTest(cause=repr(cause)):
+                mock_check_instance_fits.side_effect = (
+                    lambda *args, cause=cause, **kwargs: _raise_unreachable(
+                        cause))
 
-        def check_instance_side_effect(context,
-                                       instance_type,
-                                       ephemeral_storage_gb=None):
-            del context, instance_type, ephemeral_storage_gb
-            try:
-                raise k8s_client.rest.ApiException(status=403)
-            except k8s_client.rest.ApiException as e:
-                raise sky_exceptions.KubeAPIUnreachableError(
-                    'Kubernetes API error: Forbidden') from e
+                unreachable_errors = []
+                regions = kubernetes.Kubernetes.regions_with_offering(
+                    instance_type='4CPU--8GB',
+                    accelerators=None,
+                    use_spot=False,
+                    region=None,
+                    zone=None,
+                    resources=None,
+                    unreachable_errors=unreachable_errors)
 
-        mock_check_instance_fits.side_effect = check_instance_side_effect
-
-        unreachable_errors = []
-        regions = kubernetes.Kubernetes.regions_with_offering(
-            instance_type='4CPU--8GB',
-            accelerators=None,
-            use_spot=False,
-            region=None,
-            zone=None,
-            resources=None,
-            unreachable_errors=unreachable_errors)
-
-        self.assertEqual(regions, [])
-        self.assertEqual(unreachable_errors, [])
+                self.assertEqual(regions, [])
+                self.assertEqual(unreachable_errors, [])
 
     @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
     @patch('sky.clouds.kubernetes.Kubernetes.check_features_are_supported')
@@ -3392,8 +3401,7 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         del mock_check_features
         mock_existing_allowed_contexts.return_value = ['ctx1']
         mock_check_instance_fits.side_effect = (
-            sky_exceptions.KubeAPIUnreachableError(
-                'Timed out when trying to get node info'))
+            lambda *args, **kwargs: _raise_unreachable(_timed_out()))
 
         resources = mock.MagicMock()
         resources.instance_type = '4CPU--8GB'

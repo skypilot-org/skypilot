@@ -404,14 +404,19 @@ def _is_cloudflare_403_error(exception: Exception) -> bool:
     return False
 
 
-def is_auth_rejection(exception: Optional[BaseException]) -> bool:
-    """Whether the Kubernetes API server rejected the credentials.
+def is_transient_api_error(exception: Optional[BaseException]) -> bool:
+    """Whether a failed Kubernetes API call may succeed if retried later.
 
-    True for a 401 or 403 response, except a transient CloudFlare 403.
+    True for connection errors and timeouts, 429, 5xx and a CloudFlare 403.
+    False for other 4xx responses and kubeconfig errors.
     """
-    return (isinstance(exception, kubernetes.api_exception()) and
-            exception.status in (401, 403) and
-            not _is_cloudflare_403_error(exception))
+    if isinstance(exception, kubernetes.max_retry_error()):
+        return True
+    if isinstance(exception, kubernetes.api_exception()):
+        status = exception.status or 0
+        return (status == 429 or status >= 500 or
+                _is_cloudflare_403_error(exception))
+    return False
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -454,7 +459,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
                     # Don't retry on permanent errors like 401 (Unauthorized)
                     # or 403 (Forbidden), unless it's a CloudFlare transient 403
-                    if is_auth_rejection(e):
+                    if (isinstance(e, kubernetes.api_exception()) and
+                            e.status in (401, 403) and not is_cloudflare_403):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.
                         raise exceptions.KubeAPIUnreachableError(

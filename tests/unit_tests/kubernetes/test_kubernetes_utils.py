@@ -38,22 +38,31 @@ def test_get_kubernetes_nodes():
 
 
 @pytest.mark.parametrize('status,headers,expected', [
-    (401, None, True),
-    (403, None, True),
+    (500, None, True),
+    (503, None, True),
+    (429, None, True),
     (403, {
         'CF-RAY': '98b8076cfae4058d-IAD'
-    }, False),
-    (500, None, False),
+    }, True),
+    (401, None, False),
+    (403, None, False),
+    (404, None, False),
+    (400, None, False),
+    (None, None, False),
 ])
-def test_is_auth_rejection(status, headers, expected):
+def test_is_transient_api_error(status, headers, expected):
     error = kubernetes.client.rest.ApiException(status=status)
     error.headers = headers
-    assert utils.is_auth_rejection(error) is expected
+    assert utils.is_transient_api_error(error) is expected
 
 
-def test_is_auth_rejection_non_api_errors():
-    assert utils.is_auth_rejection(None) is False
-    assert utils.is_auth_rejection(TimeoutError('timed out')) is False
+def test_is_transient_api_error_other_errors():
+    assert utils.is_transient_api_error(kubernetes_adaptor.max_retry_error()(
+        None, '/api/v1/nodes')) is True
+    assert utils.is_transient_api_error(
+        kubernetes_adaptor.config_exception()('invalid kubeconfig')) is False
+    assert utils.is_transient_api_error(None) is False
+    assert utils.is_transient_api_error(TimeoutError('timed out')) is False
 
 
 def test_check_instance_fits_raises_when_unreachable():

@@ -656,9 +656,10 @@ class Kubernetes(clouds.Cloud):
 
         Args:
             unreachable_errors: If given, gets one KubeAPIUnreachableError for
-                each context that was skipped because it could not be reached.
-                A context that rejects the credentials (401/403) is not
-                included.
+                each context that was skipped because of a failure that may
+                pass (connection error, timeout, 429 or 5xx). A context that
+                fails for any other reason, e.g. it rejects the credentials or
+                its kubeconfig entry is invalid, is not included.
         """
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
@@ -707,7 +708,7 @@ class Kubernetes(clouds.Cloud):
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 if (unreachable_errors is not None and
-                        not kubernetes_utils.is_auth_rejection(e.__cause__)):
+                        kubernetes_utils.is_transient_api_error(e.__cause__)):
                     unreachable_errors.append(
                         exceptions.KubeAPIUnreachableError(
                             f'Kubernetes context {context!r} is unreachable: '
