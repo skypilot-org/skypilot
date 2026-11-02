@@ -874,24 +874,96 @@ def _through_request_store(error):
         pickle.loads(pickle.dumps(exceptions.serialize_exception(error))))
 
 
+def _unreachable_infra_error():
+    """The launch error for a request only unreachable infra might fit."""
+    return _through_request_store(
+        exceptions.ResourcesUnavailableError(
+            'No reachable infra has resources satisfying the request',
+            failover_history=[
+                exceptions.KubeAPIUnreachableError(
+                    "Kubernetes context 'ctx1' is unreachable: Timed out")
+            ]))
+
+
 @pytest.mark.asyncio
 async def test_unreachable_kubernetes_context_retries(monkeypatch):
     """An unreachable context backs off and retries instead of failing."""
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
-    unavailable = exceptions.ResourcesUnavailableError(
-        'No reachable infra has resources satisfying the request',
-        failover_history=[
-            exceptions.KubeAPIUnreachableError(
-                "Kubernetes context 'ctx1' is unreachable: Timed out")
-        ])
     executor._await_launch_request = mock.AsyncMock(
-        side_effect=[_through_request_store(unavailable), None])
+        side_effect=[_unreachable_infra_error(), None])
 
     assert await executor._launch(max_retry=None,
                                   raise_on_failure=True) == 123.45
     assert _codes(
-        patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+        patches.set_backoff_pending) == ['launch_retry:infra_unreachable']
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_gives_up_after_timeout(monkeypatch):
+    """Infra that stays unreachable ends the launch as a failed precheck."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(),
+                     _unreachable_infra_error()])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None, raise_on_failure=True)
+
+    assert 'stayed unreachable' in str(e.value.reasons[0])
+    assert "'ctx1' is unreachable" in str(e.value.reasons[0])
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_timer_restarts_after_other_failure(
+        monkeypatch):
+    """Only consecutive unreachable-only failures count toward the timeout."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _unreachable_infra_error(),
+        KeyError('status'),
+        _unreachable_infra_error(),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:infra_unreachable',
+        'launch_retry:KeyError',
+        'launch_retry:infra_unreachable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_and_unavailable_infra_never_gives_up(monkeypatch):
+    """Capacity shortages elsewhere keep the usual unlimited retries."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    mixed = exceptions.ResourcesUnavailableError(
+        'no capacity',
+        failover_history=[
+            exceptions.KubeAPIUnreachableError(
+                "Kubernetes context 'ctx1' is unreachable: Timed out"),
+            exceptions.ResourcesUnavailableError('zone a'),
+        ])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(mixed),
+        _through_request_store(mixed),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:resources_unavailable',
+        'launch_retry:resources_unavailable',
+    ]
 
 
 @pytest.mark.asyncio
