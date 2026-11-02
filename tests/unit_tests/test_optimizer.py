@@ -11,7 +11,9 @@ from sky import resources as resources_lib
 from sky import task as task_lib
 
 
-def _optimize_ordered_task_with_mock_launchable(dag, launchable_call_indexes):
+def _optimize_ordered_task_with_mock_launchable(dag,
+                                                launchable_call_indexes,
+                                                unreachable_call_indexes=()):
     fill_calls = []
 
     def fake_fill_in_launchable_resources(task, blocked_resources, quiet):
@@ -21,7 +23,13 @@ def _optimize_ordered_task_with_mock_launchable(dag, launchable_call_indexes):
         fill_calls.append(requested_resources)
         launchable_resources = ([requested_resources] if call_index
                                 in launchable_call_indexes else [])
-        return {requested_resources: launchable_resources}, {}, [], {}, []
+        unreachable_errors = ([
+            exceptions.KubeAPIUnreachableError(
+                f"Kubernetes context 'ctx{call_index}' is unreachable")
+        ] if call_index in unreachable_call_indexes else [])
+        return ({
+            requested_resources: launchable_resources
+        }, {}, [], {}, unreachable_errors)
 
     def fake_optimize_by_dp(topo_order, node_to_cost_map, minimize_cost):
         del node_to_cost_map, minimize_cost
@@ -123,6 +131,43 @@ def test_ordered_resources_with_docker_login_uses_first_launchable():
 
     assert len(fill_calls) == 2
     assert task.best_resources.accelerators == {'H100': 8}
+
+
+def _ordered_task(name):
+    with dag_lib.Dag() as dag:
+        task = task_lib.Task(name=name)
+        task.set_resources([
+            resources_lib.Resources(infra='aws/us-east-2',
+                                    accelerators='A100:8',
+                                    use_spot=True),
+            resources_lib.Resources(infra='aws/us-east-2',
+                                    accelerators='L4:4',
+                                    use_spot=True),
+        ])
+    return dag, task
+
+
+def test_ordered_resources_unreachable_then_infeasible_is_retryable():
+    """An earlier unreachable choice keeps the failure retryable."""
+    dag, _ = _ordered_task('ordered-unreachable-then-infeasible')
+
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _optimize_ordered_task_with_mock_launchable(
+            dag, launchable_call_indexes=set(), unreachable_call_indexes={0})
+
+    assert len(e.value.failover_history) == 1
+    assert "'ctx0' is unreachable" in str(e.value)
+
+
+def test_ordered_resources_unreachable_then_launchable_uses_later_choice():
+    """An unreachable earlier choice does not block a launchable later one."""
+    dag, task = _ordered_task('ordered-unreachable-then-launchable')
+
+    fill_calls = _optimize_ordered_task_with_mock_launchable(
+        dag, launchable_call_indexes={1}, unreachable_call_indexes={0})
+
+    assert len(fill_calls) == 2
+    assert task.best_resources.accelerators == {'L4': 4}
 
 
 def _optimize_with_no_launchable(unreachable_errors):
