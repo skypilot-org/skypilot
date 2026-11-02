@@ -2042,6 +2042,9 @@ def get_config_schema():
                     'task_logs_gc_retention_hours': {
                         'type': 'integer',
                     },
+                    'stream_task_logs_to_controller_log': {
+                        'type': 'boolean',
+                    },
                 },
             },
             'bucket': {

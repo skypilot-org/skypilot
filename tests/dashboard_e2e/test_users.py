@@ -642,6 +642,151 @@ def test_create_service_account_shows_token_once(make_user, open_as, admin_api,
     assert 6 < days <= 7.01, f'the new token must expire in 7 days, got {days}'
 
 
+def _role_says_viewer(data, _body):
+    """res twist: /users/role answers viewer whoever asks."""
+    return {**data, 'role': 'viewer'}
+
+
+def _expires_in_days(name: str) -> float:
+    tokens = [
+        t for t in seed_users.service_account_tokens()
+        if t['token_name'] == name
+    ]
+    assert tokens and tokens[0]['expires_at'], (
+        f'service account {name} must have an expiry, got {tokens}')
+    return (tokens[0]['expires_at'] - time.time()) / 86400
+
+
+def _signs_in(e2e_base_url: str, token: str) -> int:
+    return requests.get(f'{e2e_base_url}/users/role',
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            **PROXY_HEADERS
+                        },
+                        timeout=60).status_code
+
+
+@with_twists(
+    Twist('res-user-reported-viewer',
+          'res',
+          expect=r'a user must get the create dialog',
+          apply=rewrite_response('/users/role', _role_says_viewer)),
+    Twist('res-user-reported-admin',
+          'res',
+          expect=r'a user must (start on the User role|not be offered the '
+          r'Admin role)',
+          apply=rewrite_response('/users/role', _role_says_admin)),
+    Twist('dom-no-rotate-button',
+          'dom',
+          expect=r'a user must get Rotate on their own service account',
+          apply=remove_element('button:has(svg.lucide-rotate-cw)')),
+    Twist('srv-users-sa-rotate-ignores-expiry',
+          'srv',
+          expect=r'the rotated token must expire in 30 days'),
+)
+def test_user_manages_own_service_account(make_user, open_as, admin_api,
+                                          e2e_base_url, uid, twist, request):
+    """A non-admin creates, rotates and deletes a service account of their
+    own, as the server allows; only admins may grant the admin role."""
+    user = make_user('user', role='user')
+    name = f'{uid}-own'
+    request.addfinalizer(
+        lambda: seed_users.delete_token_by_name(admin_api, name))
+    page = _open_users(open_as, user, '?tab=service-accounts')
+
+    page.get_by_role('button', name='Create Service Account').click()
+    dialog = page.get_by_role('dialog')
+    expect(dialog.get_by_role('button', name='Create Token'),
+           'a user must get the create dialog').to_be_visible()
+    # The server's default role is admin here, which a user cannot grant.
+    role_picker = dialog.get_by_role('combobox')
+    expect(role_picker, 'a user must start on the User role').to_have_text(
+        _role_text('user'))
+    role_picker.click()
+    expect(page.get_by_role('option'),
+           'a user must not be offered the Admin role').to_have_text(
+               ['User', 'Viewer'])
+    page.get_by_role('option', name='User', exact=True).click()
+    dialog.get_by_placeholder('e.g., ci-pipeline, monitoring-system').fill(name)
+    dialog.get_by_placeholder('e.g., 30').fill('7')
+    with page.expect_response(lambda r: r.request.method == 'POST' and r.url.
+                              split('?')[0].endswith(SA_TOKENS)) as created:
+        dialog.get_by_role('button', name='Create Token').click()
+    assert created.value.status == 200, (
+        f'the server must let a user create a service account: '
+        f'{created.value.status} {created.value.text()}')
+    code = dialog.locator('code')
+    expect(code, 'the new token must be shown once').to_have_text(
+        re.compile(r'^sky_\S+$'))
+    old_token = code.inner_text().strip()
+    dialog.get_by_role('button', name='Close', exact=True).first.click()
+
+    page.get_by_placeholder(SA_TAB_SEARCH).fill(name)
+    row = _row(page, name)
+    expect(row, f'service account {name} must be listed').to_have_count(1)
+    expect(
+        row.locator('span.capitalize').first,
+        f'{name} must have the User role').to_have_text(_role_text('user'))
+
+    # Rotate with a new expiry.
+    rotate = row.locator('button:has(svg.lucide-rotate-cw)')
+    expect(
+        rotate,
+        'a user must get Rotate on their own service account').to_be_visible()
+    rotate.click()
+    expect(
+        page.get_by_text('is logged in as non-admin'),
+        'a user must not be denied rotating their own token').to_have_count(0)
+    dialog = page.get_by_role('dialog')
+    dialog.get_by_placeholder(
+        'Leave empty to preserve current expiration').fill('30')
+    with page.expect_response(
+            lambda r: r.request.method == 'POST' and r.url.split('?')[
+                0].endswith(f'{SA_TOKENS}/rotate')) as rotated:
+        dialog.get_by_role('button', name='Rotate Token').click()
+    assert rotated.value.status == 200, (
+        f'the server must let a user rotate their own token: '
+        f'{rotated.value.status} {rotated.value.text()}')
+    code = dialog.locator('code')
+    expect(code, 'the rotated token must be shown once').to_have_text(
+        re.compile(r'^sky_\S+$'))
+    new_token = code.inner_text().strip()
+    dialog.get_by_role('button', name='Close', exact=True).first.click()
+    assert new_token != old_token, 'rotating must issue a new token'
+    assert _signs_in(
+        e2e_base_url,
+        old_token) == 401, ('the old token must stop working after a rotate')
+    assert _signs_in(e2e_base_url,
+                     new_token) == 200, ('the rotated token must sign in')
+    days = _expires_in_days(name)
+    assert 29 < days <= 30.01, (
+        f'the rotated token must expire in 30 days, got {days}')
+
+    # Delete.
+    row.locator('button:has(svg.lucide-trash2, svg.lucide-trash-2)').click()
+    expect(
+        page.get_by_text('is logged in as non-admin'),
+        'a user must not be denied deleting their own token').to_have_count(0)
+    dialog = page.get_by_role('dialog')
+    # The open dialog hides the table from role queries, so wait for the
+    # server to answer and the dialog to close before looking at the row.
+    with page.expect_response(lambda r: r.request.method == 'POST' and r.url.
+                              split('?')[0].endswith(f'{SA_TOKENS}/delete'),
+                              timeout=60_000) as deleted:
+        dialog.get_by_role('button', name='Delete Token').click()
+    assert deleted.value.status == 200, (
+        f'the server must let a user delete their own token: '
+        f'{deleted.value.status} {deleted.value.text()}')
+    expect(dialog, 'the delete dialog must close').to_have_count(0)
+    expect(
+        row,
+        f'the deleted service account {name} must disappear').to_have_count(0)
+    assert not [
+        t for t in seed_users.service_account_tokens()
+        if t['token_name'] == name
+    ], f'service account {name} must be deleted on the server'
+
+
 # --- roles -------------------------------------------------------------------
 
 

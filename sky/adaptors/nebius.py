@@ -16,6 +16,9 @@ from sky.utils import ux_utils
 # Default read timeout for nebius SDK
 READ_TIMEOUT = 10
 
+# Budget (seconds) for the credential check, including the token exchange.
+CREDENTIAL_CHECK_TIMEOUT = 30
+
 logger = sky_logging.init_logger(__name__)
 
 _loop_lock = threading.Lock()
@@ -152,13 +155,17 @@ class _NebiusDeprecationFilter(logging.Filter):
     The nebius SDK emits deprecated-field warnings (e.g.
     'Field .nebius.compute.v1.PreemptibleSpec.priority is deprecated')
     to a logger named 'deprecation'. They are not actionable by users and
-    pollute user-facing CLI output. Only records originating from the
-    nebius package are dropped, so other libraries using the same logger
+    pollute user-facing CLI output. Only nebius records are dropped: those
+    from the nebius package, and service deprecations (e.g. 'Service
+    nebius.iam.v1.ProjectService is deprecated'), which the SDK attributes
+    to the calling SkyPilot frame. Other libraries using the same logger
     name are unaffected.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return f'{os.sep}nebius{os.sep}' not in record.pathname
+        if f'{os.sep}nebius{os.sep}' in record.pathname:
+            return False
+        return not record.getMessage().startswith('Service nebius.')
 
 
 class _NebiusGrpcPollerFilter(logging.Filter):
@@ -192,11 +199,30 @@ class _NebiusGrpcPollerFilter(logging.Filter):
         return False
 
 
+class _NebiusTokenRefreshFilter(logging.Filter):
+    """Downgrades the SDK's per-attempt token refresh errors to debug.
+
+    The SDK logs every failed token refresh at ERROR with a full traceback
+    (three in a row for a rejected key) before the request reports the same
+    error to the caller, so `sky check nebius` printed ~200 lines for one
+    bad key. The records are re-logged at debug level so SKYPILOT_DEBUG=1
+    still shows them.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        logger.debug('nebius SDK token refresh: %s',
+                     record.getMessage(),
+                     exc_info=record.exc_info)
+        return False
+
+
 def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     os.environ['GRPC_VERBOSITY'] = 'NONE'
     logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
     logging.getLogger('asyncio').addFilter(_NebiusGrpcPollerFilter())
+    logging.getLogger('nebius.aio.token.renewable').addFilter(
+        _NebiusTokenRefreshFilter())
 
 
 nebius = common.LazyImport('nebius',
@@ -235,6 +261,21 @@ def iam():
     # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.iam import v1 as iam_v1
     return iam_v1
+
+
+def fail_fast_auth_options() -> Dict[str, str]:
+    """Request auth options that surface a failed token exchange at once.
+
+    By default the SDK retries a failed exchange in the background until its
+    15-minute auth timeout, then reports DEADLINE_EXCEEDED instead of the
+    real error (e.g. a public key Nebius does not know).
+    """
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio.token import options as token_options
+    return {
+        token_options.OPTION_RENEW_SYNCHRONOUS: '1',
+        token_options.OPTION_REPORT_ERROR: '1',
+    }
 
 
 def billing():
