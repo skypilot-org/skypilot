@@ -43,6 +43,15 @@ if typing.TYPE_CHECKING:
 else:
     managed_jobsv1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.managed_jobsv1_pb2')
+    # Non-TYPE_CHECKING path must bind these before use sites below so pylint
+    # does not treat the TYPE_CHECKING imports as the only assignment.
+    sqlalchemy = None  # type: ignore
+    sqlalchemy_exc = None  # type: ignore
+    orm = None  # type: ignore
+    postgresql = None  # type: ignore
+    sqlite = None  # type: ignore
+    sql_async = None  # type: ignore
+    declarative = None  # type: ignore
 
 # Separate callback types for sync and async contexts
 SyncCallbackType = Callable[[str], None]
@@ -58,9 +67,9 @@ DEFAULT_JOB_EVENT_RETENTION_HOURS = 30 * 24.0
 # Run the job event retention daemon every hour
 JOB_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
-# Separate from TYPE_CHECKING so mypy keeps sqlalchemy module imports
-# for annotations; pylint E0601 on the rebind is disabled here.
-if sqlalchemy_deps.sqlalchemy_available():  # pylint: disable=used-before-assignment
+# Separate from TYPE_CHECKING so mypy keeps the sqlalchemy module imports for
+# annotations; runtime overwrites the placeholders from the else branch above.
+if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in sky.jobs.state_db (column 0) to avoid indenting table defs.
     # pylint: disable=protected-access
     from sky.jobs import state_db as _jobs_db
@@ -96,13 +105,6 @@ if sqlalchemy_deps.sqlalchemy_available():  # pylint: disable=used-before-assign
 else:
     # Client-only install: enums/helpers below still import. DB APIs
     # fail with a clear install hint when first used.
-    sqlalchemy = None  # type: ignore
-    sqlalchemy_exc = None  # type: ignore
-    orm = None  # type: ignore
-    postgresql = None  # type: ignore
-    sqlite = None  # type: ignore
-    sql_async = None  # type: ignore
-    declarative = None  # type: ignore
     Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore
 

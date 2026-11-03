@@ -24,8 +24,19 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
     from sky.serve import service_spec
+else:
+    # Non-TYPE_CHECKING path must bind these before use sites below so pylint
+    # does not treat the TYPE_CHECKING imports as the only assignment.
+    sqlalchemy = None  # type: ignore
+    sqlalchemy_exc = None  # type: ignore
+    orm = None  # type: ignore
+    postgresql = None  # type: ignore
+    sqlite = None  # type: ignore
+    declarative = None  # type: ignore
 
-if sqlalchemy_deps.sqlalchemy_available():  # pylint: disable=used-before-assignment
+# Separate from TYPE_CHECKING so mypy keeps the sqlalchemy module imports for
+# annotations; runtime overwrites the placeholders from the else branch above.
+if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
     # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db
@@ -45,12 +56,6 @@ if sqlalchemy_deps.sqlalchemy_available():  # pylint: disable=used-before-assign
 else:
     # Client-only install: status enums below still import. DB APIs
     # fail with a clear install hint when first used.
-    sqlalchemy = None  # type: ignore
-    sqlalchemy_exc = None  # type: ignore
-    orm = None  # type: ignore
-    postgresql = None  # type: ignore
-    sqlite = None  # type: ignore
-    declarative = None  # type: ignore
     Base = None  # type: ignore  # pylint: disable=invalid-name
     _db_manager = None  # type: ignore
 
