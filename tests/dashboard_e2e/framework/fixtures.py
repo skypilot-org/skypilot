@@ -117,10 +117,22 @@ def make_user(admin_api: requests.Session,
 
     yield make
     for ident in created:
+        # A request the browser queued before it closed (a background
+        # refresh, say) re-creates the user row when it runs, so let those
+        # finish first.
+        seed.wait_for_user_requests(ident.user_id)
         admin_api.post(
             f'{admin_api.base_url}/users/service-account-tokens/delete',  # type: ignore[attr-defined]
             json={'token_id': ident.token_id},
             timeout=60)
+        # One that reached the server just as the browser closed can still be
+        # queued after the wait; remove the row it brings back.
+        seed.wait_for_user_requests(ident.user_id)
+        if seed.user_exists(ident.user_id):
+            admin_api.post(
+                f'{admin_api.base_url}/users/delete',  # type: ignore[attr-defined]
+                json={'user_id': ident.user_id},
+                timeout=60)
 
 
 @pytest.fixture
@@ -165,6 +177,37 @@ class Recorder:
         self.responses: List[Response] = []
         page.on('request', lambda r: self.requests.append(r))  # pylint: disable=unnecessary-lambda
         page.on('response', lambda r: self.responses.append(r))  # pylint: disable=unnecessary-lambda
+        self.failed: List[Request] = []
+        page.on('requestfailed', lambda r: self.failed.append(r))  # pylint: disable=unnecessary-lambda
+
+    def settle(self, timeout_s: float = 10) -> None:
+        """Stop the page's timers and wait until every request it sent is
+        answered or has failed.
+
+        The server records a queued request before it answers the POST, so
+        after this the request DB holds everything this page asked for; a
+        request still on the wire when the context closes would otherwise run
+        later, unseen by teardown.
+        """
+        try:
+            self.page.evaluate('''() => {
+                const last = setTimeout(() => {}, 0);
+                for (let id = 1; id <= last; id++) {
+                    clearTimeout(id);
+                    clearInterval(id);
+                }
+            }''')
+        except PlaywrightError:
+            return
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            done = [r.request for r in self.responses] + self.failed
+            if all(any(req is d for d in done) for req in self.requests):
+                return
+            try:
+                self.page.wait_for_timeout(200)
+            except PlaywrightError:
+                return
 
     def mark(self) -> int:
         return len(self.requests)
@@ -199,6 +242,37 @@ class Recorder:
                 return
             self.page.wait_for_timeout(200)
         raise AssertionError(f'{message} (no result within {timeout_s:.0f}s)')
+
+    def wait_for_response(self,
+                          path_suffix: str,
+                          message: str,
+                          timeout_s: float = 60) -> None:
+        """Wait until every request the page has sent to ``*path_suffix`` is
+        answered, and the page has rendered what it read.
+
+        For a check that something is absent: it passes at once on a page
+        that has not loaded the data yet, so a regression that would show the
+        thing goes unnoticed. Every request, not the first: several
+        components may fetch the same path.
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            sent = [
+                r for r in self.requests
+                if r.url.split('?')[0].endswith(path_suffix)
+            ]
+            if sent:
+                for req in sent:
+                    resp = req.response()
+                    if resp is not None:
+                        resp.finished()
+                # Two frames: React has committed the state set from it.
+                self.page.evaluate(
+                    '() => new Promise(r => requestAnimationFrame('
+                    '() => requestAnimationFrame(r)))')
+                return
+            self.page.wait_for_timeout(200)
+        raise AssertionError(f'{message} (no response within {timeout_s:.0f}s)')
 
     def posts(self, path_suffix: str, since: int = 0) -> List[Dict[str, Any]]:
         """JSON bodies of POSTs to ``*path_suffix`` since ``mark()``."""
@@ -273,6 +347,10 @@ def open_as(browser: Browser, e2e_base_url: str, twist: Optional[Twist],
                     print(f'e2e: saved {path}')
                 except PlaywrightError as e:
                     print(f'e2e: no screenshot of {page.url}: {e}')
+        for page in ctx.pages:
+            recorder = getattr(page, 'recorder', None)
+            if recorder is not None:
+                recorder.settle()
         if failed:
             ctx.tracing.stop(path=os.path.join(out_dir, f'ctx{i}-trace.zip'))
         else:

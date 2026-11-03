@@ -219,7 +219,10 @@ class TestUpdateClusterStatusInitReason:
     def test_some_nodes_terminated_surfaces_node_state(self):
         # A node that vanished from under the cluster is named in the event.
         handle_info = mock.Mock()
-        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        handle_info.instances = {
+            'pod-0': [mock.Mock(node_name='node-0')],
+            'pod-1': [mock.Mock(node_name='node-1')],
+        }
         with mock.patch.object(
                 backend_utils.global_user_state,
                 'get_cluster_yaml_dict',
@@ -229,18 +232,24 @@ class TestUpdateClusterStatusInitReason:
                 }}), \
              mock.patch.object(backend_utils.k8s_instance,
                                'get_missing_node_reason',
-                               return_value='node node-1 no longer exists'):
+                               return_value='node node-1 no longer exists'
+                              ) as mock_reason:
             msg = _capture_init_log_message(
                 {'pod-0': (status_lib.ClusterStatus.UP, None)},
                 launched_nodes=2,
                 cached_cluster_info=handle_info)
         assert 'one or more nodes terminated' in msg, msg
         assert 'node node-1 no longer exists' in msg, msg
+        # Only the missing pod's node: node-0 still runs pod-0.
+        assert mock_reason.call_args.args[0] == ['node-1']
 
     def test_some_nodes_terminated_falls_back_when_nodes_healthy(self):
         # Nodes all present and healthy -> keep the generic message.
         handle_info = mock.Mock()
-        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        handle_info.instances = {
+            'pod-0': [mock.Mock(node_name='node-0')],
+            'pod-1': [mock.Mock(node_name='node-1')],
+        }
         with mock.patch.object(
                 backend_utils.global_user_state,
                 'get_cluster_yaml_dict',
@@ -262,7 +271,10 @@ class TestUpdateClusterStatusInitReason:
         # relaunched, and the event is not re-written once it is INIT. Don't
         # poll the K8s API every refresh to build a discarded string.
         handle_info = mock.Mock()
-        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        handle_info.instances = {
+            'pod-0': [mock.Mock(node_name='node-0')],
+            'pod-1': [mock.Mock(node_name='node-1')],
+        }
         with mock.patch.object(backend_utils.k8s_instance,
                                'get_missing_node_reason') as mock_reason:
             _capture_init_log_message(

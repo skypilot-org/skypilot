@@ -476,8 +476,9 @@ class FeasibleResources:
     """Feasible resources returned by cloud.
 
     Used to represent a collection of feasible resources returned by cloud,
-    any fuzzy candidates, and optionally a string hint if no feasible resources
-    are found.
+    any fuzzy candidates, optionally a string hint if no feasible resources
+    are found, and the errors of locations that were skipped because they
+    could not be reached (the request may still fit there).
 
     Fuzzy candidates example: when the requested GPU is A100:1 but is not
     available in a cloud/region, the fuzzy candidates are results of a fuzzy
@@ -487,6 +488,8 @@ class FeasibleResources:
     resources_list: List['resources_lib.Resources']
     fuzzy_candidate_list: List[str]
     hint: Optional[str]
+    unreachable_errors: List[Exception] = dataclasses.field(
+        default_factory=list)
 
 
 def need_to_query_reservations() -> bool:

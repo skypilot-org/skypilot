@@ -140,6 +140,24 @@ def test_pending_budget_does_not_reset_on_state_change(provider, monkeypatch):
     assert instance.MAX_RETRIES_TO_LAUNCH * utils.POLL_INTERVAL == 15
 
 
+def test_settled_instance_resets_progress_budget(provider, monkeypatch):
+    monkeypatch.setattr(instance, 'MAX_RETRIES_TO_LAUNCH', 3)
+    service, sleep = provider
+    service.list.side_effect = [
+        SimpleNamespace(items=[
+            _instance('STOPPED' if head_pending else 'RUNNING', head_pending),
+            _instance('RUNNING', worker_pending, 'cluster-worker')
+        ],
+                        next_page_token='')
+        for head_pending, worker_pending in [(True, True), (
+            True, True), (False, True), (False, True), (False, False)]
+    ]
+    instance.wait_instances('region', 'cluster', status_lib.ClusterStatus.UP)
+    # Both IDs remain listed; only finishing reconciliation is progress.
+    assert service.list.call_count == 5
+    assert sleep.call_args_list == [mock.call(utils.POLL_INTERVAL)] * 4
+
+
 @pytest.mark.parametrize(
     'error', [RuntimeError('provider read failed'),
               KeyboardInterrupt()])

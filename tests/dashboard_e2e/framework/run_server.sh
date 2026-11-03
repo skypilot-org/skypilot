@@ -9,6 +9,7 @@
 #   E2E_PLUGINS_CONFIG       plugins.yaml (default: $E2E_SUITE_DIR/plugins.yaml)
 #   E2E_SERVER_TWIST_MODULES modules that register server twists
 #   E2E_RUNTIME_DIR          server state dir (default: a fresh temp dir)
+#   E2E_WARMUP_REQUESTS      requests that warm the workers (default: E2E_WORKERS, or 8)
 #   E2E_PORT, E2E_KUBECONFIG, E2E_ADMIN_USER, E2E_ADMIN_PW
 #
 # State lives in $E2E_RUNTIME_DIR, so the server never touches ~/.sky. Tests
@@ -143,6 +144,35 @@ for _ in $(seq 1 120); do
 done
 curl -fsS "http://127.0.0.1:$PORT/api/health" | grep -q healthy
 echo "# server healthy after $(( $(date +%s) - START ))s" >&2
+
+# Healthy is not warm: request workers start on their first request and each
+# takes several seconds to import, so the first test's page could wait 20s for
+# its table and time out. Send a burst of jobs-queue requests, one per test
+# worker, and wait for every result before handing the server to the tests.
+WARM=$(date +%s)
+python - "http://127.0.0.1:$PORT" "${E2E_WARMUP_REQUESTS:-${E2E_WORKERS:-8}}" <<'PY'
+import concurrent.futures
+import sys
+
+import requests
+
+base, count = sys.argv[1], int(sys.argv[2])
+
+
+def warm(_):
+    r = requests.post(f'{base}/jobs/queue/v2',
+                      json={'all_users': True, 'skip_finished': False},
+                      timeout=60)
+    r.raise_for_status()
+    request_id = r.headers['X-Skypilot-Request-ID']
+    requests.get(f'{base}/api/get', params={'request_id': request_id},
+                 timeout=120).raise_for_status()
+
+
+with concurrent.futures.ThreadPoolExecutor(count) as pool:
+    list(pool.map(warm, range(count)))
+PY
+echo "# request workers warm after $(( $(date +%s) - WARM ))s" >&2
 
 cat <<EOF
 export E2E_BASE_URL=http://127.0.0.1:$PORT
