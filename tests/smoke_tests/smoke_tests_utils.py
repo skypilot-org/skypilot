@@ -1708,24 +1708,46 @@ def is_in_buildkite_env() -> bool:
 def get_available_gpus(default_gpu: str = 'T4',
                        infra: str = 'kubernetes',
                        count: int = 1) -> str:
-    """Get the available GPUs for K8s or Slurm."""
+    """Get the available GPUs for K8s or Slurm.
+
+    Returns the GPU on the last table row of `sky gpus list` that offers
+    `count`, or '' when no row does.
+
+    Raises:
+        RuntimeError: if `sky gpus list` reports the infra as not enabled.
+            It prints that to stdout and exits 0, which would otherwise read
+            the same as an infra with no GPUs.
+    """
     try:
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky gpus list --infra {infra}'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
-                                      check=True,
+                                      check=False,
                                       capture_output=True,
                                       text=True)
-        gpu_name = result.stdout.strip()
-        return gpu_name
     except Exception as e:
         Test.echo_without_prefix(f'Error getting available GPUs: {e}')
         return default_gpu
+    if 'is not enabled. To fix, run: sky check' in result.stdout:
+        raise RuntimeError(f'`sky gpus list --infra {infra}` reports the infra '
+                           f'as not enabled, so its GPUs cannot be listed:\n'
+                           f'{result.stdout}')
+    lines = result.stdout.splitlines()
+    rows = [
+        row for header, row in zip(lines, lines[1:])
+        if header.startswith('GPU') and f' {count}' in row
+    ]
+    if not rows:
+        Test.echo_without_prefix(
+            f'No GPU offering {count} in `sky gpus list --infra {infra}` '
+            f'(exit {result.returncode}):\n{result.stdout}{result.stderr}')
+        return ''
+    return rows[-1].split()[0]
 
 
 def get_enabled_cloud_storages() -> List[clouds.Cloud]:
