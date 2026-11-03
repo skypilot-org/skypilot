@@ -185,6 +185,12 @@ class UpCloud(clouds.Cloud):
                         f'Volume {vol.volume_name!r} is in '
                         f'{volume_config.region}, but the cluster is launched '
                         f'in {region}.')
+            # The path is written into setup_commands, so only plain paths pass.
+            if not re.fullmatch(r'/[A-Za-z0-9._/-]+', vol.path):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Mount path {vol.path!r} may only contain letters, '
+                        'digits, ".", "_", "-" and "/", starting with "/".')
             file_volumes.append({
                 'address': volume_config.config['nfs_address'],
                 'share_path': volume_config.config['nfs_path'],

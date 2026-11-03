@@ -279,6 +279,12 @@ def test_volume_deploy_vars_rejects_two_networks():
                     _mount('/b', 'net-2')])
 
 
+def test_volume_deploy_vars_rejects_unsafe_path():
+    # Mount paths go into setup_commands, so shell syntax must be refused.
+    with pytest.raises(ValueError, match='may only contain'):
+        clouds.UpCloud._volume_vars(_ZONE, [_mount('/data; touch /x')])
+
+
 def test_deploy_vars_volumes_with_docker_not_supported(monkeypatch):
     # pylint: disable=import-outside-toplevel
     from sky import exceptions
