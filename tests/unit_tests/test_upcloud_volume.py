@@ -11,7 +11,6 @@ import pytest
 from sky import clouds
 from sky import global_user_state
 from sky import models
-from sky import provision
 from sky.provision.upcloud import utils
 from sky.provision.upcloud import volume as upcloud_volume
 from sky.utils import resources_utils
@@ -77,6 +76,7 @@ class _FakeClient:
             'size_gib': body['size_gib'],
             'operational_state': 'running',
             'labels': body['labels'],
+            'shares': body['shares'],
             'networks': [{
                 **body['networks'][0], 'ip_address': '10.101.0.2'
             }],
@@ -200,6 +200,20 @@ def test_apply_file_storage_use_existing_missing(fake_client):
         upcloud_volume.apply_volume(_volume_config(use_existing=True))
 
 
+def test_apply_file_storage_use_existing_uses_share_path(fake_client):
+    upcloud_volume.apply_volume(_volume_config())
+    fake_client.file_storages[0]['shares'] = [{'path': '/shared'}]
+    config = upcloud_volume.apply_volume(_volume_config(use_existing=True))
+    assert config.config['nfs_path'] == '/shared'
+
+
+def test_apply_file_storage_use_existing_without_share(fake_client):
+    upcloud_volume.apply_volume(_volume_config())
+    fake_client.file_storages[0]['shares'] = []
+    with pytest.raises(utils.UpCloudError, match='has no share'):
+        upcloud_volume.apply_volume(_volume_config(use_existing=True))
+
+
 def test_get_volume_usedby(fake_client, monkeypatch):
     config = upcloud_volume.apply_volume(_volume_config())
     fake_client.networks['net-1']['servers'] = {'server': [{'uuid': 'srv-1'}]}
@@ -286,7 +300,7 @@ def test_deploy_vars_volumes_with_docker_not_supported(monkeypatch):
 
 def test_volume_apply_name_on_cloud_fits_limit(monkeypatch):
     """Generated name, with its UUID suffix, fits the UpCloud limit."""
-    saved = {}
+    saved: Dict[str, str] = {}
     monkeypatch.setattr(global_user_state, 'get_volume_by_name',
                         lambda name: None)
     monkeypatch.setattr(core, '_volume_lock',

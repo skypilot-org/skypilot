@@ -37,6 +37,14 @@ def _file_storage_address(service: Dict[str, Any]) -> Tuple[str, str]:
         f'UpCloud file storage {service.get("uuid")} has no network address.')
 
 
+def _file_storage_share_path(service: Dict[str, Any]) -> str:
+    for share in service.get('shares') or []:
+        if share.get('path'):
+            return str(share['path'])
+    raise utils.UpCloudError(
+        f'UpCloud file storage {service.get("uuid")} has no share.')
+
+
 def _wait_file_storage_running(client: utils.UpCloudClient,
                                uuid: str) -> Dict[str, Any]:
     deadline = time.time() + _FILE_STORAGE_TIMEOUT
@@ -132,10 +140,13 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             raise
         logger.info(f'Created UpCloud file storage {name_on_cloud} '
                     f'(id={service["uuid"]}).')
+        nfs_path = FILE_STORAGE_SHARE_PATH
+    else:
+        nfs_path = _file_storage_share_path(service)
     address, network_uuid = _file_storage_address(service)
     config.id_on_cloud = str(service['uuid'])
     config.config['nfs_address'] = address
-    config.config['nfs_path'] = FILE_STORAGE_SHARE_PATH
+    config.config['nfs_path'] = nfs_path
     config.config['network'] = network_uuid
     _resolve_size(config, service.get('size_gib'))
     return config
