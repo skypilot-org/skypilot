@@ -1348,3 +1348,36 @@ def test_fixed_submit_reasons_are_exempt_from_the_metric_cap():
         with metrics_utils._launch_retry_kinds_lock:
             metrics_utils._launch_retry_kinds.clear()
             metrics_utils._launch_retry_kinds.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_recovery_rereads_priority_before_every_attempt(monkeypatch):
+    """A priority change made while a recovery is retrying reaches the retry.
+
+    Each attempt can create the cluster afresh, so re-reading the persisted
+    DAG only when the recovery starts would relaunch later attempts at a
+    stale priority.
+    """
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._refresh_priority_from_persisted_dag = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('boom'), None])
+
+    await executor._launch(max_retry=2, raise_on_failure=True, recovery=True)
+
+    assert executor._refresh_priority_from_persisted_dag.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_first_launch_rereads_priority_only_on_retries(monkeypatch):
+    """A first launch has just loaded the DAG; only its retries re-read it."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._refresh_priority_from_persisted_dag = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('boom'), None])
+
+    await executor._launch(max_retry=2, raise_on_failure=True)
+
+    assert executor._refresh_priority_from_persisted_dag.await_count == 1

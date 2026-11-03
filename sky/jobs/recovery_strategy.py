@@ -979,11 +979,6 @@ class StrategyExecutor:
                 succeed and the job should be failed instead of retried.
         Other exceptions may be raised depending on the backend.
         """
-        # On recovery, re-read the persisted DAG so an out-of-band priority
-        # change takes effect on this relaunch (the controller caches the DAG
-        # in memory for its lifetime).
-        if recovery:
-            await self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
@@ -1002,6 +997,15 @@ class StrategyExecutor:
         unreachable_since: Optional[float] = None
         while True:
             retry_cnt += 1
+            # Re-read the persisted DAG so an out-of-band priority change takes
+            # effect on this attempt (the controller caches the DAG in memory
+            # for its lifetime). Done per attempt, not once per launch: each
+            # retry can create the cluster afresh, and a change made while a
+            # recovery is still retrying must not be lost to the value read
+            # when it started. A first launch's first attempt has just loaded
+            # the DAG, so it skips the read.
+            if recovery or retry_cnt > 1:
+                await self._refresh_priority_from_persisted_dag()
             # Why this attempt failed, for the backoff event below. Reset every
             # iteration: the write happens in the NoClusterLaunchedError
             # handler, by which point the exception is long gone, and a value
