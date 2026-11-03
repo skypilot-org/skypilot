@@ -4,6 +4,7 @@ Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
 import collections
+import contextvars
 import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
@@ -11,12 +12,15 @@ from typing import Dict, List, Optional, Set, Tuple
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.catalog import CloudFilter
 from sky.catalog import common
+from sky.catalog import config as catalog_config
 from sky.clouds import cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -105,12 +109,19 @@ def _list_accelerators(
     realtime: bool = False
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
-    """List accelerators in the Kubernetes cluster.
+    """List accelerators in the Kubernetes clusters.
 
-    If realtime is True, the function will query the cluster to fetch real-time
-    GPU usage, which is returned in total_accelerators_available. Note that
-    this may require an expensive list_pod_for_all_namespaces call, which
-    requires cluster-wide pod read permissions.
+    When ``region_filter`` is None, all Kubernetes contexts allowed by the
+    active workspace (falling back to the in-cluster context when no kubeconfig
+    context is available) are queried and their results merged, so the
+    listing matches the table output of ``sky gpus list --cloud kubernetes``,
+    which also reports every allowed context. Otherwise, only the context
+    named by ``region_filter`` is queried.
+
+    If realtime is True, the function will query the clusters to fetch
+    real-time GPU usage, which is returned in total_accelerators_available.
+    Note that this may require an expensive list_pod_for_all_namespaces call,
+    which requires cluster-wide pod read permissions.
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
@@ -120,14 +131,14 @@ def _list_accelerators(
         - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
             objects with quantity information.
         - total_accelerators_capacity: Dict mapping accelerator names to their
-            total capacity in the cluster.
+            total capacity across all queried contexts.
         - total_accelerators_available: Dict mapping accelerator names to their
-            current availability. Returns -1 for each accelerator if
-            realtime=False or if insufficient permissions.
+            current availability across all queried contexts. Returns -1 for
+            each accelerator if realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
-    del all_regions, require_price  # Unused.
+    del require_price  # Unused.
 
     # First check if Kubernetes is enabled. This ensures k8s python client is
     # installed. Do not put any k8s-specific logic before this check.
@@ -137,34 +148,122 @@ def _list_accelerators(
                                         enabled_clouds):
         return {}, {}, {}
 
-    # TODO(zhwu): this should return all accelerators in multiple kubernetes
-    # clusters defined by allowed_contexts.
     if region_filter is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
-        if context is None and kubernetes_utils.is_incluster_config_available():
-            # If context is None and we are running in a kubernetes pod, use the
-            # in-cluster context as the current context.
-            context = kubernetes.in_cluster_context_name()
-        # Never fall back to a context the active workspace does not allow.
-        allowed = sky_clouds.Kubernetes.existing_allowed_contexts(silent=True)
-        if context not in allowed:
-            context = next((c for c in allowed if c is not None), None)
+        # List accelerators from all contexts allowed by the active workspace,
+        # never falling back to a context it does not allow. The in-cluster
+        # context is included by existing_allowed_contexts() when there is no
+        # kubeconfig context to fall back to (e.g., running in a pod).
+        contexts = [
+            context
+            for context in sky_clouds.Kubernetes.existing_allowed_contexts(
+                silent=True)
+            if context is not None
+        ]
     else:
-        context = region_filter
-    if context is None:
+        contexts = [region_filter]
+    if not contexts:
         return {}, {}, {}
 
+    # Query the contexts in parallel, like the table output's realtime
+    # availability path: each context needs credential checks and API calls,
+    # and exec-based auth (e.g., on EKS/GKE) can take seconds per context.
+    # Pool threads start without the request's config context, active
+    # workspace and catalog fallback flag (thread-local), so carry them over;
+    # each thread needs its own context copy.
+    workspace = skypilot_config.get_active_workspace()
+    use_default_catalog = catalog_config.get_use_default_catalog_if_failed()
+    request_context = contextvars.copy_context()
+
+    def _list_in_context(context: str):
+
+        def _run():
+            with skypilot_config.local_active_workspace_ctx(
+                    workspace
+            ), catalog_config.set_use_default_catalog_if_failed(
+                    use_default_catalog):
+                return _list_accelerators_in_context(
+                    context=context,
+                    name_filter=name_filter,
+                    quantity_filter=quantity_filter,
+                    case_sensitive=case_sensitive,
+                    realtime=realtime)
+
+        return request_context.copy().run(_run)
+
+    per_context_results = subprocess_utils.run_in_parallel(
+        _list_in_context, contexts)
+
+    result = []
+    total_accelerators_capacity: Dict[str, int] = {}
+    total_accelerators_available: Dict[str, int] = {}
+    for context_result, capacity, available in per_context_results:
+        result.extend(context_result)
+        for accelerator_name, count in capacity.items():
+            total_accelerators_capacity[accelerator_name] = (
+                total_accelerators_capacity.get(accelerator_name, 0) + count)
+        for accelerator_name, count in available.items():
+            if (count == -1 or
+                    total_accelerators_available.get(accelerator_name) == -1):
+                # -1 (unknown) dominates: if the availability cannot be
+                # determined in one context, do not report the partial sum
+                # from the other contexts as if it were the total.
+                total_accelerators_available[accelerator_name] = -1
+            else:
+                total_accelerators_available[accelerator_name] = (
+                    total_accelerators_available.get(accelerator_name, 0) +
+                    count)
+
+    df = pd.DataFrame(result,
+                      columns=[
+                          'Cloud', 'InstanceType', 'AcceleratorName',
+                          'AcceleratorCount', 'vCPUs', 'DeviceMemoryGiB',
+                          'MemoryGiB', 'Price', 'SpotPrice', 'Region'
+                      ])
+    df['GpuInfo'] = True
+    qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
+                                             name_filter, region_filter,
+                                             quantity_filter, case_sensitive,
+                                             all_regions)
+    return qtys_map, total_accelerators_capacity, total_accelerators_available
+
+
+def _list_accelerators_in_context(
+    context: str,
+    name_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool,
+    realtime: bool,
+) -> Tuple[List[common.InstanceTypeInfo], Dict[str, int], Dict[str, int]]:
+    """Lists the accelerators of a single Kubernetes context.
+
+    A context with invalid credentials, no accelerators or no GPU label
+    formatter is skipped (empty results), so that one bad or unreachable
+    cluster does not abort the listing of the other contexts.
+
+    Returns:
+        A tuple of:
+        - The InstanceTypeInfo entries found in the context, each with its
+            ``region`` field set to the context it came from.
+        - The total accelerator capacity in the context, and the current
+            accelerator availability in the context, each keyed by accelerator
+            name. The availability is -1 if it cannot be determined.
+    """
     # Verify that the credentials are still valid.
-    if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
-        return {}, {}, {}
+    valid, reason = kubernetes_utils.check_credentials(context,
+                                                       cloud='kubernetes')
+    if not valid:
+        logger.debug(f'Skipping Kubernetes context {context!r}: {reason}')
+        return [], {}, {}
 
-    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
+    has_gpu, _ = kubernetes_utils.detect_accelerator_resource(context)
     if not has_gpu:
-        return {}, {}, {}
+        logger.debug(
+            f'No accelerators found on Kubernetes context {context!r}.')
+        return [], {}, {}
 
     lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
     if not lf:
-        return {}, {}, {}
+        return [], {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
@@ -350,17 +449,7 @@ def _list_accelerators(
                                     spot_price=accel_price,
                                     region=context))
 
-    df = pd.DataFrame(result,
-                      columns=[
-                          'Cloud', 'InstanceType', 'AcceleratorName',
-                          'AcceleratorCount', 'vCPUs', 'DeviceMemoryGiB',
-                          'MemoryGiB', 'Price', 'SpotPrice', 'Region'
-                      ])
-    df['GpuInfo'] = True
-    qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
-                                             name_filter, region_filter,
-                                             quantity_filter, case_sensitive)
-    return qtys_map, total_accelerators_capacity, total_accelerators_available
+    return result, total_accelerators_capacity, total_accelerators_available
 
 
 def _get_pricing(region: Optional[str]) -> Dict:
