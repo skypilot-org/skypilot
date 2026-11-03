@@ -902,7 +902,8 @@ Notes specific to UpCloud:
   region.
 - Minimum size is 250 GiB.
 - SkyPilot creates a private network for each file storage volume. Clusters
-  mounting the volume are attached to that network.
+  mounting the volume are attached to that network. A cluster can join only
+  one network, so a task cannot mount two volumes created separately.
 - Volume name length is limited (max 64 characters).
 - UpCloud volumes cannot be mounted into ``docker:`` images yet.
 

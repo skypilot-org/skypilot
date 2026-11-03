@@ -208,7 +208,9 @@ class UpCloud(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'UpCloud clusters can mount file storage volumes of one '
-                    f'private network only, got networks {sorted(networks)}.')
+                    'private network only. Each volume has its own network, '
+                    f'so a task cannot mount volumes from different networks '
+                    f'({sorted(networks)}).')
         return file_volumes, next(iter(networks), None)
 
     def make_deploy_resources_variables(
