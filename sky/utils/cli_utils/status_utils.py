@@ -267,7 +267,7 @@ def _get_status(cluster_record: _ClusterRecord,
 def _get_workspace(cluster_record: _ClusterRecord,
                    truncate: bool = True) -> str:
     del truncate
-    return cluster_record['workspace']
+    return (cluster_record.get('workspace_name') or cluster_record['workspace'])
 
 
 def _get_status_colored(cluster_record: _ClusterRecord,

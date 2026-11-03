@@ -27,6 +27,11 @@ parser.add_argument('--base-image-id',
 parser.add_argument('--os-type', default='ubuntu', help='The OS type')
 parser.add_argument('--os-version', default='22.04', help='The OS version')
 parser.add_argument('--arch', default='x86_64', help='The architecture')
+parser.add_argument('--tag-suffix',
+                    default='',
+                    help='Appended to the image tag and the copied AMI '
+                    'names. Pass it as --tag-suffix=-cuda13-ray256: argparse '
+                    'reads a separate leading-dash value as another flag.')
 parser.add_argument('--output-csv',
                     default='images.csv',
                     help='The output CSV file name')
@@ -78,10 +83,13 @@ def copy_image_and_make_public(target_region):
     # Copy the AMI to the target region
     if args.arch == 'arm64':
         ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-{args.arch}-'
-                    f'{time.strftime("%y%m%d")}')
+                    f'{time.strftime("%y%m%d%H%M", time.gmtime())}')
     else:
         ami_name = (f'skypilot-aws-{args.processor}-{args.os_type}-'
-                    f'{time.strftime("%y%m%d")}')
+                    f'{time.strftime("%y%m%d%H%M", time.gmtime())}')
+    # AMI names are unique per region, so two same-day variants differing only
+    # in their tag would otherwise collide.
+    ami_name += args.tag_suffix
     copy_command = (
         f'aws ec2 copy-image --source-region {args.region} '
         f'--source-image-id {args.image_id} --region {target_region} '
@@ -115,6 +123,7 @@ def write_image_to_csv(image_id, region):
             tag = f'skypilot:custom-{args.processor}-{args.os_type}-{args.arch}'
         else:
             tag = f'skypilot:custom-{args.processor}-{args.os_type}'
+        tag += args.tag_suffix
         row = [
             tag, region, args.os_type, args.os_version, image_id,
             time.strftime('%Y%m%d'), args.base_image_id

@@ -20,6 +20,7 @@ from sky import resources as resources_lib
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.backends import backend_utils
+from sky.catalog import slurm_catalog
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
@@ -1633,6 +1634,35 @@ class TestCreateVirtualInstance:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
+    def test_configuring_allocation_is_reused(self, mock_ssh_runner,
+                                              mock_slurm_client,
+                                              mock_get_partition_info,
+                                              mock_get_proctrack_type,
+                                              mock_wait_for_job_nodes):
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        client = mock_slurm_client.return_value
+        client.query_jobs.side_effect = (lambda name, states: ['42']
+                                         if 'configuring' in states else [])
+
+        record = slurm_instance._create_virtual_instance(
+            region='us-west-2',
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster',
+            config=self._make_non_container_config(2),
+        )
+
+        client.submit_job.assert_not_called()
+        mock_wait_for_job_nodes.assert_called_once()
+        assert record.head_instance_id == slurm_utils.instance_id('42', 'node1')
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
     def test_corrupt_snapshot_blocks_restart(self, mock_ssh_runner,
                                              mock_slurm_client,
                                              mock_get_partition_info,
@@ -1747,6 +1777,49 @@ srun() {{
                                 text=True,
                                 check=False)
         assert result.returncode == exit_code, result.stderr
+
+    @pytest.mark.parametrize('remove_rc', [0, 1])
+    def test_container_launch_removes_stale_container_first(
+            self, tmp_path, remove_rc):
+        script = (SBATCH_TESTDATA_DIR / 'containers.sh').read_text()
+        start = script.index("srun --overlap --unbuffered --nodes=1 "
+                             "--ntasks-per-node=1 bash -c 'while")
+        end = script.index('CONTAINER_PIDS+=("$!")', start)
+        launch = script[start:end]
+        log = tmp_path / 'calls.log'
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        (fake_bin / 'enroot').write_text(
+            '#!/bin/bash\n'
+            'case "$1" in\n'
+            '  list) echo pyxis_test-cluster ;;\n'
+            f'  remove) echo "remove $3" >> {log}; exit {remove_rc} ;;\n'
+            'esac\n')
+        os.chmod(fake_bin / 'enroot', 0o755)
+        stub = f"""
+srun() {{
+    case "$*" in
+        *--container-name=*) echo create >> {log} ;;
+        *) bash -c "${{@: -1}}" ;;
+    esac
+}}
+"""
+        result = subprocess.run(
+            ['bash', '-c', stub + launch + '\nwait'],
+            env={
+                **os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}'
+            },
+            capture_output=True,
+            text=True,
+            check=False)
+        calls = log.read_text().splitlines()
+        if remove_rc == 0:
+            assert result.returncode == 0, result.stderr
+            assert calls == ['remove pyxis_test-cluster', 'create']
+        else:
+            assert result.returncode == 1
+            assert calls == ['remove pyxis_test-cluster']
+            assert 'Failed to remove stale container' in result.stderr
 
     def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
@@ -2114,7 +2187,8 @@ srun() {{
         script = self._run_and_capture_script(cluster_name, config)
 
         mock_validate_files.assert_called_once()
-        assert 'mapfile -t SKY_NODES' in script
+        assert ('mapfile -t SKY_NODES < <(scontrol show hostnames '
+                '"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)")') in script
         assert '-w "${SKY_NODES[0]}"' in script
         assert '-w "${SKY_NODES[1]}"' in script
         assert f'--container-image={generation_dir}/rank0.sqsh' in script
@@ -2225,21 +2299,21 @@ srun() {{
         config = self._make_non_container_config(cpus=2)
         script = self._run_and_capture_script('test-keeper', config)
 
-        keeper_idx = script.index(
-            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
-            '--nodelist=$SKY_HEAD_NODE')
+        keeper_idx = script.index('( while true; do SKY_HEAD_NODE=')
         anchor_idx = script.rindex('sleep infinity\n')
         # The keeper is backgrounded before the allocation-lifetime anchor.
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        assert ('srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+                '--job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE'
+               ) in keeper_line
         # Outer retry loop: the batch script restarts the step itself.
         assert keeper_line.endswith('sleep 5; done ) &')
         # Head node is resolved in-script from the allocation.
-        head_idx = script.index(
-            'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
-            '| head -n1)')
-        assert head_idx < keeper_idx
+        # The head node is resolved inside the retry loop, like get_job_nodes().
+        assert ('SKY_HEAD_NODE=$(scontrol show hostnames '
+                '"$(squeue -h --jobs "$SLURM_JOB_ID" -o %N)" | head -n1); '
+                '[ -n "$SKY_HEAD_NODE" ] && srun') in keeper_line
         # The loop runs the start spec from the runtime dir, foreground.
         assert constants.SKYLET_START_FILE in keeper_line
         assert 'while true; do' in keeper_line
@@ -2295,13 +2369,13 @@ srun() {{
         )
         script = self._run_and_capture_script('test-keeper-ctr', config)
 
-        keeper_idx = script.index(
-            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
-            '--nodelist=$SKY_HEAD_NODE')
+        keeper_idx = script.index('( while true; do SKY_HEAD_NODE=')
         anchor_idx = script.rindex('\nwait -n "${CONTAINER_PIDS[@]}"\n')
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        assert ('srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+                '--job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE'
+               ) in keeper_line
         # The keeper never attaches the container: Slurm CLIs are host-only.
         assert '--container-name' not in keeper_line
         assert '--container-remap-root' not in keeper_line
@@ -2807,3 +2881,75 @@ class TestSlurmQuotaConfig:
                                           },
                                       })
         assert result == {'qos': 'task-qos', 'account': 'task-account'}
+
+
+class TestNamesLimitedToAllowedClusters:
+    """Errors, hints and probes must stay within allowed_clusters, so a
+    caller never learns about clusters outside it."""
+
+    @pytest.fixture(autouse=True)
+    def _clusters(self):
+        with patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+                   return_value=['cl-a', 'cl-b']), \
+             patch('sky.skypilot_config.get_workspace_cloud',
+                   return_value={'allowed_clusters': ['cl-a']}), \
+             patch('sky.provision.slurm.utils.get_partitions',
+                   return_value=['secret-part']) as get_partitions, \
+             patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
+                   return_value=True) as probe:
+            self.get_partitions = get_partitions
+            self.probe = probe
+            yield
+
+    def _probed(self):
+        return [c.args[0] for c in self.probe.call_args_list]
+
+    def test_unknown_cluster_lists_only_allowed(self):
+        with pytest.raises(ValueError) as e:
+            slurm_cloud.Slurm().validate_region_zone('typo-cl', None)
+        assert 'cl-a' in str(e.value)
+        assert 'cl-b' not in str(e.value)
+
+    def test_partitions_not_probed_for_cluster_outside_allowed(self):
+        # Existing clusters there must still load, so this does not raise.
+        assert slurm_cloud.Slurm().validate_region_zone(
+            'cl-b', 'typo-part') == ('cl-b', 'typo-part')
+        self.get_partitions.assert_not_called()
+
+    def test_partitions_listed_for_allowed_cluster(self):
+        with pytest.raises(ValueError) as e:
+            slurm_cloud.Slurm().validate_region_zone('cl-a', 'typo-part')
+        assert 'secret-part' in str(e.value)
+
+    @pytest.mark.parametrize('region,shown', [('cl-a', True), ('cl-b', False)])
+    def test_gpu_partition_map_hint_only_for_allowed(self, region, shown):
+        itype = slurm_utils.SlurmInstanceType(4, 16, 1, 'H100').name
+        with patch('sky.provision.slurm.utils.lookup_gpu_partition_map',
+                   return_value=['h100-part']):
+            hint = slurm_cloud.Slurm._gpu_partition_map_hint(itype, region)
+        assert ('secret-part' in (hint or '')) == shown
+
+    def test_memory_hint_probes_only_allowed(self):
+        with patch('sky.provision.slurm.utils.get_slurm_nodes_info',
+                   return_value=[]):
+            slurm_cloud.Slurm._get_memory_hint(mock.MagicMock(memory='8'))
+        assert self._probed() == ['cl-a']
+
+    @pytest.mark.parametrize('region,probed', [(None, ['cl-a']),
+                                               ('cl-a', ['cl-a']),
+                                               ('cl-b', [])])
+    def test_default_instance_type_probes_only_allowed(self, region, probed):
+        slurm_catalog.get_default_instance_type(region=region)
+        assert self._probed() == probed
+
+
+def test_memory_hint_names_clusters_in_sorted_order():
+    # With allowed_clusters unset or 'all', the allowed list is built from a
+    # set and its order varies between processes; the hint must not.
+    with patch.object(slurm_cloud.Slurm,
+                      'existing_allowed_clusters',
+                      return_value=['cl-c', 'cl-a', 'cl-b']), \
+         patch('sky.provision.slurm.utils.is_memory_scheduling_enabled',
+               return_value=False):
+        hint = slurm_cloud.Slurm._get_memory_hint(mock.MagicMock(memory='8'))
+    assert "Cluster 'cl-a'" in hint

@@ -7,10 +7,14 @@ from unittest import mock
 
 import pytest
 
+from sky import dag as dag_lib
+from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import dag_utils
 
 # String path for mock.patch — can't use the constant directly because
 # mock.patch needs the dotted path to the attribute being patched.
@@ -1159,6 +1163,57 @@ class TestCollectDebugDumpManifestParallel:
         assert len(job_info_items) == len(ok_jobs)
 
 
+class TestJobInfoDumpRedaction:
+    """job_info.json in a debug dump should carry no credentials."""
+
+    def test_api_server_access_credentials_redacted(self, tmp_path,
+                                                    monkeypatch):
+        task = task_lib.Task.from_yaml_str('name: train\n'
+                                           'secrets:\n'
+                                           '  HF_TOKEN: inline-secret\n'
+                                           'run: echo hi\n')
+        # What jobs launch injects into a task with api_server_access.
+        endpoint = 'https://alice:basic-pass@example.com'
+        task.update_envs({constants.SKY_API_SERVER_URL_ENV_VAR: endpoint})
+        task.update_secrets(
+            {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'job-token-value'})
+        dag = dag_lib.Dag()
+        dag.add(task)
+        dag_yaml = dag_utils.dump_dag_to_yaml_str(dag)
+        user_yaml = dag_utils.dump_dag_to_yaml_str(dag,
+                                                   use_user_specified_yaml=True)
+        credentials = ('job-token-value', 'inline-secret', 'basic-pass')
+        assert all(c in dag_yaml for c in credentials)
+        record = {
+            'job_id': 1,
+            'user_yaml': user_yaml,
+            'original_user_yaml_content': user_yaml,
+            'dag_yaml_content': dag_yaml,
+        }
+
+        monkeypatch.setattr(utils.managed_job_constants,
+                            'JOBS_CONTROLLER_LOGS_DIR', str(tmp_path))
+        monkeypatch.setattr(utils.managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [record])
+        monkeypatch.setattr(utils.managed_job_state,
+                            'get_job_events',
+                            lambda job_id, limit=None: [])
+        monkeypatch.setattr(utils.managed_job_state,
+                            'get_all_task_ids_names_statuses_logs',
+                            lambda job_id: [])
+        monkeypatch.setattr(utils.managed_job_state, 'get_pool_submit_info',
+                            lambda job_id: (None, None))
+
+        inline_data, _, errors, _, _ = utils._collect_job_debug_manifest(1)
+
+        assert not errors
+        job_info = next(d['content']
+                        for d in inline_data
+                        if d['relative_path'] == 'managed_jobs/1/job_info.json')
+        for credential in credentials:
+            assert credential not in job_info
+
+
 class TestControllerSystemLogScoping:
     """Scope managed_jobs/controller_system/*.log to the controllers that
     actually ran the requested jobs.
@@ -1361,7 +1416,7 @@ class TestControllerSystemLogScoping:
 
 
 class TestParseSubmitLogJobRanges:
-    """Inverse of sky.jobs.server.core._job_ids_to_str (kept as intervals)."""
+    """Parses submit-job log names: id spans, and lists from older versions."""
 
     def test_single_id(self):
         assert utils._parse_submit_log_job_ranges('584') == [(584, 584)]

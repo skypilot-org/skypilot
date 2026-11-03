@@ -194,6 +194,45 @@ def test_force_caller_scope_cancel_body_admin_preserved(mock_svc):
 
 
 @mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_admin_named_ids_unscoped(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    # Clients send their own user hash along with the ids. Kept as is, it hid
+    # every other user's request from an admin's `sky api cancel <id>`.
+    body = payloads.RequestCancelBody(request_ids=['abc'],
+                                      user_id='admin-carol')
+    out = role_filter.force_caller_scope_cancel_body(_admin_request(), body)
+    assert out.request_ids == ['abc']
+    assert out.user_id is None
+
+
+def test_force_caller_scope_cancel_body_no_auth_named_ids_unscoped():
+    # Without per-user auth there is no identity to scope by: the client
+    # hash is not one, so a named request is cancelled whoever owns it.
+    body = payloads.RequestCancelBody(request_ids=['abc'], user_id='abcdef12')
+    out = role_filter.force_caller_scope_cancel_body(_anonymous_request(), body)
+    assert out.user_id is None
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_admin_all_keeps_own_scope(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.ADMIN.value])
+    # `sky api cancel --all` from an admin still cancels only their own.
+    body = payloads.RequestCancelBody(request_ids=None, user_id='admin-carol')
+    out = role_filter.force_caller_scope_cancel_body(_admin_request(), body)
+    assert out.user_id == 'admin-carol'
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
+def test_force_caller_scope_cancel_body_user_named_ids_forced(mock_svc):
+    _roles_returning(mock_svc, [rbac.RoleName.USER.value])
+    # Even with the ids unscoped for admins, a non-admin naming another
+    # user's request is still forced to their own scope.
+    body = payloads.RequestCancelBody(request_ids=['abc'], user_id=None)
+    out = role_filter.force_caller_scope_cancel_body(_user_request(), body)
+    assert out.user_id == 'user-alice'
+
+
+@mock.patch.object(role_filter.permission, 'permission_service')
 def test_force_caller_scope_cancel_body_viewer_forbidden(mock_svc):
     _roles_returning(mock_svc, [rbac.RoleName.VIEWER.value])
     body = payloads.RequestCancelBody(request_ids=['abc'])

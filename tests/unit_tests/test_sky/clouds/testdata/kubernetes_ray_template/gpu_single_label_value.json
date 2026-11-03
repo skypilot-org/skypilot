@@ -231,6 +231,7 @@
     "networking_mode": "portforward",
     "port_mode": "portforward",
     "region": "kubernetes",
+    "remote_identity_none": false,
     "services": [
       {
         "apiVersion": "v1",

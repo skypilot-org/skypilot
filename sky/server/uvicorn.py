@@ -21,6 +21,7 @@ from uvicorn.supervisors import multiprocess
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import state
@@ -44,11 +45,7 @@ _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 _WAIT_REQUESTS_INTERVAL_SECONDS = 5
 
 # Timeout for waiting for on-going requests to finish.
-try:
-    _WAIT_REQUESTS_TIMEOUT_SECONDS = int(
-        os.environ.get(constants.GRACE_PERIOD_SECONDS_ENV_VAR, '60'))
-except ValueError:
-    _WAIT_REQUESTS_TIMEOUT_SECONDS = 60
+_WAIT_REQUESTS_TIMEOUT_SECONDS = server_constants.GRACE_PERIOD_SECONDS
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.

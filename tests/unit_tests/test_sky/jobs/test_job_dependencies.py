@@ -290,10 +290,35 @@ class TestCheckJobDependencies:
             self._run([1])
 
     def test_other_workspace(self):
-        with pytest.raises(ValueError, match="in workspace 'team-b'"):
-            self._run([1],
-                      rows={1: 'team-b'},
-                      statuses={1: ManagedJobStatus.RUNNING})
+        with mock.patch.object(jobs_core.workspaces_core,
+                               'get_readable_workspace_names',
+                               return_value=None):
+            with pytest.raises(ValueError, match="in workspace 'team-b'"):
+                self._run([1],
+                          rows={1: 'team-b'},
+                          statuses={1: ManagedJobStatus.RUNNING})
+
+    def test_other_workspace_is_named_only_if_readable(self):
+        workspaces = {'default': {}, 'ws-0123456789ab': {'name': 'secret'}}
+        with mock.patch.object(jobs_core.skypilot_config, '_loaded_workspaces',
+                               return_value=workspaces), \
+             mock.patch.object(jobs_core.workspaces_core,
+                               'get_readable_workspace_names',
+                               return_value={'default'}):
+            with pytest.raises(ValueError,
+                               match="in workspace 'ws-0123456789ab'"):
+                self._run([1],
+                          rows={1: 'ws-0123456789ab'},
+                          statuses={1: ManagedJobStatus.RUNNING})
+        with mock.patch.object(jobs_core.skypilot_config, '_loaded_workspaces',
+                               return_value=workspaces), \
+             mock.patch.object(jobs_core.workspaces_core,
+                               'get_readable_workspace_names',
+                               return_value=None):
+            with pytest.raises(ValueError, match="in workspace 'secret'"):
+                self._run([1],
+                          rows={1: 'ws-0123456789ab'},
+                          statuses={1: ManagedJobStatus.RUNNING})
 
     def test_already_ended_without_success(self):
         with pytest.raises(ValueError, match='ended as FAILED'):

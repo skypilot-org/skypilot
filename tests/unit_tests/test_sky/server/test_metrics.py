@@ -18,6 +18,7 @@ from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
+from prometheus_client import values as prom_values
 import prometheus_client as prom
 import pytest
 
@@ -110,20 +111,22 @@ def test_register_multiproc_cleanup_atexit_noop_without_env_var():
         mock_register.assert_not_called()
 
 
-def test_register_multiproc_cleanup_atexit_registers_when_enabled():
-    """When PROMETHEUS_MULTIPROC_DIR is set, register mark_process_dead(pid)."""
-    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+def test_register_multiproc_cleanup_atexit_registers_when_enabled(tmp_path):
+    """Registers the exit cleanup and records this process's identity."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch.object(metrics, '_multiproc_cleanup_registered', False), \
          patch('sky.server.metrics.atexit.register') as mock_register, \
-         patch('sky.server.metrics.os.getpid', return_value=4242):
+         patch('sky.server.metrics.os.getpid', return_value=4242), \
+         patch('sky.server.metrics._process_identity', return_value='777'):
         metrics.register_multiproc_cleanup_atexit()
-        mock_register.assert_called_once_with(
-            metrics.multiprocess.mark_process_dead, 4242)
+        mock_register.assert_called_once_with(metrics._forget_writer,
+                                              str(tmp_path), 4242)
+    assert (tmp_path / 'liveowner_4242').read_text() == '777'
 
 
-def test_register_multiproc_cleanup_atexit_is_idempotent():
+def test_register_multiproc_cleanup_atexit_is_idempotent(tmp_path):
     """Repeated calls in the same process only register once."""
-    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch.object(metrics, '_multiproc_cleanup_registered', False), \
          patch('sky.server.metrics.atexit.register') as mock_register:
         metrics.register_multiproc_cleanup_atexit()
@@ -253,12 +256,11 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
 
     reaped_pids = []
 
-    def fake_mark_dead(pid):
+    def fake_mark_dead(pid, path=None):
+        del path
         reaped_pids.append(pid)
-        for path in (
-                tmp_path /
-                f'gauge_liveall_{pid}.db').parent.glob(f'gauge_live*_{pid}.db'):
-            path.unlink()
+        for p in tmp_path.glob(f'gauge_live*_{pid}.db'):
+            p.unlink()
 
     with patch.dict(os.environ,
                     {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
@@ -280,6 +282,166 @@ def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
     ]
 
 
+def _fake_process(tmp_path, open_files):
+    """psutil.Process stand-in. open_files maps pid -> names of the files in
+    tmp_path its holder has open, or None when it cannot be inspected."""
+
+    def process(pid):
+        names = open_files.get(pid, ())
+        proc = MagicMock()
+        if names is None:
+            proc.open_files.side_effect = metrics.psutil.AccessDenied(pid)
+        else:
+            proc.open_files.return_value = [
+                types.SimpleNamespace(path=os.path.realpath(tmp_path / name))
+                for name in names
+            ]
+        return proc
+
+    return process
+
+
+def _reap_with(tmp_path, holders, open_files=None):
+    """One reaper tick; holders maps pid -> identity of the process holding
+    it (None for a zombie). Pids not in holders are free."""
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists',
+               side_effect=lambda pid: pid in holders), \
+         patch('sky.server.metrics._process_identity',
+               side_effect=holders.get), \
+         patch('sky.server.metrics.psutil.Process',
+               side_effect=_fake_process(tmp_path, open_files or {})):
+        return metrics._reap_stale_multiproc_files()
+
+
+def _live_files(tmp_path, pid):
+    return sorted(p.name for p in tmp_path.glob(f'gauge_live*_{pid}.db'))
+
+
+def _register_as(tmp_path, pid, identity, open_files=()):
+    """register_multiproc_cleanup_atexit() in a process with this pid that
+    has the named files open."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register'), \
+         patch('sky.server.metrics.os.getpid', return_value=pid), \
+         patch('sky.server.metrics._process_identity', return_value=identity), \
+         patch('sky.server.metrics.psutil.Process',
+               side_effect=_fake_process(tmp_path, {pid: open_files})):
+        metrics.register_multiproc_cleanup_atexit()
+
+
+def test_reap_stale_multiproc_files_reaps_zombie_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: None}) == 1
+    assert not _live_files(tmp_path, 991)
+
+
+def test_reap_stale_multiproc_files_reaps_reused_pid(tmp_path, monkeypatch):
+    """A writer that did not register: the holder seen first is the writer."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    # The writer died and the kernel handed 991 to an unrelated process.
+    assert _reap_with(tmp_path, {991: '500'}) == 1
+    assert not _live_files(tmp_path, 991)
+    assert metrics._live_gauge_writers == {}
+
+
+def test_reap_stale_multiproc_files_keeps_writer_that_reused_pid(
+        tmp_path, monkeypatch):
+    """A new writer that got a dead writer's pid keeps its own files."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '100'}) == 0
+    # Writer 100 is SIGKILLed; writer 500 starts with the same pid before
+    # the next sweep. It keeps the livesum file it opened at import, drops
+    # the old writer's other files and writes its own.
+    _register_as(tmp_path, 991, '500', open_files=['gauge_livesum_991.db'])
+    assert _live_files(tmp_path, 991) == ['gauge_livesum_991.db']
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'}) == 0
+    assert _reap_with(tmp_path, {991: '500'}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+
+
+def test_register_keeps_a_live_gauge_opened_before_registration(
+        tmp_path, monkeypatch):
+    """Unlabeled gauges open this pid's livesum file at import, before the
+    process registers. A dead writer's identity under the same pid must not
+    make registration unlink it."""
+    monkeypatch.setenv('PROMETHEUS_MULTIPROC_DIR', str(tmp_path))
+    monkeypatch.setattr(prom_values, 'ValueClass',
+                        prom_values.MultiProcessValue())
+    gauge = prom.Gauge('sky_test_executors',
+                       'Test.',
+                       multiprocess_mode='livesum',
+                       registry=None)
+    (tmp_path / f'liveowner_{os.getpid()}').write_text('100')
+    with patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register'), \
+         patch('sky.server.metrics._process_identity', return_value='500'):
+        metrics.register_multiproc_cleanup_atexit()
+    gauge.set(3)
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry, path=str(tmp_path))
+    assert registry.get_sample_value('sky_test_executors') == 3
+
+
+def test_reap_stale_multiproc_files_keeps_files_the_holder_has_open(
+        tmp_path, monkeypatch):
+    """A worker that got a dead writer's pid opens the pid's livesum file at
+    import; a sweep before it registers keeps the files."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'},
+                      open_files={991: ['gauge_livesum_991.db']}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+    # The holder's open files cannot be read.
+    assert _reap_with(tmp_path, {991: '500'}, open_files={991: None}) == 0
+    assert len(_live_files(tmp_path, 991)) == 4
+
+
+def test_reap_stale_multiproc_files_reaps_pid_reused_before_first_sweep(
+        tmp_path, monkeypatch):
+    """A writer that died before the reaper ever saw it is still reaped
+    when an unrelated process holds its pid."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _touch_live_gauge_files(str(tmp_path), 991)
+    assert _reap_with(tmp_path, {991: '500'}) == 1
+    assert not _live_files(tmp_path, 991)
+    assert not (tmp_path / 'liveowner_991').exists()
+
+
+def test_reap_stale_multiproc_files_removes_identity_of_writer_without_files(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _register_as(tmp_path, 991, '100')
+    _register_as(tmp_path, 992, '200')
+    _reap_with(tmp_path, {992: '200'})
+    assert not (tmp_path / 'liveowner_991').exists()
+    assert (tmp_path / 'liveowner_992').read_text() == '200'
+
+
+def test_reap_stale_multiproc_files_forgets_pids_without_files(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    _reap_with(tmp_path, {991: '100'})
+    assert metrics._live_gauge_writers == {991: '100'}
+    # The writer removed its own files at exit.
+    for path in tmp_path.glob('gauge_live*_991.db'):
+        path.unlink()
+    _reap_with(tmp_path, {})
+    assert metrics._live_gauge_writers == {}
+
+
 def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
     """A failure on one pid does not stop the rest of the sweep."""
     pid_a, pid_b = 991, 992
@@ -288,7 +450,8 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
 
     successes = []
 
-    def flaky_mark_dead(pid):
+    def flaky_mark_dead(pid, path=None):
+        del path
         if pid == pid_a:
             raise OSError('boom')
         successes.append(pid)
@@ -302,6 +465,42 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
 
     assert reaped == 1
     assert successes == [pid_b]
+
+
+def test_reap_stale_multiproc_files_keeps_unreadable_holder(
+        tmp_path, monkeypatch):
+    """A holder whose /proc entry cannot be read keeps its files, and the
+    sweep goes on to the other pids."""
+    monkeypatch.setattr(metrics, '_live_gauge_writers', {})
+    _touch_live_gauge_files(str(tmp_path), 991)
+    _touch_live_gauge_files(str(tmp_path), 992)
+    proc_errors = {
+        '/proc/991/stat': PermissionError(13, 'Permission denied'),
+        '/proc/992/stat': FileNotFoundError(2, 'No such file or directory'),
+    }
+
+    def fake_open(path, *args, **kwargs):
+        if path in proc_errors:
+            raise proc_errors[path]
+        return open(path, *args, **kwargs)
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch.object(metrics, '_HAS_PROCFS', True), \
+         patch.object(metrics, 'open', fake_open, create=True), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=True):
+        assert metrics._reap_stale_multiproc_files() == 1
+    assert len(_live_files(tmp_path, 991)) == 4
+    assert not _live_files(tmp_path, 992)
+
+
+def test_process_identity_of_this_process_and_a_free_pid():
+    identity = metrics._process_identity(os.getpid())
+    assert identity
+    assert metrics._process_identity(os.getpid()) == identity
+    with patch('sky.server.metrics.psutil.Process',
+               side_effect=metrics.psutil.NoSuchProcess(2**22 + 1)):
+        assert metrics._process_identity(2**22 + 1) is None
 
 
 @pytest.mark.asyncio
@@ -402,6 +601,33 @@ def _response(status_code: int) -> MagicMock:
     return response
 
 
+async def _dispatch(middleware, request, call_next):
+    """Drive the middleware's ASGI entry with `call_next` as the next layer.
+
+    The next layer sends the status of whatever `call_next` returns, which is
+    also what this returns.
+    """
+    result = None
+
+    async def app(scope, receive, send):
+        del scope, receive
+        nonlocal result
+        result = await call_next(request)
+        await send({
+            'type': 'http.response.start',
+            'status': result.status_code,
+            'headers': [],
+        })
+        await send({'type': 'http.response.body', 'body': b''})
+
+    async def send(message):
+        del message
+
+    middleware.app = app
+    await middleware(request.scope, request.receive, send)
+    return result
+
+
 @pytest.fixture
 def prometheus_middleware():
     """Create PrometheusMiddleware instance for testing."""
@@ -424,7 +650,7 @@ async def test_middleware_successful_request(prometheus_middleware):
     call_next = AsyncMock(return_value=response)
 
     start_time = time.time()
-    result = await prometheus_middleware.dispatch(request, call_next)
+    result = await _dispatch(prometheus_middleware, request, call_next)
     end_time = time.time()
 
     assert result == response
@@ -464,7 +690,7 @@ async def test_middleware_streaming_request(prometheus_middleware):
     response = _response(200)
     call_next = AsyncMock(return_value=response)
 
-    result = await prometheus_middleware.dispatch(request, call_next)
+    result = await _dispatch(prometheus_middleware, request, call_next)
 
     assert result == response
 
@@ -493,7 +719,7 @@ async def test_middleware_exception_handling(prometheus_middleware):
     call_next = AsyncMock(side_effect=Exception("Test error"))
 
     with pytest.raises(Exception, match="Test error"):
-        await prometheus_middleware.dispatch(request, call_next)
+        await _dispatch(prometheus_middleware, request, call_next)
 
     # Check that 5xx metric was recorded even with exception
     total_requests = _get_metric_value('sky_apiserver_requests_total', {
@@ -517,7 +743,7 @@ async def test_middleware_different_status_codes(prometheus_middleware):
         request = _http_request(f'/test/{status_code}')
         call_next = AsyncMock(return_value=_response(status_code))
 
-        await prometheus_middleware.dispatch(request, call_next)
+        await _dispatch(prometheus_middleware, request, call_next)
 
         # Verify the correct status group was recorded
         total_requests = _get_metric_value(
@@ -555,6 +781,50 @@ def _app_with_routes() -> fastapi.FastAPI:
 
 
 @pytest.mark.asyncio
+async def test_duration_ends_when_the_response_starts(prometheus_middleware):
+    """Time spent streaming the body is not part of the duration."""
+    request = _http_request('/api/v1/status')
+
+    async def app(scope, receive, send):
+        del scope, receive
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': []
+        })
+        await asyncio.sleep(0.5)
+        await send({'type': 'http.response.body', 'body': b''})
+
+    prometheus_middleware.app = app
+    await prometheus_middleware(request.scope, request.receive, AsyncMock())
+
+    labels = {'path': '/api/v1/status', 'method': 'GET', 'status': '2xx'}
+    assert _get_metric_value('sky_apiserver_request_duration_seconds_count',
+                             labels) == 1.0
+    assert _get_metric_value('sky_apiserver_request_duration_seconds_sum',
+                             labels) < 0.5
+
+
+@pytest.mark.asyncio
+async def test_an_app_returning_without_a_response_is_counted_as_500(
+        prometheus_middleware):
+    """The ASGI server answers such a request with a 500 itself."""
+    request = _http_request('/api/v1/status')
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+
+    prometheus_middleware.app = app
+    await prometheus_middleware(request.scope, request.receive, AsyncMock())
+
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/api/v1/status',
+        'method': 'GET',
+        'status': '5xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
 async def test_path_label_is_read_after_the_inner_layers_ran(
         prometheus_middleware):
     """Inner middlewares rewrite `scope['path']` in place (the internal
@@ -567,7 +837,7 @@ async def test_path_label_is_read_after_the_inner_layers_ran(
         req.scope['router'] = object()
         return _response(200)
 
-    await prometheus_middleware.dispatch(request, call_next)
+    await _dispatch(prometheus_middleware, request, call_next)
 
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': '/status',
@@ -580,8 +850,8 @@ async def test_path_label_is_read_after_the_inner_layers_ran(
 @pytest.mark.asyncio
 async def test_a_404_from_the_router_keeps_the_raw_path(prometheus_middleware):
     request = _http_request('/no/such/route')
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(404)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(404)))
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': '/no/such/route',
         'status': '4xx'
@@ -595,8 +865,8 @@ async def test_a_middleware_rejection_keeps_a_registered_route_path(
     series as the successes of `/status`."""
     app = _app_with_routes()
     request = _http_request('/status', reached_router=False, app=app)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(503)))
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': '/status',
         'status': '5xx'
@@ -622,8 +892,8 @@ async def test_a_middleware_rejection_on_an_unknown_path_is_bucketed(
     (`/api/.*`, `/dashboard/.*`) matching."""
     app = _app_with_routes()
     request = _http_request(raw_path, reached_router=False, app=app)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(401)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(401)))
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': label,
         'status': '4xx'
@@ -638,8 +908,8 @@ async def test_a_middleware_rejection_without_an_app_is_still_bounded(
     """No app on the scope (bare ASGI callable): nothing to match against,
     so every rejected path folds into a prefix or `other`."""
     request = _http_request('/status', reached_router=False)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(503)))
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': metrics.OTHER_PATH_LABEL,
         'status': '5xx'
@@ -682,8 +952,8 @@ async def test_a_stamped_rejection_is_counted_by_reason(prometheus_middleware):
     request = _http_request('/status', reached_router=False)
     middleware_utils.mark_rejection(
         request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(503)))
     collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
     assert _get_metric_value('sky_apiserver_request_rejections_total', {
         'reason': middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
@@ -696,8 +966,8 @@ async def test_a_stamped_rejection_is_counted_by_reason(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_an_unstamped_response_is_not_a_rejection(prometheus_middleware):
     request = _http_request('/status')
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(500)))
+    await _dispatch(prometheus_middleware, request,
+                    AsyncMock(return_value=_response(500)))
     collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
     assert _get_metric_value('sky_apiserver_request_rejections_total',
                              collectors=collectors) == 0.0
@@ -795,7 +1065,7 @@ async def test_middleware_records_user_metrics(prometheus_middleware_user):
         state={'auth_user': types.SimpleNamespace(name='alice@example.com')})
     call_next = AsyncMock(return_value=_response(200))
 
-    await prometheus_middleware_user.dispatch(request, call_next)
+    await _dispatch(prometheus_middleware_user, request, call_next)
 
     # Check that user metric was recorded
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
@@ -815,7 +1085,7 @@ async def test_middleware_records_anonymous_user_metrics(
     request = _http_request('/api/v1/status')  # No auth_user in the state.
     call_next = AsyncMock(return_value=_response(200))
 
-    await prometheus_middleware_user.dispatch(request, call_next)
+    await _dispatch(prometheus_middleware_user, request, call_next)
 
     # Check that anonymous user metric was recorded
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
@@ -870,8 +1140,8 @@ async def test_middleware_user_metrics_with_basic_auth(
                return_value=False), \
          patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
 
-        response = await prometheus_middleware_user.dispatch(
-            request, basic_auth_call_next)
+        response = await _dispatch(prometheus_middleware_user, request,
+                                   basic_auth_call_next)
 
     assert response.status_code == 200
     # BasicAuth should have set auth_user
@@ -907,8 +1177,8 @@ async def test_middleware_user_metrics_with_basic_auth_rejection(
     with patch('sky.server.auth.loopback.is_loopback_request',
                return_value=False), \
          patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
-        response = await prometheus_middleware_user.dispatch(
-            request, basic_auth_call_next)
+        response = await _dispatch(prometheus_middleware_user, request,
+                                   basic_auth_call_next)
 
     assert response.status_code == 401
     final_handler.assert_not_awaited()
@@ -942,7 +1212,7 @@ async def test_middleware_records_api_get_duration_by_name(
                             })
     call_next = AsyncMock(return_value=_response(200))
 
-    await prometheus_middleware.dispatch(request, call_next)
+    await _dispatch(prometheus_middleware, request, call_next)
 
     get_collectors = [metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS]
     duration_count = _get_metric_value(
@@ -961,7 +1231,7 @@ async def test_middleware_no_api_get_duration_without_name(
     request = _http_request('/api/v1/status')  # No request_name / auth_user.
     call_next = AsyncMock(return_value=_response(200))
 
-    await prometheus_middleware.dispatch(request, call_next)
+    await _dispatch(prometheus_middleware, request, call_next)
 
     # No per-name series recorded: every _count sample stays at 0.
     registry = CollectorRegistry()

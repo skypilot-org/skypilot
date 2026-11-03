@@ -130,8 +130,12 @@ def _parse_args(args: Optional[str] = None):
         args_list = shlex.split(args)
     else:
         args_list = []
+    # allow_abbrev=False: flags this parser does not define must reach
+    # `pytest --collect-only` unchanged (see pytest_native below). With
+    # abbreviations on, a conftest flag that is a prefix of one defined here
+    # is taken as that flag instead: `--serve` became `--serve-consolidation`.
     parser = argparse.ArgumentParser(
-        description="Process cloud arguments for tests")
+        description="Process cloud arguments for tests", allow_abbrev=False)
 
     # Flags for recognized clouds - use cloud names (e.g., --lambda) to match pytest
     for cloud in all_clouds_in_smoke_tests:
@@ -151,6 +155,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--serve-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
+    parser.add_argument('--remote-identity-none', action='store_true')
     parser.add_argument('--env-file')
     parser.add_argument('--plugin-yaml')
     parser.add_argument('--submodule-base-branch')
@@ -210,6 +215,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--serve-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
+    if parsed_args.remote_identity_none:
+        extra_args.append('--remote-identity-none')
     if parsed_args.env_file:
         extra_args.extend(['--env-file', parsed_args.env_file])
     if parsed_args.plugin_yaml:

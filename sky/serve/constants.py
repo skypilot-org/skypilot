@@ -109,6 +109,12 @@ INITIAL_VERSION = 1
 # Replica ID environment variable name that can be accessed on the replica.
 REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 
+# Blob holding the task's workdir and file mounts, passed to a service
+# controller started in consolidation mode. An env var rather than a flag: the
+# HA recovery daemon reruns the stored controller script with its own code, and
+# an older API server replica's code would reject an unknown flag.
+FILE_MOUNTS_BLOB_ID_ENV_VAR = 'SKYPILOT_SERVE_FILE_MOUNTS_BLOB_ID'
+
 # The version of the lib files that serve use. Whenever there is an API
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that
 # the user can be notified to update their SkyPilot serve version on the remote

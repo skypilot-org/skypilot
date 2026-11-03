@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -12,8 +11,8 @@ import (
 	log "k8s.io/klog/v2"
 )
 
-// TODO(aylei): hacky, we should not assume specific knowledge in the caller container, need to find a better way.
-var fusermountPath = flag.String("fusermount-path", "/bin/fusermount-original", "Path to fusermount binary in the caller container")
+var helperPath = flag.String("helper-path", common.HelperBinPath,
+	"Path to the privileged mount helper in this container")
 
 func main() {
 	log.InitFlags(nil)
@@ -24,18 +23,16 @@ func main() {
 	// shared path so that the caller container can access it.
 	// We assume the architecture of the caller container is the same as this
 	// server container since they are running on the same node.
-	cmd := exec.Command("cp", "-p", common.ShimBinPath, shimInstallPath)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to copy fusermount-shim: %v", err)
+	if err := common.InstallBinary(common.ShimBinPath, shimInstallPath); err != nil {
+		log.Fatalf("Failed to install fusermount-shim: %v", err)
 	}
-	cmd = exec.Command("cp", "-p", common.WrapperBinPath, wrapperInstallPath)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to copy fusermount-wrapper: %v", err)
+	if err := common.InstallBinary(common.WrapperBinPath, wrapperInstallPath); err != nil {
+		log.Fatalf("Failed to install fusermount-wrapper: %v", err)
 	}
 
 	socketPath := common.MustGetServerSocketPath()
 
-	srv := server.NewServer(*fusermountPath, socketPath)
+	srv := server.NewServer(*helperPath, socketPath)
 
 	// Handle signals for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

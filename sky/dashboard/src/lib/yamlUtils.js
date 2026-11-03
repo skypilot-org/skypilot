@@ -1,7 +1,28 @@
 import yaml from 'js-yaml';
 
+// The server writes YAML with PyYAML, which follows YAML 1.1: a scalar like
+// `1e-3` (no dot) is a string there, so it is written unquoted. js-yaml
+// follows YAML 1.2 and would read it back as the float 0.001, so an env such
+// as `LR: 1e-3` would display as `LR: 0.001`. Resolve floats the YAML 1.1 way
+// -- only with a dot, which is also how PyYAML always writes a real float --
+// so such strings are shown as written.
+const floatType = yaml.types.float;
+const YAML_1_1_FLOAT = new yaml.Type('tag:yaml.org,2002:float', {
+  kind: 'scalar',
+  resolve: (data) =>
+    data !== null && floatType.resolve(data) && data.includes('.'),
+  construct: floatType.construct,
+  predicate: floatType.predicate,
+  represent: floatType.represent,
+  defaultStyle: floatType.defaultStyle,
+});
+const SERVER_YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend({
+  implicit: [YAML_1_1_FLOAT],
+});
+
 // Common YAML dump configuration
 const YAML_DUMP_OPTIONS = {
+  schema: SERVER_YAML_SCHEMA,
   lineWidth: -1, // Disable line wrapping
   quotingType: "'", // Use single quotes for strings that need quoting
   forceQuotes: false, // Only quote when necessary
@@ -23,7 +44,7 @@ export const formatYaml = (yamlString) => {
 
   try {
     // Parse the YAML string into an object
-    const parsed = yaml.load(yamlString);
+    const parsed = yaml.load(yamlString, { schema: SERVER_YAML_SCHEMA });
 
     // Remove internal metadata fields before display
     if (parsed && typeof parsed === 'object') {
@@ -86,7 +107,7 @@ export const getYamlPreview = (parsed) => {
 export const formatSingleYamlDocument = (doc, index) => {
   try {
     // Parse the YAML string into an object
-    const parsed = yaml.load(doc);
+    const parsed = yaml.load(doc, { schema: SERVER_YAML_SCHEMA });
 
     // Remove internal metadata fields before display
     if (parsed && typeof parsed === 'object') {
@@ -170,4 +191,19 @@ export const formatJobYaml = (yamlString) => {
       },
     ];
   }
+};
+
+/**
+ * The `name:` / `execution:` header shown above a managed job's (or job
+ * group's) task YAMLs, followed by a document separator; empty when the job
+ * has neither.
+ * @param {{name?: string, execution?: string}} jobData
+ * @returns {string}
+ */
+export const buildJobGroupHeader = (jobData) => {
+  const lines = [
+    jobData?.name ? `name: ${jobData.name}` : null,
+    jobData?.execution ? `execution: ${jobData.execution}` : null,
+  ].filter(Boolean);
+  return lines.length > 0 ? lines.join('\n') + '\n---\n' : '';
 };

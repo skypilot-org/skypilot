@@ -21,6 +21,7 @@ from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
@@ -1491,11 +1492,8 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
-# Accepted sbatch --time formats:
-#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
 # See: https://slurm.schedmd.com/sbatch.html#OPT_time
-_TIME_FORMAT_RE = re.compile(
-    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+_TIME_FORMAT_RE = re.compile(schemas.SLURM_SBATCH_TIME_PATTERN)
 
 
 def validate_sbatch_time(value: str) -> None:
@@ -1514,7 +1512,8 @@ def validate_sbatch_time(value: str) -> None:
     if not _TIME_FORMAT_RE.fullmatch(value):
         raise ValueError(
             f'Invalid slurm.sbatch_options.time {value!r}. '
-            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s, '
+            'UNLIMITED, INFINITE, -1.')
 
 
 def srun_sshd_command(

@@ -1,4 +1,6 @@
 """Shared fixtures for the unit test suite."""
+import sys
+
 import pytest
 
 from sky.utils import context
@@ -30,3 +32,16 @@ def _isolate_context():
         yield
     finally:
         context._CONTEXT.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def _clear_sa_token_cache():
+    """Drop service-account auth rows cached by an earlier test.
+
+    The cache is per process, so a token one test authenticated would
+    otherwise skip the DB lookups another test mocks for the same token.
+    """
+    cache = sys.modules.get('sky.server.auth.sa_token_cache')
+    if cache is not None:
+        cache.clear()
+    yield

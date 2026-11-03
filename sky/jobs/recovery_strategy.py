@@ -11,6 +11,7 @@ import contextlib
 import logging
 import os
 import re
+import time
 import traceback
 import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
@@ -84,7 +85,10 @@ _OOM_FAILURE_SIGNATURES = ('oomkilled', 'out of memory', 'out-of-memory')
 
 def _is_oom_failure(exception: Exception) -> bool:
     """Whether `exception` indicates an out-of-memory pod termination."""
-    message = common_utils.format_exception(exception).lower()
+    message = common_utils.format_exception(exception)
+    # The container's own output follows the marker; it is the workload's
+    # text, not a termination reason.
+    message = message.split(constants.CONTAINER_OUTPUT_MARKER, 1)[0].lower()
     return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
 
 
@@ -146,6 +150,7 @@ _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 # Kinds for the launch-retry paths that carry no exception to classify. Spelled
 # without a colon so they are exempt from the metric's open-family cap.
 _KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
+_KIND_INFRA_UNREACHABLE = 'infra_unreachable'
 _KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
 _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 
@@ -222,14 +227,14 @@ class _LaunchRequestParked(Exception):
 
     Raised while supervising the inner sky.launch request when the request is
     set to WAITING by the API server, i.e. the launch is waiting on some
-    external condition (e.g. admission to a queue) and has yielded its
-    executor worker. We mirror that at the job scheduling layer: exit the
-    scheduled_launch context so the job releases its launch slot instead of
-    holding it for the entire wait.
+    external condition (e.g. a cluster lock held by another operation) and has
+    yielded its executor worker. We mirror that at the job scheduling layer:
+    exit the scheduled_launch context so the job releases its launch slot
+    instead of holding it for the entire wait.
 
     Notably, this must not tear down the partially provisioned cluster: a
-    parked launch keeps its resources (e.g. its position in an admission
-    queue) and will reuse them on resume.
+    parked launch keeps any resources it already has and will reuse them on
+    resume.
     """
 
     def __init__(self, request_id: str, status_msg: Optional[str]):
@@ -242,6 +247,9 @@ class StrategyExecutor:
     """Handle the launching, recovery and termination of managed job clusters"""
 
     RETRY_INIT_GAP_SECONDS = 60
+    # How long _launch keeps retrying while every attempt fails only because
+    # the infra cannot be reached.
+    UNREACHABLE_INFRA_TIMEOUT_SECONDS = 60 * 60
 
     def __init__(
         self,
@@ -275,8 +283,9 @@ class StrategyExecutor:
             file_mounts_blob_id: If set, the content-addressed blob id
                 associated with this job's uploaded file mounts. It is
                 forwarded to the inner ``sdk.launch`` so that whichever API
-                server replica executes the launch can resolve the blob to
-                its own extraction cache (critical under HA failover).
+                server process executes the launch can resolve the blob to
+                its own extraction cache (critical when that process runs on
+                a different host from the one that received the upload).
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -359,8 +368,16 @@ class StrategyExecutor:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        emergency_reattach: bool = False,
     ) -> Optional[bool]:
         """Strategy-owned monitoring loop override.
+
+        ``emergency_reattach``: the task kept its cluster through an
+        emergency and its latest job event is EMERGENCY-sourced. A strategy
+        that owns the loop must close that episode the way
+        ``JobController._monitor_one_task`` does: call
+        ``state.record_emergency_reattached_async`` once, on the first
+        status poll the job answers with a non-terminal status.
 
         # TODO(kevin): The default monitor (JobController._monitor_one_task)
         # bakes in cluster-level detection logic (skylet polling, cluster
@@ -376,6 +393,12 @@ class StrategyExecutor:
         FAILED_SETUP with the exception message and return False. Letting
         it escape gets swallowed into the group's monitor results with no
         terminal state set for the task.
+
+        A strategy that checks the network before each poll should call
+        ``sky.jobs.controller.check_network_connection()`` rather than
+        ``backend_utils.async_check_network_connection()``: it shares one
+        check across every monitor loop in the controller process, where the
+        latter sends one request per job per poll.
 
         Returns:
             None: fall back to OSS default monitor.
@@ -799,8 +822,8 @@ class StrategyExecutor:
         While waiting on the request's log stream (started by
         _start_stream_task), periodically poll the request's status: if the
         API server has parked the request as WAITING (the request yielded its
-        executor worker to wait for some external condition, e.g. admission
-        to a queue), raise _LaunchRequestParked so that the caller can
+        executor worker to wait for some external condition, e.g. a cluster
+        lock), raise _LaunchRequestParked so that the caller can
         release this job's launch slot for the duration of the wait.
 
         The stream task is deliberately left running when parking: the
@@ -940,6 +963,8 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                3. Every attempt for UNREACHABLE_INFRA_TIMEOUT_SECONDS failed
+                only because the infra could not be reached.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -972,6 +997,9 @@ class StrategyExecutor:
         parked_request_id: Optional[str] = None
         parked_stream_task: Optional['asyncio.Future'] = None
         parked_reason: Optional[str] = None
+        # When the current run of attempts that failed only because the infra
+        # could not be reached began.
+        unreachable_since: Optional[float] = None
         while True:
             retry_cnt += 1
             # Why this attempt failed, for the backoff event below. Reset every
@@ -1045,6 +1073,7 @@ class StrategyExecutor:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
+                            blob_id = self.file_mounts_blob_id
 
                             if reattach_request_id is None:
                                 # sdk.launch will implicitly start the API
@@ -1072,13 +1101,25 @@ class StrategyExecutor:
                                                          f'{env_var}: {value}')
                                             os.environ[env_var] = value
 
-                                # HA failover may land the controller on new
-                                # hosts, ensure blob extraction on the current
-                                # host
-                                if self.file_mounts_blob_id is not None:
+                                # The blob holds the original upload. Once
+                                # submit has rewritten the task to cloud URLs,
+                                # the retry reads the bucket and the local
+                                # directory is unused.
+                                if (blob_id is not None and not server_common.
+                                        dag_requires_local_file_mounts(
+                                            self.dag)):
+                                    logger.info(
+                                        'Skipping local file-mounts blob '
+                                        f'{blob_id}: task sources are cloud '
+                                        'URLs.')
+                                    blob_id = None
+                                # The controller may now run on a different
+                                # host than the upload landed on (e.g. after
+                                # an API server restart), so ensure blob
+                                # extraction on the current host.
+                                if blob_id is not None:
                                     await asyncio.to_thread(
-                                        server_common.resolve_blob_dir,
-                                        self.file_mounts_blob_id,
+                                        server_common.resolve_blob_dir, blob_id,
                                         common_utils.get_user_hash())
 
                             request_id: Optional[str] = None
@@ -1113,8 +1154,7 @@ class StrategyExecutor:
                                             _AUTODOWN_MINUTES),
                                         down=True,
                                         _is_launched_by_jobs_controller=True,
-                                        _file_mounts_blob_id=(
-                                            self.file_mounts_blob_id),
+                                        _file_mounts_blob_id=blob_id,
                                         _extra_launch_context=(
                                             extra_ctx if extra_ctx else None),
                                     )
@@ -1290,7 +1330,34 @@ class StrategyExecutor:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None
-                        retry_code = _KIND_RESOURCES_UNAVAILABLE
+                        if all(
+                                isinstance(err,
+                                           exceptions.KubeAPIUnreachableError)
+                                for err in e.failover_history):
+                            retry_code = _KIND_INFRA_UNREACHABLE
+                            if unreachable_since is None:
+                                unreachable_since = time.monotonic()
+                            elif (time.monotonic() - unreachable_since >=
+                                  self.UNREACHABLE_INFRA_TIMEOUT_SECONDS):
+                                timeout_minutes = (
+                                    self.UNREACHABLE_INFRA_TIMEOUT_SECONDS //
+                                    60)
+                                unreachable_str = '; '.join(
+                                    dict.fromkeys(
+                                        str(err) for err in e.failover_history))
+                                reason = exceptions.ResourcesUnavailableError(
+                                    'The infra stayed unreachable for '
+                                    f'{timeout_minutes} minutes: '
+                                    f'{unreachable_str}')
+                                logger.error(
+                                    'Giving up the launch: '
+                                    f'{common_utils.format_exception(reason)}')
+                                if raise_on_failure:
+                                    raise exceptions.ProvisionPrechecksError(
+                                        [reason])
+                                return None
+                        else:
+                            retry_code = _KIND_RESOURCES_UNAVAILABLE
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
@@ -1410,15 +1477,14 @@ class StrategyExecutor:
 
             except _LaunchRequestParked as e:
                 # The underlying launch request yielded its executor worker
-                # and is waiting to resume (e.g. waiting for admission to a
-                # queue). Mirror it at this layer: we have exited the
+                # and is waiting to resume (e.g. waiting on a cluster lock).
+                # Mirror it at this layer: we have exited the
                 # scheduled_launch context above, releasing this job's launch
                 # slot, so that other jobs (including higher-priority ones)
                 # can launch while this job waits. This mirrors the
                 # retry-backoff path below, except that:
                 # - the cluster is NOT torn down: the parked launch keeps its
-                #   partially provisioned resources (e.g. its position in an
-                #   admission queue), and
+                #   partially provisioned resources, and
                 # - we wait for the request to resume instead of sleeping a
                 #   fixed backoff, and then re-attach to the same request.
                 # The waiting itself happens at the top of the next loop
@@ -1455,6 +1521,8 @@ class StrategyExecutor:
                         _consume_task_exception)
                 raise
             except exceptions.NoClusterLaunchedError:
+                if retry_code != _KIND_INFRA_UNREACHABLE:
+                    unreachable_since = None
                 # Update the status to PENDING during backoff.
                 # retry_code is None only if a path reached here without
                 # saying why; leave the column NULL and count nothing rather

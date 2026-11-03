@@ -4,6 +4,7 @@ import enum
 import itertools
 import json
 import math
+import re
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -475,8 +476,9 @@ class FeasibleResources:
     """Feasible resources returned by cloud.
 
     Used to represent a collection of feasible resources returned by cloud,
-    any fuzzy candidates, and optionally a string hint if no feasible resources
-    are found.
+    any fuzzy candidates, optionally a string hint if no feasible resources
+    are found, and the errors of locations that were skipped because they
+    could not be reached (the request may still fit there).
 
     Fuzzy candidates example: when the requested GPU is A100:1 but is not
     available in a cloud/region, the fuzzy candidates are results of a fuzzy
@@ -486,6 +488,8 @@ class FeasibleResources:
     resources_list: List['resources_lib.Resources']
     fuzzy_candidate_list: List[str]
     hint: Optional[str]
+    unreachable_errors: List[Exception] = dataclasses.field(
+        default_factory=list)
 
 
 def need_to_query_reservations() -> bool:
@@ -701,6 +705,37 @@ def parse_time_seconds(time: str) -> int:
         ValueError: If the time format is invalid.
     """
     return _parse_time_with_units(time, constants.TIME_UNITS_SECONDS)
+
+
+def parse_positive_duration_seconds(value: Any, field_name: str) -> int:
+    """Parse a positive duration (e.g. '90s', '30m', '2h', 30) to seconds.
+
+    Args:
+        value: Duration string with an optional unit suffix, or an integer
+            number of seconds.
+        field_name: Name of the field, for the error message.
+
+    Returns:
+        The duration in seconds, always > 0.
+
+    Raises:
+        ValueError: If the value is not a valid positive duration.
+    """
+    seconds: Optional[int] = None
+    # bool is a subclass of int; `true` is not a duration.
+    # Strings must match the same pattern the YAML schema enforces, so a
+    # value set through the Python SDK is held to the same format.
+    if ((isinstance(value, int) and not isinstance(value, bool)) or
+        (isinstance(value, str) and
+         re.match(constants.TIME_PATTERN_SECONDS, value))):
+        seconds = parse_time_seconds(str(value))
+    if seconds is None or seconds <= 0:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid {field_name}: {value!r}. Expected a positive '
+                'duration with an optional unit suffix (s, m, h, d, w), e.g. '
+                '"90s", "30m", "2h", or an integer number of seconds.')
+    return seconds
 
 
 def normalize_any_of_resources_config(

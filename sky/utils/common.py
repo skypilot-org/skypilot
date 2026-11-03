@@ -31,8 +31,8 @@ def is_controller_name(cluster_name: str) -> bool:
 #    cache file.
 # 2. SkyPilot API server restarts, because the API server will restore the
 #    user hash from the global user state db on startup.
-# 3. Potential multiple server replicas, because multiple server replicas of
-#    a same deployment will share the same global user state db.
+# 3. Potential multiple server instances, because multiple server instances
+#    of a same deployment will share the same global user state db.
 # This behavior is the same for the local API server (where SERVER_ID is the
 # same as the normal user hash). This ensures backwards-compatibility with jobs
 # controllers from before #4660.

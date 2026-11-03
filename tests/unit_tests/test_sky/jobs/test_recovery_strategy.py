@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import inspect
+import pickle
 import types
 from unittest import mock
 
@@ -10,6 +11,7 @@ import pytest
 from sky import exceptions
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
+from sky.skylet import constants
 
 
 def test_is_oom_failure_detects_oomkilled():
@@ -32,6 +34,26 @@ def test_is_oom_failure_is_case_insensitive():
 def test_is_oom_failure_false_for_unrelated():
     assert recovery_strategy._is_oom_failure(
         RuntimeError('/bin/bash: line 1: conda: command not found')) is False
+
+
+def test_is_oom_failure_ignores_the_containers_own_output():
+    """A workload that prints "out of memory" was not OOM-killed.
+
+    The terminated-pod diagnosis appends the container's last output, which
+    is free text. Classifying it as OOM makes recovery fail the job
+    terminally instead of retrying it.
+    """
+    exc = RuntimeError('Pod p terminated: Error (exit code 1).\n'
+                       f'{constants.CONTAINER_OUTPUT_MARKER} ray-node:\n'
+                       'RuntimeError: CUDA out of memory. Tried to allocate')
+    assert recovery_strategy._is_oom_failure(exc) is False
+
+
+def test_is_oom_failure_still_reads_the_reason_before_the_output():
+    exc = RuntimeError('Pod p terminated: OOMKilled (exit code 137).\n'
+                       f'{constants.CONTAINER_OUTPUT_MARKER} ray-node:\n'
+                       'Killed')
+    assert recovery_strategy._is_oom_failure(exc) is True
 
 
 # ---------------------------------------------------------------------------
@@ -844,6 +866,119 @@ async def test_resources_unavailable_is_not_an_unknown_error(monkeypatch):
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(
         patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+def _through_request_store(error):
+    """The error as the controller reads it back from the launch request."""
+    return exceptions.deserialize_exception(
+        pickle.loads(pickle.dumps(exceptions.serialize_exception(error))))
+
+
+def _unreachable_infra_error():
+    """The launch error for a request only unreachable infra might fit."""
+    return _through_request_store(
+        exceptions.ResourcesUnavailableError(
+            'No reachable infra has resources satisfying the request',
+            failover_history=[
+                exceptions.KubeAPIUnreachableError(
+                    "Kubernetes context 'ctx1' is unreachable: Timed out")
+            ]))
+
+
+@pytest.mark.asyncio
+async def test_unreachable_kubernetes_context_retries(monkeypatch):
+    """An unreachable context backs off and retries instead of failing."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(), None])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:infra_unreachable']
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_gives_up_after_timeout(monkeypatch):
+    """Infra that stays unreachable ends the launch as a failed precheck."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(),
+                     _unreachable_infra_error()])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None, raise_on_failure=True)
+
+    assert 'stayed unreachable' in str(e.value.reasons[0])
+    assert "'ctx1' is unreachable" in str(e.value.reasons[0])
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_timer_restarts_after_other_failure(
+        monkeypatch):
+    """Only consecutive unreachable-only failures count toward the timeout."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _unreachable_infra_error(),
+        KeyError('status'),
+        _unreachable_infra_error(),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:infra_unreachable',
+        'launch_retry:KeyError',
+        'launch_retry:infra_unreachable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_and_unavailable_infra_never_gives_up(monkeypatch):
+    """Capacity shortages elsewhere keep the usual unlimited retries."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    mixed = exceptions.ResourcesUnavailableError(
+        'no capacity',
+        failover_history=[
+            exceptions.KubeAPIUnreachableError(
+                "Kubernetes context 'ctx1' is unreachable: Timed out"),
+            exceptions.ResourcesUnavailableError('zone a'),
+        ])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(mixed),
+        _through_request_store(mixed),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:resources_unavailable',
+        'launch_retry:resources_unavailable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_infeasible_request_fails_prechecks(monkeypatch):
+    """No fit on reachable infra is terminal."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    infeasible = exceptions.ResourcesUnavailableError(
+        'Kubernetes cluster does not contain any instances satisfying the '
+        'request')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_through_request_store(infeasible)])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError):
+        await executor._launch(max_retry=None, raise_on_failure=True)
 
 
 @pytest.mark.asyncio

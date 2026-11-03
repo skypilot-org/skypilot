@@ -183,7 +183,8 @@
                 },
                 {
                   "mountPath": "/var/run/fusermount",
-                  "name": "fusermount-shared-dir"
+                  "name": "fusermount-shared-dir",
+                  "readOnly": true
                 },
                 {
                   "mountPath": "/var/run/dind",
@@ -349,6 +350,7 @@
     "networking_mode": "portforward",
     "port_mode": "portforward",
     "region": "kubernetes",
+    "remote_identity_none": false,
     "services": [
       {
         "apiVersion": "v1",

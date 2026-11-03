@@ -241,6 +241,12 @@ class FluentbitAgent(LoggingAgent):
                     # for this: the VM might be autodown within a minute
                     # right after the job completion.
                     'refresh_interval': 1,
+                    # By default a line longer than the 32KB read buffer makes
+                    # fluent-bit stop tailing the whole file, silently dropping
+                    # the rest of the job's logs. Grow the buffer and skip only
+                    # the lines that still do not fit.
+                    'buffer_max_size': '256k',
+                    'skip_long_lines': 'on',
                 }],
                 'filters': [{
                     'name': 'parser',

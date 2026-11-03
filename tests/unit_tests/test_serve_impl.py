@@ -144,3 +144,37 @@ class TestApplyRefusesTerminalStates:
                     p.stop()
         mock_up.assert_called_once()
         mock_update.assert_not_called()
+
+    def test_no_existing_record_passes_blob_id_to_up(self):
+        """A new service is created from the request's upload blob, so `up`
+        must receive the blob id."""
+        patches = [
+            mock.patch(
+                'sky.serve.server.impl.serve_utils.get_service_filelock_path',
+                return_value='/tmp/test_apply_lock'),
+            mock.patch('sky.serve.server.impl.controller_utils.'
+                       'get_controller_for_pool'),
+            mock.patch(
+                'sky.serve.server.impl.backend_utils.'
+                'is_controller_accessible',
+                return_value=mock.Mock()),
+            mock.patch(
+                'sky.serve.server.impl.backend_utils.'
+                'get_backend_from_handle',
+                return_value=_backend_mock()),
+            mock.patch('sky.serve.server.impl._get_service_record',
+                       return_value=None),
+        ]
+        with mock.patch('sky.serve.server.impl.up') as mock_up:
+            for p in patches:
+                p.start()
+            try:
+                impl.apply(task=mock.Mock(),
+                           workers=None,
+                           service_name='svc',
+                           pool=True,
+                           file_mounts_blob_id='a' * 64)
+            finally:
+                for p in patches:
+                    p.stop()
+        assert mock_up.call_args.kwargs['file_mounts_blob_id'] == 'a' * 64

@@ -1581,7 +1581,7 @@ class TestQueryInstances:
         }
         read_manifest.assert_called_once_with(
             login_runner, '/home/test/.sky_snapshots/test-cluster')
-        assert client.query_jobs.call_count == 7
+        assert client.query_jobs.call_count == 8
         sleep.assert_not_called()
         get_config.assert_not_called()
 
@@ -1614,6 +1614,24 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.UP, None)
         }
         read_manifest.assert_not_called()
+
+    def test_configuring_job_is_init(self, monkeypatch):
+        client = mock.MagicMock()
+        client.query_jobs.side_effect = (
+            lambda job_name, states: ['booting-job']
+            if states == ['configuring'] else [])
+        client.get_job_nodes.return_value = (['node-a'], ['10.0.0.1'])
+        monkeypatch.setattr(instance.slurm, 'SlurmClient',
+                            mock.MagicMock(return_value=client))
+
+        statuses = instance.query_instances('test-cluster',
+                                            _CLUSTER,
+                                            provider_config=_PROVIDER_CONFIG)
+
+        assert statuses == {
+            instance.slurm_utils.instance_id('booting-job', 'node-a'):
+                (instance.status_lib.ClusterStatus.INIT, None)
+        }
 
     def test_container_snapshot_denial_keeps_status_unknown(self, mock_client):
         mock_client.query_jobs.return_value = []
@@ -1676,7 +1694,7 @@ class TestQueryInstances:
                                           retry_if_missing=True)
 
         assert not result
-        assert mock_client.query_jobs.call_count == 7
+        assert mock_client.query_jobs.call_count == 8
         mock_client.get_job_reason.assert_called_once_with('386700')
         read_manifest.assert_not_called()
         sleep.assert_not_called()
@@ -1694,7 +1712,7 @@ class TestQueryInstances:
                                           retry_if_missing=False)
 
         assert not result
-        assert mock_client.query_jobs.call_count == 7
+        assert mock_client.query_jobs.call_count == 8
         sleep.assert_not_called()
 
     def test_retry_exhaustion_returns_empty(self, mock_client, monkeypatch):
@@ -1710,7 +1728,7 @@ class TestQueryInstances:
 
         assert not result
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
-        assert mock_client.query_jobs.call_count == 7 * expected_rounds
+        assert mock_client.query_jobs.call_count == 8 * expected_rounds
         read_manifest.assert_not_called()
 
 

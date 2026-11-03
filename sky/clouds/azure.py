@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import common as adaptors_common
 from sky.clouds.utils import azure_utils
+from sky.clouds.utils import gpu_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -43,13 +44,22 @@ _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 _DEFAULT_SKYPILOT_IMAGE_GB = 30
 
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-v2'
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
-_DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
+# The -ray256 images have SKY_REMOTE_RAY_VERSION baked in. New tags rather
+# than new versions of the old definitions, because older SkyPilot versions
+# read the same catalog and boot the latest version of each definition.
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-v2-ray256'
+# NVIDIA 580 open kernel module + CUDA 13 (sky/catalog/images/provisioners/
+# cuda.sh): Turing and later only.
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-ray256'
+_DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1-ray256'
+# NVIDIA 535 proprietary driver + CUDA 12, for pre-Turing GPUs (V100, M60).
+# Not rebuilt for the Ray upgrade: those nodes install Ray at launch.
+_DEFAULT_LEGACY_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
+_DEFAULT_LEGACY_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 # This is used by Azure GPU VMs that use grid drivers (e.g. A10).
-_DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid'
+_DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid-ray256'
 
 _COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
 
@@ -289,6 +299,9 @@ class Azure(clouds.Cloud):
                 return _DEFAULT_GPU_K80_IMAGE_ID
             if acc_name == 'A10':
                 return _DEFAULT_GPU_GRID_IMAGE_ID
+            if gpu_utils.is_legacy_driver_gpu(acc_name):
+                return (_DEFAULT_LEGACY_V1_IMAGE_ID if gen_version == 'V1' else
+                        _DEFAULT_LEGACY_GPU_IMAGE_ID)
         # About Gen V1 vs V2:
         # In Azure, all instances with K80 (Standard_NC series), some
         # instances with M60 (Standard_NV series) and some cpu instances

@@ -70,6 +70,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import {
   BatchRoleDialog,
@@ -328,6 +335,30 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   );
 };
 
+// Mirrors check_service_account_token_permission on the server: admins can
+// manage any token, other users only their own, and viewers none.
+export function canManageServiceAccountToken(roleData, token) {
+  if (!roleData || !token) return false;
+  if (roleData.role === 'admin') return true;
+  return roleData.role !== 'viewer' && token.creator_user_hash === roleData.id;
+}
+
+// The server lets any non-viewer create a service account, but only admins
+// can grant the admin role (see _check_role_grantable).
+export function canCreateServiceAccountToken(roleData) {
+  return Boolean(roleData) && roleData.role !== 'viewer';
+}
+
+export function grantableServiceAccountRoles(role) {
+  return role === 'admin' ? ['admin', 'user', 'viewer'] : ['user', 'viewer'];
+}
+
+const SERVICE_ACCOUNT_ROLE_LABELS = {
+  admin: 'Admin',
+  user: 'User',
+  viewer: 'Viewer',
+};
+
 export function Users() {
   const router = useRouter();
   const { userEmail } = useSidebar();
@@ -492,11 +523,15 @@ export function Users() {
     });
   }, [getUserRole]);
 
-  const checkPermissionAndAct = async (action, actionCallback) => {
+  const checkPermissionAndAct = async (
+    action,
+    actionCallback,
+    isAllowed = (roleData) => roleData.role === 'admin'
+  ) => {
     try {
       const roleData = await getUserRole();
 
-      if (roleData.role !== 'admin') {
+      if (!isAllowed(roleData)) {
         setPermissionDenialState({
           open: true,
           message: action,
@@ -976,7 +1011,8 @@ export function Users() {
                 'cannot create service account tokens',
                 () => {
                   setShowCreateDialog(true);
-                }
+                },
+                canCreateServiceAccountToken
               );
             }}
             className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
@@ -1122,6 +1158,7 @@ export function Users() {
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
               </select>
             </div>
           </div>
@@ -2554,6 +2591,7 @@ function UsersTable({
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
+                                <option value="viewer">Viewer</option>
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
@@ -2821,6 +2859,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
+    role: '',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -2864,6 +2903,36 @@ function ServiceAccountTokensView({
     if (!serverPaginated) return;
     setPage(1);
   }, [debouncedSearch, serverPaginated]);
+
+  // Start the Role field on the server's `rbac.default_role`, unless a role
+  // was already picked.
+  useEffect(() => {
+    if (!showCreateDialog) return undefined;
+    let cancelled = false;
+    const fetchDefaultRole = async () => {
+      try {
+        const response = await apiClient.get('/users/default-role');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to get default role');
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          // `rbac.default_role` falls back to admin, which a non-admin
+          // cannot grant, so start them on user instead.
+          const grantable = grantableServiceAccountRoles(userRoleCache?.role);
+          const role = grantable.includes(data.role) ? data.role : 'user';
+          setNewToken((prev) => (prev.role ? prev : { ...prev, role }));
+        }
+      } catch (error) {
+        console.error('Failed to get default role:', error);
+      }
+    };
+    fetchDefaultRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateDialog, userRoleCache?.role]);
 
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
@@ -3063,6 +3132,7 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
 
       const response = await apiClient.post(
@@ -3073,7 +3143,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30 });
+        setNewToken({ token_name: '', expires_in_days: 30, role: '' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3254,6 +3324,7 @@ function ServiceAccountTokensView({
                             >
                               <option value="admin">Admin</option>
                               <option value="user">User</option>
+                              <option value="viewer">Viewer</option>
                             </select>
                             <button
                               onClick={() => handleSaveEdit(token.token_id)}
@@ -3392,9 +3463,8 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        {/* Show rotate button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show rotate button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3402,11 +3472,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot rotate service account tokens',
+                                  'cannot rotate this service account token',
                                   () => {
                                     setTokenToRotate(token);
                                     setShowRotateDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
@@ -3415,9 +3490,8 @@ function ServiceAccountTokensView({
                             </button>
                           </CustomTooltip>
                         )}
-                        {/* Show delete button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show delete button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3425,11 +3499,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot delete service account tokens',
+                                  'cannot delete this service account token',
                                   () => {
                                     setTokenToDelete(token);
                                     setShowDeleteDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
@@ -3563,6 +3642,34 @@ function ServiceAccountTokensView({
                   />
                 </div>
                 <div className="grid gap-2">
+                  <label
+                    htmlFor="create-sa-role-select"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Role
+                  </label>
+                  <Select
+                    value={newToken.role}
+                    onValueChange={(role) => setNewToken({ ...newToken, role })}
+                  >
+                    <SelectTrigger
+                      id="create-sa-role-select"
+                      className="w-full focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {grantableServiceAccountRoles(userRoleCache?.role).map(
+                        (role) => (
+                          <SelectItem key={role} value={role}>
+                            {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
                     Expiration (days)
                   </label>
@@ -3615,7 +3722,9 @@ function ServiceAccountTokensView({
                 <button
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
                   onClick={handleCreateToken}
-                  disabled={creating || !newToken.token_name.trim()}
+                  disabled={
+                    creating || !newToken.token_name.trim() || !newToken.role
+                  }
                 >
                   {creating ? 'Creating...' : 'Create Token'}
                 </button>

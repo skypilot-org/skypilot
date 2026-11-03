@@ -18,6 +18,7 @@ from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+from sky.skylet import constants
 
 
 def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):
@@ -109,6 +110,10 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_check_compat.return_value = mock.Mock(error=None)
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
+    # The status response cache is process-wide (5s TTL), so an earlier test
+    # in the same worker can leave a cached entry for this endpoint; that
+    # would let the first health check skip `make_authenticated_request`.
+    common.get_api_server_status_response.cache_clear()
 
     try:
         with mock.patch.object(common.get_api_server_status_response,
@@ -728,6 +733,68 @@ run: echo "hello world"
     assert not list(api_server_dir.rglob('*.yaml'))
 
 
+_BLOB_ID = 'a' * 64
+
+
+def test_cloud_urls_skip_blob_resolve(tmp_path, monkeypatch):
+    """A task whose mounts are already cloud URLs must not touch the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', tmp_path)
+    monkeypatch.setattr(
+        common, 'resolve_blob_dir',
+        mock.Mock(side_effect=AssertionError('blob was resolved')))
+    task_yaml = '''
+name: test-task
+file_mounts:
+  /remote/data: gs://bucket/data
+  /remote/code:
+    source: s3://bucket/code
+  /remote/azure: https://account.blob.core.windows.net/container/obj
+run: echo hi
+'''
+    dag = common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    assert dag.tasks[0].file_mounts['/remote/data'] == 'gs://bucket/data'
+    assert not common.dag_requires_local_file_mounts(dag)
+
+
+def test_local_path_still_resolves_blob(tmp_path, monkeypatch):
+    """A task that still names a local path resolves the blob."""
+    from sky.skylet import constants as skylet_constants
+
+    clients = tmp_path / 'clients'
+    blob_dir = clients / 'test-user' / 'file_mounts' / 'blobs' / _BLOB_ID
+    blob_dir.mkdir(parents=True)
+    resolve = mock.Mock(return_value=str(blob_dir))
+    monkeypatch.setattr(common, 'API_SERVER_CLIENT_DIR', clients)
+    monkeypatch.setattr(common, 'resolve_blob_dir', resolve)
+    task_yaml = '''
+name: test-task
+workdir: /local/workdir
+file_mounts_mapping:
+  /local/workdir: workdir
+run: echo hi
+'''
+    common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars={skylet_constants.USER_ID_ENV_VAR: 'test-user'},
+        workdir_only=False,
+        file_mounts_blob_id=_BLOB_ID)
+    resolve.assert_called_once_with(_BLOB_ID, 'test-user')
+
+
+def test_dag_requires_local_file_mounts_for_local_workdir(tmp_path):
+    workdir = tmp_path / 'workdir'
+    workdir.mkdir()
+    dag = sky.Dag()
+    dag.add(sky.Task(workdir=str(workdir)))
+    assert common.dag_requires_local_file_mounts(dag)
+
+
 def _fake_response(status_code, json_body=None, json_raises=False):
     """Build a fake requests.Response for handle_request_error tests."""
     resp = mock.Mock(spec=requests.Response)
@@ -763,6 +830,31 @@ def test_handle_request_error_403_detail_clean_message():
 def test_handle_request_error_403_no_detail_falls_through():
     """A 403 without a usable `detail` keeps the original HTTPError."""
     resp = _fake_response(403, {})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_handle_request_error_404_hidden_infra_target():
+    """The server's 404 for a context or cluster outside the caller's
+    workspaces reads as a clean not-found error."""
+    resp = _fake_response(
+        404, {
+            'detail': {
+                'error': 'infra_target_not_found',
+                'message': 'Kubernetes context not found.'
+            }
+        })
+    with pytest.raises(exceptions.InfraTargetNotFoundError) as exc_info:
+        common.handle_request_error(resp)
+    assert str(exc_info.value) == 'Kubernetes context not found.'
+    # The CLI's show-gpus path catches ValueError.
+    assert isinstance(exc_info.value, ValueError)
+
+
+@pytest.mark.parametrize('body', [{'detail': 'Not Found'}, {}, None])
+def test_handle_request_error_other_404_keeps_http_error(body):
+    """FastAPI's own 404 (e.g. a route an old server lacks) is unchanged."""
+    resp = _fake_response(404, body, json_raises=body is None)
     with pytest.raises(requests.exceptions.HTTPError):
         common.handle_request_error(resp)
 
@@ -822,3 +914,44 @@ def test_redact_url_password_bad_port_is_returned_unchanged():
     """
     for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
         assert common.redact_url_password(url) == url
+
+
+def test_controller_always_uses_local_server(monkeypatch):
+    """A controller calls its own server over loopback even when an endpoint
+    is configured, so its requests keep loopback treatment."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       'http://remote.example.com:8080')
+    common.get_server_url.cache_clear()
+    try:
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()
+
+
+def test_controller_ignores_config_api_server_endpoint(monkeypatch):
+    """The controller loopback pin must also beat a server-side
+    api_server.endpoint in the config, not only the URL env var: get_server_url
+    falls back to that config key (common.py), and a non-loopback endpoint
+    there would otherwise stamp the controller's own requests as remote."""
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    real_get_nested = skypilot_config.get_nested
+
+    def fake_get_nested(keys, default_value=None, *args, **kwargs):
+        if tuple(keys) == ('api_server', 'endpoint'):
+            return 'http://remote.example.com:8080'
+        return real_get_nested(keys, default_value, *args, **kwargs)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', fake_get_nested)
+    common.get_server_url.cache_clear()
+    try:
+        # Without the controller marker, the config endpoint is honored.
+        assert common.get_server_url() == 'http://remote.example.com:8080'
+        # With it, the controller pins to its own loopback server.
+        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        common.get_server_url.cache_clear()
+        assert common.get_server_url() == common.get_default_server_url()
+    finally:
+        common.get_server_url.cache_clear()

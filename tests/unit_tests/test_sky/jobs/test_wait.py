@@ -27,6 +27,9 @@ def _make_record(
     )
 
 
+_WAIT_FIELDS = jobs_core._MANAGED_JOB_FIELDS_FOR_WAIT  # pylint: disable=protected-access
+
+
 def _mock_queue_v2_api(
     side_effect: List[List[responses.ManagedJobRecord]],) -> mock.MagicMock:
     """Create a mock for queue_v2_api that returns records from side_effect.
@@ -251,8 +254,12 @@ class TestWaitNameResolution:
         assert result == exceptions.JobExitCode.SUCCEEDED
         # First call uses name_match, second uses job_ids.
         calls = mock_queue.call_args_list
-        assert calls[0] == mock.call(refresh=False, name_match='my-job')
-        assert calls[1] == mock.call(refresh=False, job_ids=[42])
+        assert calls[0] == mock.call(refresh=False,
+                                     name_match='my-job',
+                                     fields=_WAIT_FIELDS)
+        assert calls[1] == mock.call(refresh=False,
+                                     job_ids=[42],
+                                     fields=_WAIT_FIELDS)
 
     @mock.patch.object(jobs_core, 'queue_v2_api')
     @mock.patch('time.sleep')
@@ -274,7 +281,8 @@ class TestWaitNameResolution:
         assert result == exceptions.JobExitCode.SUCCEEDED
         # Should have resolved to job_id=20 (the latest).
         assert mock_queue.call_args_list[1] == mock.call(refresh=False,
-                                                         job_ids=[20])
+                                                         job_ids=[20],
+                                                         fields=_WAIT_FIELDS)
 
     @mock.patch.object(jobs_core, 'queue_v2_api')
     @mock.patch('time.sleep')
@@ -307,7 +315,8 @@ class TestWaitNameResolution:
 
         assert result == exceptions.JobExitCode.SUCCEEDED
         assert mock_queue.call_args_list[1] == mock.call(refresh=False,
-                                                         job_ids=[1])
+                                                         job_ids=[1],
+                                                         fields=_WAIT_FIELDS)
 
 
 # ──────────────────────────────────────────────────────────────────────

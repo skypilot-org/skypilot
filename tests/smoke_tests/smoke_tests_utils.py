@@ -721,6 +721,11 @@ def override_sky_config(
         )
     if is_grpc_enabled_test():
         env_overrides[env_options.Options.ENABLE_GRPC.env_key] = '1'
+    if is_remote_identity_none_test():
+        # After the shallow update above, which would replace a test's whole
+        # `kubernetes` dict.
+        override_sky_config_dict.set_nested(('kubernetes', 'remote_identity'),
+                                            'NONE')
 
     if not override_sky_config_dict:
         yield None
@@ -1172,9 +1177,11 @@ def launch_cluster_for_cloud_cmd(cloud: str,
         # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
-        return (
-            f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
-        )
+        # The helper's kubectl needs its pod's token, which NONE removes.
+        identity = (' --config kubernetes.remote_identity=SERVICE_ACCOUNT'
+                    if is_remote_identity_none_test() else '')
+        return (f'sky launch -y -c {cluster_name} --infra {cloud} '
+                f'{LOW_RESOURCE_ARG} --async{identity}')
 
 
 def k8s_landed_context_file(name: str) -> str:
@@ -1405,6 +1412,11 @@ def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
+def is_remote_identity_none_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_REMOTE_IDENTITY_NONE',
+                          None) is not None
+
+
 def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
 
@@ -1491,6 +1503,27 @@ def is_docker_remote_api_server() -> bool:
     return False
 
 
+def get_api_server_config() -> Dict[str, Any]:
+    """Returns the API server's own config (not this client's)."""
+    response = server_common.make_authenticated_request(
+        'GET', '/workspaces/config', server_url=get_api_server_url())
+    return get_response_from_request_id_dashboard(
+        server_common.get_request_id(response))
+
+
+def update_api_server_config(config: Dict[str, Any]) -> None:
+    """Replaces the API server's config, e.g. to set keys a remote server
+    ignores in a client's config. Restore the original after the test."""
+    body = payloads.UpdateConfigBody(config=config)
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/workspaces/config',
+        json=json.loads(body.model_dump_json()),
+        server_url=get_api_server_url())
+    get_response_from_request_id_dashboard(
+        server_common.get_request_id(response))
+
+
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
@@ -1545,6 +1578,56 @@ def get_response_from_request_id_dashboard(request_id: str) -> Any:
 def with_config(cmd: str, config_path: str) -> str:
     return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
             f'{cmd}')
+
+
+def write_api_server_config(config: Optional[Dict[str, Any]] = None) -> str:
+    """Writes the local API server's config, plus `config`, to a new file.
+
+    For keys the server ignores in a client's config, such as `logs`, which a
+    test can only set by restarting the server with them (see
+    restart_api_server_with_config). Starts from the server's default config
+    file, without its `logs`, so the restarted server keeps its other settings.
+
+    The file is not deleted when the test exits: the server reads it on every
+    request, and a test that fails under --no-terminate-on-failure skips the
+    teardown that restores the server. The caller removes it once the test
+    passes.
+
+    Returns:
+        The path of the written file.
+    """
+    path = os.path.expanduser(skypilot_config.get_user_config_path())
+    base = (skypilot_config.parse_and_validate_config_file(path)
+            if os.path.exists(path) else config_utils.Config())
+    base.pop('logs', None)
+    if config is not None:
+        base = skypilot_config.overlay_skypilot_config(
+            base, config_utils.Config(config))
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     prefix='server_config_',
+                                     suffix='.yaml',
+                                     delete=False) as f:
+        # An empty config is left empty rather than dumped as '{}', so that a
+        # test can append further top-level keys to the file.
+        if base:
+            f.write(yaml_utils.dump_yaml_str(dict(base)))
+        return f.name
+
+
+def restart_api_server_with_config(config_path: str) -> str:
+    """Restarts the local API server with the config at `config_path`.
+
+    Tests using this must be marked no_remote_server, and restore the server
+    with RESTORE_API_SERVER_CONFIG in their teardown.
+    """
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path} && '
+            f'{SKY_API_RESTART}')
+
+
+# Restarts the local API server with its default config file.
+RESTORE_API_SERVER_CONFIG = (
+    f'unset {skypilot_config.ENV_VAR_GLOBAL_CONFIG} && '
+    f'{SKY_API_RESTART}')
 
 
 def _get_controller_pod_name(controller_name: str) -> str:
@@ -1625,24 +1708,51 @@ def is_in_buildkite_env() -> bool:
 def get_available_gpus(default_gpu: str = 'T4',
                        infra: str = 'kubernetes',
                        count: int = 1) -> str:
-    """Get the available GPUs for K8s or Slurm."""
+    """Get the available GPUs for K8s or Slurm.
+
+    Returns the GPU on the last table row of `sky gpus list` that offers
+    `count`, or '' when no row does.
+
+    Raises:
+        RuntimeError: if `sky gpus list` exits non-zero, or prints that the
+            infra is not enabled (which it does with exit 0). An infra with
+            no GPUs exits 0 without that message, so neither case is an
+            empty inventory.
+    """
     try:
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky gpus list --infra {infra}'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
-                                      check=True,
+                                      check=False,
                                       capture_output=True,
                                       text=True)
-        gpu_name = result.stdout.strip()
-        return gpu_name
     except Exception as e:
         Test.echo_without_prefix(f'Error getting available GPUs: {e}')
         return default_gpu
+    if result.returncode != 0:
+        raise RuntimeError(f'`sky gpus list --infra {infra}` failed with exit '
+                           f'code {result.returncode}:\n'
+                           f'{result.stdout}{result.stderr}')
+    if 'is not enabled. To fix, run: sky check' in result.stdout:
+        raise RuntimeError(f'`sky gpus list --infra {infra}` reports the infra '
+                           f'as not enabled, so its GPUs cannot be listed:\n'
+                           f'{result.stdout}')
+    lines = result.stdout.splitlines()
+    rows = [
+        row for header, row in zip(lines, lines[1:])
+        if header.startswith('GPU') and f' {count}' in row
+    ]
+    if not rows:
+        Test.echo_without_prefix(
+            f'No GPU offering {count} in `sky gpus list --infra {infra}`:\n'
+            f'{result.stdout}{result.stderr}')
+        return ''
+    return rows[-1].split()[0]
 
 
 def get_enabled_cloud_storages() -> List[clouds.Cloud]:

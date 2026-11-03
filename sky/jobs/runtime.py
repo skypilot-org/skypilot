@@ -312,6 +312,19 @@ class ManagedJobRuntime(Protocol):
         """Return K8s DNS names for this handle's nodes, or ``None``."""
         ...
 
+    def cost_units(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> Optional[int]:
+        """Controller cost units of a job running on this cluster.
+
+        Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
+        ``None`` for the full cost. A job counts in full against its
+        controller's job cap until a launch brings its cluster up: while it
+        launches or waits for resources, it costs the controller about the
+        same whatever its runtime."""
+        ...
+
 
 _runtimes: List[ManagedJobRuntime] = []
 
@@ -350,6 +363,17 @@ def is_registered() -> bool:
     thread-pool overhead when no runtime is installed.
     """
     return bool(_runtimes)
+
+
+def observes_recovery() -> bool:
+    """Whether any registered runtime implements ``get_recovery_status``.
+
+    Cheap synchronous check like ``is_registered``. When it is False, every
+    ``get_recovery_status`` dispatch returns None, so callers can skip the
+    dispatch and the work of preparing its ``previous`` cursor.
+    """
+    return any(
+        getattr(r, 'get_recovery_status', None) is not None for r in _runtimes)
 
 
 def _is_runtime_candidate(handle) -> bool:
@@ -475,10 +499,9 @@ def on_before_recovery(
     exit_codes: Optional[List[int]] = None,
     job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
-    # This hook fires for Ray-backed handles too — runtimes may
-    # capture VM logs before recovery — and ``handle`` may be None when
-    # the cluster is already unreachable. Runtimes self-filter inside
-    # the hook.
+    # This hook fires for Ray-backed handles too, and ``handle`` may be
+    # None when the cluster is already unreachable. Runtimes self-filter
+    # inside the hook.
     for r in _runtimes:
         # Defensive: a runtime registered by an older plugin build may not
         # implement this hook. Skip rather than crash on version skew.
@@ -583,6 +606,21 @@ def k8s_dns_addresses_for_handle(
         return None
     for r in _claimants(handle):
         result = r.k8s_dns_addresses_for_handle(handle)
+        if result is not None:
+            return result
+    return None
+
+
+def cost_units(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+) -> Optional[int]:
+    if not _is_runtime_candidate(handle):
+        return None
+    for r in _claimants(handle):
+        hook = getattr(r, 'cost_units', None)
+        if hook is None:
+            continue
+        result = hook(handle)
         if result is not None:
             return result
     return None

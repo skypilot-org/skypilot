@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 35  # remove ephemeral_storage; use disk_size for k8s.
+    _VERSION = 36  # add _kubernetes_identity, _remote_identity_none.
 
     def __init__(
         self,
@@ -465,6 +465,12 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
+        # Not a constructor argument and never in YAML, so a requester cannot
+        # set it: only a cluster SkyPilot launches in-process for itself does.
+        self._kubernetes_identity: Optional[str] = None
+        # Recorded from the rendered cluster config when a Kubernetes cluster
+        # is launched; None until then (and for clusters from older versions).
+        self._remote_identity_none: Optional[bool] = None
         self._cached_repr: Optional[str] = None
         self._no_missing_accel_warnings = _no_missing_accel_warnings
 
@@ -825,6 +831,24 @@ class Resources:
         # TODO(zeping): This violates the immutability of Resources.
         #  Refactor to use Resources.copy instead.
         self._requires_fuse = value
+
+    @property
+    def kubernetes_identity(self) -> Optional[str]:
+        """A fixed Kubernetes service account, exempt from remote_identity."""
+        return self._kubernetes_identity
+
+    def set_kubernetes_identity(self, service_account: Optional[str]) -> None:
+        # Mutates in place like set_requires_fuse: the task's resources are
+        # shared with the dag the launch already holds.
+        self._kubernetes_identity = service_account
+
+    @property
+    def remote_identity_none_at_launch(self) -> Optional[bool]:
+        """Whether its launched pods got no Kubernetes token, if known."""
+        return self._remote_identity_none
+
+    def set_remote_identity_none_at_launch(self, value: Optional[bool]) -> None:
+        self._remote_identity_none = value
 
     @property
     def cluster_config_overrides(self) -> Dict[str, Any]:
@@ -2345,6 +2369,8 @@ class Resources:
             _no_missing_accel_warnings=override.pop(
                 'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
+        resources.set_kubernetes_identity(self._kubernetes_identity)
+        resources.set_remote_identity_none_at_launch(self._remote_identity_none)
         assert not override
         return resources
 
@@ -3006,6 +3032,10 @@ class Resources:
 
         if version < 34:
             self._docker_image = None
+
+        if version < 36:
+            self._kubernetes_identity = None
+            self._remote_identity_none = None
 
         if version < 35:
             state.pop('_ephemeral_storage', None)
