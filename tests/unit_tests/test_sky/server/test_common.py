@@ -313,6 +313,49 @@ def test_check_server_healthy_or_start_in_server_preserves_metrics_dir(
     assert (metrics_dir / 'histogram_liveall.db').exists()
 
 
+@mock.patch('sky.server.common.subprocess.Popen')
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_sdk_api_start_in_server_never_starts(unused_url, unused_local,
+                                              mock_make_request, mock_filelock,
+                                              mock_start_server, mock_popen,
+                                              monkeypatch):
+    """sdk.api_start() from inside the API server never starts a new server.
+
+    recovery_strategy._launch called sdk.api_start() before launching a
+    cluster, after clearing env vars that include
+    SKYPILOT_DISABLE_LOCAL_API_SERVER. That call is now skipped inside the API
+    server, but any in-server caller can still reach api_start, so the guard
+    in check_server_healthy_or_start_fn must hold on this path too.
+
+    While the server's HTTP workers are not listening yet (for example, while
+    they are still binding during startup), the health probe fails. A second,
+    non-deploy server started at that point runs its startup against the live
+    server's state directory before it fails to bind: it removes the jobs
+    consolidation signal file and resets the local request database. The call
+    must surface the connection error instead.
+    """
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+    monkeypatch.delenv('SKYPILOT_DISABLE_LOCAL_API_SERVER', raising=False)
+    common.get_api_server_status_response.cache_clear()
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    with mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            sdk.api_start()
+
+    mock_start_server.assert_not_called()
+    mock_popen.assert_not_called()
+    # The creation lock is only needed to start a server.
+    mock_filelock.assert_not_called()
+
+
 def test_local_api_server_not_disabled_by_default():
     """Without the env var, the guard is a no-op."""
     env = os.environ.copy()
