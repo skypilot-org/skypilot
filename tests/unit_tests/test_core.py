@@ -896,6 +896,42 @@ def test_launch_confirm_resize_scale_down(monkeypatch):
     assert 'terminated' in msg
 
 
+def test_launch_confirm_resize_candidates_differ_in_num_nodes(monkeypatch):
+    # The smallest candidate count (1) is not the resize target: the server
+    # picks the candidate matching the cluster's hardware. The prompt must not
+    # claim a no-op or a specific scale-down.
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 1,
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    dag = sky_mod.Dag()
+    with dag:
+        task = sky_mod.Task(run='echo hi')
+        task.set_resources([
+            sky_mod.Resources(accelerators='H200:8', num_nodes=1),
+            sky_mod.Resources(accelerators='H100:8', num_nodes=2),
+        ])
+    request_options = sky_admin_policy.RequestOptions(
+        cluster_name='my-cluster',
+        idle_minutes_to_autostop=None,
+        down=False,
+        dryrun=False)
+    with pytest.raises(RuntimeError, match='stop-after-confirm'):
+        sdk_mod._launch(dag,
+                        'my-cluster',
+                        request_options,
+                        resize=True,
+                        _need_confirmation=True)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 1 node(s) to the node count' in msg
+    assert 'one of 1, 2' in msg
+    assert 'no-op' not in msg
+
+
 def test_launch_confirm_resize_noop(monkeypatch):
     record = {
         'status': status_lib.ClusterStatus.UP,

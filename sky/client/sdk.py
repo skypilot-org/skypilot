@@ -1047,7 +1047,21 @@ def _launch(
             resume_str = ''
             if cluster_status == status_lib.ClusterStatus.STOPPED:
                 resume_str = ' The stopped cluster will be restarted.'
-            if current_nodes is None:
+            # Resources candidates may set their own node counts. The
+            # cluster is resized to the count of the candidate that matches
+            # its hardware, which only the server works out.
+            candidate_num_nodes = sorted(set(
+                dag.tasks[0].candidate_num_nodes()))
+            if len(candidate_num_nodes) > 1:
+                from_str = (f'from {current_nodes} node(s) '
+                            if current_nodes is not None else '')
+                counts_str = ', '.join(map(str, candidate_num_nodes))
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'{from_str}to the node count of the resources '
+                          'candidate that matches its hardware (one of '
+                          f'{counts_str}). If that is fewer nodes, excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
+            elif current_nodes is None:
                 # Record is missing the 'nodes' field (e.g. older server or
                 # partial status response). Avoid TypeError from comparing
                 # int to None; show a generic resize prompt without the
