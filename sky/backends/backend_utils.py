@@ -4452,8 +4452,10 @@ def _status_refresh_num_threads() -> Optional[int]:
     Each cluster refresh checks one connection out of this process's state
     DB pool and holds it for the advisory lock across the cloud status call.
     A state query while that lock is held checks out a second connection.
-    More threads than half the pool wait out the pool timeout. Pool size 0
-    is NullPool and does not queue, so the caller keeps the CPU default.
+    More threads than half the pool wait out the pool timeout. The count
+    stays at or below get_parallel_threads(), since num_threads replaces
+    that default. Pool size 0 is NullPool and does not queue, so the caller
+    keeps the CPU default.
 
     Returns:
         Thread count, or None when the CPU default should be used.
@@ -4464,7 +4466,8 @@ def _status_refresh_num_threads() -> Optional[int]:
     capacity = pool_size + db_utils.get_db_connection_pool_max_overflow(
         pool_size)
     # One connection for the lock, one for a query issued while it is held.
-    return max(1, capacity // 2)
+    # num_threads replaces the CPU default, so a large pool must not exceed it.
+    return min(subprocess_utils.get_parallel_threads(), max(1, capacity // 2))
 
 
 def refresh_cluster_records() -> None:

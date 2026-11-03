@@ -17,9 +17,24 @@ def test_threads_leave_room_for_a_query_beside_the_lock():
                     return_value=1), mock.patch(
                         'sky.utils.db.db_utils.'
                         'get_db_connection_pool_max_overflow',
-                        return_value=9) as overflow:
+                        return_value=9) as overflow, mock.patch(
+                            'sky.backends.backend_utils.subprocess_utils.'
+                            'get_parallel_threads',
+                            return_value=31):
         assert backend_utils._status_refresh_num_threads() == 5
         overflow.assert_called_once_with(1)
+
+
+def test_large_pool_stays_at_the_cpu_default():
+    with mock.patch('sky.utils.db.db_utils.get_db_connection_pool_size',
+                    return_value=40), mock.patch(
+                        'sky.utils.db.db_utils.'
+                        'get_db_connection_pool_max_overflow',
+                        return_value=40), mock.patch(
+                            'sky.backends.backend_utils.subprocess_utils.'
+                            'get_parallel_threads',
+                            return_value=31):
+        assert backend_utils._status_refresh_num_threads() == 31
 
 
 def test_a_single_connection_still_refreshes_one_cluster_at_a_time():
