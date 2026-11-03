@@ -501,6 +501,13 @@ function normalizeTableColumn(config) {
       className: config.header.className
         ? String(config.header.className)
         : undefined,
+      // Optional () => node rendered inside the header cell in place of the
+      // label (e.g. a select-all checkbox). The label still names the column
+      // for tables that only show text.
+      render:
+        typeof config.header.render === 'function'
+          ? config.header.render
+          : undefined,
       order: Number.isFinite(config.header.order) ? config.header.order : 100,
     },
     cell: {

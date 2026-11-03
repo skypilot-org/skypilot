@@ -83,6 +83,7 @@ import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
 import {
   useTableColumns,
   usePluginComponents,
@@ -2371,7 +2372,7 @@ export function ManagedJobsTable({
                 : undefined
             }
           >
-            {col.header.label}
+            {col.header.render ? col.header.render() : col.header.label}
             {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
           </TableHead>
         );
@@ -2799,11 +2800,16 @@ export function ManagedJobsTable({
           )}
           <Table className="min-w-full border-collapse">
             <TableHeader>
-              <TableRow>
-                {visibleColumns.map((col) =>
-                  React.cloneElement(col.renderHeader(), { key: col.id })
-                )}
-              </TableRow>
+              {/* Extension point: a plugin may wrap the header row (it
+                  receives the row as children), e.g. to overlay it while
+                  table rows are selected. */}
+              <PluginWrapperSlot name="jobs.table.header-row">
+                <TableRow>
+                  {visibleColumns.map((col) =>
+                    React.cloneElement(col.renderHeader(), { key: col.id })
+                  )}
+                </TableRow>
+              </PluginWrapperSlot>
             </TableHeader>
             <TableBody>
               {(isInitialLoad ||
