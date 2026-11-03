@@ -292,6 +292,13 @@ def test_volume_deploy_vars_rejects_unsafe_path():
         clouds.UpCloud._volume_vars(_ZONE, [_mount('/data; touch /x')])
 
 
+def test_volume_deploy_vars_rejects_sub_path():
+    mount = _mount('/data')
+    mount.sub_path = 'datasets/v1'
+    with pytest.raises(ValueError, match='cannot use sub_path'):
+        clouds.UpCloud._volume_vars(_ZONE, [mount])
+
+
 def test_deploy_vars_volumes_with_docker_not_supported(monkeypatch):
     # pylint: disable=import-outside-toplevel
     from sky import exceptions

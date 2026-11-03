@@ -185,6 +185,13 @@ class UpCloud(clouds.Cloud):
                         f'Volume {vol.volume_name!r} is in '
                         f'{volume_config.region}, but the cluster is launched '
                         f'in {region}.')
+            # UpCloud mounts the whole share; sub_path is a Kubernetes feature.
+            if vol.sub_path is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Volume {vol.volume_name!r} cannot use sub_path on '
+                        'UpCloud. Remove sub_path and use the subfolder in '
+                        'your task instead.')
             # The path is written into setup_commands, so only plain paths pass.
             if not re.fullmatch(r'/[A-Za-z0-9._/-]+', vol.path):
                 with ux_utils.print_exception_no_traceback():
