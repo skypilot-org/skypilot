@@ -433,6 +433,9 @@ class InitializeRequestAuthUserMiddleware(middleware_utils.ASGIMiddleware):
         # Make sure that request.state.auth_user is set. Otherwise, we may get a
         # KeyError while trying to read it.
         request.state.auth_user = None
+        # The service account behind an impersonated request, see
+        # ImpersonationMiddleware.
+        request.state.impersonator = None
         return None
 
 
@@ -721,6 +724,111 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                 audit_detail='Service account authentication failed')
 
         return None
+
+
+class _ImpersonationRejected(Exception):
+    """The impersonation header names a user the caller may not act as."""
+
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def _has_only_admin_role(user_id: str) -> bool:
+    """Whether the user's only role is admin.
+
+    Reads this process's policy like the RBAC check does, and reloads it only
+    before denying, so a role granted moments ago on another worker counts.
+    """
+    service = permission.permission_service
+    admin = [rbac.RoleName.ADMIN.value]
+    return (service.roles_in_memory(user_id) == admin or
+            service.get_user_roles(user_id) == admin)
+
+
+def _resolve_impersonated_user(target: str) -> models.User:
+    """The user an impersonating request acts as: by ID, else by exact name."""
+    user = global_user_state.get_user(target)
+    if user is None:
+        matches = global_user_state.get_user_by_name(target)
+        if not matches:
+            raise _ImpersonationRejected(400, f'User {target!r} not found.')
+        if len(matches) > 1:
+            raise _ImpersonationRejected(
+                400, f'User name {target!r} matches {len(matches)} users. '
+                'Use the user ID instead.')
+        user = matches[0]
+    user_type = users_rest.get_user_type(user)
+    if user_type == models.UserType.SA.value:
+        raise _ImpersonationRejected(
+            403, 'Service accounts cannot be impersonated.')
+    if user_type == models.UserType.SYSTEM.value:
+        raise _ImpersonationRejected(
+            403, 'Built-in system users cannot be impersonated.')
+    return user
+
+
+@middleware_utils.websocket_aware
+class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
+    """Lets an admin service account act as another user.
+
+    A request carrying the impersonation header runs as the named user: the
+    user owns what the request creates, and RBAC and workspace checks apply to
+    the user. Only a service account whose role is admin may impersonate, so
+    the request can never do more than the caller could on its own. Every
+    impersonated request is logged with the service account behind it, which
+    stays on `request.state.impersonator`.
+    """
+
+    async def on_request(self, request: fastapi.Request):
+        target = request.headers.get(server_constants.IMPERSONATE_USER_HEADER)
+        if target is None:
+            return None
+        target = target.strip()
+        caller = request.state.auth_user
+        if caller is None or not caller.is_service_account():
+            return self._reject(
+                request, 403, 'Impersonation requires a service account token.')
+        if not target:
+            return self._reject(request, 400,
+                                'The user to impersonate must not be empty.')
+        try:
+            is_admin = await db_lookup.call_with_deadline(
+                _has_only_admin_role, caller.id)
+            if not is_admin:
+                return self._reject(
+                    request, 403,
+                    'Only service accounts with the admin role can '
+                    'impersonate users.')
+            user = await db_lookup.call_with_deadline(
+                _resolve_impersonated_user, target)
+        except _ImpersonationRejected as e:
+            return self._reject(request, e.status_code, e.detail)
+        except asyncio.TimeoutError:
+            logger.error('Impersonation DB lookup timed out')
+            return db_lookup.db_timeout_response(request)
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(
+                f'Concurrent worker exhausted during impersonation: {e}')
+            return db_lookup.worker_exhausted_response(request)
+
+        request_id = getattr(request.state, 'request_id', None)
+        logger.info(f'Service account {caller.name!r} ({caller.id}) is acting '
+                    f'as user {user.name!r} ({user.id}): {request.method} '
+                    f'{request.url.path} (request ID: {request_id})')
+        request.state.impersonator = caller
+        request.state.auth_user = models.User(id=user.id, name=user.name)
+        return None
+
+    @staticmethod
+    def _reject(request: fastapi.Request, status_code: int,
+                detail: str) -> fastapi.responses.JSONResponse:
+        if status_code == 403:
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_FORBIDDEN)
+        return fastapi.responses.JSONResponse(status_code=status_code,
+                                              content={'detail': detail})
 
 
 @middleware_utils.websocket_aware
@@ -1343,6 +1451,10 @@ app.add_middleware(APIVersionMiddleware)
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+# ImpersonationMiddleware sits between RBACMiddleware and all the auth
+# middleware: it needs the authenticated caller, and RBAC must check the
+# impersonated user.
+app.add_middleware(ImpersonationMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)

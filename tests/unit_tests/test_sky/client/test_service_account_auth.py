@@ -1,11 +1,16 @@
 """Tests for service account authentication client module."""
 
+import asyncio
 import os
+import threading
 import unittest.mock as mock
 
 import pytest
 
+from sky import exceptions
 from sky.client import service_account_auth
+from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.skylet import constants
 
 
@@ -153,3 +158,102 @@ class TestServiceAccountAuth:
             # Should check config since env token is empty
             mock_get_nested.assert_called_once_with(
                 ('api_server', 'service_account_token'), default_value=None)
+
+
+_TOKEN_ENV = {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_admin'}
+
+
+class TestImpersonation:
+    """Test cases for acting as another user."""
+
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    def test_header_sent_only_inside_context(self):
+        with service_account_auth.impersonate('alice'):
+            headers = service_account_auth.get_service_account_headers()
+        assert headers == {
+            'Authorization': 'Bearer sky_admin',
+            server_constants.IMPERSONATE_USER_HEADER: 'alice',
+        }
+        assert service_account_auth.get_service_account_headers() == {
+            'Authorization': 'Bearer sky_admin'
+        }
+
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    def test_nested_contexts_restore_outer_user(self):
+        with service_account_auth.impersonate('alice'):
+            with service_account_auth.impersonate('bob'):
+                assert service_account_auth.get_impersonated_user() == 'bob'
+            assert service_account_auth.get_impersonated_user() == 'alice'
+        assert service_account_auth.get_impersonated_user() is None
+
+    @mock.patch.dict(os.environ, {
+        **_TOKEN_ENV, constants.IMPERSONATE_USER_ENV_VAR: 'carol'
+    },
+                     clear=True)
+    def test_env_var_applies_and_context_takes_precedence(self):
+        assert service_account_auth.get_impersonated_user() == 'carol'
+        with service_account_auth.impersonate('alice'):
+            assert service_account_auth.get_impersonated_user() == 'alice'
+
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    def test_context_does_not_leak_into_new_threads(self):
+        seen = []
+        with service_account_auth.impersonate('alice'):
+            thread = threading.Thread(target=lambda: seen.append(
+                service_account_auth.get_impersonated_user()))
+            thread.start()
+            thread.join()
+        assert seen == [None]
+
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    def test_concurrent_tasks_act_as_different_users(self):
+
+        async def headers_as(user):
+            with service_account_auth.impersonate(user):
+                await asyncio.sleep(0)
+                return service_account_auth.get_service_account_headers()
+
+        async def main():
+            return await asyncio.gather(headers_as('alice'), headers_as('bob'))
+
+        alice, bob = asyncio.run(main())
+        assert alice[server_constants.IMPERSONATE_USER_HEADER] == 'alice'
+        assert bob[server_constants.IMPERSONATE_USER_HEADER] == 'bob'
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    @mock.patch('sky.skypilot_config.get_nested', return_value=None)
+    def test_requires_service_account_token(self, mock_get_nested):
+        del mock_get_nested
+        with service_account_auth.impersonate('alice'):
+            with pytest.raises(ValueError, match='service account token'):
+                service_account_auth.get_service_account_headers()
+
+    @pytest.mark.parametrize('user', ['', '   '])
+    def test_rejects_empty_user(self, user):
+        with pytest.raises(ValueError, match='must not be empty'):
+            with service_account_auth.impersonate(user):
+                pass
+
+    @pytest.mark.parametrize('remote_api_version,raises', [
+        (None, False),
+        (server_constants.MIN_IMPERSONATION_API_VERSION - 1, True),
+        (server_constants.MIN_IMPERSONATION_API_VERSION, False),
+    ])
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    @mock.patch('sky.server.common.rest.request')
+    def test_refuses_server_that_ignores_header(self, mock_request,
+                                                remote_api_version, raises):
+        with mock.patch('sky.server.versions.get_remote_api_version',
+                        return_value=remote_api_version), \
+                service_account_auth.impersonate('alice'):
+            if raises:
+                with pytest.raises(exceptions.APINotSupportedError):
+                    server_common.make_authenticated_request(
+                        'POST', '/launch', server_url='https://api')
+                mock_request.assert_not_called()
+            else:
+                server_common.make_authenticated_request(
+                    'POST', '/launch', server_url='https://api')
+                headers = mock_request.call_args.kwargs['headers']
+                assert headers[
+                    server_constants.IMPERSONATE_USER_HEADER] == 'alice'

@@ -658,6 +658,10 @@ SKY_API_SERVER_LOCAL_PORT_ENV_VAR = (
 SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVICE_ACCOUNT_TOKEN')
 
+# The name for the environment variable that names the user an admin service
+# account acts as on client side.
+IMPERSONATE_USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}IMPERSONATE_USER'
+
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
