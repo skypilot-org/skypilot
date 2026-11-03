@@ -281,3 +281,13 @@ def test_template_file_volume_mounted_on_all_nodes():
     assert '-head)' not in setup
     # A failed mount stops setup before the directory becomes writable.
     assert setup.index('exit 1') < setup.index('chmod a+w /data')
+
+
+def test_adaptor_client_uses_rotated_token(monkeypatch):
+    tokens = ['token-a', 'token-b']
+    monkeypatch.setattr(upcloud_adaptor, 'get_api_token', lambda: tokens[0])
+    first = upcloud_adaptor.client()
+    assert first.headers['Authorization'] == 'Bearer token-a'
+    tokens[0] = 'token-b'
+    second = upcloud_adaptor.client()
+    assert second.headers['Authorization'] == 'Bearer token-b'

@@ -97,9 +97,13 @@ def make_client(token: Optional[str] = None):
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
+def _session_for_token(api_token: str):
+    return make_client(api_token)
+
+
 def client():
-    """Return a cached authenticated UpCloud API client."""
-    return make_client()
+    """Return the cached client for the token now in upctl's config file."""
+    return _session_for_token(get_api_token())
 
 
 def get_account():
