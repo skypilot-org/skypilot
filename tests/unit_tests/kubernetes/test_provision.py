@@ -1,6 +1,7 @@
 """Tests for Kubernetes provision."""
 
 import datetime
+import json
 import re
 from typing import Optional
 from unittest import mock
@@ -6226,7 +6227,6 @@ class TestCreatePodFinalizerHandling:
                      'exists')
 
     def _conflict_exc(self):
-        import json
         return _make_api_exception(409,
                                    'Conflict',
                                    body=json.dumps(
@@ -6372,6 +6372,169 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+# ---------- Pod creation 500 "failed calling webhook" handling ----------
+
+
+class TestCreatePodWebhookUnavailable:
+    """An admission webhook that cannot be called is retried, then raised as a
+    KubernetesError naming the webhook instead of a raw ApiException."""
+
+    _WEBHOOK_MSG = (
+        'Internal error occurred: failed calling webhook "mpod.kb.io": '
+        'failed to call webhook: Post "https://kueue-webhook-service.'
+        'kueue-system.svc:443/mutate--v1-pod?timeout=10s": no endpoints '
+        'available for service "kueue-webhook-service"')
+
+    @staticmethod
+    def _api_exc(message):
+        return _make_api_exception(500,
+                                   'Internal Server Error',
+                                   body=json.dumps({'message': message}))
+
+    @staticmethod
+    def _patch(monkeypatch, create_side_effect):
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = create_side_effect
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+        clock = [1000.0]
+        sleeps = []
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        monkeypatch.setattr(instance.time, 'time', lambda: clock[0])
+        monkeypatch.setattr(instance.time, 'sleep', fake_sleep)
+        return core_api_mock, sleeps
+
+    @staticmethod
+    def _create():
+        pod_spec = {'metadata': {'name': 'c-head'}, 'spec': {}}
+        return instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, 'ctx-a')
+
+    def test_retries_until_webhook_recovers(self, monkeypatch):
+        created_pod = mock.MagicMock()
+        core_api_mock, sleeps = self._patch(monkeypatch, [
+            self._api_exc(self._WEBHOOK_MSG),
+            self._api_exc(self._WEBHOOK_MSG), created_pod
+        ])
+
+        assert self._create() is created_pod
+        assert core_api_mock.create_namespaced_pod.call_count == 3
+        assert len(sleeps) == 2
+
+    def test_raises_kubernetes_error_naming_webhook(self, monkeypatch):
+        core_api_mock, sleeps = self._patch(monkeypatch,
+                                            self._api_exc(self._WEBHOOK_MSG))
+
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._create()
+
+        message = str(exc_info.value)
+        assert 'admission webhook \'mpod.kb.io\'' in message
+        assert 'context \'ctx-a\'' in message
+        assert 'not a lack of resources' in message
+        assert 'no endpoints available' in message
+        assert exc_info.value.insufficent_resources is None
+        assert core_api_mock.create_namespaced_pod.call_count > 2
+        assert sum(sleeps) == pytest.approx(
+            instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS)
+
+    def test_reason_reaches_block_output(self, monkeypatch,
+                                         mock_format_resource):
+        """The failover loop keeps str(KubernetesError) as the reason; it must
+        name the webhook in the summary and carry no capacity hint."""
+        self._patch(monkeypatch, self._api_exc(self._WEBHOOK_MSG))
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._create()
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'ctx-a'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(k8s_resource, {k8s_resource},
+                                                  None,
+                                                  last_error_reason=str(
+                                                      exc_info.value))
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: sky_exceptions.ResourcesUnavailableError(msg)})
+
+        assert 'Reason: Pod creation in context \'ctx-a\'' in blocks
+        assert 'mpod.kb.io' in blocks
+        assert 'Hint:' not in blocks
+
+    def test_final_attempt_at_the_deadline(self, monkeypatch):
+        """A webhook that recovers in the last backoff interval is still
+        reached: the last sleep is cut short to land on the deadline."""
+        created_pod = mock.MagicMock()
+        clock_start = 1000.0
+        deadline = clock_start + instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+
+        def create(*args, **kwargs):
+            del args, kwargs  # Unused.
+            if instance.time.time() < deadline:
+                raise self._api_exc(self._WEBHOOK_MSG)
+            return created_pod
+
+        core_api_mock, sleeps = self._patch(monkeypatch, create)
+
+        assert self._create() is created_pod
+        assert sum(sleeps) == pytest.approx(
+            instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS)
+        assert core_api_mock.create_namespaced_pod.call_count == len(sleeps) + 1
+
+    def test_other_500_is_not_retried(self, monkeypatch):
+        core_api_mock, sleeps = self._patch(
+            monkeypatch, self._api_exc('etcdserver: request timed out'))
+
+        with pytest.raises(FakeApiException):
+            self._create()
+
+        assert core_api_mock.create_namespaced_pod.call_count == 1
+        assert not sleeps
+
+    @pytest.mark.parametrize('first_error', [
+        (422, 'Unprocessable Entity', 'Pod "c-head" is invalid: '
+         'FieldValueForbidden: AppArmorProfile: nil'),
+        (409, 'Conflict',
+         'object is being deleted: pods "c-head" already exists'),
+    ],
+                             ids=['apparmor-422', 'terminating-409'])
+    def test_second_attempt_retries_webhook(self, monkeypatch, first_error):
+        """The create after the AppArmor 422 or 409 handling also retries
+        while the webhook cannot be called."""
+        status, reason, message = first_error
+        created_pod = mock.MagicMock()
+        core_api_mock, sleeps = self._patch(monkeypatch, [
+            _make_api_exception(
+                status, reason, body=json.dumps({'message': message})),
+            self._api_exc(self._WEBHOOK_MSG), created_pod
+        ])
+        core_api_mock.read_namespaced_pod.return_value.metadata.finalizers = (
+            None)
+        pod_spec = {
+            'metadata': {
+                'name': 'c-head',
+                'annotations': {
+                    'container.apparmor.security.beta.kubernetes.io/'
+                    f'{k8s_constants.RAY_NODE_CONTAINER_NAME}': 'unconfined'
+                },
+            },
+            'spec': {},
+        }
+
+        assert instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, 'ctx-a') is created_pod
+        assert core_api_mock.create_namespaced_pod.call_count == 3
+        assert len(sleeps) == 1
 
 
 _LAUNCHED = datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc)
