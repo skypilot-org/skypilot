@@ -1,6 +1,7 @@
 """Tests for Kubernetes provision."""
 
 import datetime
+import json
 import re
 from typing import Optional
 from unittest import mock
@@ -6226,7 +6227,6 @@ class TestCreatePodFinalizerHandling:
                      'exists')
 
     def _conflict_exc(self):
-        import json
         return _make_api_exception(409,
                                    'Conflict',
                                    body=json.dumps(
@@ -6389,7 +6389,6 @@ class TestCreatePodWebhookUnavailable:
 
     @staticmethod
     def _api_exc(message):
-        import json
         return _make_api_exception(500,
                                    'Internal Server Error',
                                    body=json.dumps({'message': message}))
@@ -6444,7 +6443,8 @@ class TestCreatePodWebhookUnavailable:
         assert 'no endpoints available' in message
         assert exc_info.value.insufficent_resources is None
         assert core_api_mock.create_namespaced_pod.call_count > 2
-        assert sum(sleeps) <= instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+        assert sum(sleeps) == pytest.approx(
+            instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS)
 
     def test_reason_reaches_block_output(self, monkeypatch,
                                          mock_format_resource):
@@ -6471,6 +6471,26 @@ class TestCreatePodWebhookUnavailable:
         assert 'mpod.kb.io' in blocks
         assert 'Hint:' not in blocks
 
+    def test_final_attempt_at_the_deadline(self, monkeypatch):
+        """A webhook that recovers in the last backoff interval is still
+        reached: the last sleep is cut short to land on the deadline."""
+        created_pod = mock.MagicMock()
+        clock_start = 1000.0
+        deadline = clock_start + instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+
+        def create(*args, **kwargs):
+            del args, kwargs  # Unused.
+            if instance.time.time() < deadline:
+                raise self._api_exc(self._WEBHOOK_MSG)
+            return created_pod
+
+        core_api_mock, sleeps = self._patch(monkeypatch, create)
+
+        assert self._create() is created_pod
+        assert sum(sleeps) == pytest.approx(
+            instance._WEBHOOK_UNAVAILABLE_RETRY_SECONDS)
+        assert core_api_mock.create_namespaced_pod.call_count == len(sleeps) + 1
+
     def test_other_500_is_not_retried(self, monkeypatch):
         core_api_mock, sleeps = self._patch(
             monkeypatch, self._api_exc('etcdserver: request timed out'))
@@ -6491,7 +6511,6 @@ class TestCreatePodWebhookUnavailable:
     def test_second_attempt_retries_webhook(self, monkeypatch, first_error):
         """The create after the AppArmor 422 or 409 handling also retries
         while the webhook cannot be called."""
-        import json
         status, reason, message = first_error
         created_pod = mock.MagicMock()
         core_api_mock, sleeps = self._patch(monkeypatch, [

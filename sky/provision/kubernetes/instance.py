@@ -2149,8 +2149,11 @@ def _create_namespaced_pod_retrying_webhook_errors(
             if match is None:
                 raise
             webhook = match.group(1)
-            sleep_seconds = backoff.current_backoff()
-            if time.time() + sleep_seconds > deadline:
+            # The last sleep is cut short so a final attempt lands on the
+            # deadline.
+            sleep_seconds = min(backoff.current_backoff(),
+                                deadline - time.time())
+            if sleep_seconds <= 0:
                 raise config_lib.KubernetesError(
                     f'Pod creation in context {context!r} was rejected '
                     f'because admission webhook {webhook!r} could not be '
