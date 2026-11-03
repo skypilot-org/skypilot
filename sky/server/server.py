@@ -4573,6 +4573,27 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def _mark_process_as_api_server() -> None:
+    """Marks this process tree as the API server, however it was launched.
+
+    In-server code reads ENV_VAR_IS_SKYPILOT_SERVER to tell the API server,
+    and the processes it starts (HTTP workers, request executors, in-process
+    jobs and serve controllers), apart from a client. It drives config
+    loading, schema and permission checks, and database setup. `sky api start`
+    and the SDK's local server start set it before running this module, but
+    running `python -m sky.server.server` directly did not, so such a server
+    and everything it started took the client path in those checks.
+
+    Must run before any worker or controller is spawned, so they inherit it.
+    """
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        return
+    os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+    # skypilot_config loads on import, before this ran, so it loaded the
+    # client config. Reload it as the server.
+    skypilot_config.reload_config()
+
+
 def _init_or_restore_server_user_hash():
     """Restores the server user hash from the global user state db.
 
@@ -4630,6 +4651,9 @@ def _bootstrap_jwt_secret() -> None:
 
 
 if __name__ == '__main__':
+    # First, before anything reads it or any child process is spawned.
+    _mark_process_as_api_server()
+
     # Raise the websockets library header limits before importing uvicorn.
     # The env vars are read by websockets.http11 and websockets.legacy.http
     # at import time. Large auth cookies from an auth proxy can exceed the

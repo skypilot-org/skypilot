@@ -29,6 +29,33 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 
 
+def test_mark_process_as_api_server_sets_env_and_reloads_config():
+    """A directly started server marks itself as the API server.
+
+    `python -m sky.server.server` run without IS_SKYPILOT_SERVER must set it,
+    so the server and every process it spawns take the server path, and
+    reload the config that was loaded as a client on import.
+    """
+    with mock.patch.dict(os.environ):
+        os.environ.pop(constants.ENV_VAR_IS_SKYPILOT_SERVER, None)
+        with mock.patch.object(server.skypilot_config,
+                               'reload_config') as mock_reload:
+            server._mark_process_as_api_server()
+        assert os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] == 'true'
+        mock_reload.assert_called_once_with()
+
+
+def test_mark_process_as_api_server_keeps_launcher_value():
+    """A server started by a launcher keeps its value and its loaded config."""
+    with mock.patch.dict(os.environ,
+                         {constants.ENV_VAR_IS_SKYPILOT_SERVER: '1'}):
+        with mock.patch.object(server.skypilot_config,
+                               'reload_config') as mock_reload:
+            server._mark_process_as_api_server()
+        assert os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] == '1'
+        mock_reload.assert_not_called()
+
+
 @mock.patch('uvicorn.run')
 @mock.patch('sky.server.requests.executor.start')
 @mock.patch('sky.utils.common_utils.get_cpu_count')
