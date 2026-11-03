@@ -112,7 +112,7 @@ setup_commands:
     {%- if upcloud_file_volumes %}
     command -v mount.nfs >/dev/null || (sudo apt-get update -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-common);
     {%- for vol in upcloud_file_volumes %}
-    sudo mkdir -p {{vol.path}}; grep -q " {{vol.path}} nfs " /etc/fstab || echo "{{vol.address}}:{{vol.share_path}} {{vol.path}} nfs defaults,nofail,_netdev 0 0" | sudo tee -a /etc/fstab >/dev/null; mountpoint -q {{vol.path}} || sudo mount {{vol.path}}; sudo chmod a+w {{vol.path}};
+    sudo mkdir -p {{vol.path}}; grep -q " {{vol.path}} nfs " /etc/fstab || echo "{{vol.address}}:{{vol.share_path}} {{vol.path}} nfs defaults,nofail,_netdev 0 0" | sudo tee -a /etc/fstab >/dev/null; mountpoint -q {{vol.path}} || sudo mount {{vol.path}}; mountpoint -q {{vol.path}} || { echo 'NFS mount failed at {{vol.path}}' >&2; exit 1; }; sudo chmod a+w {{vol.path}};
     {%- endfor %}
     {%- endif %}
     mkdir -p ~/.ssh; touch ~/.ssh/config;

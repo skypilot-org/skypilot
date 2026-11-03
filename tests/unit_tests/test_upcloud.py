@@ -279,3 +279,5 @@ def test_template_file_volume_mounted_on_all_nodes():
     assert 'nfs-common' in setup
     assert '10.101.0.2:/skypilot /data nfs' in setup
     assert '-head)' not in setup
+    # A failed mount stops setup before the directory becomes writable.
+    assert setup.index('exit 1') < setup.index('chmod a+w /data')
