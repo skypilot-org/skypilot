@@ -317,12 +317,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     }
     resumed_ids: List[str] = []
     if stopped:
-        if config.resume_stopped_nodes:
+        # UpCloud stops reclaimed spot servers, so they look like stopped ones.
+        # Replace them instead of resuming.
+        if (config.resume_stopped_nodes and
+                not config.node_config.get('UseSpot')):
             resumed_ids = list(stopped)
             _start_servers(client, resumed_ids)
         else:
             logger.info(f'Terminating {len(stopped)} stopped UpCloud '
-                        'server(s) as resume_stopped_nodes is False.')
+                        'server(s) instead of resuming them.')
             _delete_servers(client, stopped)
 
     running = _filter_instances(cluster_name_on_cloud,

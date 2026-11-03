@@ -292,6 +292,15 @@ def test_run_instances_resumes_stopped(fake_client):
     assert second.head_instance_id == first.head_instance_id
 
 
+def test_run_instances_spot_replaces_stopped(fake_client):
+    first = _run(_config(node_config={'UseSpot': True}))
+    upcloud_instance.stop_instances('demo')
+    second = _run(_config(node_config={'UseSpot': True}))
+    assert ('delete', first.head_instance_id) in fake_client.calls
+    assert not second.resumed_instance_ids
+    assert second.created_instance_ids != first.created_instance_ids
+
+
 def test_run_instances_no_resume_replaces_stopped(fake_client):
     first = _run(_config())
     upcloud_instance.stop_instances('demo')
