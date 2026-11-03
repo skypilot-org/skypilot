@@ -1714,9 +1714,10 @@ def get_available_gpus(default_gpu: str = 'T4',
     `count`, or '' when no row does.
 
     Raises:
-        RuntimeError: if `sky gpus list` reports the infra as not enabled.
-            It prints that to stdout and exits 0, which would otherwise read
-            the same as an infra with no GPUs.
+        RuntimeError: if `sky gpus list` exits non-zero, or prints that the
+            infra is not enabled (which it does with exit 0). An infra with
+            no GPUs exits 0 without that message, so neither case is an
+            empty inventory.
     """
     try:
         prefix = ''
@@ -1733,6 +1734,10 @@ def get_available_gpus(default_gpu: str = 'T4',
     except Exception as e:
         Test.echo_without_prefix(f'Error getting available GPUs: {e}')
         return default_gpu
+    if result.returncode != 0:
+        raise RuntimeError(f'`sky gpus list --infra {infra}` failed with exit '
+                           f'code {result.returncode}:\n'
+                           f'{result.stdout}{result.stderr}')
     if 'is not enabled. To fix, run: sky check' in result.stdout:
         raise RuntimeError(f'`sky gpus list --infra {infra}` reports the infra '
                            f'as not enabled, so its GPUs cannot be listed:\n'
@@ -1744,8 +1749,8 @@ def get_available_gpus(default_gpu: str = 'T4',
     ]
     if not rows:
         Test.echo_without_prefix(
-            f'No GPU offering {count} in `sky gpus list --infra {infra}` '
-            f'(exit {result.returncode}):\n{result.stdout}{result.stderr}')
+            f'No GPU offering {count} in `sky gpus list --infra {infra}`:\n'
+            f'{result.stdout}{result.stderr}')
         return ''
     return rows[-1].split()[0]
 
