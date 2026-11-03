@@ -28,9 +28,8 @@ from sky.skylet import constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import infra_utils
+# Tests monkeypatch state.migration_utils.db_lock; schema upgrades use state_db.
 from sky.utils.db import db_utils
-# Re-exported module attribute: unit fixtures monkeypatch
-# ``state.migration_utils.db_lock``. Schema upgrades run via state_db.
 from sky.utils.db import migration_utils  # pylint: disable=unused-import
 from sky.utils.db import retries as db_retries
 from sky.utils.db import sqlalchemy_deps
