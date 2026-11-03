@@ -51,6 +51,16 @@ def _wait_file_storage_running(client: utils.UpCloudClient,
         time.sleep(utils.POLL_INTERVAL)
 
 
+def _wait_file_storage_deleted(client: utils.UpCloudClient, name_on_cloud: str,
+                               zone: str) -> None:
+    deadline = time.time() + _FILE_STORAGE_TIMEOUT
+    while _find_file_storage(client, name_on_cloud, zone):
+        if time.time() > deadline:
+            raise TimeoutError('Timed out waiting for UpCloud file storage '
+                               f'{name_on_cloud} deletion.')
+        time.sleep(utils.POLL_INTERVAL)
+
+
 def _resolve_size(config: models.VolumeConfig, actual: Any) -> None:
     if actual is None:
         return
@@ -78,6 +88,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
         network, cidr = utils.create_network_in_free_range(
             client, f'skypilot-volume-{name_on_cloud}', zone, name_on_cloud,
             {utils.LABEL_VOLUME: name_on_cloud})
+        storage_uuid: Optional[str] = None
         try:
             service = client.create_file_storage({
                 'name': name_on_cloud,
@@ -103,11 +114,22 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
                     'value': name_on_cloud
                 }],
             })
-        except utils.UpCloudError:
-            # Do not leave the new network behind when the storage fails.
-            client.delete_network(network['uuid'])
+            storage_uuid = str(service['uuid'])
+            service = _wait_file_storage_running(client, storage_uuid)
+        except (utils.UpCloudError, TimeoutError):
+            # Remove the storage and network, so none is left without a record.
+            # Cleanup is best effort, so the user still sees the first error.
+            try:
+                if storage_uuid is not None:
+                    client.delete_file_storage(storage_uuid)
+                    _wait_file_storage_deleted(client, name_on_cloud, zone)
+                client.delete_network(network['uuid'])
+            except (utils.UpCloudError, TimeoutError) as e:
+                logger.warning(
+                    f'Could not clean up UpCloud file storage '
+                    f'{name_on_cloud} or network {network["uuid"]}: {e}. '
+                    'Delete them in the UpCloud console.')
             raise
-        service = _wait_file_storage_running(client, str(service['uuid']))
         logger.info(f'Created UpCloud file storage {name_on_cloud} '
                     f'(id={service["uuid"]}).')
     address, network_uuid = _file_storage_address(service)
@@ -131,12 +153,7 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
         return config
     _, network_uuid = _file_storage_address(service)
     client.delete_file_storage(str(service['uuid']))
-    deadline = time.time() + _FILE_STORAGE_TIMEOUT
-    while _find_file_storage(client, config.name_on_cloud, zone):
-        if time.time() > deadline:
-            raise TimeoutError('Timed out waiting for UpCloud file storage '
-                               f'{config.name_on_cloud} deletion.')
-        time.sleep(utils.POLL_INTERVAL)
+    _wait_file_storage_deleted(client, config.name_on_cloud, zone)
     network = client.get_network(network_uuid)
     if utils.has_label(network, utils.LABEL_VOLUME, config.name_on_cloud):
         client.delete_network(network_uuid)

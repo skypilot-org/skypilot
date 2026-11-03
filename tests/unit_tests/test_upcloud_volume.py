@@ -154,6 +154,26 @@ def test_apply_file_storage_failure_deletes_network(fake_client):
     assert fake_client.deleted == [('network', 'net-1')]
 
 
+def test_apply_file_storage_timeout_deletes_storage(fake_client, monkeypatch):
+    monkeypatch.setattr(upcloud_volume, '_wait_file_storage_running',
+                        mock.Mock(side_effect=TimeoutError('slow')))
+    with pytest.raises(TimeoutError, match='slow'):
+        upcloud_volume.apply_volume(_volume_config())
+    assert fake_client.file_storages == []
+    assert fake_client.networks == {}
+    assert fake_client.deleted == [('file_storage', 'fs-1'),
+                                   ('network', 'net-1')]
+
+
+def test_apply_cleanup_failure_keeps_original_error(fake_client, monkeypatch):
+    monkeypatch.setattr(upcloud_volume, '_wait_file_storage_running',
+                        mock.Mock(side_effect=TimeoutError('slow')))
+    monkeypatch.setattr(fake_client, 'delete_file_storage',
+                        mock.Mock(side_effect=utils.UpCloudError('busy')))
+    with pytest.raises(TimeoutError, match='slow'):
+        upcloud_volume.apply_volume(_volume_config())
+
+
 def test_delete_file_storage_deletes_own_network(fake_client):
     config = upcloud_volume.apply_volume(_volume_config())
     upcloud_volume.delete_volume(config)
