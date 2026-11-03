@@ -107,6 +107,14 @@ def test_feasible_resources_by_accelerator():
     assert not missing.resources_list
 
 
+def test_feasible_resources_cpu_spot_has_hint():
+    cloud = upcloud.UpCloud()
+    feasible = cloud._get_feasible_launchable_resources(
+        resources_lib.Resources(cloud=cloud, cpus='8+', use_spot=True))
+    assert not feasible.resources_list
+    assert '--gpus' in feasible.hint
+
+
 def test_feasible_resources_by_instance_type():
     cloud = upcloud.UpCloud()
     feasible = cloud._get_feasible_launchable_resources(

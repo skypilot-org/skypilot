@@ -60,7 +60,12 @@ def get_default_instance_type(
     if disk_tier == resources_utils.DiskTier.ULTRA:
         # UpCloud has no storage tier faster than MaxIOPS (DiskTier.HIGH).
         return None
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+    df = _df
+    if use_spot:
+        # Spot defaults are CPU plans with a spot price. UpCloud sells spot only
+        # for GPU plans, so a CPU spot request must not land on a GPU server.
+        df = df[df['AcceleratorName'].isna() & df['SpotPrice'].notna()]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone, use_spot,
                                                       max_hourly_cost)
 

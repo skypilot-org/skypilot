@@ -66,6 +66,16 @@ def test_default_instance_type():
                                                      memory='32+') == _L40S
 
 
+def test_default_spot_instance_type_is_cpu_only(monkeypatch):
+    assert upcloud_catalog.get_default_instance_type(use_spot=True) is None
+    assert upcloud_catalog.get_default_instance_type(cpus='8+',
+                                                     use_spot=True) is None
+    df = upcloud_catalog._df.copy()
+    df.loc[df['InstanceType'] == _CPU, 'SpotPrice'] = 0.01
+    monkeypatch.setattr(upcloud_catalog, '_df', df)
+    assert upcloud_catalog.get_default_instance_type(use_spot=True) == _CPU
+
+
 def test_list_accelerators_and_regions():
     accs = upcloud_catalog.list_accelerators(gpus_only=True,
                                              name_filter=None,

@@ -359,7 +359,11 @@ class UpCloud(clouds.Cloud):
             use_spot=resources.use_spot,
             max_hourly_cost=resources.max_hourly_cost)
         if default_instance_type is None:
-            return resources_utils.FeasibleResources([], [], None)
+            hint = None
+            if resources.use_spot:
+                hint = ('No UpCloud CPU plan with a spot price matches. '
+                        'Request a GPU with --gpus.')
+            return resources_utils.FeasibleResources([], [], hint)
         return resources_utils.FeasibleResources([
             resources.copy(
                 cloud=self,
