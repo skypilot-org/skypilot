@@ -77,6 +77,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -4445,6 +4446,27 @@ def _refresh_cluster(
     return record
 
 
+def _status_refresh_num_threads() -> Optional[int]:
+    """Thread count for one status refresh, or None for the CPU default.
+
+    Each cluster refresh checks one connection out of this process's state
+    DB pool and holds it for the advisory lock across the cloud status call.
+    A state query while that lock is held checks out a second connection.
+    More threads than half the pool wait out the pool timeout. Pool size 0
+    is NullPool and does not queue, so the caller keeps the CPU default.
+
+    Returns:
+        Thread count, or None when the CPU default should be used.
+    """
+    pool_size = db_utils.get_db_connection_pool_size()
+    if pool_size <= 0:
+        return None
+    capacity = pool_size + db_utils.get_db_connection_pool_max_overflow(
+        pool_size)
+    # One connection for the lock, one for a query issued while it is held.
+    return max(1, capacity // 2)
+
+
 def refresh_cluster_records() -> None:
     """Refreshes the status of all clusters, except managed clusters.
 
@@ -4487,8 +4509,10 @@ def refresh_cluster_records() -> None:
 
     if len(cluster_names_without_launch_request) > 0:
         # Do not refresh the clusters that have an active launch request.
-        subprocess_utils.run_in_parallel(_refresh_cluster_record,
-                                         cluster_names_without_launch_request)
+        subprocess_utils.run_in_parallel(
+            _refresh_cluster_record,
+            cluster_names_without_launch_request,
+            num_threads=_status_refresh_num_threads())
 
 
 def _get_records_with_handle(
