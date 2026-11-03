@@ -1,6 +1,7 @@
 """Tests for UpCloud File Storage volumes."""
 # pylint: disable=protected-access
 
+import contextlib
 import ipaddress
 from typing import Any, Dict, List
 from unittest import mock
@@ -8,12 +9,16 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky import global_user_state
 from sky import models
+from sky import provision
 from sky.provision.upcloud import utils
 from sky.provision.upcloud import volume as upcloud_volume
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import volume as volume_lib
 from sky.volumes import volume as volume_spec
+from sky.volumes.server import core
 
 _ZONE = 'fi-hel2'
 
@@ -277,3 +282,29 @@ def test_deploy_vars_volumes_with_docker_not_supported(monkeypatch):
             None,
             1,
             volume_mounts=[_mount('/data')])
+
+
+def test_volume_apply_name_on_cloud_fits_limit(monkeypatch):
+    """Generated name, with its UUID suffix, fits the UpCloud limit."""
+    saved = {}
+    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                        lambda name: None)
+    monkeypatch.setattr(core, '_volume_lock',
+                        lambda name: contextlib.nullcontext())
+    monkeypatch.setattr(core.provision, 'apply_volume',
+                        lambda cloud, config: config)
+    monkeypatch.setattr(
+        core, '_initial_volume_status', lambda cloud, config:
+        (status_lib.VolumeStatus.READY, None))
+    monkeypatch.setattr(
+        global_user_state, 'add_volume', lambda name, config, *args, **kwargs:
+        saved.update(name_on_cloud=config.name_on_cloud))
+    core.volume_apply(
+        name='v' * 64,
+        volume_type=(volume_lib.VolumeType.UPCLOUD_FILE_STORAGE.value),
+        cloud='upcloud',
+        region='fi-hel2',
+        zone=None,
+        size='250',
+        config={})
+    assert len(saved['name_on_cloud']) <= 64
