@@ -186,6 +186,13 @@ def test_delete_file_storage_deletes_own_network(fake_client):
                                    ('network', 'net-1')]
 
 
+def test_delete_file_storage_use_existing_keeps_storage(fake_client):
+    config = upcloud_volume.apply_volume(_volume_config())
+    config = upcloud_volume.apply_volume(_volume_config(use_existing=True))
+    upcloud_volume.delete_volume(config)
+    assert fake_client.deleted == []
+
+
 def test_apply_file_storage_reuses_and_syncs_size(fake_client):
     upcloud_volume.apply_volume(_volume_config())
     fake_client.file_storages[0]['size_gib'] = 500

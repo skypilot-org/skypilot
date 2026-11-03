@@ -153,7 +153,15 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 
 def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
-    """Deletes an UpCloud file storage and the network SkyPilot created."""
+    """Deletes an UpCloud file storage and the network SkyPilot created.
+
+    Volumes registered with use_existing keep their cloud resources; only the
+    SkyPilot record is removed.
+    """
+    if config.config.get('use_existing'):
+        logger.info(f'Leaving UpCloud file storage {config.name_on_cloud} '
+                    'intact (use_existing=True).')
+        return config
     client = utils.UpCloudClient()
     zone = config.region
     assert zone is not None
