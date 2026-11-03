@@ -108,12 +108,9 @@ class ExtensionContext:
 
     Attributes:
         app: The FastAPI application instance.
-        rbac_rules: List of RBAC rules registered by the plugin.
-        Example:
-        [
-            ('user', RBACRule(path='/plugins/api/xx/*', method='POST')),
-            ('user', RBACRule(path='/plugins/api/xx/*', method='DELETE'))
-        ]
+
+    RBAC rules are declared through ``BasePlugin.rbac_rules``, not here: the
+    server collects them before any plugin is installed.
     """
 
     def __init__(
@@ -124,7 +121,6 @@ class ExtensionContext:
     ):
         self.context = context
         self.app = app
-        self.rbac_rules: List[Tuple[str, RBACRule]] = []
         self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
 
     def register_managed_secrets_provider(
@@ -173,40 +169,6 @@ class ExtensionContext:
         # pylint: disable=import-outside-toplevel
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
-
-    def register_rbac_rule(self,
-                           path: str,
-                           method: str,
-                           description: Optional[str] = None,
-                           role: str = 'user') -> None:
-        """Register an RBAC rule for this plugin.
-
-        This method allows plugins to declare which endpoints should be
-        restricted to admin users during the install phase.
-
-        Args:
-            path: The path pattern to restrict (supports wildcards with
-                  keyMatch2).
-                  Example: '/plugins/api/credentials/*'
-            method: The HTTP method to restrict. Example: 'POST', 'DELETE'
-            description: Optional description of what this rule protects.
-            role: The role to add this rule to (default: 'user').
-                  Rules added to 'user' role block regular users but allow
-                  admins.
-
-        Example:
-            def install(self, ctx: ExtensionContext):
-                # Only admin can upload credentials
-                ctx.register_rbac_rule(
-                    path='/plugins/api/credentials/*',
-                    method='POST',
-                    description='Only admin can upload credentials'
-                )
-        """
-        rule = RBACRule(path=path, method=method, description=description)
-        self.rbac_rules.append((role, rule))
-        logger.debug(f'Registered RBAC rule for {role}: {method} {path}'
-                     f'{f" - {description}" if description else ""}')
 
 
 @dataclasses.dataclass
