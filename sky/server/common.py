@@ -33,6 +33,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.client import auth_proxy
 from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
@@ -366,8 +367,10 @@ def _prepare_authenticated_request_params(
     if server_url is None:
         server_url = get_server_url()
 
-    # Prepare headers and URL for service account authentication
-    headers = service_account_auth.get_service_account_headers()
+    # Prepare headers and URL for service account authentication, plus the
+    # credential for an authenticating proxy in front of the server, if any.
+    headers = auth_proxy.get_auth_proxy_headers()
+    headers.update(service_account_auth.get_service_account_headers())
 
     # Merge with existing headers
     if 'headers' in kwargs:

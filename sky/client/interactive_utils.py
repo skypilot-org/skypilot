@@ -11,6 +11,7 @@ import typing
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.client import auth_proxy
 from sky.client import service_account_auth
 from sky.server import common as server_common
 from sky.utils import rich_utils
@@ -50,7 +51,8 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
     logger.info('Starting interactive SSH authentication...')
 
     headers = {}
-    # Add service account auth if available
+    # Add the authenticating proxy's credential and service account auth
+    headers.update(auth_proxy.get_auth_proxy_headers())
     headers.update(service_account_auth.get_service_account_headers())
     # Add cookie auth with URL-aware filtering
     headers.update(server_common.get_cookie_header_for_url(ws_url))

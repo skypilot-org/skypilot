@@ -19,6 +19,7 @@ import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.client import auth_proxy
 from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.data import storage_utils
@@ -192,7 +193,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
-    sa_headers = service_account_auth.get_service_account_headers()
+    sa_headers = auth_proxy.get_auth_proxy_headers()
+    sa_headers.update(service_account_auth.get_service_account_headers())
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(

@@ -335,6 +335,45 @@ Example:
 
 Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
 
+.. _config-yaml-api-server-auth-proxy:
+
+``api_server.auth_proxy``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Credential for an authenticating proxy in front of the API server (optional),
+such as `Google Cloud Identity-Aware Proxy (IAP)
+<https://cloud.google.com/iap/docs/authentication-howto>`_ or Cloudflare
+Access. Such proxies keep their browser session cookie to themselves, so
+``sky api login``'s browser flow cannot get through them; instead, the client
+runs ``command``, which prints a short-lived token, and sends it in a header
+on every request to the API server, including WebSocket connections.
+
+The token is cached in memory: a JWT until one minute before its ``exp``
+claim, anything else for ``cache_seconds``. This setting is read only by the
+client and is never sent to the API server.
+
+- ``command``: the command to run, as a string or a list of arguments. It must
+  print the token as a single line.
+- ``header`` (default: ``Proxy-Authorization``): the request header to send.
+- ``value_template`` (default: ``Bearer {token}``): the header's value.
+- ``cache_seconds`` (default: ``300``): how long to reuse a token that is not
+  a JWT.
+
+Example, for an API server behind IAP (IAP must accept ID tokens issued to
+gcloud's OAuth client for programmatic access; see `Programmatic
+authentication <https://cloud.google.com/iap/docs/authentication-howto>`_):
+
+.. code-block:: yaml
+
+  api_server:
+    endpoint: https://skypilot.example.com
+    auth_proxy:
+      command: gcloud auth print-identity-token
+
+The API server can then take the user's identity from IAP's signed header (see
+:ref:`auth-proxy-byo`): ``X-Goog-IAP-JWT-Assertion``, in ``jwt``
+format, with claim ``email``.
+
 .. _config-yaml-api-server-requests-gc-retention-hours:
 
 ``api_server.requests_retention_hours``

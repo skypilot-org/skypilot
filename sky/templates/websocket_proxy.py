@@ -22,6 +22,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
 
 from sky import exceptions
+from sky.client import auth_proxy
 from sky.client import service_account_auth
 from sky.server import common as server_common
 from sky.server import constants
@@ -114,6 +115,7 @@ async def main(
         headers.update(override_headers)
     else:
         headers.update(server_common.get_cookie_header_for_url(url))
+        headers.update(auth_proxy.get_auth_proxy_headers())
         headers.update(service_account_auth.get_service_account_headers())
     try:
         async with connect(url,
@@ -366,6 +368,7 @@ async def _connect_with_redirect(ws_url: str, timestamps_supported: bool,
     """Connect to WebSocket, handle REDIRECT frame if server sends one."""
     headers: Dict[str, str] = {}
     headers.update(server_common.get_cookie_header_for_url(ws_url))
+    headers.update(auth_proxy.get_auth_proxy_headers())
     headers.update(service_account_auth.get_service_account_headers())
     try:
         async with connect(ws_url,
