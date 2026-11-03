@@ -317,7 +317,12 @@ rejects these rules, so select the classic build with
 ``update-alternatives --set sudo /usr/bin/sudo.ws``. Adjust the executable
 locations, group name, and paths,
 install the file with root ownership and mode ``0440``, and check it
-with ``visudo -cf``. The rsync rule lists explicit server arguments; different
+with ``visudo -cf``. If account names contain ``.``, ``+``, or a domain (for
+example ``alice@corp.example.com`` with
+:ref:`username_from_email <config-yaml-slurm-username-from-email>`), widen the
+home-directory pattern to match, e.g.
+``/home/[a-z_][a-z0-9_.+-]*(@[a-z0-9][a-z0-9.-]*)?``, or to your directory's
+home layout. The rsync rule lists explicit server arguments; different
 rsync versions may require an adjusted rule based on sudo's log. The ``rm`` rule
 also permits ``--one-file-system`` so recursive cleanup can skip nested
 filesystems, such as bucket mounts that could not be unmounted.
