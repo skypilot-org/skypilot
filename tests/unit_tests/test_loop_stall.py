@@ -473,7 +473,10 @@ def test_starved_loop_dumps_other_threads(stall_logs):
     parked in its selector holds only asyncio frames, which is the condition
     under test, and a real GIL-starvation race would be flaky.
     """
-    loop = asyncio.new_event_loop()
+    # This test asserts on the selector frame.  Do not inherit a uvloop policy
+    # left by another test: uvloop's C-level run_forever() hides that frame
+    # from sys._current_frames(), leaving only this function visible.
+    loop = asyncio.SelectorEventLoop()
     loop_ready = threading.Event()
 
     def park_the_loop():
