@@ -333,30 +333,58 @@ class TestRequestsCarryTheHeaders:
         }
         cookie_jar.assert_not_called()
 
-    def test_async_request_gets_a_token_off_the_event_loop(self):
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.client.service_account_auth.get_service_account_headers',
+                return_value={})
+    @mock.patch('sky.client.auth_proxy.get_auth_proxy_headers',
+                return_value={'Authorization': 'Bearer idtok'})
+    def test_proxy_in_authorization_keeps_cookies(self, _proxy, _sa,
+                                                  cookie_jar):
+        """A proxy token in Authorization isn't SkyPilot's own bearer token."""
+        cookie_jar.return_value = 'jar'
+        _, kwargs = server_common._prepare_authenticated_request_params(
+            '/api/health', server_url=ENDPOINT)
+        assert kwargs['headers'] == {'Authorization': 'Bearer idtok'}
+        assert kwargs['cookies'] == 'jar'
+
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.client.auth_proxy.get_auth_headers')
+    def test_prepare_uses_given_credentials(self, get_auth_headers,
+                                            _cookie_jar):
+        _, kwargs = server_common._prepare_authenticated_request_params(
+            '/api/health',
+            server_url=ENDPOINT,
+            auth_headers={'Proxy-Authorization': 'Bearer given'})
+        assert kwargs['headers'] == {'Proxy-Authorization': 'Bearer given'}
+        get_auth_headers.assert_not_called()
+
+    def test_async_request_runs_the_command_once_off_the_loop(
+            self, user_config):
+        """Even for a token too close to expiry to cache, the async path
+        runs the command once per request, in a worker thread."""
+        user_config.set({'command': 'print-token'})
+        token = _jwt(time.time() + 30)
         threads = []
 
-        def fake_headers(url):
+        def run(*args, **kwargs):
             threads.append(threading.current_thread())
-            return {}
+            return _completed(token)
 
-        class Stop(Exception):
-            pass
+        sent = mock.AsyncMock(return_value='response')
 
-        async def run():
-            with mock.patch('sky.client.auth_proxy.token_needs_refresh',
-                            return_value=True), \
-                 mock.patch('sky.client.auth_proxy.get_auth_proxy_headers',
-                            side_effect=fake_headers), \
-                 mock.patch('sky.server.common.'
-                            '_prepare_authenticated_request_params',
-                            side_effect=Stop):
-                with pytest.raises(Stop):
-                    await server_common.make_authenticated_request_async(
-                        mock.Mock(), 'GET', '/api/health', server_url=ENDPOINT)
+        async def request():
+            return await server_common.make_authenticated_request_async(
+                mock.Mock(), 'GET', '/api/health', server_url=ENDPOINT)
 
-        asyncio.run(run())
-        assert threads and threads[0] is not threading.main_thread()
+        with mock.patch('subprocess.run', side_effect=run), \
+             mock.patch('sky.server.common.get_api_cookie_jar'), \
+             mock.patch('sky.server.common.rest.request_async', sent):
+            assert asyncio.run(request()) == 'response'
+        assert len(threads) == 1
+        assert threads[0] is not threading.main_thread()
+        assert sent.call_args.kwargs['headers'] == {
+            'Proxy-Authorization': f'Bearer {token}'
+        }
 
     def test_upload_retry_gets_a_new_token(self, tmp_path):
         chunk = tmp_path / 'chunk'

@@ -250,12 +250,9 @@ def get_auth_headers(url: str) -> Dict[str, str]:
     return headers
 
 
-def token_needs_refresh(url: str) -> bool:
-    """Whether getting headers for `url` would run the command first."""
-    settings = _settings_for(url)
-    if settings is None:
-        return False
-    return _cached_token(tuple(_command_argv(settings['command']))) is None
+def configured_for(url: str) -> bool:
+    """Whether getting headers for `url` may run the command."""
+    return _settings_for(url) is not None
 
 
 def clear_cache() -> None:

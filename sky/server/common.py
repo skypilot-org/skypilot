@@ -35,6 +35,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import auth_proxy
+from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -358,8 +359,13 @@ def get_cookies_from_response(
 def _prepare_authenticated_request_params(
         path: str,
         server_url: Optional[str] = None,
+        auth_headers: Optional[Dict[str, str]] = None,
         **kwargs) -> Tuple[str, Dict[str, Any]]:
     """Prepare common parameters for authenticated requests (sync or async).
+
+    Args:
+        auth_headers: The result of `auth_proxy.get_auth_headers(server_url)`,
+            if the caller already has it.
 
     Returns:
         Tuple of (url, updated_kwargs)
@@ -369,11 +375,13 @@ def _prepare_authenticated_request_params(
 
     # The service account token, plus the credential for an authenticating
     # proxy in front of the server, if any.
-    headers = auth_proxy.get_auth_headers(server_url)
+    if auth_headers is None:
+        auth_headers = auth_proxy.get_auth_headers(server_url)
+    headers = dict(auth_headers)
 
     # Merge with existing headers
-    if 'headers' in kwargs:
-        headers.update(kwargs['headers'])
+    caller_headers = kwargs.get('headers') or {}
+    headers.update(caller_headers)
     kwargs['headers'] = headers
 
     # Always use the same URL regardless of authentication type
@@ -381,8 +389,11 @@ def _prepare_authenticated_request_params(
     url = f'{server_url}/{path}' if not path.startswith(
         '/') else f'{server_url}{path}'
 
-    # Use cookie authentication if no Bearer token present
-    if not headers.get('Authorization') and 'cookies' not in kwargs:
+    # Use cookie authentication if no Bearer token for SkyPilot itself is
+    # present. A proxy's token is for the proxy, even in Authorization.
+    has_bearer = (caller_headers.get('Authorization') or
+                  service_account_auth.get_service_account_headers())
+    if not has_bearer and 'cookies' not in kwargs:
         kwargs['cookies'] = get_api_cookie_jar()
 
     return url, kwargs
@@ -464,13 +475,16 @@ async def make_authenticated_request_async(
     """
     if server_url is None:
         server_url = get_server_url()
-    # Getting a new token for an authenticating proxy runs a command, which can
-    # take seconds: do it off the event loop. Then the call below uses the
-    # cached token.
-    if auth_proxy.token_needs_refresh(server_url):
-        await asyncio.to_thread(auth_proxy.get_auth_proxy_headers, server_url)
-    url, kwargs = _prepare_authenticated_request_params(path, server_url,
-                                                        **kwargs)
+    # An authenticating proxy's token comes from a command, which can take
+    # seconds: get the credentials off the event loop, once, when one is
+    # configured for this server.
+    if auth_proxy.configured_for(server_url):
+        auth_headers = await asyncio.to_thread(auth_proxy.get_auth_headers,
+                                               server_url)
+    else:
+        auth_headers = auth_proxy.get_auth_headers(server_url)
+    url, kwargs = _prepare_authenticated_request_params(
+        path, server_url, auth_headers=auth_headers, **kwargs)
 
     # Convert cookies to aiohttp format if needed
     if 'cookies' in kwargs and isinstance(kwargs['cookies'],
