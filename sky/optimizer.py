@@ -1302,12 +1302,25 @@ class Optimizer:
                 'in _find_common_infras or in how candidate clouds are '
                 'matched by name.')
 
-            # Find resources in this cloud+region
+            # Find resources in this cloud+region. Take the candidate the
+            # infra was scored with (candidates may differ in node count),
+            # unless the user ordered them: then the first one in order.
+            region_resources = [
+                r for r in candidates[matching_cloud] if r.region == region
+            ]
             matched_resources = None
-            for resources in candidates[matching_cloud]:
-                if resources.region == region:
-                    matched_resources = resources
-                    break
+            if region_resources:
+                if (len(region_resources) == 1 or
+                        isinstance(task.resources, list)):
+                    matched_resources = region_resources[0]
+                else:
+                    scores = [
+                        Optimizer._job_group_score(
+                            task, r, minimize == common.OptimizeTarget.COST)
+                        for r in region_resources
+                    ]
+                    matched_resources = region_resources[scores.index(
+                        min(scores))]
             # Same invariant as above, at region granularity.
             candidate_regions = sorted(
                 {str(r.region) for r in candidates[matching_cloud]})
@@ -1448,6 +1461,27 @@ class Optimizer:
         return result
 
     @staticmethod
+    def _job_group_score(task: task_lib.Task,
+                         resources: resources_lib.Resources,
+                         minimize_cost: bool) -> float:
+        """Estimated cost or time of running a job group task on resources.
+
+        Used both to pick the job group's infra and the resources assigned
+        on it, so the two agree.
+        """
+        if task.time_estimator_func is None:
+            runtime = 3600  # Default 1 hour
+        else:
+            runtime = task.estimate_runtime(resources)
+            if runtime is None:
+                runtime = 3600  # Default 1 hour
+
+        if minimize_cost:
+            hourly_cost = resources.get_cost(runtime)
+            return hourly_cost * task.num_nodes_for(resources)
+        return runtime
+
+    @staticmethod
     def _select_best_infra(
             common_infras: List[Tuple[clouds.Cloud, Optional[str]]],
             task_candidates: Dict[task_lib.Task, _PerCloudCandidates],
@@ -1495,20 +1529,8 @@ class Optimizer:
                 best_task_score = float('inf')
                 for resources in candidates[cloud]:
                     if resources.region == region or resources.region is None:
-                        # Estimate score for this resource
-                        if task.time_estimator_func is None:
-                            runtime = 3600  # Default 1 hour
-                        else:
-                            runtime = task.estimate_runtime(resources)
-                            if runtime is None:
-                                runtime = 3600  # Default 1 hour
-
-                        if minimize_cost:
-                            hourly_cost = resources.get_cost(runtime)
-                            score = hourly_cost * task.num_nodes_for(resources)
-                        else:
-                            score = runtime
-
+                        score = Optimizer._job_group_score(
+                            task, resources, minimize_cost)
                         if score < best_task_score:
                             best_task_score = score
 

@@ -476,6 +476,68 @@ class TestOptimizeSameInfra:
             assert task1.best_resources == resources
             assert task2.best_resources == resources
 
+    def _same_region_candidates_differing_in_num_nodes(self, mock_aws_cloud):
+        """A task whose any_of candidates differ only in node count."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'test-job-group'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=False)
+
+        candidates = []
+        for num_nodes in (4, 1):
+            resources = MagicMock(spec=resources_lib.Resources)
+            resources.cloud = mock_aws_cloud
+            resources.region = 'us-east-1'
+            resources.num_nodes = num_nodes
+            resources.get_cost = MagicMock(return_value=1.0)
+            candidates.append(resources)
+
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'task'
+        task.estimate_runtime = MagicMock(return_value=3600)
+        task.time_estimator_func = None
+        task.num_nodes_for.side_effect = lambda r: r.num_nodes
+        dag.tasks = [task]
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({c: [c] for c in candidates}, None, None, None, None)
+
+        return dag, task, candidates, mock_fill
+
+    def test_optimize_same_infra_assigns_cheapest_candidate(
+            self, mock_aws_cloud):
+        """The assigned candidate is the one the infra was scored with."""
+        dag, task, candidates, mock_fill = (
+            self._same_region_candidates_differing_in_num_nodes(mock_aws_cloud))
+        task.resources = set(candidates)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        # 1 node at $1/hour, not the first-listed 4 nodes at $4/hour.
+        assert task.best_resources is candidates[1]
+
+    def test_optimize_same_infra_keeps_ordered_preference(self, mock_aws_cloud):
+        """With `ordered` resources, the first candidate in order wins."""
+        dag, task, candidates, mock_fill = (
+            self._same_region_candidates_differing_in_num_nodes(mock_aws_cloud))
+        task.resources = list(candidates)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert task.best_resources is candidates[0]
+
 
 class TestInterConnectionPlacement:
     """Tests for inter_connection-aware JobGroup placement."""
