@@ -273,10 +273,10 @@ def test_restore_job_config_file_missing_everywhere_writes_nothing(
 def _job_info_priority(job_id: int):
     with state._db_manager.get_engine().connect() as conn:
         row = conn.execute(
-            sqlalchemy.select(state.job_info_table.c.priority,
-                              state.job_info_table.c.priority_class).where(
-                                  state.job_info_table.c.spot_job_id ==
-                                  job_id)).fetchone()
+            sqlalchemy.select(
+                state.job_info_table.c.priority,
+                state.job_info_table.c.priority_class).where(
+                    state.job_info_table.c.spot_job_id == job_id)).fetchone()
     return row.priority, row.priority_class
 
 
