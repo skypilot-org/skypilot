@@ -45,7 +45,7 @@ def _get_policy_impl(
         return None
 
     if _is_url(policy_location):
-        # Use the built-in URL policy class when an URL is specified.
+        # Use the built-in URL policy class when a URL is specified.
         return admin_policy.RestfulAdminPolicy(policy_location)
 
     # Handle module path format
