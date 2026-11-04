@@ -2853,6 +2853,12 @@ function ServiceAccountTokensView({
 }) {
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Columns contributed via useTableColumns() are rendered after Role and
+  // sorted among themselves by header.order.
+  const extraColumns = useTableColumns('service-accounts');
+  const sortedExtraColumns = [...extraColumns].sort(
+    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
+  );
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [tokenToDelete, setTokenToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
@@ -3286,6 +3292,16 @@ function ServiceAccountTokensView({
                   <TableHead>Name</TableHead>
                   <TableHead>Created by</TableHead>
                   <TableHead>Role</TableHead>
+                  {sortedExtraColumns.map((col) => (
+                    <TableHead
+                      key={col.id}
+                      className={`whitespace-nowrap${
+                        col.header?.className ? ' ' + col.header.className : ''
+                      }`}
+                    >
+                      {col.header?.label}
+                    </TableHead>
+                  ))}
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
                   <TableHead>GPUs</TableHead>
@@ -3367,6 +3383,14 @@ function ServiceAccountTokensView({
                         )}
                       </div>
                     </TableCell>
+                    {sortedExtraColumns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={col.cell?.className || ''}
+                      >
+                        {col.cell?.render?.(token, { item: token })}
+                      </TableCell>
+                    ))}
                     <TableCell>
                       {token.clusterCount === undefined ? (
                         <span

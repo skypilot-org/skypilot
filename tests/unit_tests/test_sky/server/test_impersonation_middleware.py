@@ -1,4 +1,4 @@
-"""An admin service account can act as another user via a request header."""
+"""The impersonation header runs a request as another user."""
 
 import json
 import unittest.mock as mock
@@ -9,21 +9,10 @@ import pytest
 from sky import models
 from sky.server import constants as server_constants
 from sky.server import server
-from sky.skylet import constants
-from sky.users import rbac
+from sky.server.auth import impersonation
 
 _ADMIN_SA = models.User(id='sa-admin', name='platform')
-_ALICE = models.User(id='a1b2c3d4',
-                     name='alice@example.com',
-                     user_type=models.UserType.SSO.value)
-_USERS = {
-    _ALICE.id: _ALICE,
-    'sa-other': models.User(id='sa-other',
-                            name='other-sa',
-                            user_type=models.UserType.SA.value),
-    constants.SKYPILOT_SYSTEM_USER_ID: models.User(
-        id=constants.SKYPILOT_SYSTEM_USER_ID, name='skypilot-system'),
-}
+_ALICE = models.User(id='a1b2c3d4', name='alice@example.com')
 
 
 def _request(target=None, path='/launch', method='POST'):
@@ -47,130 +36,78 @@ async def _call_next(request):
     return fastapi.responses.JSONResponse({'message': 'success'})
 
 
-def _users_by_name(name):
-    if name == 'dup':
-        return [_ALICE, models.User(id='e5f6a7b8', name='dup')]
-    return [u for u in _USERS.values() if u.name == name]
-
-
 async def _dispatch(request,
                     caller=_ADMIN_SA,
-                    roles=(rbac.RoleName.ADMIN.value,),
-                    roles_in_memory=None,
+                    check=None,
                     call_next=_call_next):
     request.state.auth_user = caller
     request.state.impersonator = None
     middleware = server.ImpersonationMiddleware(app=mock.Mock())
-    with mock.patch('sky.users.permission.permission_service') as perm, \
-            mock.patch('sky.global_user_state.get_user',
-                       side_effect=_USERS.get), \
-            mock.patch('sky.global_user_state.get_user_by_name',
-                       side_effect=_users_by_name), \
+    with mock.patch.object(impersonation, 'check',
+                           side_effect=check or
+                           (lambda *_: _ALICE)) as check_mock, \
             mock.patch.object(server, 'logger') as logger:
-        perm.get_user_roles.return_value = list(roles)
-        perm.roles_in_memory.return_value = list(
-            roles if roles_in_memory is None else roles_in_memory)
-        perm.check_endpoint_permission.return_value = False  # not blocked
         response = await middleware.dispatch(request, call_next)
-    return response, logger, perm
+    return response, logger, check_mock
 
 
 @pytest.mark.asyncio
 async def test_without_header_the_caller_is_kept():
     request = _request()
-    response, logger, _ = await _dispatch(request)
+    response, logger, check = await _dispatch(request)
     assert response.status_code == 200
     assert request.state.auth_user is _ADMIN_SA
     assert request.state.impersonator is None
+    check.assert_not_called()
     logger.info.assert_not_called()
 
 
-@pytest.mark.parametrize('target', [_ALICE.name, _ALICE.id])
 @pytest.mark.asyncio
-async def test_admin_service_account_acts_as_user(target):
-    request = _request(target)
-    response, logger, _ = await _dispatch(request)
+async def test_allowed_request_runs_as_the_user():
+    request = _request(f'  {_ALICE.name} ')
+    response, logger, check = await _dispatch(request)
     assert response.status_code == 200
+    check.assert_called_once_with(_ADMIN_SA, _ALICE.name, '/launch', 'POST')
     assert request.state.auth_user.id == _ALICE.id
     assert request.state.auth_user.name == _ALICE.name
     assert request.state.impersonator is _ADMIN_SA
-    # Every impersonated request names the service account behind it.
+    # Every impersonated request names the caller behind it.
     logger.info.assert_called_once()
     message = logger.info.call_args.args[0]
     assert _ADMIN_SA.id in message and _ALICE.id in message
 
 
-@pytest.mark.parametrize('caller', [
-    None,
-    models.User(id='a1b2c3d4', name='alice@example.com'),
-])
 @pytest.mark.asyncio
-async def test_only_service_accounts_can_impersonate(caller):
-    request = _request(_ALICE.name)
-    response, _, _ = await _dispatch(request, caller=caller)
-    assert response.status_code == 403
-    assert request.state.auth_user is caller
+async def test_refusal_is_a_403_with_the_reason():
 
+    def refuse(*_):
+        raise impersonation.Refused('User \'nobody\' not found.')
 
-@pytest.mark.parametrize('roles', [
-    (rbac.RoleName.USER.value,),
-    (rbac.RoleName.VIEWER.value,),
-    (),
-])
-@pytest.mark.asyncio
-async def test_non_admin_service_account_cannot_impersonate(roles):
-    request = _request(_ALICE.name)
-    response, logger, _ = await _dispatch(request, roles=roles)
-    assert response.status_code == 403
-    assert request.state.auth_user is _ADMIN_SA
-    logger.info.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_admin_role_is_read_from_memory_on_the_hot_path():
-    request = _request(_ALICE.name)
-    response, _, perm = await _dispatch(request)
-    assert response.status_code == 200
-    perm.get_user_roles.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_admin_role_granted_on_another_worker_is_honored():
-    # This worker's policy has not seen the role yet; the reload has.
-    request = _request(_ALICE.name)
-    response, _, _ = await _dispatch(request, roles_in_memory=())
-    assert response.status_code == 200
-    assert request.state.auth_user.id == _ALICE.id
-
-
-@pytest.mark.parametrize('target,reason', [
-    ('', 'must not be empty'),
-    ('nobody', 'not found'),
-    ('dup', 'matches 2 users'),
-    ('sa-other', 'Service accounts cannot'),
-    (constants.SKYPILOT_SYSTEM_USER_ID, 'system users cannot'),
-])
-@pytest.mark.asyncio
-async def test_rejected_targets(target, reason):
-    request = _request(target)
-    response, logger, _ = await _dispatch(request)
+    request = _request('nobody')
+    response, logger, _ = await _dispatch(request, check=refuse)
     # 403 with a detail is what clients render as a permission error.
     assert response.status_code == 403
-    assert reason in json.loads(response.body)['detail']
+    assert json.loads(response.body)['detail'] == 'User \'nobody\' not found.'
     assert request.state.auth_user is _ADMIN_SA
     logger.info.assert_not_called()
 
 
-@pytest.mark.parametrize('caller,target', [
-    (_ADMIN_SA, 'nobody'),
-    (models.User(id='a1b2c3d4', name='alice@example.com'), _ALICE.name),
-])
 @pytest.mark.asyncio
-async def test_health_check_ignores_the_header(caller, target):
-    request = _request(target, path='/api/health', method='GET')
-    response, logger, _ = await _dispatch(request, caller=caller)
+async def test_unauthenticated_caller_is_refused():
+    request = _request(_ALICE.name)
+    response, _, check = await _dispatch(request, caller=None)
+    assert response.status_code == 403
+    check.assert_not_called()
+
+
+@pytest.mark.parametrize('caller', [_ADMIN_SA, None])
+@pytest.mark.asyncio
+async def test_health_check_ignores_the_header(caller):
+    request = _request('nobody', path='/api/health', method='GET')
+    response, logger, check = await _dispatch(request, caller=caller)
     assert response.status_code == 200
     assert request.state.auth_user is caller
+    check.assert_not_called()
     logger.info.assert_not_called()
 
 
@@ -182,7 +119,9 @@ async def test_rbac_checks_the_impersonated_user():
     async def run_rbac(req):
         return await rbac_middleware.dispatch(req, _call_next)
 
-    response, _, perm = await _dispatch(request, call_next=run_rbac)
+    with mock.patch('sky.users.permission.permission_service') as perm:
+        perm.check_endpoint_permission.return_value = False  # not blocked
+        response, _, _ = await _dispatch(request, call_next=run_rbac)
     assert response.status_code == 200
     perm.check_endpoint_permission.assert_called_once_with(
         _ALICE.id, '/launch', 'POST')

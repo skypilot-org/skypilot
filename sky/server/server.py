@@ -83,6 +83,7 @@ from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
 from sky.server.auth import db_lookup
+from sky.server.auth import impersonation
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sa_token_cache
@@ -726,58 +727,15 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
         return None
 
 
-class _ImpersonationRejected(Exception):
-    """The impersonation header names a user the caller may not act as."""
-
-    def __init__(self, detail: str):
-        super().__init__(detail)
-        self.detail = detail
-
-
-def _has_only_admin_role(user_id: str) -> bool:
-    """Whether the user's only role is admin.
-
-    Reads this process's policy like the RBAC check does, and reloads it only
-    before denying, so a role granted moments ago on another worker counts.
-    """
-    service = permission.permission_service
-    admin = [rbac.RoleName.ADMIN.value]
-    return (service.roles_in_memory(user_id) == admin or
-            service.get_user_roles(user_id) == admin)
-
-
-def _resolve_impersonated_user(target: str) -> models.User:
-    """The user an impersonating request acts as: by ID, else by exact name."""
-    user = global_user_state.get_user(target)
-    if user is None:
-        matches = global_user_state.get_user_by_name(target)
-        if not matches:
-            raise _ImpersonationRejected(f'User {target!r} not found.')
-        if len(matches) > 1:
-            raise _ImpersonationRejected(
-                f'User name {target!r} matches {len(matches)} users. '
-                'Use the user ID instead.')
-        user = matches[0]
-    user_type = users_rest.get_user_type(user)
-    if user_type == models.UserType.SA.value:
-        raise _ImpersonationRejected('Service accounts cannot be impersonated.')
-    if user_type == models.UserType.SYSTEM.value:
-        raise _ImpersonationRejected(
-            'Built-in system users cannot be impersonated.')
-    return user
-
-
 @middleware_utils.websocket_aware
 class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
-    """Lets an admin service account act as another user.
+    """Lets a caller act as another user, as `impersonation.check` allows.
 
     A request carrying the impersonation header runs as the named user: the
     user owns what the request creates, and RBAC and workspace checks apply to
-    the user. Only a service account whose role is admin may impersonate, so
-    the request can never do more than the caller could on its own. Every
-    impersonated request is logged with the service account behind it, which
-    stays on `request.state.impersonator`. A refused impersonation is a 403
-    whose detail says why.
+    the user. Every impersonated request is logged with the caller behind it,
+    which stays on `request.state.impersonator`. A refused impersonation is a
+    403 whose detail says why.
     """
 
     async def on_request(self, request: fastapi.Request):
@@ -788,24 +746,16 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
         # read as an unreachable server instead of the reason.
         if request.url.path.startswith('/api/health'):
             return None
-        target = target.strip()
         caller = request.state.auth_user
-        if caller is None or not caller.is_service_account():
+        if caller is None:
             return self._reject(
-                request, 'Impersonation requires a service account token.')
-        if not target:
-            return self._reject(request,
-                                'The user to impersonate must not be empty.')
+                request, 'Impersonation requires an authenticated caller.')
         try:
-            is_admin = await db_lookup.call_with_deadline(
-                _has_only_admin_role, caller.id)
-            if not is_admin:
-                return self._reject(
-                    request, 'Only service accounts with the admin role can '
-                    'impersonate users.')
-            user = await db_lookup.call_with_deadline(
-                _resolve_impersonated_user, target)
-        except _ImpersonationRejected as e:
+            user = await db_lookup.call_with_deadline(impersonation.check,
+                                                      caller, target.strip(),
+                                                      request.url.path,
+                                                      request.method)
+        except impersonation.Refused as e:
             return self._reject(request, e.detail)
         except asyncio.TimeoutError:
             logger.error('Impersonation DB lookup timed out')
@@ -816,8 +766,8 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
             return db_lookup.worker_exhausted_response(request)
 
         request_id = getattr(request.state, 'request_id', None)
-        logger.info(f'Service account {caller.name!r} ({caller.id}) is acting '
-                    f'as user {user.name!r} ({user.id}): {request.method} '
+        logger.info(f'{caller.name!r} ({caller.id}) is acting as user '
+                    f'{user.name!r} ({user.id}): {request.method} '
                     f'{request.url.path} (request ID: {request_id})')
         request.state.impersonator = caller
         request.state.auth_user = models.User(id=user.id, name=user.name)

@@ -3746,8 +3746,12 @@ def impersonate(user: str) -> Iterator[None]:
     workspace permissions decide what it may do. The API server logs the
     service account behind each such request.
 
-    The client must authenticate with the token of a service account whose
-    role is admin. Requests and their results are owned by `user`, so make
+    By default, the API server must set ``rbac.allow_impersonation: true`` and
+    the client must authenticate with the token of a service account whose
+    role is admin; a server plugin can grant it differently. Either way,
+    service accounts, built-in users and users whose role outranks the
+    caller's cannot be impersonated. Requests and their results are owned by
+    `user`, so make
     follow-up calls such as :func:`sky.get` and :func:`sky.stream_and_get` in
     the same context. Contexts nest, and concurrent threads or asyncio tasks
     can each act as a different user. Threads started inside the context do
@@ -3766,8 +3770,7 @@ def impersonate(user: str) -> Iterator[None]:
 
     Args:
         user: The ID or name of the user to act as. A name must match exactly
-            one user. Service accounts and the server's built-in users cannot
-            be impersonated.
+            one user.
 
     Raises:
         ValueError: If ``user`` is empty, or if a request is sent in the
