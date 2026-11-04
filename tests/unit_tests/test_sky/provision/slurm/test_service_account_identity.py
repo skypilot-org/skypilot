@@ -94,7 +94,10 @@ def test_disabled(identity_config):
     assert utils.get_submit_user('a') is None
 
 
-@pytest.mark.parametrize('value', ['Root', '-root', 'svc;id', '', 'svc\n'])
+@pytest.mark.parametrize('value', [
+    'Root', '-root', 'svc;id', '', 'svc\n', 'svc@', '@corp.example',
+    'svc@Corp.example', 'svc@corp@example', 'svc@-corp', 'svc@corp;id'
+])
 def test_invalid_mapping_rejected(identity_config, value):
     identity_config['slurm']['username_map']['Machine'] = value
     with pytest.raises(ValueError, match='Invalid Unix user'):
@@ -127,6 +130,7 @@ def test_client_cannot_override_identity(identity_config):
             'slurm': {
                 'provision_timeout': 123,
                 'submit_as_user': False,
+                'username_from_email': 'full_email',
                 'username_map': {
                     'Machine': 'root'
                 },
@@ -295,3 +299,82 @@ def test_service_account_creator_chain(identity_config, monkeypatch):
     monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
                         creators.get)
     assert utils.get_submit_user('b') == 'jane'
+
+
+def _set_human(monkeypatch, name='alice.smith@example.com'):
+    monkeypatch.setattr(common_utils, 'get_current_user',
+                        lambda: models.User(id='human', name=name))
+
+
+def test_mapping_to_fully_qualified_account(identity_config):
+    identity_config['slurm']['username_map']['Machine'] = 'svc@corp.example'
+    assert utils.get_submit_user('b') == 'svc@corp.example'
+
+
+def test_human_full_email_username(identity_config, monkeypatch):
+    _set_human(monkeypatch)
+    identity_config['slurm']['username_from_email'] = 'full_email'
+    assert utils.get_submit_user('b') == 'alice.smith@example.com'
+
+
+def test_full_email_username_is_case_insensitive(identity_config, monkeypatch):
+    _set_human(monkeypatch)
+    identity_config['slurm']['username_from_email'] = 'Full_Email'
+    assert utils.get_submit_user('b') == 'alice.smith@example.com'
+
+
+def test_full_email_username_per_cluster(identity_config, monkeypatch):
+    _set_human(monkeypatch)
+    identity_config['slurm']['cluster_configs']['a'][
+        'username_from_email'] = 'full_email'
+    assert utils.get_submit_user('a') == 'alice.smith@example.com'
+    assert utils.get_submit_user('b') == 'alice.smith'
+
+
+def test_explicit_mapping_beats_full_email(identity_config, monkeypatch):
+    _set_human(monkeypatch)
+    identity_config['slurm']['username_from_email'] = 'full_email'
+    identity_config['slurm']['username_map'][
+        'alice.smith@example.com'] = 'asmith'
+    assert utils.get_submit_user('b') == 'asmith'
+
+
+def test_full_email_username_must_be_valid(identity_config, monkeypatch):
+    _set_human(monkeypatch, name='Alice.Smith@Example.com')
+    identity_config['slurm']['username_from_email'] = 'full_email'
+    with pytest.raises(ValueError, match='Cannot derive a valid Unix user'):
+        utils.get_submit_user('b')
+
+
+def test_service_account_creator_full_email(identity_config, monkeypatch):
+    identity_config['slurm']['username_map'].clear()
+    identity_config['slurm']['username_from_email'] = 'full_email'
+    monkeypatch.setattr(
+        utils.global_user_state, 'get_service_account_creator',
+        lambda _: models.User(id='human', name='jane.doe@example.com'))
+    assert utils.get_submit_user('b') == 'jane.doe@example.com'
+
+
+@pytest.mark.parametrize('cluster_specific', [False, True])
+def test_schema_accepts_fully_qualified_names(identity_config,
+                                              cluster_specific):
+    target = identity_config['slurm']
+    if cluster_specific:
+        target = target['cluster_configs']['a']
+    target['username_map'] = {'alice@example.com': 'alice@corp.example.com'}
+    target['username_from_email'] = 'full_email'
+    common_utils.validate_schema(identity_config, schemas.get_config_schema(),
+                                 '')
+
+
+@pytest.mark.parametrize('field,value', [
+    ('username_from_email', 'domain'),
+    ('username_map', {
+        'alice@example.com': 'alice@'
+    }),
+])
+def test_schema_rejects_bad_email_settings(identity_config, field, value):
+    identity_config['slurm'][field] = value
+    with pytest.raises(ValueError):
+        common_utils.validate_schema(identity_config,
+                                     schemas.get_config_schema(), '')

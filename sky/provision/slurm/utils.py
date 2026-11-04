@@ -30,7 +30,12 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
-_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.+-]*$')
+# A Unix account name, optionally qualified with a domain as user@domain: SSSD
+# names directory accounts that way with use_fully_qualified_names, e.g. when
+# they are named after email addresses.
+SLURM_USER_REGEX = r'^[a-z_][a-z0-9_.+-]*(@[a-z0-9][a-z0-9.-]*)?$'
+_SLURM_USER_PATTERN = re.compile(SLURM_USER_REGEX)
+_USERNAME_FROM_EMAIL_FULL = 'full_email'
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
@@ -185,14 +190,23 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
 
     user_name = user.name
     assert user_name is not None
-    submit_user = user_name.split('@', 1)[0]
+    username_from_email = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=cluster_name,
+        keys=('username_from_email',),
+        default_value='local_part')
+    # The schema accepts any case; compare normalized.
+    if str(username_from_email).lower() == _USERNAME_FROM_EMAIL_FULL:
+        submit_user = user_name
+    else:
+        submit_user = user_name.split('@', 1)[0]
     if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
         raise ValueError(
             'Cannot derive a valid Unix user from SkyPilot user '
             f'{user_name!r}. Slurm submit users must start with a lowercase '
-            'letter or "_" '
-            'and contain only lowercase letters, digits, "_", ".", "+", or "-".'
-        )
+            'letter or "_" and contain only lowercase letters, digits, "_", '
+            '".", "+", or "-", optionally followed by "@" and a lowercase '
+            'domain.')
     return submit_user
 
 

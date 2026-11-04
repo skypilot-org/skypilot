@@ -317,7 +317,12 @@ rejects these rules, so select the classic build with
 ``update-alternatives --set sudo /usr/bin/sudo.ws``. Adjust the executable
 locations, group name, and paths,
 install the file with root ownership and mode ``0440``, and check it
-with ``visudo -cf``. The rsync rule lists explicit server arguments; different
+with ``visudo -cf``. If account names contain ``.``, ``+``, or a domain (for
+example ``alice@corp.example.com`` with
+:ref:`username_from_email <config-yaml-slurm-username-from-email>`), widen the
+home-directory pattern to match, e.g.
+``/home/[a-z_][a-z0-9_.+-]*(@[a-z0-9][a-z0-9.-]*)?``, or to your directory's
+home layout. The rsync rule lists explicit server arguments; different
 rsync versions may require an adjusted rule based on sudo's log. The ``rm`` rule
 also permits ``--one-file-system`` so recursive cleanup can skip nested
 filesystems, such as bucket mounts that could not be unmounted.
@@ -369,8 +374,12 @@ the matching path prefix. Load workload modules in the task's ``setup`` or
 ``run`` commands.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
-example, ``alice@example.com`` maps to the Unix account ``alice``. The account
-must already exist on the Slurm login and compute nodes. SkyPilot submits,
+example, ``alice@example.com`` maps to the Unix account ``alice``. With
+:ref:`username_from_email: full_email <config-yaml-slurm-username-from-email>`,
+it maps to ``alice@example.com`` itself, for clusters whose accounts are named
+after email addresses. :ref:`username_map <config-yaml-slurm-service-account-user-mapping>`
+overrides either for specific users. The account must already exist on the
+Slurm login and compute nodes. SkyPilot submits,
 queries, and cancels the user's allocations, runs host commands, transfers
 files, and starts host SSH sessions as that user. Container commands and SSH
 sessions run as root inside the container, while the Slurm allocation remains

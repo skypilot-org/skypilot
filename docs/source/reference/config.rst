@@ -153,6 +153,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       - mycluster1
       - mycluster2
     :ref:`submit_as_user <config-yaml-slurm-submit-as-user>`: false
+    :ref:`username_from_email <config-yaml-slurm-username-from-email>`: local_part
     :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
     :ref:`pricing <config-yaml-slurm-pricing>`:
       cpu: 0.04        # $/vCPU/hr
@@ -2536,9 +2537,13 @@ Run Slurm operations as the Unix account matching the authenticated SkyPilot
 user (optional).
 
 SkyPilot maps the username to the portion before ``@``. For example,
-``alice@example.com`` maps to ``alice``. The resulting username must start with
+``alice@example.com`` maps to ``alice``. To use the whole email instead, for
+clusters whose directory names accounts after email addresses (such as SSSD with
+``use_fully_qualified_names``), set :ref:`username_from_email
+<config-yaml-slurm-username-from-email>`. The resulting username must start with
 a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
-``.``, or ``-``. The account must already exist on the Slurm cluster.
+``.``, ``+``, or ``-``, optionally followed by ``@`` and a lowercase domain. The
+account must already exist on the Slurm cluster.
 
 When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` (using
 ``runuser``) or have passwordless ``sudo`` permission for individual Slurm
@@ -2595,8 +2600,34 @@ A cluster-specific mapping overrides the tenant mapping for the same name.
 A service account without an entry uses its creator's Unix identity: the
 creator's cluster mapping, then tenant mapping, then email local part. If the
 creator is another service account, the same resolution applies to that account.
-Human users without an entry use their email local part. If the creator cannot
-be found, configure an explicit mapping for the service account.
+Human users without an entry use their email local part, or their whole email
+with :ref:`username_from_email <config-yaml-slurm-username-from-email>`. If the
+creator cannot be found, configure an explicit mapping for the service account.
+
+Unix users may be fully qualified, as in ``jane.doe@corp.example.com``.
+
+.. _config-yaml-slurm-username-from-email:
+
+``slurm.username_from_email``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+How ``slurm.submit_as_user`` derives the Unix user of a SkyPilot user without a
+``username_map`` entry (optional): ``local_part`` (the portion before ``@``) or
+``full_email`` (the whole email, for clusters whose accounts are named after
+email addresses, such as SSSD with ``use_fully_qualified_names``).
+
+Default: ``local_part``. This is an API server setting and cannot be overridden
+by client, project, or task configuration. It can also be set per cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`; the per-cluster value
+overrides the global value.
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+    cluster_configs:
+      ldap-cluster:
+        username_from_email: full_email
 
 This changes the Unix submit identity only; it does not grant SkyPilot roles
 or workspace access.
