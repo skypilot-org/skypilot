@@ -2955,7 +2955,7 @@ function ServiceAccountTokensView({
           // exists to avoid. Counts will be surfaced per-row via
           // dedicated drill-ins later.
           if (forceRefresh) {
-            dashboardCache.invalidate(getServiceAccountTokensPaginated);
+            dashboardCache.invalidateFunction(getServiceAccountTokensPaginated);
           }
           const resp = await dashboardCache.get(
             getServiceAccountTokensPaginated,
