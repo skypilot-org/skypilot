@@ -23,9 +23,6 @@ from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import sqlalchemy_deps
 
-# Re-exported for sky.jobs.state (annotations / dialect helpers).
-_ = (postgresql, sqlite, sql_async)
-
 sqlalchemy_deps.require_sqlalchemy()
 
 Base = declarative.declarative_base()
@@ -648,3 +645,37 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
+
+# Names re-exported into sky.jobs.state under sqlalchemy_available().
+# Keep this list in sync when adding tables/helpers the facade must expose.
+__all__ = [
+    'sqlalchemy',
+    'sqlalchemy_exc',
+    'orm',
+    'postgresql',
+    'sqlite',
+    'sql_async',
+    'declarative',
+    'Base',
+    '_MEASURABLE',
+    'PENDING_TIMELINE_PREDICATE',
+    'NEVER_RAN_PREDICATE',
+    'CLAIMED_IN_FLIGHT_PREDICATE',
+    'CLAIMED_LIVE_PREDICATE',
+    'spot_table',
+    'job_info_table',
+    'api_access_token_table',
+    'ha_recovery_script_table',
+    'job_events_table',
+    'batch_state_table',
+    'job_dependencies_table',
+    '_unfinished_dependency_exists',
+    '_users_at_launch_limit',
+    '_has_live_task',
+    '_not_held_by_launch_limit',
+    'get_held_job_ids',
+    'users_at_launch_limit_sql',
+    '_batch_progress_subquery',
+    'create_table',
+    '_db_manager',
+]

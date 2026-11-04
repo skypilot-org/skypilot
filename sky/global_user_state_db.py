@@ -23,9 +23,6 @@ from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import sqlalchemy_deps
 
-# Re-exported for sky.global_user_state.
-_ = (postgresql, sqlite, sql_async)
-
 sqlalchemy_deps.require_sqlalchemy()
 
 Base = declarative.declarative_base()
@@ -526,3 +523,38 @@ def _supports_returning() -> bool:
 _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
+
+# Names re-exported into sky.global_user_state under sqlalchemy_available().
+# Keep this list in sync when adding tables/helpers the facade must expose.
+__all__ = [
+    'sqlalchemy',
+    'sqlalchemy_exc',
+    'orm',
+    'postgresql',
+    'sqlite',
+    'sql_async',
+    'declarative',
+    'Base',
+    'config_table',
+    'user_table',
+    'cluster_table',
+    'storage_table',
+    'volume_table',
+    'cluster_history_table',
+    'cluster_event_table',
+    'UNOBSERVED_ATTEMPT_PREDICATE',
+    'launch_attempt_table',
+    'ssh_key_table',
+    'service_account_token_table',
+    'cluster_yaml_table',
+    'system_config_table',
+    'cluster_job_spec_table',
+    'MAX_JOB_SPECS_PER_CLUSTER',
+    'leader_leases_table',
+    '_glob_to_similar',
+    'create_table',
+    '_sqlite_supports_returning',
+    '_supports_returning',
+    '_db_manager',
+    'initialize_and_get_db',
+]

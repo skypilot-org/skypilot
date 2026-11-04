@@ -21,9 +21,6 @@ from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import sqlalchemy_deps
 
-# Re-exported for sky.serve.serve_state.
-_ = (postgresql, sqlite)
-
 sqlalchemy_deps.require_sqlalchemy()
 
 Base = declarative.declarative_base()
@@ -131,3 +128,21 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
 
 _db_manager = db_utils.DatabaseManager('serve/services', create_table)
+
+# Names re-exported into sky.serve.serve_state under sqlalchemy_available().
+# Keep this list in sync when adding tables/helpers the facade must expose.
+__all__ = [
+    'sqlalchemy',
+    'sqlalchemy_exc',
+    'orm',
+    'postgresql',
+    'sqlite',
+    'declarative',
+    'Base',
+    'services_table',
+    'replicas_table',
+    'version_specs_table',
+    'serve_ha_recovery_script_table',
+    'create_table',
+    '_db_manager',
+]

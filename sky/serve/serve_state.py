@@ -1,6 +1,4 @@
 """The database for services information."""
-# Indent under sqlalchemy_available() pushes many schema lines over 80.
-# pylint: disable=line-too-long
 from __future__ import annotations
 
 import collections
@@ -40,19 +38,9 @@ if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
     # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db
-    sqlalchemy = _serve_db.sqlalchemy
-    sqlalchemy_exc = _serve_db.sqlalchemy_exc
-    orm = _serve_db.orm
-    postgresql = _serve_db.postgresql
-    sqlite = _serve_db.sqlite
-    declarative = _serve_db.declarative
-    Base = _serve_db.Base
-    services_table = _serve_db.services_table
-    replicas_table = _serve_db.replicas_table
-    version_specs_table = _serve_db.version_specs_table
-    serve_ha_recovery_script_table = _serve_db.serve_ha_recovery_script_table
-    create_table = _serve_db.create_table
-    _db_manager = _serve_db._db_manager
+    # Bind every name listed in _serve_db.__all__ so a new table cannot be
+    # forgotten in a hand-copied re-export list.
+    globals().update({n: getattr(_serve_db, n) for n in _serve_db.__all__})
 else:
     # Client-only install: status enums below still import. DB APIs
     # fail with a clear install hint when first used.
@@ -512,7 +500,8 @@ def get_services() -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     records = []
     for row in rows:
-        records.append(_get_service_from_row(row._mapping))  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        records.append(_get_service_from_row(row._mapping))
     return records
 
 
@@ -520,9 +509,10 @@ def get_num_services() -> int:
     """Get the number of services."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        # pylint: disable=not-callable
         return session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
-                             ).select_from(services_table)).fetchone()[0]
+            sqlalchemy.select(sqlalchemy.func.count()).select_from(
+                services_table)).fetchone()[0]
 
 
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
@@ -532,7 +522,8 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
         query = _build_services_with_latest_version_query(service_name)
         rows = session.execute(query).fetchall()
     for row in rows:
-        return _get_service_from_row(row._mapping)  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        return _get_service_from_row(row._mapping)
     return None
 
 

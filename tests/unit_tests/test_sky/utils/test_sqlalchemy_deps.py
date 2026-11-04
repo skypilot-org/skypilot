@@ -1,5 +1,8 @@
 """SQLAlchemy is server-only; helpers must fail clearly when it is missing."""
 import ast
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -69,3 +72,38 @@ def test_client_safe_modules_have_no_top_level_sqlalchemy_import(relpath):
     assert not _top_level_imports_sqlalchemy(path), (
         f'{relpath} has a top-level sqlalchemy import; use LazyImport or '
         'gate behind sqlalchemy_available() so client installs stay importable')
+
+
+def test_client_surface_imports_without_db_stack():
+    """A client-only install (no DB stack) must import and run ``sky --help``.
+
+    AST checks only cover a few facade files and direct ``sqlalchemy``
+    imports. This subprocess hides the DB packages via ``sys.meta_path`` in a
+    fresh interpreter (pytest already imported ``sky`` / ``sqlalchemy``).
+    """
+    script = textwrap.dedent("""
+        import sys
+
+        BLOCKED = ('sqlalchemy', 'sqlalchemy_adapter', 'alembic', 'psycopg2',
+                   'asyncpg', 'aiosqlite', 'casbin', 'greenlet')
+
+        class _Block:
+            def find_spec(self, name, path=None, target=None):
+                if name.split('.')[0] in BLOCKED:
+                    # ValueError: can_import_modules() treats it as absent,
+                    # while a real import still fails loudly.
+                    raise ValueError('client-only import of ' + name)
+
+        sys.meta_path.insert(0, _Block())
+        import sky, sky.client.sdk
+        from click.testing import CliRunner
+        from sky.client.cli import command
+        result = CliRunner().invoke(command.cli, ['--help'])
+        assert result.exit_code == 0, result.output
+    """)
+    result = subprocess.run([sys.executable, '-c', script],
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                            check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
