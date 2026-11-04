@@ -1049,7 +1049,7 @@ class TestIsJobsConsolidationMode:
 
     Shared helper behind both sky/jobs/utils.py::is_consolidation_mode() and
     sky/serve/serve_utils.py::is_consolidation_mode(pool=True). Owns:
-    - OVERRIDE_CONSOLIDATION_MODE env short-circuit.
+    - ENV_VAR_IN_CONTROLLER_PROCESS_TREE env short-circuit.
     - Signal-file read (source of truth).
     - Config-vs-signal restart warning (server only).
     - Jobs validator call against intent (server only).
@@ -1061,8 +1061,8 @@ class TestIsJobsConsolidationMode:
          cache_clear())
 
     def test_override_env_short_circuits_to_true(self, monkeypatch, tmp_path):
-        """OVERRIDE_CONSOLIDATION_MODE forces True without reading signal file
-        or config. Used inside the controller process itself."""
+        """ENV_VAR_IN_CONTROLLER_PROCESS_TREE forces True without reading signal
+        file or config. Used inside the controller process itself."""
         monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', '1')
         signal_file = tmp_path / 'signal'  # does not exist
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \

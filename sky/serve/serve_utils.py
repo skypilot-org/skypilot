@@ -354,7 +354,8 @@ def is_consolidation_mode(pool: bool = False) -> bool:
             extra_validator=_pool_consolidation_extra_validator)
     # Serve (pool=False) runs on its own controller cluster, independent of
     # the jobs controller, and keeps a config-driven consolidation flag.
-    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+    if os.environ.get(
+            skylet_constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE) is not None:
         # if we are in the serve controller, we must always be in
         # consolidation mode.
         return True
@@ -2195,11 +2196,13 @@ class ServeCodeGen:
         # lacks serve.controller.consolidation_mode=true. The subprocess would
         # then read the server config from the client override path and
         # incorrectly conclude it is NOT in consolidation mode, causing a
-        # 300-second CONTROLLER_SETUP_TIMEOUT. Bake OVERRIDE_CONSOLIDATION_MODE
-        # into the shell command so the subprocess always sees the correct mode.
+        # 300-second CONTROLLER_SETUP_TIMEOUT. Bake
+        # ENV_VAR_IN_CONTROLLER_PROCESS_TREE into the shell command so the
+        # subprocess always sees the correct mode.
         if is_consolidation_mode(pool):
-            cmd = (f'export {skylet_constants.OVERRIDE_CONSOLIDATION_MODE}'
-                   f'=true; {cmd}')
+            cmd = (
+                f'export {skylet_constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE}'
+                f'=true; {cmd}')
         return cmd
 
     @classmethod
