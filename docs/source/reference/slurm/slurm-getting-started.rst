@@ -374,8 +374,12 @@ the matching path prefix. Load workload modules in the task's ``setup`` or
 ``run`` commands.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
-example, ``alice@example.com`` maps to the Unix account ``alice``. The account
-must already exist on the Slurm login and compute nodes. SkyPilot submits,
+example, ``alice@example.com`` maps to the Unix account ``alice``. With
+:ref:`username_from_email: full_email <config-yaml-slurm-username-from-email>`,
+it maps to ``alice@example.com`` itself, for clusters whose accounts are named
+after email addresses. :ref:`username_map <config-yaml-slurm-service-account-user-mapping>`
+overrides either for specific users. The account must already exist on the
+Slurm login and compute nodes. SkyPilot submits,
 queries, and cancels the user's allocations, runs host commands, transfers
 files, and starts host SSH sessions as that user. Container commands and SSH
 sessions run as root inside the container, while the Slurm allocation remains
