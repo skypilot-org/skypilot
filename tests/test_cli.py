@@ -6,6 +6,7 @@ from click import testing as cli_testing
 import pytest
 import requests
 
+from sky import backends
 from sky import clouds
 from sky import exceptions
 from sky import models
@@ -366,23 +367,155 @@ class TestWithNoCloudEnabled:
 
 class TestHelperFunctions:
 
+    def test_status_restores_ssh_config_from_cached_cluster_info(
+            self, monkeypatch):
+        """Cached connection info should survive an API server restart."""
+        mock_api_server_calls(monkeypatch)
+
+        cluster_info = mock.sentinel.cluster_info
+        mock_handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+        mock_handle.cluster_name = 'test-cluster'
+        mock_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
+        mock_handle.cached_external_ips = None
+        mock_handle.cached_external_ssh_ports = None
+        mock_handle.cached_cluster_info = cluster_info
+        mock_handle.docker_user = None
+        mock_handle.ssh_user = 'ubuntu'
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.cloud = mock.MagicMock()
+
+        def update_cluster_ips(*, cluster_info):
+            assert cluster_info is mock_handle.cached_cluster_info
+            mock_handle.cached_external_ips = ['1.2.3.4']
+
+        def update_ssh_ports():
+            mock_handle.cached_external_ssh_ports = [22]
+
+        mock_handle.update_cluster_ips.side_effect = update_cluster_ips
+        mock_handle.update_ssh_ports.side_effect = update_ssh_ports
+        mock_records = [{
+            'name': 'test-cluster',
+            'handle': mock_handle,
+            'status': status_lib.ClusterStatus.UP,
+            'credentials': {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/path/to/key.pem'
+            }
+        }]
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'request-id')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_records)
+        mock_add_cluster = mock.MagicMock()
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            mock_add_cluster)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            mock.MagicMock())
+
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['test-cluster'])
+
+        assert records == mock_records
+        mock_handle.update_cluster_ips.assert_called_once_with(
+            cluster_info=cluster_info)
+        mock_handle.update_ssh_ports.assert_called_once_with()
+        mock_add_cluster.assert_called_once_with(
+            'test-cluster', 'test-cluster-abcdef', ['1.2.3.4'], {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/path/to/key.pem'
+            }, [22], None, 'ubuntu')
+
+    def test_status_does_not_restore_ssh_config_for_stopped_cluster(
+            self, monkeypatch):
+        """Stopped clusters must not regain stale SSH config entries."""
+        mock_api_server_calls(monkeypatch)
+
+        mock_handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+        mock_handle.cached_external_ips = None
+        mock_handle.cached_external_ssh_ports = None
+        mock_handle.cached_cluster_info = mock.sentinel.cluster_info
+        mock_records = [{
+            'name': 'stopped-cluster',
+            'handle': mock_handle,
+            'status': status_lib.ClusterStatus.STOPPED,
+            'credentials': {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/path/to/key.pem'
+            }
+        }]
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'request-id')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_records)
+        mock_add_cluster = mock.MagicMock()
+        mock_remove_cluster = mock.MagicMock()
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            mock_add_cluster)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            mock_remove_cluster)
+
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['stopped-cluster'])
+
+        assert records == mock_records
+        mock_handle.update_cluster_ips.assert_not_called()
+        mock_handle.update_ssh_ports.assert_not_called()
+        mock_add_cluster.assert_not_called()
+        mock_remove_cluster.assert_called_once_with('stopped-cluster')
+
+    def test_status_skips_ssh_config_for_local_docker_handle(self, monkeypatch):
+        """Local Docker handles do not expose cloud connection caches."""
+        mock_api_server_calls(monkeypatch)
+        local_handle = mock.MagicMock(spec=backends.LocalDockerResourceHandle)
+        mock_records = [{
+            'name': 'local-cluster',
+            'handle': local_handle,
+            'status': status_lib.ClusterStatus.UP,
+        }]
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'request-id')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_records)
+        mock_add_cluster = mock.MagicMock()
+        mock_remove_cluster = mock.MagicMock()
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            mock_add_cluster)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            mock_remove_cluster)
+
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['local-cluster'])
+
+        assert records == mock_records
+        mock_add_cluster.assert_not_called()
+        mock_remove_cluster.assert_called_once_with('local-cluster')
+
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):
         """Tests _get_cluster_records_and_set_ssh_config with mocked components."""
         mock_api_server_calls(monkeypatch)
 
         # Mock cluster records that would be returned by stream_and_get
-        mock_handle = mock.MagicMock()
+        mock_handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
         mock_handle.cluster_name = 'test-cluster'
         mock_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_handle.cached_external_ips = ['1.2.3.4']
         mock_handle.cached_external_ssh_ports = [22]
+        mock_handle.cached_cluster_info = None
         mock_handle.docker_user = None
         mock_handle.ssh_user = 'ubuntu'
+        mock_handle.launched_resources = mock.MagicMock()
         mock_handle.launched_resources.cloud = mock.MagicMock()
 
         mock_records = [{
             'name': 'test-cluster',
             'handle': mock_handle,
+            'status': status_lib.ClusterStatus.UP,
             'credentials': {
                 'ssh_user': 'ubuntu',
                 'ssh_private_key': '/path/to/key.pem'
@@ -456,17 +589,20 @@ class TestHelperFunctions:
         mock_remove_cluster.reset_mock()
 
         # Test case 4: Test with a cluster that is using kubernetes
-        mock_k8s_handle = mock.MagicMock()
+        mock_k8s_handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
         mock_k8s_handle.cluster_name = 'test-cluster'
         mock_k8s_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_k8s_handle.cached_external_ips = ['1.2.3.4']
         mock_k8s_handle.cached_external_ssh_ports = [22]
+        mock_k8s_handle.cached_cluster_info = None
         mock_k8s_handle.docker_user = None
         mock_k8s_handle.ssh_user = 'ubuntu'
+        mock_k8s_handle.launched_resources = mock.MagicMock()
         mock_k8s_handle.launched_resources.cloud = clouds.Kubernetes()
         mock_records_kubernetes = [{
             'name': 'test-cluster',
             'handle': mock_k8s_handle,
+            'status': status_lib.ClusterStatus.UP,
             'credentials': {
                 'ssh_user': 'ubuntu',
                 'ssh_private_key': '/path/to/key.pem'
