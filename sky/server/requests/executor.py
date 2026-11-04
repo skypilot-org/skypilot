@@ -113,6 +113,17 @@ _AUTH_THREADS_LIMIT = 32
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
 
+# Errors from queue.get() that mean the connection to the request queue is
+# broken (e.g. the queue manager process is gone), rather than a failure of a
+# single request. BrokenPipeError and ConnectionError are OSError subclasses.
+_QUEUE_CONNECTION_ERRORS = (EOFError, OSError)
+# Backoff between retries while the request queue is unreachable.
+_QUEUE_RETRY_INITIAL_BACKOFF_SECONDS = 0.1
+_QUEUE_RETRY_MAX_BACKOFF_SECONDS = 5.0
+# How long the request queue may stay unreachable before the worker gives up
+# and shuts the API server down.
+_QUEUE_UNREACHABLE_TIMEOUT_SECONDS = 60.0
+
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
@@ -352,6 +363,10 @@ class RequestWorker:
             config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+        # Set while queue.get() keeps failing with a connection error: when
+        # the failures started, and the wait before the next retry.
+        self._queue_unreachable_since: Optional[float] = None
+        self._queue_retry_backoff = _QUEUE_RETRY_INITIAL_BACKOFF_SECONDS
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
@@ -372,7 +387,13 @@ class RequestWorker:
     def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
         try:
-            request_element = queue.get()
+            try:
+                request_element = queue.get()
+            except _QUEUE_CONNECTION_ERRORS as e:
+                self._handle_queue_connection_error(e)
+                return
+            self._queue_unreachable_since = None
+            self._queue_retry_backoff = _QUEUE_RETRY_INITIAL_BACKOFF_SECONDS
             if request_element is None:
                 time.sleep(0.1)
                 return
@@ -417,6 +438,38 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    def _handle_queue_connection_error(self, e: BaseException) -> None:
+        """Back off, or give up, after queue.get() lost the request queue.
+
+        A broken queue connection fails every get() instantly, so retrying
+        without a wait spins the worker and writes an error line per attempt.
+        Retry with capped exponential backoff instead; once the queue has been
+        unreachable for _QUEUE_UNREACHABLE_TIMEOUT_SECONDS, shut the server
+        down so it is restarted with a working queue rather than staying up
+        without one.
+        """
+        now = time.monotonic()
+        if self._queue_unreachable_since is None:
+            self._queue_unreachable_since = now
+        unreachable_seconds = now - self._queue_unreachable_since
+        error_str = common_utils.format_exception(e, use_bracket=True)
+        if unreachable_seconds >= _QUEUE_UNREACHABLE_TIMEOUT_SECONDS:
+            logger.critical(
+                f'[{self}] Request queue unreachable for '
+                f'{unreachable_seconds:.0f}s, shutting down the API server: '
+                f'{error_str}')
+            os.kill(os.getpid(), signal.SIGTERM)
+            # Stop polling but keep the executor up: the graceful shutdown
+            # drains in-flight requests and then cancels this worker.
+            self._cancel_event.wait()
+            return
+        logger.error(f'[{self}] Request queue unreachable for '
+                     f'{unreachable_seconds:.1f}s, retrying in '
+                     f'{self._queue_retry_backoff:.1f}s: {error_str}')
+        self._cancel_event.wait(self._queue_retry_backoff)
+        self._queue_retry_backoff = min(self._queue_retry_backoff * 2,
+                                        _QUEUE_RETRY_MAX_BACKOFF_SECONDS)
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.

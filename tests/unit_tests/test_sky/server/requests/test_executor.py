@@ -7,6 +7,7 @@ import os
 import pathlib
 import pickle
 import queue as queue_lib
+import signal
 import textwrap
 import threading
 import time
@@ -2564,3 +2565,118 @@ def test_config_override_infra_keys_gated_through_entry_point(
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+class _BrokenQueue:
+    """A request queue whose connection is gone: every get() fails at once,
+    like the manager proxy after the queue manager process died."""
+
+    def __init__(self, fail_every: int = 1) -> None:
+        self.gets = 0
+        self._fail_every = fail_every
+
+    def get(self):
+        self.gets += 1
+        if self.gets % self._fail_every == 0:
+            raise BrokenPipeError(32, 'Broken pipe')
+        return None
+
+
+def _start_worker_loop(worker: executor.RequestWorker,
+                       queue) -> threading.Thread:
+    """Run the RequestWorker.run() polling loop against `queue`."""
+
+    def loop():
+        while not worker._cancel_event.is_set():
+            worker.process_request(mock.MagicMock(), queue)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def _short_worker() -> executor.RequestWorker:
+    return executor.RequestWorker(schedule_type=requests_lib.ScheduleType.SHORT,
+                                  config=server_config.WorkerConfig(
+                                      garanteed_parallelism=1,
+                                      burstable_parallelism=0,
+                                      num_db_connections_per_worker=0))
+
+
+def test_broken_queue_is_retried_with_backoff():
+    """A dead queue connection must not spin the worker or flood the log."""
+    queue = _BrokenQueue()
+    worker = _short_worker()
+    with mock.patch.object(executor.logger, 'error') as log_error, \
+            mock.patch.object(executor.os, 'kill') as kill:
+        thread = _start_worker_loop(worker, queue)
+        time.sleep(1.0)
+        worker._cancel_event.set()
+        thread.join(timeout=2)
+    assert not thread.is_alive(), 'cancel must interrupt the backoff wait'
+    # Backoff from 0.1s doubling: attempts at ~0, 0.1, 0.3, 0.7s. Without a
+    # backoff this loop makes tens of thousands of attempts per second.
+    assert queue.gets <= 6, queue.gets
+    assert log_error.call_count <= queue.gets
+    kill.assert_not_called()
+
+
+def test_queue_unreachable_past_timeout_shuts_down_server(monkeypatch):
+    # raising=False: on a build without these knobs the test runs as is and
+    # fails on the behavior (no shutdown), not on a missing attribute.
+    monkeypatch.setattr(executor,
+                        '_QUEUE_RETRY_INITIAL_BACKOFF_SECONDS',
+                        0.01,
+                        raising=False)
+    monkeypatch.setattr(executor,
+                        '_QUEUE_RETRY_MAX_BACKOFF_SECONDS',
+                        0.02,
+                        raising=False)
+    monkeypatch.setattr(executor,
+                        '_QUEUE_UNREACHABLE_TIMEOUT_SECONDS',
+                        0.3,
+                        raising=False)
+    queue = _BrokenQueue()
+    worker = _short_worker()
+    with mock.patch.object(executor.os, 'kill') as kill:
+        thread = _start_worker_loop(worker, queue)
+        try:
+            deadline = time.monotonic() + 5
+            while not kill.called and time.monotonic() < deadline:
+                time.sleep(0.01)
+            kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+            gets_at_shutdown = queue.gets
+            time.sleep(0.2)
+            # The worker stops polling, but stays up (keeping its executor
+            # and in-flight requests alive) until the server's shutdown
+            # cancels it.
+            assert queue.gets == gets_at_shutdown
+            assert thread.is_alive()
+        finally:
+            worker._cancel_event.set()
+            thread.join(timeout=2)
+    assert not thread.is_alive()
+    kill.assert_called_once()
+
+
+def test_queue_recovering_between_failures_does_not_shut_down(monkeypatch):
+    """Only continuous unreachability counts toward the shutdown timeout."""
+    monkeypatch.setattr(executor,
+                        '_QUEUE_RETRY_INITIAL_BACKOFF_SECONDS',
+                        0.01,
+                        raising=False)
+    monkeypatch.setattr(executor,
+                        '_QUEUE_UNREACHABLE_TIMEOUT_SECONDS',
+                        0.3,
+                        raising=False)
+    # Every other get() fails; the successful ones return an empty queue.
+    queue = _BrokenQueue(fail_every=2)
+    worker = _short_worker()
+    with mock.patch.object(executor.os, 'kill') as kill:
+        thread = _start_worker_loop(worker, queue)
+        time.sleep(1.0)
+        worker._cancel_event.set()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert queue.gets > 4, queue.gets
+    kill.assert_not_called()
