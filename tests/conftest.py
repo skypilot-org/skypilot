@@ -23,6 +23,7 @@ from sky import skypilot_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import context_utils
 
 # Initialize logger at the top level
@@ -67,6 +68,23 @@ def _clear_request_level_cache():
     sky_check._unstored_enabled_cloud_names.cache_clear()
     # pylint: disable-next=protected-access
     kubernetes_utils._kubeconfig_context_names = None
+
+
+@pytest.fixture(autouse=True)
+def _restore_sky_context():
+    """Leave no active SkyPilotContext behind after a test.
+
+    `context.initialize()` sets a ContextVar on the calling thread and many
+    tests call it without unsetting it. Under xdist that thread goes on to
+    run other modules' tests, and every `skypilot_config` read then goes
+    through the leaked context's cloned config instead of the global one.
+    Tests that reload the global config from another thread and read it
+    back on the main thread fail as a result, depending only on which
+    modules shared a worker.
+    """
+    token = context._CONTEXT.set(context._CONTEXT.get())  # pylint: disable=protected-access
+    yield
+    context._CONTEXT.reset(token)  # pylint: disable=protected-access
 
 
 # Usage: use
