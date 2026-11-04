@@ -362,6 +362,7 @@ Launch a managed job from a YAML or a command.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 - `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
 - `--output`, `-o` — Print only the submitted job IDs, for scripts: `id` prints one per line, `json` prints {"job_ids": [...]}. Everything else goes to stderr. Implies --detach-run.
+- `--restart` — Launch a finished managed job again, by ID or name, as a new job. It runs the same spec at the same git commit; resource, --env and --secret flags override it. Takes no ENTRYPOINT.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`

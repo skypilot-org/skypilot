@@ -27,10 +27,14 @@ import {
   useSingleManagedJob,
   getPoolStatus,
   computeJobGroupStatus,
+  handleJobAction,
 } from '@/data/connectors/jobs';
+import { statusGroups } from '@/components/jobs';
+import { ConfirmationModal } from '@/components/elements/modals';
 import Link from 'next/link';
 import {
   RotateCwIcon,
+  RotateCcwIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   Download,
@@ -150,6 +154,13 @@ function JobDetails({
   }, [treeMemberRows]);
   const [poolsData, setPoolsData] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRerunning, setIsRerunning] = useState(false);
+  const [confirmationModal, setConfirmationModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+  });
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
@@ -396,6 +407,41 @@ function JobDetails({
       }
     : null;
 
+  // Job-level status (for job groups, derived across primary tasks).
+  const jobStatus = isMultiTask
+    ? computeJobGroupStatus(allTasks)
+    : detailJobData?.status;
+  // Re-run is only offered for finished jobs; re-running a live job would
+  // leave two copies running.
+  const canRerun = !!detailJobData && statusGroups.finished.includes(jobStatus);
+
+  const handleRerun = () => {
+    setConfirmationModal({
+      isOpen: true,
+      title: 'Re-run Job',
+      message:
+        `Re-run job ${jobId}` +
+        `${detailJobData?.name ? ` (${detailJobData.name})` : ''} ` +
+        'as a new managed job? It runs the same spec at the same git commit ' +
+        'as the original run.',
+      onConfirm: async () => {
+        try {
+          setIsRerunning(true);
+          const ok = await handleJobAction('rerun', jobId);
+          if (ok) {
+            // The re-run is a new job with a new ID; send the user to the
+            // jobs list where it appears as <original>-rerun-<suffix>.
+            router.push('/jobs');
+          }
+        } catch (err) {
+          console.error('Error re-running job:', err);
+        } finally {
+          setIsRerunning(false);
+        }
+      },
+    });
+  };
+
   // What the Logs card streams: a dynamic task streams its own managed job
   // (all of its tasks); otherwise the selected task of this job.
   const logsJobData = selectedDynamicJob
@@ -477,6 +523,21 @@ function JobDetails({
                 <CircularProgress size={15} className="mt-0" />
                 <span className="ml-2 text-gray-500">Loading...</span>
               </div>
+            )}
+            {canRerun && (
+              <Tooltip
+                content="Re-run this job as a new job"
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={handleRerun}
+                  disabled={isRerunning}
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8 mr-4"
+                >
+                  <RotateCcwIcon className="w-4 h-4 mr-1.5" />
+                  {!isMobile && <span>Re-run</span>}
+                </button>
+              </Tooltip>
             )}
             <Tooltip content="Refresh" className="text-muted-foreground">
               <button
@@ -1081,6 +1142,16 @@ function JobDetails({
             <span>Job not found</span>
           </div>
         )}
+        <ConfirmationModal
+          isOpen={confirmationModal.isOpen}
+          onClose={() =>
+            setConfirmationModal({ ...confirmationModal, isOpen: false })
+          }
+          onConfirm={confirmationModal.onConfirm}
+          title={confirmationModal.title}
+          message={confirmationModal.message}
+          confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
+        />
       </>
     </>
   );

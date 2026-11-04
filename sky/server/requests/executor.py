@@ -636,6 +636,8 @@ _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG = {
     request_names.RequestName.CLUSTER_LAUNCH.value,
     server_constants.REQUEST_NAME_PREFIX +
     request_names.RequestName.JOBS_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_RESTART.value,
 }
 
 # Sources we DON'T announce, even on a resource-creating request:

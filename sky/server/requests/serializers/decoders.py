@@ -118,7 +118,7 @@ def decode_status_kubernetes(
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-@register_decoders('launch', 'exec', 'jobs.launch')
+@register_decoders('launch', 'exec', 'jobs.launch', 'jobs.restart')
 def decode_launch(
     return_value: Dict[str, Any]
 ) -> Union[Tuple[str, 'backends.CloudVmRayResourceHandle'], Tuple[

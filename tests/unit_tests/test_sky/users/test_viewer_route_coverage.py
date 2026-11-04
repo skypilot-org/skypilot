@@ -77,6 +77,7 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/users/me/workspace', 'POST'),
     # --- Managed jobs writes ---
     ('/jobs/launch', 'POST'),
+    ('/jobs/restart', 'POST'),
     ('/jobs/cancel', 'POST'),
     ('/jobs/pool_apply', 'POST'),
     ('/jobs/pool_down', 'POST'),

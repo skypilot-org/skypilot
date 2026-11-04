@@ -50,6 +50,7 @@ class RequestName(str, enum.Enum):
     CREATE_DEBUG_DUMP = 'create_debug_dump'
     # Managed jobs requests
     JOBS_LAUNCH = 'jobs.launch'
+    JOBS_RESTART = 'jobs.restart'
     JOBS_QUEUE = 'jobs.queue'
     JOBS_QUEUE_V2 = 'jobs.queue_v2'
     JOBS_CANCEL = 'jobs.cancel'

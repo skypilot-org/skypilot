@@ -5875,8 +5875,9 @@ def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=True)
+# Optional only so that --restart can stand alone; checked in jobs_launch.
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -5956,6 +5957,15 @@ def _parse_depends_on(value: Optional[str]) -> Optional[List[int]]:
               help=('Print only the submitted job IDs, for scripts: `id` '
                     'prints one per line, `json` prints {"job_ids": [...]}. '
                     'Everything else goes to stderr. Implies --detach-run.'))
+@click.option('--restart',
+              'restart',
+              metavar='JOB',
+              type=str,
+              default=None,
+              help=('Launch a finished managed job again, by ID or name, as a '
+                    'new job. It runs the same spec at the same git commit; '
+                    'resource, --env and --secret flags override it. Takes no '
+                    'ENTRYPOINT.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -5998,6 +6008,7 @@ def jobs_launch(
     no_job_group: bool = False,
     depends_on: Optional[str] = None,
     output_format: Optional[str] = None,
+    restart: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -6018,7 +6029,15 @@ def jobs_launch(
 
       # Print only the job ID, e.g. to pass it to another command.
       JOB_ID=$(sky jobs launch -y -o id task.yaml)
+
+      # Run finished job 12 again as a new job, at the same git commit.
+      sky jobs launch --restart 12
+
+      # Run it again on 8 H100s with a different learning rate.
+      sky jobs launch --restart 12 --gpus H100:8 --env LR=1e-4
     """
+    if not entrypoint and restart is None:
+        raise click.UsageError('Missing argument ENTRYPOINT.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
@@ -6037,6 +6056,44 @@ def jobs_launch(
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
+    if restart is not None:
+        _jobs_restart(restart,
+                      entrypoint=entrypoint,
+                      name=name,
+                      workdir=workdir,
+                      git_url=git_url,
+                      git_ref=git_ref,
+                      num_jobs=num_jobs,
+                      job_group=job_group,
+                      no_job_group=no_job_group,
+                      depends_on_ids=depends_on_ids,
+                      override_params=_parse_override_params(
+                          cloud=cloud,
+                          region=region,
+                          zone=zone,
+                          gpus=gpus,
+                          cpus=cpus,
+                          memory=memory,
+                          instance_type=instance_type,
+                          use_spot=use_spot,
+                          image_id=image_id,
+                          disk_size=disk_size,
+                          disk_tier=disk_tier,
+                          network_tier=network_tier,
+                          local_disk=local_disk,
+                          ports=ports,
+                          priority=priority,
+                          config_override=config_override),
+                      job_recovery=job_recovery,
+                      env=env,
+                      secret=secret,
+                      num_nodes=num_nodes,
+                      pool_name=pool,
+                      yes=yes,
+                      detach_run=detach_run,
+                      async_call=async_call,
+                      output_format=output_format)
+        return
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -6130,6 +6187,75 @@ def jobs_launch(
                                      job_group=job_group_arg,
                                      depends_on=depends_on_ids,
                                      _need_confirmation=not yes)
+    _report_jobs_launch_result(request_id,
+                               async_call=async_call,
+                               output_format=output_format,
+                               detach_run=detach_run,
+                               pool_name=pool)
+
+
+def _jobs_restart(job: str, *, entrypoint: Tuple[str, ...], name: Optional[str],
+                  workdir: Optional[str], git_url: Optional[str],
+                  git_ref: Optional[str], num_jobs: Optional[int],
+                  job_group: Optional[str], no_job_group: bool,
+                  depends_on_ids: Optional[List[int]],
+                  override_params: Dict[str, Any], job_recovery: Optional[str],
+                  env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+                  num_nodes: Optional[int], pool_name: Optional[str], yes: bool,
+                  detach_run: bool, async_call: bool,
+                  output_format: Optional[str]) -> None:
+    """Handles `sky jobs launch --restart JOB`."""
+    if entrypoint:
+        raise click.UsageError(
+            '--restart takes no ENTRYPOINT: it runs the stored spec of the '
+            'job. Override fields with flags such as --gpus or --env.')
+    # These change where the code comes from or how the job is attached; the
+    # restarted job keeps the original's code and is a top-level job.
+    incompatible = {
+        '--workdir': workdir is not None,
+        '--git-url': git_url is not None,
+        '--git-ref': git_ref is not None,
+        '--num-jobs': num_jobs is not None,
+        '--job-group': job_group is not None,
+        '--no-job-group': no_job_group,
+        '--depends-on': bool(depends_on_ids),
+    }
+    used = [flag for flag, is_set in incompatible.items() if is_set]
+    if used:
+        raise click.UsageError(
+            f'--restart cannot be used with {", ".join(used)}.')
+    if name is not None:
+        common_utils.check_cluster_name_is_valid(name)
+    if job_recovery is not None:
+        override_params['job_recovery'] = job_recovery
+
+    if not yes:
+        click.confirm(
+            f'Launching managed job {job!r} again as a new job. '
+            'Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+    request_id = managed_jobs.restart(job,
+                                      name=name,
+                                      pool=pool_name,
+                                      resources_override=override_params or
+                                      None,
+                                      env_overrides=env or None,
+                                      secrets_overrides=secret or None,
+                                      num_nodes=num_nodes)
+    _report_jobs_launch_result(request_id,
+                               async_call=async_call,
+                               output_format=output_format,
+                               detach_run=detach_run,
+                               pool_name=pool_name)
+
+
+def _report_jobs_launch_result(request_id: server_common.RequestId, *,
+                               async_call: bool, output_format: Optional[str],
+                               detach_run: bool,
+                               pool_name: Optional[str]) -> None:
+    """Waits for a jobs launch request and reports or tails the new job(s)."""
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
@@ -6171,11 +6297,11 @@ def jobs_launch(
         job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            if pool is not None:
+            if pool_name is not None:
                 query = urllib.parse.urlencode({
                     'property': 'pool',
                     'operator': ':',
-                    'value': pool,
+                    'value': pool_name,
                 })
                 starting_page = f'jobs?{query}'
                 show_jobs_label = 'Show all jobs in the pool:'
@@ -6187,10 +6313,10 @@ def jobs_launch(
             dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
                               f'\t\t{ux_utils.BOLD}{dashboard_url}'
                               f'{ux_utils.RESET_BOLD}')
-        if pool is not None:
+        if pool_name is not None:
             cancel_hint = (
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool_name}'
                 f'{ux_utils.RESET_BOLD}')
         else:
             cancel_hint = (
