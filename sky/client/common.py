@@ -20,7 +20,6 @@ import filelock
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import auth_proxy
-from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.data import storage_utils
 from sky.schemas.api import responses as api_responses
@@ -193,10 +192,10 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
-    sa_headers = auth_proxy.get_auth_proxy_headers()
-    sa_headers.update(service_account_auth.get_service_account_headers())
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
+            # Per attempt: a retry may need a new token for the proxy.
+            auth_headers = auth_proxy.get_auth_headers(server_url)
             response = params.client.post(
                 f'{server_url}{params.endpoint}',
                 params={
@@ -210,7 +209,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                                           params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
-                    **sa_headers,
+                    **auth_headers,
                 },
                 cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
@@ -232,6 +231,10 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                     f'{response.content.decode("utf-8")}')
                 upload_logger.info(
                     f'Retrying... ({attempt + 1} / {max_attempts})')
+                if response.status_code in (401, 407):
+                    # An authenticating proxy may have rejected an expired
+                    # token: get a new one for the retry.
+                    auth_proxy.clear_cache()
                 if response.status_code == 503:
                     # If the server is temporarily unavailable,
                     # wait a little longer before retrying.

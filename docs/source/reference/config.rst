@@ -352,10 +352,23 @@ The token is cached in memory: a JWT until one minute before its ``exp``
 claim, anything else for ``cache_seconds``. This setting is read only by the
 client and is never sent to the API server.
 
+It is read only from the user config file (``~/.sky/config.yaml``, or the file
+in ``SKYPILOT_GLOBAL_CONFIG``), never from a project's ``.sky.yaml`` or a
+``--config`` override, so a checked-out repository cannot make the client run
+a command. The token is sent only to the ``api_server.endpoint`` set in the same
+file: if the client is pointed at another server, for example with
+``SKYPILOT_API_SERVER_ENDPOINT``, that server doesn't get it.
+``sky api login`` to the same endpoint keeps this setting; a login to a
+different one removes it.
+
 - ``command``: the command to run, as a string or a list of arguments. It must
   print the token as a single line.
 - ``header`` (default: ``Proxy-Authorization``): the request header to send.
-- ``value_template`` (default: ``Bearer {token}``): the header's value.
+  It can't be ``Authorization`` if a :ref:`service account token
+  <config-yaml-api-server-service-account-token>` is also configured, since that
+  goes in ``Authorization``.
+- ``value_template`` (default: ``Bearer {token}``): the header's value, with
+  ``{token}`` and no other field (``{{`` and ``}}`` for literal braces).
 - ``cache_seconds`` (default: ``300``): how long to reuse a token that is not
   a JWT.
 

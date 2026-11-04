@@ -1,5 +1,6 @@
 """Common data structures and constants used in the API."""
 
+import asyncio
 import dataclasses
 import enum
 import functools
@@ -34,7 +35,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import auth_proxy
-from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -367,10 +367,9 @@ def _prepare_authenticated_request_params(
     if server_url is None:
         server_url = get_server_url()
 
-    # Prepare headers and URL for service account authentication, plus the
-    # credential for an authenticating proxy in front of the server, if any.
-    headers = auth_proxy.get_auth_proxy_headers()
-    headers.update(service_account_auth.get_service_account_headers())
+    # The service account token, plus the credential for an authenticating
+    # proxy in front of the server, if any.
+    headers = auth_proxy.get_auth_headers(server_url)
 
     # Merge with existing headers
     if 'headers' in kwargs:
@@ -463,6 +462,13 @@ async def make_authenticated_request_async(
         exceptions.ServerTemporarilyUnavailableError: When server returns 503
         exceptions.RequestInterruptedError: When request is interrupted
     """
+    if server_url is None:
+        server_url = get_server_url()
+    # Getting a new token for an authenticating proxy runs a command, which can
+    # take seconds: do it off the event loop. Then the call below uses the
+    # cached token.
+    if auth_proxy.token_needs_refresh(server_url):
+        await asyncio.to_thread(auth_proxy.get_auth_proxy_headers, server_url)
     url, kwargs = _prepare_authenticated_request_params(path, server_url,
                                                         **kwargs)
 
