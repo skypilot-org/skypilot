@@ -234,17 +234,34 @@ class TestImpersonation:
             with service_account_auth.impersonate(user):
                 pass
 
-    @pytest.mark.parametrize('remote_api_version,raises', [
-        (None, False),
-        (server_constants.MIN_IMPERSONATION_API_VERSION - 1, True),
-        (server_constants.MIN_IMPERSONATION_API_VERSION, False),
-    ])
+    _OLD = server_constants.MIN_IMPERSONATION_API_VERSION - 1
+    _NEW = server_constants.MIN_IMPERSONATION_API_VERSION
+
+    @pytest.mark.parametrize(
+        'known,after_probe,probes,raises',
+        [
+            (_OLD, None, False, True),
+            (_NEW, None, False, False),
+            # Unknown: a health check learns the version first.
+            (None, _OLD, True, True),
+            (None, _NEW, True, False),
+            # An unreachable server is left to fail on the request itself.
+            (None, None, True, False),
+        ])
     @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
     @mock.patch('sky.server.common.rest.request')
-    def test_refuses_server_that_ignores_header(self, mock_request,
-                                                remote_api_version, raises):
+    def test_refuses_server_that_ignores_header(self, mock_request, known,
+                                                after_probe, probes, raises):
+        version = {'api': known}
+
+        def probe(server_url):
+            assert server_url == 'https://api'
+            version['api'] = after_probe
+
         with mock.patch('sky.server.versions.get_remote_api_version',
-                        return_value=remote_api_version), \
+                        side_effect=lambda: version['api']), \
+                mock.patch('sky.server.common.get_api_server_status',
+                           side_effect=probe) as mock_probe, \
                 service_account_auth.impersonate('alice'):
             if raises:
                 with pytest.raises(exceptions.APINotSupportedError):
@@ -257,3 +274,18 @@ class TestImpersonation:
                 headers = mock_request.call_args.kwargs['headers']
                 assert headers[
                     server_constants.IMPERSONATE_USER_HEADER] == 'alice'
+        assert mock_probe.called == probes
+
+    @mock.patch.dict(os.environ, _TOKEN_ENV, clear=True)
+    @mock.patch('sky.server.common.rest.request')
+    def test_health_check_does_not_probe_itself(self, mock_request):
+        with mock.patch('sky.server.versions.get_remote_api_version',
+                        return_value=None), \
+                mock.patch('sky.server.common.get_api_server_status'
+                          ) as mock_probe, \
+                service_account_auth.impersonate('alice'):
+            server_common.make_authenticated_request('GET',
+                                                     '/api/health',
+                                                     server_url='https://api')
+        mock_probe.assert_not_called()
+        mock_request.assert_called_once()
