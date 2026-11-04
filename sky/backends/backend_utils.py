@@ -31,6 +31,7 @@ from aiohttp import ClientTimeout
 from aiohttp import TCPConnector
 import colorama
 from packaging import version
+import sqlalchemy
 from typing_extensions import Literal
 
 import sky
@@ -4449,25 +4450,32 @@ def _refresh_cluster(
 def _status_refresh_num_threads() -> Optional[int]:
     """Thread count for one status refresh, or None for the CPU default.
 
-    Each cluster refresh checks one connection out of this process's state
-    DB pool and holds it for the advisory lock across the cloud status call.
-    A state query while that lock is held checks out a second connection.
-    More threads than half the pool wait out the pool timeout. The count
-    stays at or below get_parallel_threads(), since num_threads replaces
-    that default. Pool size 0 is NullPool and does not queue, so the caller
-    keeps the CPU default.
+    Derived from the state engine this process actually uses, not from the
+    configured budget: skypilot_config builds and caches that engine at
+    import time, before the executor calls set_max_connections(), so without
+    an explicit pool size the engine is NullPool even though the budget is
+    non-zero. Only a Postgres QueuePool queues checkouts and can time out.
+
+    When the advisory lock shares that pool (no pooler configured), each
+    cluster refresh holds one connection for the lock across the cloud status
+    call and may check out a second one for a state query, so only half the
+    pool can refresh at once. The count stays at or below
+    get_parallel_threads(), since num_threads replaces that default.
 
     Returns:
         Thread count, or None when the CPU default should be used.
     """
-    pool_size = db_utils.get_db_connection_pool_size()
-    if pool_size <= 0:
+    state_engine = global_user_state.initialize_and_get_db()
+    pool = state_engine.pool
+    if (state_engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value
+            or not isinstance(pool, sqlalchemy.pool.QueuePool)):
         return None
+    pool_size = pool.size()
     capacity = pool_size + db_utils.get_db_connection_pool_max_overflow(
         pool_size)
-    # One connection for the lock, one for a query issued while it is held.
-    # num_threads replaces the CPU default, so a large pool must not exceed it.
-    return min(subprocess_utils.get_parallel_threads(), max(1, capacity // 2))
+    if locks.postgres_lock_engine() is state_engine:
+        capacity //= 2
+    return min(subprocess_utils.get_parallel_threads(), max(1, capacity))
 
 
 def refresh_cluster_records() -> None:

@@ -169,6 +169,19 @@ def postgres_lock_key(lock_id: str) -> int:
     return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
 
+def postgres_lock_engine() -> sqlalchemy.engine.Engine:
+    """Return the engine :class:`PostgresLock` takes its connections from.
+
+    When no pooler is configured this is the same engine global_user_state
+    uses, so every held lock occupies one connection of that pool.
+    """
+    # Session-scoped advisory locks hold one connection across their whole
+    # lifetime, which is unsafe through a transaction-mode pooler (the
+    # backend can change between statements). Use a direct engine so the
+    # lock connection bypasses any configured pooler.
+    return db_utils.get_engine(None, direct=True)
+
+
 class PostgresLock(DistributedLock):
     """PostgreSQL advisory lock implementation.
 
@@ -207,12 +220,7 @@ class PostgresLock(DistributedLock):
     @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
-        # Session-scoped advisory locks hold one connection across their whole
-        # lifetime, which is unsafe through a transaction-mode pooler (the
-        # backend can change between statements). Use a direct engine so the
-        # lock connection bypasses any configured pooler; when none is
-        # configured this is the same engine global_user_state uses.
-        engine = db_utils.get_engine(None, direct=True)
+        engine = postgres_lock_engine()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
