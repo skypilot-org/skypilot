@@ -21,6 +21,65 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 
 
+@pytest.mark.parametrize('remote_identity,client_config', [
+    ('NO_UPLOAD', None),
+    ('no_upload', None),
+    ('NO_UPLOAD', {
+        'lambda': {
+            'remote_identity': 'LOCAL_CREDENTIALS'
+        }
+    }),
+])
+def test_write_cluster_config_lambda_no_upload(remote_identity, client_config,
+                                               tmp_path, monkeypatch) -> None:
+    """`lambda.remote_identity: NO_UPLOAD` keeps the Lambda API key off every
+    cluster, in any case (the schema accepts it case-insensitively), and a
+    client config merged into the request cannot loosen it."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(f'lambda:\n  remote_identity: {remote_identity}\n')
+    monkeypatch.setattr(skypilot_config, '_global_config_context',
+                        skypilot_config.ConfigContext())
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    skypilot_config.reload_config()
+    for target, value in [
+        ('sky.catalog.instance_type_exists', True),
+        ('sky.catalog.get_accelerators_from_instance_type', {
+            'fake-acc': 2
+        }),
+        ('sky.catalog.get_image_id_from_tag', 'fake-image'),
+        ('sky.catalog.get_arch_from_instance_type', 'fake-arch'),
+        ('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
+         '/tmp/fake/path'),
+        ('sky.backends.backend_utils._deterministic_cluster_yaml_hash',
+         'fake-hash'),
+        ('sky.utils.common_utils.fill_template', None),
+    ]:
+        monkeypatch.setattr(target, mock.MagicMock(return_value=value))
+    monkeypatch.setattr(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME',
+                        'fake-default-sg')
+
+    with mock.patch('sky.check.get_cloud_credential_file_mounts',
+                    return_value={}) as mock_mounts, \
+            skypilot_config.override_skypilot_config(client_config):
+        backend_utils.write_cluster_config(
+            to_provision=Resources(cloud=clouds.AWS(),
+                                   instance_type='fake-type: 3'),
+            num_nodes=1,
+            cluster_config_template='aws-ray.yml.j2',
+            cluster_name='display',
+            local_wheel_path=pathlib.Path('/tmp/fake'),
+            wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+            region=clouds.Region(name='fake-region'),
+            zones=[clouds.Zone(name='fake-zone')],
+            dryrun=True,
+            keep_launch_fields_in_existing_config=True)
+
+    excluded_clouds = mock_mounts.call_args[0][0]
+    assert clouds.Lambda() in excluded_clouds
+    assert clouds.AWS() not in excluded_clouds
+
+
 # Set env var to test config file.
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())

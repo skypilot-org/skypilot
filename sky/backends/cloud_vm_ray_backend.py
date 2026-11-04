@@ -1864,13 +1864,14 @@ class RetryingVmProvisioner(object):
                     requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
                 # The jobs controller's autodown is a leak guard, not the
-                # user's ask. A NONE pod cannot delete itself, so the job runs
+                # user's ask. A cluster without credentials (Kubernetes
+                # `remote_identity: NONE`, Lambda `NO_UPLOAD`) cannot delete
+                # itself, so the job runs
                 # without the guard (execution skips setting it) rather than
                 # being refused.
                 if (self._is_launched_by_jobs_controller and
-                        isinstance(to_provision.cloud, clouds.Kubernetes) and
-                        clouds.Kubernetes.remote_identity_is_none(
-                            to_provision.region, to_provision)):
+                        backend_utils.cluster_lacks_identity_to_autodown(
+                            to_provision)):
                     requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTODOWN)
 
