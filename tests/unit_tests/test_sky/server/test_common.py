@@ -188,21 +188,23 @@ def test_start_api_server_disabled_by_env_var():
 def test_check_server_healthy_or_start_in_server_never_starts(
         unused_url, unused_local, mock_make_request, mock_filelock,
         mock_start_server):
-    """Inside the API server, a transient healthz failure never starts a new
-    local server.
+    """Inside the API server, a healthz failure never starts a new local
+    server.
 
     A consolidation-mode controller runs as a child of the API server and
-    inherits IS_SKYPILOT_SERVER. When its localhost /api/health probe drops
-    transiently under load, the old code routed into _start_api_server, whose
-    _set_metrics_env_var rmtree'd the prometheus multiproc dir. Here the
-    in-server branch retries the probe briefly and surfaces an
-    ApiServerConnectionError instead; _start_api_server and the creation lock
-    are never reached (the lock is only for coordinating a real start).
+    inherits IS_SKYPILOT_SERVER. When its localhost /api/health probe fails,
+    the old code routed into _start_api_server, which ran a second server's
+    startup against the live server's state (removing the jobs consolidation
+    signal file, resetting the local request database, wiping the prometheus
+    multiproc dir). Now the in-server branch surfaces an
+    ApiServerConnectionError, as for a remote endpoint; _start_api_server and
+    the creation lock are never reached (the lock is only for coordinating a
+    real start).
     """
     mock_make_request.side_effect = requests.exceptions.ConnectionError()
+    common.get_api_server_status_response.cache_clear()
 
-    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}), \
-            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0):
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}):
         with pytest.raises(exceptions.ApiServerConnectionError):
             common.check_server_healthy_or_start_fn()
 
@@ -215,28 +217,25 @@ def test_check_server_healthy_or_start_in_server_never_starts(
 @mock.patch('sky.server.common.filelock.FileLock')
 @mock.patch('sky.server.common.check_server_healthy')
 @mock.patch('sky.server.common.is_api_server_local', return_value=True)
-def test_check_server_healthy_or_start_in_server_retries_transient(
+def test_check_server_healthy_or_start_in_server_raises_without_retry(
         unused_local, mock_check, mock_filelock, mock_start_server):
-    """A transient healthz blip inside the API server recovers via the retry.
+    """Inside the API server, one failed probe raises at once, as for a remote
+    endpoint.
 
-    The first probe fails (the blip), the retry succeeds, and the call returns
-    normally -- no _start_api_server, no error surfaced to the caller, so a
-    sub-second blip does not push the jobs controller into its full launch-retry
-    backoff.
+    There is no in-place retry and no second probe under the creation lock:
+    the caller (e.g. the jobs controller) handles the connection error through
+    its own retry path.
     """
     healthy = (ApiServerStatus.HEALTHY, mock.Mock())
     mock_check.side_effect = [
         exceptions.ApiServerConnectionError('http://127.0.0.1:1111'), healthy
     ]
 
-    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}), \
-            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC',
-                              2.0), \
-            mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_INTERVAL_SEC',
-                              0.0):
-        common.check_server_healthy_or_start_fn()
+    with mock.patch.dict(os.environ, {'IS_SKYPILOT_SERVER': 'true'}):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            common.check_server_healthy_or_start_fn()
 
-    assert mock_check.call_count == 2
+    assert mock_check.call_count == 1
     mock_start_server.assert_not_called()
     mock_filelock.assert_not_called()
 
@@ -284,7 +283,6 @@ def test_check_server_healthy_or_start_in_server_preserves_metrics_dir(
 
     monkeypatch.setattr(common.tempfile, 'gettempdir',
                         lambda: str(metrics_root))
-    monkeypatch.setattr(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0)
     monkeypatch.setattr(
         common, 'check_server_healthy',
         mock.Mock(side_effect=exceptions.ApiServerConnectionError(
@@ -346,9 +344,8 @@ def test_sdk_api_start_in_server_never_starts(unused_url, unused_local,
     common.get_api_server_status_response.cache_clear()
     mock_make_request.side_effect = requests.exceptions.ConnectionError()
 
-    with mock.patch.object(common, '_IN_SERVER_HEALTHZ_RETRY_TIMEOUT_SEC', 0):
-        with pytest.raises(exceptions.ApiServerConnectionError):
-            sdk.api_start()
+    with pytest.raises(exceptions.ApiServerConnectionError):
+        sdk.api_start()
 
     mock_start_server.assert_not_called()
     mock_popen.assert_not_called()
