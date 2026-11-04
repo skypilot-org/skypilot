@@ -97,6 +97,8 @@ async def test_unauthenticated_caller_is_refused():
     request = _request(_ALICE.name)
     response, _, check = await _dispatch(request, caller=None)
     assert response.status_code == 403
+    assert json.loads(response.body)['detail'] == (
+        'Impersonation requires a service account token.')
     check.assert_not_called()
 
 

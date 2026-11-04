@@ -747,9 +747,10 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
         if request.url.path.startswith('/api/health'):
             return None
         caller = request.state.auth_user
+        # Also unset for session cookies, which plugin middleware reads later.
         if caller is None:
             return self._reject(
-                request, 'Impersonation requires an authenticated caller.')
+                request, 'Impersonation requires a service account token.')
         # Before taking an auth worker, which the other refusals need.
         try:
             impersonation.precheck(caller, request.url.path, request.method)
