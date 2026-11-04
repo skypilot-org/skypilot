@@ -1,10 +1,10 @@
 """SQLAlchemy is server-only; helpers must fail clearly when it is missing."""
 import ast
 import importlib
+from pathlib import Path
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 import pytest
 
