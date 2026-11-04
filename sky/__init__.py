@@ -164,6 +164,7 @@ OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
+Runcrate = clouds.Runcrate
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
@@ -190,6 +191,7 @@ __all__ = [
     'Paperspace',
     'PrimeIntellect',
     'RunPod',
+    'Runcrate',
     'Vast',
     'SCP',
     'Slurm',
