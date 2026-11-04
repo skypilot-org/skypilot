@@ -605,9 +605,15 @@ def test_edit_service_account_role_in_dialog(make_user, open_as, admin_api, uid,
         row.locator('span.capitalize').first,
         f'{ci.name} must show the User role after saving').to_have_text(
             _role_text('user'))
-    role = seed_users.user_role(admin_api, ci.user_id)
-    assert role == 'user', (
-        f'{ci.name} must show the User role after saving: server has {role!r}')
+    # Service accounts are not in GET /users; their roles come with the tokens.
+    r = admin_api.get(f'{admin_api.base_url}{SA_TOKENS}', timeout=60)
+    r.raise_for_status()
+    roles = next((t.get('service_account_roles')
+                  for t in r.json()
+                  if t.get('token_id') == ci.token_id), None)
+    assert roles == [
+        'user'
+    ], (f'{ci.name} must show the User role after saving: server has {roles!r}')
 
 
 @with_twists(
