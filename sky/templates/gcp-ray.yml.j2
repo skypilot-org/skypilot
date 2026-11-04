@@ -39,6 +39,8 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
+  # Remote identity for GCP service account
+  remote_identity: "{{remote_identity}}"
 {% if vpc_name is not none %}
   # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
   vpc_name: {{vpc_name}}
