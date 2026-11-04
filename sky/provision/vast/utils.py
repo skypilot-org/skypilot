@@ -6,6 +6,7 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import re
 import shlex
 from typing import Any, Dict, List, Optional
 
@@ -111,18 +112,32 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
+    # Floor the RAM: this is a `>=` guarantor, and the value came from the
+    # catalog entry for this very instance type, so rounding up could exclude
+    # the offer we are looking for.
+    cpu_ram = int(float(instance_type.split('-')[-1]) / 1024)
+    # Keep the underscore form the instance type already carries: the catalog
+    # builds it as re.sub(r'\s', '_', gpu_name), and that is the form the
+    # query below needs (see the comment there).
+    gpu_name = instance_type.split('-')[1]
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # Every value here must be bare -- no quotes, spaces or dots. The Vast SDK
+    # parses this query with pyparsing using `Word(alphanums + '_')`, so a
+    # quoted value makes the parser stop at that token and
+    # `preprocess_search_query()` (which runs whenever `georegion` or `chunked`
+    # is set, as they are here) returns an *empty* query. Every filter is then
+    # silently dropped and `search_offers` returns offers of every GPU type in
+    # score order, from which we pick [0] below -- i.e. an arbitrary GPU in an
+    # arbitrary region rather than the one the user asked for.
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
+        f'geolocation={region[-2:]}',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
+        f'gpu_name={gpu_name}',
+        f'cpu_ram>={cpu_ram}',
     ]
     if secure_only:
         query.append('datacenter=true')
@@ -135,6 +150,20 @@ def launch(name: str,
         raise RuntimeError('Failed to create instances, could not find an '
                            'offer that satisfies the requirements '
                            f'"{query_str}".')
+
+    # Defence in depth: the query above is a string the SDK re-parses, and its
+    # grammar has both changed across SDK versions and cannot express a GPU
+    # name containing '-' (e.g. 'RTX PRO 6000 Max-Q') in any released version.
+    # If the gpu_name filter is ever dropped or truncated, the search happily
+    # returns other GPUs -- and picking [0] would launch one of them. Never
+    # launch a GPU that was not asked for; fail instead.
+    instance_list = [
+        offer for offer in instance_list
+        if re.sub(r'\s', '_', offer.get('gpu_name', '')) == gpu_name
+    ]
+    if not instance_list:
+        raise RuntimeError('Failed to create instances: no offer for GPU '
+                           f'{gpu_name!r} among the results for "{query_str}".')
 
     instance_touse = instance_list[0]
 
@@ -231,7 +260,6 @@ def launch(name: str,
             env_dict.update(user_env)
         elif isinstance(user_env, str):
             # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
             for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
                 env_dict[match.group(1)] = match.group(2)
     launch_params['env'] = env_dict
