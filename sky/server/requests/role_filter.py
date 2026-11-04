@@ -69,8 +69,9 @@ def force_caller_scope_cancel_body(
     clients send their own user hash along with the ids, which would hide
     every other user's request. Without ids they keep the client-supplied
     value, so ``--all-users`` (``user_id=None`` => every request) and
-    ``--all`` (their own) still work. The strictly-read-only viewer role may
-    not cancel anything at all.
+    ``--all`` (their own) still work. An impersonated caller's own requests
+    are the impersonated user's, not those of the client machine's user hash.
+    The strictly-read-only viewer role may not cancel anything at all.
     """
     if _is_viewer(request):
         raise fastapi.HTTPException(
@@ -80,6 +81,9 @@ def force_caller_scope_cancel_body(
         request_cancel_body.user_id = scope
     elif request_cancel_body.request_ids is not None:
         request_cancel_body.user_id = None
+    elif (request_cancel_body.user_id is not None and
+          getattr(request.state, 'impersonator', None) is not None):
+        request_cancel_body.user_id = request.state.auth_user.id
     return request_cancel_body
 
 

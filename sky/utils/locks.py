@@ -161,6 +161,14 @@ class FileLock(DistributedLock):
         return self._filelock.is_locked
 
 
+def postgres_lock_key(lock_id: str) -> int:
+    """Return the advisory lock key that :class:`PostgresLock` uses for
+    ``lock_id``."""
+    hash_digest = hashlib.sha256(lock_id.encode('utf-8')).digest()
+    # Take first 8 bytes and convert to int, ensure positive 64-bit
+    return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
+
+
 class PostgresLock(DistributedLock):
     """PostgreSQL advisory lock implementation.
 
@@ -191,17 +199,10 @@ class PostgresLock(DistributedLock):
                 advisory lock (default).
         """
         super().__init__(lock_id, timeout, poll_interval)
-        # Convert string lock_id to integer for postgres advisory locks
-        self._lock_key = self._string_to_lock_key(lock_id)
+        self._lock_key = postgres_lock_key(lock_id)
         self._shared_lock = shared_lock
         self._acquired = False
         self._connection: Optional[sqlalchemy.pool.PoolProxiedConnection] = None
-
-    def _string_to_lock_key(self, s: str) -> int:
-        """Convert string to a 64-bit integer for advisory lock key."""
-        hash_digest = hashlib.sha256(s.encode('utf-8')).digest()
-        # Take first 8 bytes and convert to int, ensure positive 64-bit
-        return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
     @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:

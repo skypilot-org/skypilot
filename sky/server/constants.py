@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 68  # num_nodes in resources
+API_VERSION = 69  # num_nodes in resources
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -66,6 +66,13 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
 
+# The HTTP header naming the user an admin service account acts as.
+IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
+# Minimum server API version that honors IMPERSONATE_USER_HEADER. An older
+# server ignores the header and runs the request as the service account
+# itself, so the client refuses to send it.
+MIN_IMPERSONATION_API_VERSION = 68
+
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
 
@@ -77,7 +84,7 @@ MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 # Minimum server API version that accepts `num_nodes` inside `resources`
 # (including each `any_of`/`ordered` candidate). An older server rejects the
 # unknown key, so the client refuses with a clearer error.
-MIN_RESOURCES_NUM_NODES_API_VERSION = 68
+MIN_RESOURCES_NUM_NODES_API_VERSION = 69
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /

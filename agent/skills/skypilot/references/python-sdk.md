@@ -1367,6 +1367,55 @@ Download a debug dump from the server.
 **Returns:**
     Path to the downloaded file.
 
+### `sky.impersonate`
+
+```python
+sky.impersonate(user: str) -> Iterator[None]
+```
+
+Acts as another user for the SDK calls made in this context.
+
+Lets a service, such as a platform that launches workloads for its users,
+act on behalf of a user. Every request sent in the context runs as `user`:
+the user owns the clusters and jobs it creates, and the user's role and
+workspace permissions decide what it may do. The API server logs the
+service account behind each such request.
+
+By default, the API server must set ``rbac.allow_impersonation: true`` and
+the client must authenticate with the token of a service account whose
+role is admin; a server plugin can grant it differently. Either way,
+service accounts, built-in users and users whose role outranks the
+caller's cannot be impersonated, and impersonated requests cannot change
+users or service account tokens. Requests and their results are owned by
+`user`, so make follow-up calls such as :func:`sky.get` and
+:func:`sky.stream_and_get` in the same context. Contexts nest, and
+concurrent threads or asyncio tasks can each act as a different user.
+Threads started inside the context do not inherit it unless they copy the
+context (`contextvars.copy_context`).
+
+The ``SKYPILOT_IMPERSONATE_USER`` environment variable sets the same for
+every request of the process, including CLI commands; this context takes
+precedence over it.
+
+**Example:**
+    ```python
+
+        with sky.impersonate('alice@example.com'):
+            request_id = sky.jobs.launch(task)
+            sky.stream_and_get(request_id)
+
+**Args:**
+    user: The ID or name of the user to act as. A name must match exactly
+        one user.
+
+**Raises:**
+    ValueError: If ``user`` is empty, or if a request is sent in the
+        context without a service account token.
+    exceptions.PermissionDeniedError: If the API server refuses to let
+        the caller act as ``user``; the message says why.
+    exceptions.APINotSupportedError: If a request is sent in the context
+        to an API server that does not support impersonation.
+
 ### `sky.kubernetes_label_gpus`
 
 ```python
