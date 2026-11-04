@@ -954,80 +954,6 @@ class JobController:
                             f'{controller_utils.JOB_COST_UNITS} cost units.')
                 self._job_costs[self._job_id] = units
 
-    async def _reattach_live_launch(
-            self, task_id: int,
-            prev_status: Optional['managed_job_state.ManagedJobStatus'],
-            cluster_name: str, callback_func: typing.Callable) -> bool:
-        """Re-attach a resumed task to its launch request, if still live.
-
-        The previous controller may have stopped while the task's launch
-        request was still live on the API server (running, or parked waiting
-        to resume). Forced recovery would tear the cluster down, cancelling
-        that request, and launch again. Re-attach to the request instead, and
-        record the task as started (or recovered) once its job is submitted.
-
-        If no launch request is live but the cluster never came up, launch
-        onto it again instead. Forced recovery tears the cluster down first
-        in case a job was half-submitted to it, and nothing can have been
-        submitted to a cluster that never came up; tearing it down would only
-        throw away what it already has (e.g. pods waiting in a resource
-        queue). This happens after an API server restart when the restarted
-        server runs the parked request again and that run fails (e.g. on a
-        transient error), or when the request ends while no controller is
-        attached to it.
-
-        Runs before the monitor loop, so before any runtime observation of
-        the task.
-
-        Returns:
-            True if the task's job is now on the cluster. False if there is no
-            live launch request and the cluster came up before (or is gone),
-            or the re-attached request did not bring the job up; the caller
-            then forces recovery as before.
-        """
-        if self._pool is not None or prev_status not in (
-                managed_job_state.ManagedJobStatus.STARTING,
-                managed_job_state.ManagedJobStatus.RECOVERING):
-            return False
-        recovering = (
-            prev_status == managed_job_state.ManagedJobStatus.RECOVERING)
-        await self._count_in_full()
-        submitted_at = await self._strategy_executor.reattach_launch(
-            recovery=recovering)
-        if submitted_at is not None:
-            logger.info(
-                f'Task {task_id} re-attached to its live launch request.')
-        elif await self._cluster_never_came_up(cluster_name):
-            logger.info(f'No live launch request for task {task_id}, and '
-                        f'cluster {cluster_name} never came up: launching '
-                        'onto it again instead of recovering it.')
-            submitted_at = await self._strategy_executor.launch_again(
-                recovery=recovering)
-        else:
-            return False
-        if recovering:
-            await managed_job_state.set_recovered_async(
-                self._job_id,
-                task_id,
-                recovered_time=submitted_at,
-                callback_func=callback_func)
-        else:
-            await managed_job_state.set_started_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                start_time=submitted_at,
-                callback_func=callback_func)
-        await self._update_cost_units(cluster_name)
-        return True
-
-    async def _cluster_never_came_up(self, cluster_name: str) -> bool:
-        """Whether the cluster exists but has never been UP."""
-        record = await asyncio.to_thread(
-            global_user_state.get_cluster_from_name,
-            cluster_name,
-            include_user_info=False)
-        return record is not None and not record['cluster_ever_up']
-
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -1190,9 +1116,13 @@ class JobController:
 
         logger.info('Started monitoring.')
 
-        # Only do the initial cluster launch if not resuming from a controller
-        # failure. Otherwise, we will transit to recovering immediately.
+        # Launch the task's cluster, unless resuming from a controller failure.
+        # A resumed task that was mid-launch first tries to continue that
+        # launch; if it cannot, it is recovered below.
         remote_job_submitted_at = time.time()
+        # The status a resumed task's launch was continued from, if it was.
+        resumed_launch_from: Optional['managed_job_state.ManagedJobStatus'] = (
+            None)
         if not is_resume:
             launch_start = time.time()
             # A pipeline's next task has no cluster yet: until its launch
@@ -1208,6 +1138,21 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+        elif self._pool is None and task_status in (
+                managed_job_state.ManagedJobStatus.STARTING,
+                managed_job_state.ManagedJobStatus.RECOVERING):
+            # The previous controller (or attempt) stopped while the task was
+            # launching. Its launch request may still be live on the API
+            # server (running, or parked waiting to resume), or its cluster
+            # may never have come up: continue that launch rather than let
+            # forced recovery tear the cluster down and launch again (see
+            # StrategyExecutor.resume_launch).
+            await self._count_in_full()
+            resumed_at = await self._strategy_executor.resume_launch(recovery=(
+                task_status == managed_job_state.ManagedJobStatus.RECOVERING))
+            if resumed_at is not None:
+                remote_job_submitted_at = resumed_at
+                resumed_launch_from = task_status
         job_id_on_pool_cluster: Optional[int] = None
         if self._pool:
             # Update the cluster name when using pool.
@@ -1240,12 +1185,21 @@ class JobController:
                 raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
-        if not is_resume:
-            await managed_job_state.set_started_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                start_time=remote_job_submitted_at,
-                callback_func=callback_func)
+        if not is_resume or resumed_launch_from is not None:
+            # Launched, or its launch continued: record the job as running.
+            if (resumed_launch_from ==
+                    managed_job_state.ManagedJobStatus.RECOVERING):
+                await managed_job_state.set_recovered_async(
+                    self._job_id,
+                    task_id,
+                    recovered_time=remote_job_submitted_at,
+                    callback_func=callback_func)
+            else:
+                await managed_job_state.set_started_async(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    start_time=remote_job_submitted_at,
+                    callback_func=callback_func)
 
         async with self.starting_lock:
             try:
@@ -1288,20 +1242,21 @@ class JobController:
                     logger.info(f'Task {task_id} was being cancelled, '
                                 're-raising cancellation')
                     raise asyncio.CancelledError()
-            if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+            if resumed_launch_from is not None:
+                # Its launch was continued above: the job is on the cluster,
+                # and the monitor loop watches it like any started task.
+                logger.info(f'Task {task_id} continued its launch.')
+            elif prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 # Force recovery (cleanup + relaunch): the task was mid-launch
                 # or mid-recovery when the previous attempt stopped (a
-                # controller restart, or an emergency retry), so whatever is
-                # on the cluster may be half-submitted and cannot be trusted.
+                # controller restart, or an emergency retry), and its launch
+                # could not be continued above, so whatever is on the cluster
+                # may be half-submitted and cannot be trusted.
                 # A RUNNING task is not forced: the monitor loop re-attaches,
                 # and its own job and cluster checks decide whether a
                 # relaunch is needed, so neither a restart nor a
                 # controller-side error restarts a healthy workload.
-                # The exception is a launch request that is still live: it
-                # decides what is on the cluster, so re-attach to it instead.
-                force_transit_to_recovering = not (
-                    await self._reattach_live_launch(
-                        task_id, prev_status, cluster_name, callback_func))
+                force_transit_to_recovering = True
             else:
                 # An emergency that kept this task's cluster recorded itself
                 # as an EMERGENCY-sourced job event (status unchanged). The
