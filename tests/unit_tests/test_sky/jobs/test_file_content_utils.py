@@ -268,3 +268,48 @@ def test_restore_job_config_file_missing_everywhere_writes_nothing(
     assert not config_path.exists()
     warning.assert_called_once()
     assert 'config content not found' in warning.call_args.args[0]
+
+
+def _job_info_priority(job_id: int):
+    with state._db_manager.get_engine().connect() as conn:
+        row = conn.execute(
+            sqlalchemy.select(state.job_info_table.c.priority,
+                              state.job_info_table.c.priority_class).where(
+                                  state.job_info_table.c.spot_job_id ==
+                                  job_id)).fetchone()
+    return row.priority, row.priority_class
+
+
+def test_set_job_dag_yaml_content_numeric_priority_clears_class(
+        _mock_managed_jobs_db_conn):
+    """A plain priority replaces a class the job had, not just the number."""
+    job_id = state.set_job_info_without_job_id(name='job',
+                                               workspace='workspace',
+                                               entrypoint='entrypoint',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user')
+    state.set_job_dag_yaml_content(job_id,
+                                   'name: job\n',
+                                   priority=300,
+                                   priority_class='emergency')
+    assert _job_info_priority(job_id) == (300, 'emergency')
+
+    state.set_job_dag_yaml_content(job_id, 'name: job\n', priority=500)
+    assert _job_info_priority(job_id) == (500, None)
+
+
+def test_set_job_dag_yaml_content_without_priority_keeps_it(
+        _mock_managed_jobs_db_conn):
+    job_id = state.set_job_info_without_job_id(name='job',
+                                               workspace='workspace',
+                                               entrypoint='entrypoint',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user')
+    state.set_job_dag_yaml_content(job_id,
+                                   'name: job\n',
+                                   priority=300,
+                                   priority_class='emergency')
+    state.set_job_dag_yaml_content(job_id, 'name: job-v2\n')
+    assert _job_info_priority(job_id) == (300, 'emergency')

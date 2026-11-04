@@ -3149,18 +3149,22 @@ def set_job_dag_yaml_content(job_id: int,
     """Overwrite a managed job's persisted DAG YAML (and optional priority).
 
     Lets the persisted job spec be updated out of band after submission. A
-    running controller picks the new spec up on its next recovery (it
-    re-reads the DAG before each recovery attempt); a brand-new controller or
-    a fresh launch reads it directly.
+    running controller picks the new spec up on its next launch attempt (it
+    re-reads the DAG before each one); a brand-new controller or a fresh
+    launch reads it directly.
+
+    ``priority`` and ``priority_class`` are written together whenever either
+    is given, so setting a plain numeric priority (``priority_class=None``)
+    clears a class the job had before instead of leaving it behind. With
+    neither given, both are left as they are.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         updates: Dict[Any, Any] = {
             job_info_table.c.dag_yaml_content: dag_yaml_content,
         }
-        if priority is not None:
+        if priority is not None or priority_class is not None:
             updates[job_info_table.c.priority] = priority
-        if priority_class is not None:
             updates[job_info_table.c.priority_class] = priority_class
         session.query(job_info_table).filter(
             job_info_table.c.spot_job_id == job_id).update(updates)
