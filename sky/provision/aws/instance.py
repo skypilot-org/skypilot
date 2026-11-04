@@ -1,5 +1,9 @@
 """AWS instance provisioning.
 
+Parts adapted from Ray (ray-2.0.1,
+python/ray/autoscaler/_private/aws/node_provider.py), Apache-2.0; see
+sky/skylet/LICENSE. Modified by the SkyPilot authors.
+
 Note (dev): If API changes are made to adaptors/aws.py and the new API is used
 in this or config module, please make sure to reload it as in
 _default_ec2_resource() to avoid version mismatch issues.
