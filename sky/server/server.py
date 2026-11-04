@@ -750,6 +750,11 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
         if caller is None:
             return self._reject(
                 request, 'Impersonation requires an authenticated caller.')
+        # Before taking an auth worker, which the other refusals need.
+        try:
+            impersonation.precheck(caller, request.url.path, request.method)
+        except impersonation.Refused as e:
+            return self._reject(request, e.detail)
         try:
             user = await db_lookup.call_with_deadline(impersonation.check,
                                                       caller, target.strip(),

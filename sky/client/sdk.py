@@ -3750,12 +3750,13 @@ def impersonate(user: str) -> Iterator[None]:
     the client must authenticate with the token of a service account whose
     role is admin; a server plugin can grant it differently. Either way,
     service accounts, built-in users and users whose role outranks the
-    caller's cannot be impersonated. Requests and their results are owned by
-    `user`, so make
-    follow-up calls such as :func:`sky.get` and :func:`sky.stream_and_get` in
-    the same context. Contexts nest, and concurrent threads or asyncio tasks
-    can each act as a different user. Threads started inside the context do
-    not inherit it unless they copy the context (`contextvars.copy_context`).
+    caller's cannot be impersonated, and impersonated requests cannot change
+    users or service account tokens. Requests and their results are owned by
+    `user`, so make follow-up calls such as :func:`sky.get` and
+    :func:`sky.stream_and_get` in the same context. Contexts nest, and
+    concurrent threads or asyncio tasks can each act as a different user.
+    Threads started inside the context do not inherit it unless they copy the
+    context (`contextvars.copy_context`).
 
     The ``SKYPILOT_IMPERSONATE_USER`` environment variable sets the same for
     every request of the process, including CLI commands; this context takes

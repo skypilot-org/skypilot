@@ -181,8 +181,12 @@ class ExtensionContext:
         `rbac.allow_impersonation` is on). The policy is called on a worker
         thread with the authenticated caller and the resolved target user, and
         returns None to allow or the reason for refusing. The server still
-        refuses service accounts and built-in users as targets, targets whose
-        role outranks the caller's, and endpoints the caller's own role denies.
+        refuses callers that are not service accounts, service accounts and
+        built-in users as targets, targets whose role outranks the caller's,
+        endpoints the caller's own role denies, and changes to users or
+        service account tokens. A plugin endpoint that issues a session or
+        token for the authenticated user must refuse when
+        `request.state.impersonator` is set.
         """
         # pylint: disable=import-outside-toplevel
         from sky.server.auth import impersonation

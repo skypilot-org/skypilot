@@ -3,12 +3,13 @@
 `check` decides whether an authenticated caller may run a request as another
 user. Who may impersonate whom is a policy: by default, admin service accounts
 when `rbac.allow_impersonation` is on, or whatever a plugin registers with
-`ExtensionContext.register_impersonation_policy`. Whatever the policy says, a
-caller can never act as a service account or a built-in user, as a user whose
-role outranks its own, or call an endpoint its own role is denied.
+`ExtensionContext.register_impersonation_policy`. Whatever the policy says,
+only a service account can impersonate; it can never act as a service account
+or a built-in user, as a user whose role outranks its own, call an endpoint its
+own role is denied, or change users or service account tokens.
 
-Everything here is blocking (database reads, policy reloads): call it from a
-worker thread.
+`precheck` needs no database read. `check` is blocking (database reads, policy
+reloads): call it from a worker thread.
 """
 from typing import Callable, Optional
 
@@ -67,13 +68,12 @@ def _allow_impersonation_enabled() -> bool:
 def default_policy(caller: models.User, target: models.User) -> Optional[str]:
     """Admin service accounts, when `rbac.allow_impersonation` is on."""
     del target
-    if not _allow_impersonation_enabled():
-        return 'Impersonation is not enabled on this API server.'
-    if not caller.is_service_account():
-        return 'Impersonation requires a service account token.'
     if _roles(caller.id) != [rbac.RoleName.ADMIN.value]:
         return ('Only service accounts with the admin role can impersonate '
                 'users.')
+    # Last, so that only a caller allowed otherwise pays for a config reload.
+    if not _allow_impersonation_enabled():
+        return 'Impersonation is not enabled on this API server.'
     return None
 
 
@@ -98,6 +98,21 @@ def _resolve_target(target: str) -> models.User:
     return user
 
 
+def precheck(caller: models.User, path: str, method: str) -> None:
+    """Refuses what can be decided without a database read.
+
+    Raises:
+        Refused: If the caller may not impersonate anyone for this request.
+    """
+    if not caller.is_service_account():
+        raise Refused('Impersonation requires a service account token.')
+    # A token, password, or account changed as the user would outlive the
+    # policy's decision.
+    if method != 'GET' and (path == '/users' or path.startswith('/users/')):
+        raise Refused('Impersonated requests cannot change users or service '
+                      'account tokens.')
+
+
 def check(caller: models.User, target: str, path: str,
           method: str) -> models.User:
     """The user `caller` acts as for this request.
@@ -105,6 +120,7 @@ def check(caller: models.User, target: str, path: str,
     Raises:
         Refused: If the caller may not act as `target` for this request.
     """
+    precheck(caller, path, method)
     user = _resolve_target(target)
     reason = (_policy or default_policy)(caller, user)
     if reason is not None:

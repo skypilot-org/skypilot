@@ -110,6 +110,50 @@ def test_default_policy_allows_admin_service_accounts_only(env, caller, reason):
         _check(caller, _VIEWER_HUMAN.name)
 
 
+@pytest.mark.parametrize('caller', [_ALICE, _USER_SA])
+def test_only_allowed_callers_reload_the_config(env, caller):
+    env.state['enabled'] = False
+    with pytest.raises(impersonation.Refused):
+        _check(caller, _VIEWER_HUMAN.name)
+    env.reload.assert_not_called()
+
+
+def test_only_service_accounts_impersonate_whatever_the_policy(env):
+    del env
+    impersonation.set_policy(lambda caller, user: None)
+    with pytest.raises(impersonation.Refused,
+                       match='requires a service account token'):
+        _check(_BOSS, _ALICE.name)
+    with pytest.raises(impersonation.Refused,
+                       match='requires a service account token'):
+        impersonation.precheck(_BOSS, '/launch', 'POST')
+
+
+@pytest.mark.parametrize('path', [
+    '/users/update',
+    '/users/create',
+    '/users/service-account-tokens',
+    '/users/service-account-tokens/rotate',
+    '/users/service-account-tokens/delete',
+])
+def test_users_and_tokens_cannot_be_changed(env, path):
+    del env
+    impersonation.set_policy(lambda caller, user: None)
+    with pytest.raises(impersonation.Refused, match='cannot change users'):
+        _check(_ADMIN_SA, _ALICE.name, path, 'POST')
+
+
+@pytest.mark.parametrize('path,method', [
+    ('/users/role', 'GET'),
+    ('/users/service-account-tokens', 'GET'),
+    ('/users_and_more', 'POST'),
+])
+def test_other_requests_are_not_refused_by_path(env, path, method):
+    del env
+    impersonation.set_policy(lambda caller, user: None)
+    assert _check(_ADMIN_SA, _ALICE.name, path, method).id == _ALICE.id
+
+
 def test_admin_role_granted_on_another_worker_is_honored(env):
     env.perm.roles_in_memory.side_effect = lambda uid: []
     assert _check(_ADMIN_SA, _ALICE.name).id == _ALICE.id

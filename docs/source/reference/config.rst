@@ -3424,6 +3424,7 @@ whose role is ``admin`` can set the ``X-SkyPilot-Impersonate-User`` header
 (``sky.impersonate()`` in the Python SDK, ``SKYPILOT_IMPERSONATE_USER`` for
 the CLI) to run as an existing user. The user owns what the request creates,
 and the API server logs the service account behind each such request.
+Impersonated requests cannot change users or service account tokens.
 
 .. code-block:: yaml
 

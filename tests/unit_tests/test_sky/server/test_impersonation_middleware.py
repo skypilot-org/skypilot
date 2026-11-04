@@ -100,6 +100,22 @@ async def test_unauthenticated_caller_is_refused():
     check.assert_not_called()
 
 
+@pytest.mark.parametrize('caller,path,reason', [
+    (_ALICE, '/launch', 'requires a service account token'),
+    (_ADMIN_SA, '/users/service-account-tokens/rotate', 'cannot change users'),
+])
+@pytest.mark.asyncio
+async def test_refused_without_an_auth_worker(caller, path, reason):
+    request = _request(_ALICE.name, path=path)
+    with mock.patch.object(server.db_lookup,
+                           'call_with_deadline') as call_with_deadline:
+        response, _, _ = await _dispatch(request, caller=caller)
+    assert response.status_code == 403
+    assert reason in json.loads(response.body)['detail']
+    call_with_deadline.assert_not_called()
+    assert request.state.auth_user is caller
+
+
 @pytest.mark.parametrize('caller', [_ADMIN_SA, None])
 @pytest.mark.asyncio
 async def test_health_check_ignores_the_header(caller):
