@@ -564,7 +564,7 @@ def scan(
     such a root is where a persistent volume gets mounted -- on a network
     filesystem, where a walk of many small files takes minutes. The
     filesystem behind it is still reported; for a volume shared between
-    replicas its free space is the meaningful number anyway.
+    servers its free space is the meaningful number anyway.
     """
     started = time.monotonic()
     deadline = started + timeout_seconds

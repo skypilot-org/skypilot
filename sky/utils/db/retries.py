@@ -55,21 +55,41 @@ _DRIVER_EXCEPTIONS = _build_driver_exceptions()
 
 
 def _asyncpg_exceptions() -> Tuple[Type[BaseException], ...]:
-    # asyncpg.connect() runs inside the engine's async_creator, so an
-    # ErrorResponse received while connecting is raised as asyncpg's own
-    # class, not wrapped by SQLAlchemy: class 08 connection errors (which a
-    # pooler such as PgBouncer uses for every rejection it issues, 08P01),
-    # 57P03 (server starting up / shutting down) and 53300 (too many
-    # connections). Resolved from sys.modules rather than imported: the
-    # import costs ~40ms per process, and an asyncpg error can only be in
-    # flight in a process that has already imported asyncpg.
+    # At connect, SQLAlchemy 2.0 lets an asyncpg error escape unwrapped and
+    # 2.1 wraps it in DBAPIError; mid-statement, both wrap it. is_transient
+    # checks the exception and its cause chain, so either form is caught.
+    # Transient here:
+    # - class 08 connection errors (a pooler such as PgBouncer uses 08P01
+    #   for every rejection it issues) and 57P03 (server starting up or
+    #   shutting down);
+    # - 57P01 (admin shutdown), 57P02 (crash shutdown) and class 53
+    #   insufficient resources (53100 disk full, 53200 out of memory, 53300
+    #   too many connections, 53400 configuration limit). psycopg2 raises
+    #   all of these as OperationalError, which counts as transient. Some
+    #   53xxx causes never heal for a given statement (temp_file_limit, a
+    #   transaction that takes more locks than the lock table holds); they
+    #   cost the retry budget, as they already do on the psycopg2 path;
+    # - 25P03 (idle-in-transaction timeout) and 25006 (a write sent to a
+    #   read-only server, e.g. a writer demoted by a failover while DNS
+    #   still points at it). psycopg2 raises these as InternalError, so
+    #   only the asyncpg path retries them.
+    # 57014 (query canceled) and 57P04 (database dropped) stay out on
+    # purpose, although psycopg2 retries both: a statement that always times
+    # out, or a dropped database, does not heal.
+    # Resolved from sys.modules rather than imported: the import costs
+    # ~40ms per process, and an asyncpg error can only be in flight in a
+    # process that has already imported asyncpg.
     asyncpg = sys.modules.get('asyncpg')
     if asyncpg is None:
         return ()
     return (
         asyncpg.exceptions.PostgresConnectionError,
         asyncpg.exceptions.CannotConnectNowError,
-        asyncpg.exceptions.TooManyConnectionsError,
+        asyncpg.exceptions.AdminShutdownError,
+        asyncpg.exceptions.CrashShutdownError,
+        asyncpg.exceptions.InsufficientResourcesError,
+        asyncpg.exceptions.IdleInTransactionSessionTimeoutError,
+        asyncpg.exceptions.ReadOnlySQLTransactionError,
     )
 
 

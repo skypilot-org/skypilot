@@ -8,7 +8,7 @@ _thread_local_config = threading.local()
 
 
 @contextlib.contextmanager
-def _set_use_default_catalog_if_failed(value: bool):
+def set_use_default_catalog_if_failed(value: bool):
     old_value = get_use_default_catalog_if_failed()
     _thread_local_config.use_default_catalog = value
     try:
@@ -47,7 +47,7 @@ def fallback_to_default_catalog(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with _set_use_default_catalog_if_failed(True):
+        with set_use_default_catalog_if_failed(True):
             return func(*args, **kwargs)
 
     return wrapper

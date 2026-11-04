@@ -1,9 +1,8 @@
 """External failure source interface for plugins.
 
-This module provides an extension point that allows plugins to provide
-cluster failure tracking functionality. By default, no-op implementations
-are used. Plugins can register their own implementations to provide actual
-failure tracking.
+This module provides an extension point for an optional source of
+per-cluster failure records. By default, no-op implementations are used
+and no failures are reported.
 
 Example usage in a plugin:
     from sky.utils.plugin_extensions import ExternalFailureSource
@@ -36,7 +35,7 @@ class ExternalClusterFailure:
     """Represents a single cluster failure from an external source.
 
     Attributes:
-        code: Machine-readable failure code (e.g. 'GPU_HARDWARE_FAILURE_XID_79')
+        code: Machine-readable failure code.
         reason: Human-readable description of the failure.
     """
     code: str
@@ -83,9 +82,9 @@ class ClearClusterFailuresFunc(Protocol):
 class ExternalFailureSource:
     """Singleton class for external cluster failure source.
 
-    This class provides an extension point for plugins to register their own
-    cluster failure tracking implementations. By default, no-op implementations
-    are used that return empty lists.
+    This class provides an extension point for registering a cluster failure
+    source. By default, no-op implementations are used that return empty
+    lists.
 
     Plugins can register their implementations during their install() phase,
     and core SkyPilot code can use the get() and clear() methods to interact
@@ -101,7 +100,6 @@ class ExternalFailureSource:
                  clear_failures: ClearClusterFailuresFunc) -> None:
         """Register an external failure source implementation.
 
-        This allows plugins to provide their own cluster failure tracking.
         Only one external failure source can be registered at a time.
 
         Args:

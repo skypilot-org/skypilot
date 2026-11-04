@@ -1,5 +1,6 @@
 """Shared loopback detection utilities for auth middlewares."""
 
+import contextvars
 import ipaddress
 
 import fastapi
@@ -7,6 +8,21 @@ import fastapi
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+# Whether the HTTP request being dispatched came from loopback, recorded by
+# `APIVersionMiddleware` and stamped onto the request body, because the worker
+# that runs the request cannot see this ContextVar. Unset means not loopback.
+_request_from_loopback: contextvars.ContextVar[bool] = (contextvars.ContextVar(
+    'request_from_loopback', default=False))
+
+
+def set_request_from_loopback(from_loopback: bool) -> None:
+    _request_from_loopback.set(from_loopback)
+
+
+def get_request_from_loopback() -> bool:
+    return _request_from_loopback.get()
+
 
 COMMON_PROXY_HEADERS = [
     'X-Forwarded-For', 'Forwarded', 'X-Real-IP', 'X-Client-IP',

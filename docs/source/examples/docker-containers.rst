@@ -246,6 +246,51 @@ you can use :ref:`task environment variables <env-vars>`:
             Note that the base64 encoding option is only available on Artifact Registry, not Container Registry (GCR).
 
 
+    .. tab-item:: Azure ACR
+        :sync: azure-acr-tab
+
+        We support private Azure Container Registries with an `access token or service principal <https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication>`_:
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<repo>:<tag>
+
+          envs:
+            SKYPILOT_DOCKER_USERNAME: <token-name-or-service-principal-id>
+            SKYPILOT_DOCKER_PASSWORD: <token-or-service-principal-password>
+            SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
+
+        .. note::
+
+            If your cluster is on Azure, SkyPilot will automatically use the VM's managed identity to authenticate with ACR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+
+            .. code-block:: yaml
+
+              resources:
+                image_id: docker:<repo>:<tag>
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
+
+            On other clouds, empty credentials skip Azure CLI authentication and
+            allow pulls from ACR registries with anonymous pull enabled.
+
+            **Important**: Grant the cluster's managed identity (SkyPilot's default
+            managed identity or a custom one via ``remote_identity``) the pull role
+            appropriate for the registry's permissions mode:
+
+            - **RBAC Registry Permissions**: assign ``AcrPull``.
+            - **RBAC Registry + ABAC Repository Permissions**: assign
+              ``Container Registry Repository Reader`` and ensure any repository
+              conditions allow access to the image's repository.
+
+            ``AcrPull`` is not honored by ABAC-enabled registries. See Azure's
+            `managed identity authentication guide <https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication-managed-identity>`_
+            for role assignment instructions.
+
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-container-registry-tab
 

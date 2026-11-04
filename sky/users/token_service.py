@@ -152,7 +152,7 @@ class TokenService:
         Generation happens only after a *successful* read found no row. A read
         that raised is propagated: treating it as "absent" would overwrite the
         live secret and invalidate every token already issued. The write is
-        insert-if-absent for the same reason, so a racing replica adopts the
+        insert-if-absent for the same reason, so a racing process adopts the
         stored secret instead of clobbering it.
         """
         try:

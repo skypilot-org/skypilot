@@ -113,6 +113,7 @@ html_theme_options = {
     ],
     'navbar_persistent': ['search-button-field'],
     'logo': {
+        'link': 'https://skypilot.ai/',
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
     'icon_links': [{
@@ -131,13 +132,7 @@ html_theme_options = {
     'use_edit_page_button': True,
     # Put announcements such as meetups here.
     # Styled by .sky-announcement* rules in _static/custom.css.
-    'announcement': ('<a class="sky-announcement" '
-                     'href="https://skypilot.ai/blog/skypilot-the-company">'
-                     '<span class="sky-announcement__pill">New</span>'
-                     '<span class="sky-announcement__text">'
-                     'Announcing SkyPilot Platform and our $20M seed</span>'
-                     '<span class="sky-announcement__arrow" aria-hidden="true">'
-                     '&rarr;</span></a>'),
+    'announcement': None,
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',

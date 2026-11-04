@@ -143,6 +143,10 @@ def run_bash_command_with_log_and_return_pid(
     ...
 
 
+def start_orphan_watchdog() -> None:
+    ...
+
+
 def tail_lines_from_end(path: str,
                         tail: int,
                         offset: int = ...) -> Tuple[List[str], int]:

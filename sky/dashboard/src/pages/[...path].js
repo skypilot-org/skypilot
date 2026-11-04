@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
-import { usePluginRoute } from '@/plugins/PluginProvider';
+import { usePluginRoute, usePluginsLoaded } from '@/plugins/PluginProvider';
+import { PageNotFound } from '@/components/elements/PageNotFound';
 
 /**
  * Catch-all page that handles plugin routes without the /plugins/ prefix.
- * e.g. /dashboard/cron renders the plugin registered at /cron (or /plugins/cron).
+ * e.g. /dashboard/foo renders the plugin registered at /foo (or /plugins/foo).
  * Specific pages (clusters.js, jobs.js, etc.) take routing priority over this.
  */
 
@@ -33,6 +34,7 @@ export default function PluginCatchAllPage() {
   const directRoute = usePluginRoute(pathname);
   const prefixedRoute = usePluginRoute(pathname ? `/plugins${pathname}` : null);
   const route = directRoute || prefixedRoute;
+  const pluginsLoaded = usePluginsLoaded();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -87,9 +89,12 @@ export default function PluginCatchAllPage() {
     };
   }, [route, pathname]);
 
+  const notFound = !route && router.isReady && pluginsLoaded;
   const title = route?.title
     ? `${route.title} | SkyPilot Dashboard`
-    : 'Plugin | SkyPilot Dashboard';
+    : notFound
+      ? 'Page not found | SkyPilot Dashboard'
+      : 'Plugin | SkyPilot Dashboard';
 
   return (
     <>
@@ -103,7 +108,8 @@ export default function PluginCatchAllPage() {
           </div>
         ) : (
           <>
-            {!route && (
+            {notFound && <PageNotFound />}
+            {!route && !notFound && (
               <div className="flex justify-center items-center h-64">
                 <CircularProgress size={20} />
                 <span className="ml-2 text-gray-500">

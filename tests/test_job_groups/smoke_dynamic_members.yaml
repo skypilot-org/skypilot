@@ -7,6 +7,10 @@
 # finishes. The launches use the SkyPilot runtime already installed on the
 # pod, which carries the code under test; the API server endpoint and token
 # come from api_server_access, which is on by default for managed jobs.
+#
+# The tasks only sleep, poll the queue and run `sky jobs launch`, so they ask
+# for the smallest pod that runs the runtime. Eight of these groups run at
+# once on a shared lane and must fit a small Kubernetes context together.
 ---
 name: {{name}}
 execution: parallel
@@ -15,8 +19,8 @@ inter_connection: false
 ---
 name: trainer
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 1
+  memory: 2+
   infra: {{cloud}}
 run: |
   echo "trainer starting: group ${SKYPILOT_JOBGROUP_NAME}, root job ${SKYPILOT_ROOT_JOB_ID}"
@@ -25,8 +29,8 @@ run: |
 ---
 name: watcher
 resources:
-  cpus: 2
-  memory: 4+
+  cpus: 1
+  memory: 2+
   infra: {{cloud}}
 run: |
   echo "watcher starting: root job ${SKYPILOT_ROOT_JOB_ID}, task ${SKYPILOT_TASK_ID}"

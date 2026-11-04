@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import common_utils
@@ -129,6 +130,21 @@ def apply(
         - The new copy of dag after applying the policy
         - The new copy of skypilot config after applying the policy.
     """
+    dag, config = _apply(entrypoint, request_name, request_options,
+                         at_client_side)
+    if not at_client_side:
+        plugin_hooks.fire_admin_policy_applied(dag, config, request_name,
+                                               request_options)
+    return dag, config
+
+
+def _apply(
+    entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_name: request_names.AdminPolicyRequestName,
+    request_options: Optional[admin_policy.RequestOptions],
+    at_client_side: bool,
+) -> Tuple['dag_lib.Dag', config_utils.Config]:
+    """Applies the registered admin policy, if any. See `apply()`."""
     if isinstance(entrypoint, task_lib.Task):
         dag = dag_lib.Dag()
         dag.add(entrypoint)

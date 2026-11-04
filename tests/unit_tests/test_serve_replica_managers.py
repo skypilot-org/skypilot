@@ -4,7 +4,10 @@ Currently focused on `SkyPilotReplicaManager.__init__` startup ordering:
 the daemon threads (especially `_job_status_fetcher`) must NOT race the
 main thread for `self.lock` before `_recover_replica_operations` runs.
 """
+import threading
 from unittest import mock
+
+import pytest
 
 from sky.serve import replica_managers
 
@@ -137,3 +140,101 @@ class TestSkyPilotReplicaManagerInitOrdering:
         assert '_thread_pool_refresher' in started_targets
         assert '_job_status_fetcher' in started_targets
         assert '_replica_prober' in started_targets
+
+
+class TestRecoveryContinuesReplicaIds:
+    """After a controller restart, new replica ids continue after the
+    recorded replicas and the service's existing clusters instead of
+    restarting at 1."""
+
+    def _manager(self) -> replica_managers.SkyPilotReplicaManager:
+        manager = replica_managers.SkyPilotReplicaManager.__new__(
+            replica_managers.SkyPilotReplicaManager)
+        manager.lock = threading.Lock()
+        manager._service_name = 'svc'
+        manager._next_replica_id = 1
+        manager._launch_thread_pool = {}
+        manager._down_thread_pool = {}
+        return manager
+
+    def _recover(self, manager, recorded_ids, cluster_names=()):
+        recorded = [
+            mock.Mock(replica_id=replica_id) for replica_id in recorded_ids
+        ]
+        with mock.patch(
+                'sky.serve.replica_managers.serve_state.get_replica_infos',
+                return_value=recorded), \
+             mock.patch(
+                 'sky.serve.replica_managers.serve_state.get_replicas_at_status',
+                 return_value=[]), \
+             mock.patch(
+                 'sky.serve.replica_managers.global_user_state.'
+                 'get_cluster_names_start_with',
+                 return_value=list(cluster_names)):
+            manager._recover_replica_operations()
+
+    def test_next_replica_id_follows_recorded_replicas(self):
+        manager = self._manager()
+        self._recover(manager, [4, 5, 6])
+        assert manager._next_replica_id == 7
+
+    def test_next_replica_id_starts_at_one_without_replicas(self):
+        manager = self._manager()
+        self._recover(manager, [])
+        assert manager._next_replica_id == 1
+
+    def test_next_replica_id_skips_cluster_without_replica_record(self):
+        manager = self._manager()
+        # svc-6 outlived its record; svc-2-1 belongs to another service.
+        self._recover(manager, [4, 5],
+                      cluster_names=['svc-4', 'svc-5', 'svc-6', 'svc-2-1'])
+        assert manager._next_replica_id == 7
+
+
+@pytest.mark.parametrize('down_status', [
+    replica_managers.common_utils.ProcessStatus.SCHEDULED,
+    replica_managers.common_utils.ProcessStatus.RUNNING,
+    replica_managers.common_utils.ProcessStatus.SUCCEEDED,
+])
+def test_recover_failed_replica_termination(down_status):
+    manager = object.__new__(replica_managers.SkyPilotReplicaManager)
+    manager._service_name = 'svc'
+    manager.lock = threading.RLock()
+    manager._launch_thread_pool = {}
+    manager._down_thread_pool = {}
+    info = mock.Mock(replica_id=1, cluster_name='svc-1')
+    info.status_property.purged = False
+    info.status_property.is_scale_down = False
+    info.status_property.sky_down_status = down_status
+
+    def replicas_at_status(_name, status):
+        if status == replica_managers.serve_state.ReplicaStatus.SHUTTING_DOWN:
+            return [info]
+        return []
+
+    with mock.patch.object(
+            replica_managers.serve_state, 'get_replicas_at_status',
+            side_effect=replicas_at_status), \
+         mock.patch.object(
+             replica_managers.serve_state, 'get_replica_info_from_id',
+             return_value=info), \
+         mock.patch.object(
+             replica_managers.global_user_state, 'cluster_with_name_exists',
+             return_value=False), \
+         mock.patch.object(manager, '_handle_sky_down_finish') as finished:
+        manager._recover_replica_operations()
+    finished.assert_called_once_with(info, format_exc=None)
+
+
+def test_new_failed_replica_termination_requires_logs():
+    manager = object.__new__(replica_managers.SkyPilotReplicaManager)
+    manager._service_name = 'svc'
+    info = mock.Mock()
+    info.status_property.sky_down_status = None
+    with mock.patch.object(replica_managers.serve_state,
+                           'get_replica_info_from_id',
+                           return_value=info), \
+         pytest.raises(AssertionError, match='logs should always'):
+        manager._terminate_replica(1,
+                                   sync_down_logs=False,
+                                   replica_drain_delay_seconds=0)

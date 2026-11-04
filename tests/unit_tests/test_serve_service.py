@@ -20,6 +20,7 @@ from unittest import mock
 import pytest
 
 from sky.serve import service
+from sky.utils import yaml_utils
 
 
 def _bind_socket_async(host, port, delay):
@@ -564,3 +565,63 @@ class TestCleanupStorageStaleBucket:
         assert '/persist' in mock_task.storage_mounts
         mock_backend.teardown_ephemeral_storage.assert_called_once_with(
             mock_task)
+
+
+class TestCleanupStorageLocalSources:
+    """`cleanup_storage` removes the two-hop copies staged for the service and
+    nothing else. In consolidation mode the task's sources point into the
+    client's upload blob (shared with any other request that uploaded the
+    same content), and on a local API server at the user's own files."""
+
+    @pytest.fixture
+    def two_hop_base(self, tmp_path, monkeypatch):
+        base = tmp_path / 'controller'
+        monkeypatch.setattr(service.skylet_constants,
+                            'FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH', str(base))
+        return base
+
+    def _cleanup(self, file_mounts):
+        task_yaml = yaml_utils.dump_yaml_str({
+            'file_mounts': file_mounts,
+            'run': 'echo hi'
+        })
+        with mock.patch(
+                'sky.serve.service.cloud_vm_ray_backend.CloudVmRayBackend'):
+            return service.cleanup_storage(task_yaml)
+
+    def test_removes_two_hop_copies(self, two_hop_base):
+        copy_dir = two_hop_base / 'run-1' / '0'
+        copy_dir.mkdir(parents=True)
+        (copy_dir / 'f.txt').write_text('x')
+        copy_file = two_hop_base / 'run-1' / '1'
+        copy_file.write_text('y')
+
+        assert self._cleanup({
+            '/remote/dir': str(copy_dir),
+            '/remote/f.txt': str(copy_file),
+        }) is True
+        assert not copy_dir.exists()
+        assert not copy_file.exists()
+
+    def test_keeps_sources_outside_two_hop_dir(self, tmp_path, two_hop_base):
+        del two_hop_base
+        blob_dir = tmp_path / 'blob-cache' / 'user' / ('a' * 64) / 'workdir'
+        blob_dir.mkdir(parents=True)
+        user_file = tmp_path / 'home' / 'hello.txt'
+        user_file.parent.mkdir()
+        user_file.write_text('hello')
+
+        assert self._cleanup({
+            '/remote/workdir': str(blob_dir),
+            '/remote/hello.txt': str(user_file),
+            # A '..' path that only looks like it is inside the two-hop dir.
+            '/remote/escape': str(
+                tmp_path / 'controller' / '..' / 'home' / 'hello.txt'),
+        }) is True
+        assert blob_dir.is_dir()
+        assert user_file.read_text() == 'hello'
+
+    def test_missing_two_hop_copy_is_already_clean(self, two_hop_base):
+        # E.g. an earlier cleanup attempt removed it before failing elsewhere.
+        assert self._cleanup(
+            {'/remote/gone': str(two_hop_base / 'run-1' / '0')}) is True

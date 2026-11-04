@@ -9,16 +9,24 @@ not the full daemon loop:
 * the bid loop keeps re-bidding instead of dying on a transient failure, and a
   won bid starts a renewer that keeps the role alive across the long blocking
   steps that follow.
-* ``_suicide_on_role_loss`` sends ``SIGTERM`` to the API server PID so
-  K8s restarts the pod and the leader is re-elected on another replica -- and
-  does *not* release the role, so the remaining lease margin keeps another
-  replica out until the controllers killed here are gone.
+* ``_suicide_on_role_loss`` marks the server as shutting down, waits the
+  configured drain, then sends ``SIGTERM`` to the API server PID so K8s
+  restarts the pod and the leader is re-elected on another server. A timer
+  forces the process to exit if that shutdown hangs. It does *not* release the
+  role, so the remaining lease margin keeps another server out until the
+  controllers killed here are gone.
 * ``start_managed_job_refresh_daemon`` gates on consolidation mode,
   preserving the historical ``should_skip_managed_job_status_refresh``
   semantics now that the daemon no longer lives in
   ``INTERNAL_REQUEST_DAEMONS``.
 """
+import os
+import re
 import signal
+import subprocess
+import sys
+import textwrap
+import threading
 from unittest import mock
 
 import pytest
@@ -26,6 +34,18 @@ import pytest
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import managed_job_refresh_thread as mjrt
 from sky.utils import leader_election
+
+_REAL_EXIT_AFTER = mjrt._exit_after
+
+
+@pytest.fixture(autouse=True)
+def exit_after_mock(monkeypatch):
+    """Keep step-down tests from arming a timer that would exit pytest."""
+    exit_after = mock.Mock()
+    monkeypatch.setattr(mjrt, '_exit_after', exit_after)
+    monkeypatch.setattr(mjrt.server_state, '_shutting_down', False)
+    monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS', 0)
+    return exit_after
 
 
 def _fake_elector():
@@ -272,13 +292,108 @@ class TestSuicideOnRoleLoss:
             thread._suicide_on_role_loss()
         kill_mock.assert_called_once_with(12345, signal.SIGTERM)
 
+    @staticmethod
+    def _step_down_recording():
+        """Run a step-down, recording readiness, drain sleeps and SIGTERM."""
+        order = []
+        thread = _leading_thread()
+
+        def on_kill_controllers():
+            order.append(
+                ('kill_controllers', mjrt.server_state.is_shutting_down()))
+
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=on_kill_controllers), \
+                mock.patch.object(
+                    mjrt.time, 'sleep',
+                    side_effect=lambda s: order.append(('sleep', s))), \
+                mock.patch.object(
+                    mjrt.os, 'kill',
+                    side_effect=lambda *a: order.append(('sigterm', a))), \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_role_loss()
+        return order
+
+    @pytest.mark.parametrize('drain,sleeps', [(0, []), (50, [('sleep', 50)])])
+    def test_marks_shutting_down_then_drains_then_sigterms(
+            self, monkeypatch, drain, sleeps):
+        monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS',
+                            drain)
+        assert self._step_down_recording() == [
+            ('kill_controllers', True), *sleeps,
+            ('sigterm', (12345, signal.SIGTERM))
+        ]
+
+    def test_forced_exit_covers_drain_and_grace_period(self, monkeypatch,
+                                                       exit_after_mock):
+        monkeypatch.setattr(mjrt.server_constants, 'STEP_DOWN_DRAIN_SECONDS',
+                            50)
+        monkeypatch.setattr(mjrt.server_constants, 'GRACE_PERIOD_SECONDS', 60)
+        self._step_down_recording()
+        exit_after_mock.assert_called_once_with(
+            50 + 60 + mjrt._STEP_DOWN_EXIT_MARGIN_SECONDS)
+
+
+class TestExitAfter:
+    """The forced exit fires on its own thread and never blocks shutdown."""
+
+    @pytest.mark.parametrize('dump_error', [None, ValueError('no stderr fd')])
+    def test_exits_after_dumping_stacks(self, dump_error):
+        exited = threading.Event()
+
+        def fake_exit(code):
+            exited.set()
+            # Ends the timer thread quietly, as the real os._exit would.
+            raise SystemExit(code)
+
+        exit_mock = mock.Mock(side_effect=fake_exit)
+        with mock.patch.object(mjrt.os, '_exit', exit_mock), \
+                mock.patch.object(mjrt.faulthandler, 'dump_traceback',
+                                  side_effect=dump_error) as dump_mock:
+            _REAL_EXIT_AFTER(0.01)
+            assert exited.wait(timeout=10)
+        exit_mock.assert_called_once_with(1)
+        dump_mock.assert_called_once_with(all_threads=True)
+
+    def test_exits_while_main_thread_waits_on_a_child(self):
+        """A child that never exits must not keep the process alive."""
+        script = textwrap.dedent("""
+            import subprocess, sys
+            from sky.jobs import managed_job_refresh_thread as mjrt
+            # DEVNULL: an inherited stdout would hold the test's pipe open.
+            child = subprocess.Popen(
+                [sys.executable, '-c', 'import time; time.sleep(600)'],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            print(f'CHILD_PID={child.pid}', flush=True)
+            mjrt._exit_after(1)
+            child.wait()
+        """)
+        proc = subprocess.run([sys.executable, '-c', script],
+                              capture_output=True,
+                              text=True,
+                              timeout=120,
+                              check=False)
+        output = proc.stdout + proc.stderr
+        child_pid = re.search(r'CHILD_PID=(\d+)', output)
+        if child_pid is not None:
+            try:
+                os.kill(int(child_pid.group(1)), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        assert proc.returncode == 1, output
+        assert 'forcing exit' in output
+
 
 class TestOuterLoopStopsAfterSuicide:
     """Normal return from _become_leader_and_run only happens after a probe
     detected role loss and called _suicide_on_role_loss. The outer run() loop
     must stop the thread instead of re-entering — otherwise the next iteration
     would re-contend, run ha_recovery_for_consolidation_mode and spawn fresh
-    controllers while the new leader on another replica is doing the same.
+    controllers while the new leader on another server is doing the same.
     """
 
     def test_run_returns_after_become_leader_returns_normally(self):
@@ -324,7 +439,7 @@ class TestOuterLoopExceptionHandling:
         suicide.assert_called_once()
 
     def test_retry_when_the_bid_threw(self):
-        """We never won the role (another replica holds it, or a transient
+        """We never won the role (another server holds it, or a transient
         database hiccup); there is nothing to step down from, just retry."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
         assert thread._renewer is None
@@ -369,7 +484,7 @@ class TestBecomeLeaderOrdering:
 
     During a rolling update we contend while the old API server still holds
     the role. If the gate file is missing in that window, a controller started
-    on this replica would be invisible to the old server's
+    on this server would be invisible to the old server's
     update_managed_jobs_statuses, which could mark the job FAILED_CONTROLLER.
     The signal file gates controller starts, so it must be touched up-front,
     not after we win the role.
@@ -403,7 +518,7 @@ class TestBecomeLeaderOrdering:
         def on_sleep(*args, **kwargs):
             order.append('sleep')
 
-        def recovery_and_stop():
+        def recovery_and_stop(*args, **kwargs):
             order.append('recovery')
             # Raise to skip the infinite event loop that follows recovery.
             raise RuntimeError('stop before event loop')
@@ -478,7 +593,7 @@ class TestBecomeLeaderOrdering:
 
     def test_steps_down_if_role_lost_during_wait(self, tmp_path, monkeypatch):
         """If the role goes away during the post-acquire wait, we must NOT run
-        recovery — another replica may now hold it. Step down via
+        recovery — another server may now hold it. Step down via
         _suicide_on_role_loss and leave the gate file in place (the suicide
         path re-touches it to keep controllers gated)."""
         signal_file = tmp_path / 'restart_signal'
@@ -502,6 +617,73 @@ class TestBecomeLeaderOrdering:
         # The gate file is NOT removed on the step-down path; the suicide
         # routine owns re-touching it for the shutdown drain.
         assert signal_file.exists()
+
+    def test_steps_down_if_ownership_lost_while_starting(
+            self, tmp_path, monkeypatch):
+        """Losing the lease mid-start is a step-down, not a recovery failure.
+
+        The gate file must survive it. _suicide_on_role_loss relies on the gate
+        to keep the status sweep off the jobs it is about to abandon, so
+        unlinking first would leave a window with no gate at all.
+        """
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = _leading_thread()
+
+        def recovery(**_):
+            # Held for the pre-recovery check, gone by the time recovery
+            # returns.
+            thread._renewer.holding = False
+
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'ha_recovery_for_consolidation_mode',
+                                  side_effect=recovery), \
+                mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
+                                  '_suicide_on_role_loss') as suicide:
+            thread._become_leader_and_run()
+
+        suicide.assert_called_once()
+        assert signal_file.exists()
+
+    def test_recovery_gets_the_leadership_probe(self, tmp_path, monkeypatch):
+        """Recovery starts the controller pool, which spans tens of seconds.
+
+        It must be able to re-check the lease itself; the check made here
+        before calling it is stale by the time the last controller starts.
+        """
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = _leading_thread()
+
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(
+                    mjrt.managed_job_utils,
+                    'ha_recovery_for_consolidation_mode',
+                    side_effect=RuntimeError('stop before event loop')
+                ) as recovery:
+            with pytest.raises(RuntimeError, match='stop before event loop'):
+                thread._become_leader_and_run()
+
+        recovery.assert_called_once_with(still_leader=thread._role_still_held)
+
+    @pytest.mark.parametrize('renewer,expected', [
+        (_fake_renewer(holding=True), True),
+        (_fake_renewer(holding=False), False),
+        (None, False),
+    ])
+    def test_role_still_held_reads_the_renewer(self, renewer, expected):
+        """The probe recovery re-checks while the controller pool starts; with
+        no renewer (stepped down) there is no role to hold."""
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._renewer = renewer
+        assert thread._role_still_held() is expected
 
 
 class TestEventLoopProbe:
@@ -528,7 +710,7 @@ class TestEventLoopProbe:
 
         refresh_event = mock.Mock()
 
-        def recovery():
+        def recovery(**_):
             holding['value'] = False
 
         with mock.patch.object(mjrt.time, 'sleep'), \

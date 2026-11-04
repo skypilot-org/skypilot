@@ -20,6 +20,26 @@ def test_rtxpro6000_in_common_gpus():
     assert 'RTXPRO6000' in catalog.get_common_gpus()
 
 
+def test_list_accelerators_with_no_gpu_rows():
+    # A catalog listing only CPU instances has an empty AcceleratorName
+    # column. Filtering by name must return no accelerators, not raise.
+    csv = ('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,'
+           'GpuInfo,Region,Price,SpotPrice\n'
+           'CPU.4V.16G,,,4.0,16.0,,FIN-03,0.048,0.0192\n')
+    with tempfile.NamedTemporaryFile('w', suffix='.csv') as f:
+        f.write(csv)
+        f.flush()
+        df = catalog_common.LazyDataFrame(f.name, lambda: False)
+        result = catalog_common.list_accelerators_impl('Verda',
+                                                       df,
+                                                       gpus_only=True,
+                                                       name_filter='H100',
+                                                       region_filter=None,
+                                                       quantity_filter=None,
+                                                       case_sensitive=False)
+    assert result == {}
+
+
 @mock.patch('sky.catalog.common.requests.get')
 def test_read_catalog_triggers_update_on_stale_file(mock_get):
     """Test that read_catalog (and the LazyDataFrame it returns)

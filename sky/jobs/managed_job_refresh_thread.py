@@ -1,4 +1,5 @@
 """Run the managed-job-status-refresh loop as a thread in the API server."""
+import faulthandler
 import os
 import pathlib
 import signal
@@ -11,6 +12,8 @@ from sky import sky_logging
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import utils as managed_job_utils
+from sky.server import constants as server_constants
+from sky.server import state as server_state
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import leader_election
@@ -73,6 +76,10 @@ _LEADER_ELECTION_BACKEND_ENV_VAR = 'SKYPILOT_JOBS_LEADER_ELECTION_BACKEND'
 _LEASE_TTL_SECONDS = 150.0
 _RENEW_DEADLINE_SECONDS = 90.0
 
+# Added to the drain and the grace period before a step-down that has not exited
+# is forced to exit.
+_STEP_DOWN_EXIT_MARGIN_SECONDS = 30
+
 # How long to wait after acquiring the consolidation-mode role before running
 # recovery. During a rolling update the new leader contends while the old API
 # server still holds the role. The role is released when the old main process
@@ -126,8 +133,8 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 # _suicide_on_role_loss sent SIGTERM. Re-entering would
                 # re-contend for a role we just gave up on, touch the signal
                 # file, and call ha_recovery -> maybe_start_controllers --
-                # spawning fresh controllers while the new leader on another
-                # replica is doing the same. Stop the thread instead so the
+                # spawning fresh controllers while the new leader in another
+                # API server is doing the same. Stop the thread instead so the
                 # SIGTERM-driven drain runs to completion without further
                 # controller churn.
                 return
@@ -137,7 +144,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                     f'retrying in {_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
                 # If we were leading and lost the role mid-recovery, retrying
                 # would run as a stale leader (our renewer has stopped, another
-                # replica can take over). Hand off via SIGTERM, same as the
+                # API server can take over). Hand off via SIGTERM, same as the
                 # steady-state probe path. Still holding it, or never having
                 # held it, is an ordinary retry.
                 if self._renewer is not None and not self._renewer.holding:
@@ -151,7 +158,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # Touch the signal file BEFORE acquiring the role: new controllers
         # must not be started until recovery has run. During a rolling
         # update we contend while the old API server still holds the role;
-        # if a controller were started on this replica in that window, the
+        # if a controller were started on this server in that window, the
         # old server's update_managed_jobs_statuses wouldn't see its process
         # and could mark the job FAILED_CONTROLLER. The signal file makes
         # update_managed_jobs_statuses and the scheduler's controller-start
@@ -187,7 +194,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # running recovery, during which the role could be lost underneath us —
         # an advisory lock's session going silently stale, or a lease we stopped
         # being able to renew. Re-verify before recovery; otherwise another
-        # replica may have taken it and could be recovering concurrently, so
+        # API server may have taken it and could be recovering concurrently, so
         # step down rather than run a second recovery loop.
         # _suicide_on_role_loss re-touches the signal file and SIGTERMs the
         # process, so leave the file in place here.
@@ -196,9 +203,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             return
 
         try:
-            managed_job_utils.ha_recovery_for_consolidation_mode()
-        finally:
+            managed_job_utils.ha_recovery_for_consolidation_mode(
+                still_leader=self._role_still_held)
+        except BaseException:
             signal_file.unlink(missing_ok=True)
+            raise
+        # Same as the check above: step down with the gate file left in place.
+        if not self._renewer.holding:
+            self._suicide_on_role_loss()
+            return
+        signal_file.unlink(missing_ok=True)
 
         # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS, role check
         # every pass, sleep 1s between.
@@ -217,8 +231,6 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         last_event = now - events.EVENT_CHECKING_INTERVAL_SECONDS
         while True:
             now = time.monotonic()
-            # Checked before the first tick too: recovery above walks every
-            # managed job, so it can have outlasted the role.
             if not self._renewer.holding:
                 self._suicide_on_role_loss()
                 return
@@ -270,12 +282,22 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         renewer.start()
         self._renewer = renewer
 
+    def _role_still_held(self) -> bool:
+        """True iff this process still holds the consolidation mode role."""
+        return self._renewer is not None and self._renewer.holding
+
     def _suicide_on_role_loss(self) -> None:
-        """SIGTERM the API server process so the pod can restart cleanly."""
+        """SIGTERM the API server process so the pod can restart cleanly.
+
+        The server is marked as shutting down first, so a readiness probe can
+        take it out of the load balancer during the optional drain. Nothing
+        else kills a process that SIGTERMs itself, so it is forced to exit if
+        it is still running after the drain, the grace period and a margin.
+        """
         assert self._elector is not None
         logger.error(
             f'Lost the consolidation mode role {self._elector.lock_id}; '
-            'sending SIGTERM to the API server to step down')
+            'stepping down')
         # Stop renewing first, so nothing re-establishes a role this process has
         # already decided to give up.
         #
@@ -289,6 +311,10 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         if self._renewer is not None:
             self._renewer.stop()
             self._renewer = None
+        server_state.set_shutting_down()
+        drain_seconds = server_constants.STEP_DOWN_DRAIN_SECONDS
+        _exit_after(drain_seconds + server_constants.GRACE_PERIOD_SECONDS +
+                    _STEP_DOWN_EXIT_MARGIN_SECONDS)
         # Re-touch the recovery signal file so no new controllers will be
         # started
         try:
@@ -299,14 +325,34 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         except OSError:
             logger.warning('Failed to touch recovery signal file on role loss')
         # The role is gone, kill job controllers to avoid split brain, e.g. new
-        # job controllers might have been launched on the new replica during
-        # rolling-update
+        # job controllers might have been launched on the new pod during a
+        # rolling update
         try:
             managed_job_scheduler.kill_local_job_controllers()
         except Exception:  # pylint: disable=broad-except
             logger.exception('Failed to kill local controllers on role loss')
-        # SIGTERM to trigger graceful shutdown
+        if drain_seconds > 0:
+            logger.info(f'Waiting {drain_seconds}s for load balancers to stop '
+                        'routing to this API server')
+            time.sleep(drain_seconds)
+        logger.info('Sending SIGTERM to the API server to step down')
         os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _exit_after(seconds: int) -> None:
+    """Exit the process if it is still running ``seconds`` from now."""
+
+    def _force_exit() -> None:
+        try:
+            logger.error(f'API server did not exit within {seconds}s of '
+                         'stepping down; forcing exit. Thread stacks:')
+            faulthandler.dump_traceback(all_threads=True)
+        finally:
+            os._exit(1)  # pylint: disable=protected-access
+
+    timer = threading.Timer(seconds, _force_exit)
+    timer.daemon = True
+    timer.start()
 
 
 def start_managed_job_refresh_daemon() -> None:
