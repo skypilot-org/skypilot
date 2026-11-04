@@ -675,6 +675,11 @@ class ApiServerAuthenticationError(RuntimeError):
             f'  sky api login -e {server_url}')
 
 
+class ApiServerAuthProxyError(RuntimeError):
+    """Raised when api_server.auth_proxy.command cannot produce a token."""
+    pass
+
+
 class APIVersionMismatchError(RuntimeError):
     """Raised when the API version mismatch."""
     pass

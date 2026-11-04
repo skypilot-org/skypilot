@@ -74,8 +74,8 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
                         lambda: server_constants.API_VERSION)
     monkeypatch.setattr(client_common.common_utils, 'get_user_hash',
                         lambda: 'test-user')
-    monkeypatch.setattr(client_common.service_account_auth,
-                        'get_service_account_headers', lambda: {})
+    monkeypatch.setattr(client_common.auth_proxy, 'get_auth_headers',
+                        lambda url: {})
     monkeypatch.setattr(client_common, 'FILE_UPLOAD_LOGS_DIR',
                         str(tmp_path / 'logs'))
     monkeypatch.setattr(client_common, '_FILE_UPLOAD_LOCK_DIR',

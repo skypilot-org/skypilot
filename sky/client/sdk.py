@@ -33,6 +33,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.client import auth_proxy
 from sky.client import common as client_common
 from sky.client import interactive_utils
 from sky.client import oauth as oauth_lib
@@ -3054,8 +3055,21 @@ def _save_config_updates(endpoint: Optional[str] = None,
         if endpoint is not None:
             # We should always reset the api_server config to avoid legacy
             # service account token.
+            old_api_server = config.get('api_server') or {}
             config['api_server'] = {}
             config['api_server']['endpoint'] = endpoint
+            # Except for an authenticating proxy's settings, which a login to
+            # the same server must keep; they don't carry over to another one.
+            old_auth_proxy = old_api_server.get('auth_proxy')
+            if old_auth_proxy:
+                if auth_proxy.same_server(old_api_server.get('endpoint'),
+                                          endpoint):
+                    config['api_server']['auth_proxy'] = old_auth_proxy
+                else:
+                    logger.warning(
+                        'api_server.auth_proxy was for '
+                        f'{old_api_server.get("endpoint")!r}; removed it, '
+                        f'since {endpoint!r} is a different server.')
 
         # Update service account token if provided
         if service_account_token is not None:

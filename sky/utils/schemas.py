@@ -2710,6 +2710,39 @@ def get_config_schema():
                     }
                 ]
             },
+            # Credential for an authenticating proxy in front of the API
+            # server (e.g. Google Cloud IAP); see sky/client/auth_proxy.py.
+            'auth_proxy': {
+                'type': 'object',
+                'required': ['command'],
+                'additionalProperties': False,
+                'properties': {
+                    'command': {
+                        'anyOf': [{
+                            'type': 'string',
+                            'minLength': 1,
+                        }, {
+                            'type': 'array',
+                            'minItems': 1,
+                            'items': {
+                                'type': 'string'
+                            },
+                        }]
+                    },
+                    'header': {
+                        'type': 'string',
+                        'pattern': r'^[A-Za-z0-9-]+$',
+                    },
+                    'value_template': {
+                        'type': 'string',
+                        'pattern': r'\{token\}',
+                    },
+                    'cache_seconds': {
+                        'type': 'number',
+                        'minimum': 0,
+                    },
+                },
+            },
             'requests_retention_hours': {
                 'type': 'integer',
             },

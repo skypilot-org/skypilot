@@ -464,6 +464,10 @@ During the login flow, the token provided by the web login will encode the cooki
 
     If your auth proxy is not automatically detected or you would like to login with a different identity, try using ``sky api login --relogin`` to force relogin.
 
+.. note::
+
+    Some proxies, such as Google Cloud Identity-Aware Proxy (IAP), never pass their session cookie on to the API server, so the token from the web login cannot authenticate the CLI. For those, configure :ref:`api_server.auth_proxy <config-yaml-api-server-auth-proxy>` on the client instead: the CLI runs a command that prints a short-lived token (for IAP, ``gcloud auth print-identity-token``) and sends it on every request.
+
 If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests. You can customize the authentication header name if your auth proxy uses a different header than the default ``X-Auth-Request-Email``.
 
 .. code-block:: bash
