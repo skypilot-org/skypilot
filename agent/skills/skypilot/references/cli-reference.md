@@ -518,6 +518,7 @@ Show statuses of SkyServe services.
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--verbose`, `-v` — Show all information in full.
+- `--all`, `-a` — Show all replicas.
 - `--endpoint` — Show service endpoint.
 - `SERVICE_NAMES` — text
 
