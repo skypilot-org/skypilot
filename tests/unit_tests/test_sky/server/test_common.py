@@ -14,6 +14,7 @@ import requests
 import sky
 from sky import exceptions
 from sky import skypilot_config
+from sky.client import sdk
 from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
@@ -337,8 +338,6 @@ def test_sdk_api_start_in_server_never_starts(unused_url, unused_local,
     consolidation signal file and resets the local request database. The call
     must surface the connection error instead.
     """
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
     monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
     monkeypatch.delenv('SKYPILOT_DISABLE_LOCAL_API_SERVER', raising=False)
     common.get_api_server_status_response.cache_clear()
