@@ -131,11 +131,14 @@ def test_schema_rejects_invalid_subnet(selected):
         }}, schemas.get_config_schema())
 
 
-@pytest.mark.parametrize('selected', [None, _SUBNET])
+@pytest.mark.parametrize('selected,task_override', [(None, False),
+                                                    (_SUBNET, False),
+                                                    (_SUBNET, True)])
 @pytest.mark.parametrize('has_nsg', [False, True])
 @pytest.mark.parametrize('existing_deployment', [False, True])
 def test_config_through_rendering_and_bootstrap(network, monkeypatch, selected,
-                                                has_nsg, existing_deployment):
+                                                has_nsg, existing_deployment,
+                                                task_override):
     settings = {'azure': {'vpc_name': 'private', 'resource_group_vm': 'rg'}}
     if selected is not None:
         settings['azure']['subnet_id'] = selected
@@ -147,15 +150,41 @@ def test_config_through_rendering_and_bootstrap(network, monkeypatch, selected,
                               instance_type='Standard_D8as_v5',
                               disk_tier=resources_utils.DiskTier.MEDIUM,
                               image_id='Canonical:ubuntu:22_04:latest')
+    if task_override:
+        task = sky.Task.from_yaml_config({
+            'resources': resources.to_yaml_config(),
+            'config': {
+                'azure': {
+                    'vpc_name': 'private',
+                    'subnet_id': selected
+                }
+            },
+        })
+        resources, = task.resources
+        resources, = sky.Resources.from_yaml_config(
+            resources.copy().to_yaml_config())
+        assert resources.cluster_config_overrides['azure'] == {
+            'vpc_name': 'private',
+            'subnet_id': selected,
+        }
+        settings['azure'].update(vpc_name='global-vnet',
+                                 subnet_id=_SUBNET.replace(
+                                     '/private/', '/global-vnet/'))
     with skypilot_config.replace_skypilot_config(
             sky.Config.from_dict(settings)):
+        vpc_name = skypilot_config.get_effective_region_config(
+            cloud='azure',
+            region='eastus',
+            keys=('vpc_name',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides)
         variables = resources.make_deploy_variables(
             SimpleNamespace(name_on_cloud='test'),
             sky.clouds.Region('eastus'),
             None,
             1,
             dryrun=True)
-    variables.update(vpc_name='private',
+    variables.update(vpc_name=vpc_name,
                      use_internal_ips=True,
                      num_nodes=1,
                      docker_image=None,
@@ -165,6 +194,7 @@ def test_config_through_rendering_and_bootstrap(network, monkeypatch, selected,
                 'azure-ray.yml.j2').read_text()
     provider = yaml.safe_load(
         jinja2.Template(template).render(**variables))['provider']
+    assert provider['vpc_name'] == 'private'
     if selected is None:
         assert 'subnet_id' not in provider
     else:
@@ -196,6 +226,7 @@ def test_config_through_rendering_and_bootstrap(network, monkeypatch, selected,
                   if kind == 'network' else resource_client))
     result = config.bootstrap_instances(
         'eastus', 'test', SimpleNamespace(provider_config=provider))
+    network.virtual_networks.get.assert_called_once_with('rg', 'private')
     name = 'workers' if selected else 'endpoints'
     assert result.provider_config['subnet'] == _VNET + '/subnets/' + name
     assert result.provider_config['nsg'] == ('nsg-' +

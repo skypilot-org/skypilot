@@ -1765,6 +1765,10 @@ VNet, ignoring case. If it does not match, provisioning fails rather than fallin
 back to another subnet. The selected subnet's NSG is used when present; otherwise,
 SkyPilot creates an NSG.
 
+This setting can also be overridden in a task's ``config.azure`` section.
+When overriding ``vpc_name``, also set ``subnet_id`` if the global configuration
+pins a subnet in a different VNet.
+
 If omitted, SkyPilot uses the first subnet returned by Azure for a custom VNet,
 or creates networking resources when no custom VNet is configured.
 
