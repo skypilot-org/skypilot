@@ -185,11 +185,40 @@ def is_unhealthy_init_reason(reason: Optional[str]) -> bool:
 # annotations; runtime overwrites the placeholders from the else branch above.
 if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in global_user_state_db (column 0) to avoid indenting tables.
+    # Explicit binds (not globals().update) so mypy/pylint see the names.
+    # Keep in sync with global_user_state_db.__all__ (unit-tested).
     # pylint: disable=protected-access
     from sky import global_user_state_db as _gus_db
-    # Bind every name listed in _gus_db.__all__ so a new table cannot be
-    # forgotten in a hand-copied re-export list.
-    globals().update({n: getattr(_gus_db, n) for n in _gus_db.__all__})
+    sqlalchemy = _gus_db.sqlalchemy
+    sqlalchemy_exc = _gus_db.sqlalchemy_exc
+    orm = _gus_db.orm
+    postgresql = _gus_db.postgresql
+    sqlite = _gus_db.sqlite
+    sql_async = _gus_db.sql_async
+    declarative = _gus_db.declarative
+    Base = _gus_db.Base
+    config_table = _gus_db.config_table
+    user_table = _gus_db.user_table
+    cluster_table = _gus_db.cluster_table
+    storage_table = _gus_db.storage_table
+    volume_table = _gus_db.volume_table
+    cluster_history_table = _gus_db.cluster_history_table
+    cluster_event_table = _gus_db.cluster_event_table
+    UNOBSERVED_ATTEMPT_PREDICATE = _gus_db.UNOBSERVED_ATTEMPT_PREDICATE
+    launch_attempt_table = _gus_db.launch_attempt_table
+    ssh_key_table = _gus_db.ssh_key_table
+    service_account_token_table = _gus_db.service_account_token_table
+    cluster_yaml_table = _gus_db.cluster_yaml_table
+    system_config_table = _gus_db.system_config_table
+    cluster_job_spec_table = _gus_db.cluster_job_spec_table
+    MAX_JOB_SPECS_PER_CLUSTER = _gus_db.MAX_JOB_SPECS_PER_CLUSTER
+    leader_leases_table = _gus_db.leader_leases_table
+    _glob_to_similar = _gus_db._glob_to_similar
+    create_table = _gus_db.create_table
+    _sqlite_supports_returning = _gus_db._sqlite_supports_returning
+    _supports_returning = _gus_db._supports_returning
+    _db_manager = _gus_db._db_manager
+    initialize_and_get_db = _gus_db.initialize_and_get_db
 else:
     # Client-only install: enums/helpers below still import. DB APIs
     # fail with a clear install hint when first used.

@@ -36,11 +36,23 @@ else:
 # annotations; runtime overwrites the placeholders from the else branch above.
 if sqlalchemy_deps.sqlalchemy_available():
     # Schema lives in serve_state_db (column 0) to avoid indenting table defs.
+    # Explicit binds (not globals().update) so mypy/pylint see the names.
+    # Keep in sync with serve_state_db.__all__ (unit-tested).
     # pylint: disable=protected-access
     from sky.serve import serve_state_db as _serve_db
-    # Bind every name listed in _serve_db.__all__ so a new table cannot be
-    # forgotten in a hand-copied re-export list.
-    globals().update({n: getattr(_serve_db, n) for n in _serve_db.__all__})
+    sqlalchemy = _serve_db.sqlalchemy
+    sqlalchemy_exc = _serve_db.sqlalchemy_exc
+    orm = _serve_db.orm
+    postgresql = _serve_db.postgresql
+    sqlite = _serve_db.sqlite
+    declarative = _serve_db.declarative
+    Base = _serve_db.Base
+    services_table = _serve_db.services_table
+    replicas_table = _serve_db.replicas_table
+    version_specs_table = _serve_db.version_specs_table
+    serve_ha_recovery_script_table = _serve_db.serve_ha_recovery_script_table
+    create_table = _serve_db.create_table
+    _db_manager = _serve_db._db_manager
 else:
     # Client-only install: status enums below still import. DB APIs
     # fail with a clear install hint when first used.

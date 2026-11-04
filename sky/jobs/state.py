@@ -72,11 +72,39 @@ JOB_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 # annotations; runtime overwrites the placeholders from the else branch above.
 if sqlalchemy_deps.sqlalchemy_available():
     # Schema in sky.jobs.state_db (column 0); avoid indenting table defs.
+    # Explicit binds (not globals().update) so mypy/pylint see the names.
+    # Keep in sync with state_db.__all__ (unit-tested).
     # pylint: disable=protected-access
     from sky.jobs import state_db as _jobs_db
-    # Bind every name listed in _jobs_db.__all__ so a new table cannot be
-    # forgotten in a hand-copied re-export list.
-    globals().update({n: getattr(_jobs_db, n) for n in _jobs_db.__all__})
+    sqlalchemy = _jobs_db.sqlalchemy
+    sqlalchemy_exc = _jobs_db.sqlalchemy_exc
+    orm = _jobs_db.orm
+    postgresql = _jobs_db.postgresql
+    sqlite = _jobs_db.sqlite
+    sql_async = _jobs_db.sql_async
+    declarative = _jobs_db.declarative
+    Base = _jobs_db.Base
+    _MEASURABLE = _jobs_db._MEASURABLE
+    PENDING_TIMELINE_PREDICATE = _jobs_db.PENDING_TIMELINE_PREDICATE
+    NEVER_RAN_PREDICATE = _jobs_db.NEVER_RAN_PREDICATE
+    CLAIMED_IN_FLIGHT_PREDICATE = _jobs_db.CLAIMED_IN_FLIGHT_PREDICATE
+    CLAIMED_LIVE_PREDICATE = _jobs_db.CLAIMED_LIVE_PREDICATE
+    spot_table = _jobs_db.spot_table
+    job_info_table = _jobs_db.job_info_table
+    api_access_token_table = _jobs_db.api_access_token_table
+    ha_recovery_script_table = _jobs_db.ha_recovery_script_table
+    job_events_table = _jobs_db.job_events_table
+    batch_state_table = _jobs_db.batch_state_table
+    job_dependencies_table = _jobs_db.job_dependencies_table
+    _unfinished_dependency_exists = _jobs_db._unfinished_dependency_exists
+    _users_at_launch_limit = _jobs_db._users_at_launch_limit
+    _has_live_task = _jobs_db._has_live_task
+    _not_held_by_launch_limit = _jobs_db._not_held_by_launch_limit
+    get_held_job_ids = _jobs_db.get_held_job_ids
+    users_at_launch_limit_sql = _jobs_db.users_at_launch_limit_sql
+    _batch_progress_subquery = _jobs_db._batch_progress_subquery
+    create_table = _jobs_db.create_table
+    _db_manager = _jobs_db._db_manager
 else:
     # Client-only install: enums/helpers below still import. DB APIs
     # fail with a clear install hint when first used.
@@ -1554,8 +1582,8 @@ def get_managed_jobs_total() -> int:
     with orm.Session(engine) as session:
         # pylint: disable=not-callable
         result = session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()).select_from(
-                spot_table)).fetchone()
+            sqlalchemy.select(
+                sqlalchemy.func.count()).select_from(spot_table)).fetchone()
         return result[0] if result else 0
 
 

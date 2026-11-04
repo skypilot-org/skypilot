@@ -1,5 +1,6 @@
 """SQLAlchemy is server-only; helpers must fail clearly when it is missing."""
 import ast
+import importlib
 import subprocess
 import sys
 import textwrap
@@ -72,6 +73,23 @@ def test_client_safe_modules_have_no_top_level_sqlalchemy_import(relpath):
     assert not _top_level_imports_sqlalchemy(path), (
         f'{relpath} has a top-level sqlalchemy import; use LazyImport or '
         'gate behind sqlalchemy_available() so client installs stay importable')
+
+
+@pytest.mark.parametrize('facade_mod, db_mod', [
+    ('sky.global_user_state', 'sky.global_user_state_db'),
+    ('sky.jobs.state', 'sky.jobs.state_db'),
+    ('sky.serve.serve_state', 'sky.serve.serve_state_db'),
+])
+def test_facade_reexports_match_db_all(facade_mod, db_mod):
+    """Facade must bind every name in ``*_db.__all__`` (static re-export list).
+
+    ``globals().update`` is invisible to mypy/pylint, so facades use explicit
+    assigns; this test catches drift when ``__all__`` gains a name.
+    """
+    facade = importlib.import_module(facade_mod)
+    db = importlib.import_module(db_mod)
+    missing = [n for n in db.__all__ if not hasattr(facade, n)]
+    assert not missing, f'{facade_mod} missing re-exports of {missing}'
 
 
 def test_client_surface_imports_without_db_stack():
