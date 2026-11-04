@@ -7,7 +7,6 @@ import logging
 import re
 import shlex
 import subprocess
-import time
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from sky.utils import command_runner
@@ -273,11 +272,6 @@ def _parse_partitions_info_output(stdout: str) -> List[SlurmPartition]:
 # 255 when it fails, and the runner reports its own timeout as
 # command_runner.TIMEOUT_RETURNCODE, so neither reads as a refusal.
 _SUBMIT_USER_REFUSED_RETURNCODE = 1
-# sudo and runuser also exit with 1 when they fail for a moment, for example
-# when the name service cannot resolve the account. Count a refusal only when
-# every check returns it.
-_SUBMIT_USER_REFUSAL_CHECKS = 3
-_SUBMIT_USER_RECHECK_SECONDS = 2
 
 
 class SubmitUserRefusedError(RuntimeError):
@@ -352,25 +346,18 @@ class SlurmClient:
         """Check the Unix account through the submit runner.
 
         Raises:
-            SubmitUserRefusedError: The login node ran the check and refused
-                it every time, so it refuses again until its configuration
-                changes.
+            SubmitUserRefusedError: The account check exited with code 1.
             RuntimeError: Any other failure, including SSH failures and
                 timeouts that may pass on a later attempt.
         """
         command = ['id', '-un']
         error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
                  f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
-        for check in range(_SUBMIT_USER_REFUSAL_CHECKS):
-            if check > 0:
-                time.sleep(_SUBMIT_USER_RECHECK_SECONDS)
-            try:
-                rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
-            except subprocess.TimeoutExpired as e:
-                raise RuntimeError(error + 'Account validation timed out '
-                                   'after 15 seconds.') from e
-            if rc != _SUBMIT_USER_REFUSED_RETURNCODE:
-                break
+        try:
+            rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(error + 'Account validation timed out after '
+                               '15 seconds.') from e
         if rc == command_runner.TIMEOUT_RETURNCODE:
             # The SSH runner reports a timeout with this exit code instead of
             # raising TimeoutExpired.

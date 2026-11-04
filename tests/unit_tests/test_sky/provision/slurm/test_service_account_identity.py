@@ -20,11 +20,6 @@ from sky.utils import config_utils
 from sky.utils import schemas
 
 
-@pytest.fixture(autouse=True)
-def _no_recheck_delay(monkeypatch):
-    monkeypatch.setattr(slurm, '_SUBMIT_USER_RECHECK_SECONDS', 0)
-
-
 @pytest.fixture
 def identity_config(monkeypatch):
     config = config_utils.Config.from_dict({
@@ -179,33 +174,10 @@ def test_submit_validation_refusal(stderr):
                            return_value=(1, '', stderr)) as run:
         with pytest.raises(slurm.SubmitUserRefusedError) as e:
             client.validate_submit_user('cluster', 'alice')
-    # A refusal counts only once every check has returned it.
-    assert run.call_count == slurm._SUBMIT_USER_REFUSAL_CHECKS  # pylint: disable=protected-access
+    run.assert_called_once()
     assert ('(`sudo --non-interactive -H -u alice -- id -un`) exited with '
             'code 1') in str(e.value)
     assert stderr in str(e.value)
-
-
-def test_submit_validation_refusal_that_clears_on_recheck():
-    """sudo also exits 1 when the name service fails for a moment."""
-    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
-    with mock.patch.object(command_runner.SSHCommandRunner,
-                           'run',
-                           side_effect=[(1, '', 'sudo: unknown user alice'),
-                                        (0, 'alice\n', '')]) as run:
-        client.validate_submit_user('cluster', 'alice')
-    assert run.call_count == 2
-
-
-def test_submit_validation_refusal_then_ssh_failure_is_not_a_refusal():
-    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
-    with mock.patch.object(command_runner.SSHCommandRunner,
-                           'run',
-                           side_effect=[(1, '', 'sudo: unknown user alice'),
-                                        (255, '', 'ssh: connect failed')]):
-        with pytest.raises(RuntimeError) as e:
-            client.validate_submit_user('cluster', 'alice')
-    assert not isinstance(e.value, slurm.SubmitUserRefusedError)
 
 
 # Only a refusal is final. Everything else stays retryable, including output
