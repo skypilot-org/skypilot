@@ -41,6 +41,7 @@ ALL_REGIONS = [
     'us-west-1',
     'us-west-2',
     'ca-central-1',
+    'sa-east-1',
     'eu-central-1',
     # 'eu-central-2', # no supported AMI
     'eu-west-1',
