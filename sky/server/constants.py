@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 67  # cluster_job_spec endpoint
+API_VERSION = 68  # service account impersonation header
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -65,6 +65,13 @@ MIN_JOBS_DEPENDS_ON_API_VERSION = 64
 # Minimum server API version that accepts the task's `job:` section
 # (`job.wait_for_scheduling_timeout`).
 MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION = 66
+
+# The HTTP header naming the user an admin service account acts as.
+IMPERSONATE_USER_HEADER = 'X-SkyPilot-Impersonate-User'
+# Minimum server API version that honors IMPERSONATE_USER_HEADER. An older
+# server ignores the header and runs the request as the service account
+# itself, so the client refuses to send it.
+MIN_IMPERSONATION_API_VERSION = 68
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49

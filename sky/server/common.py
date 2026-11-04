@@ -354,6 +354,26 @@ def get_cookies_from_response(
     return cookies
 
 
+def _check_impersonation_supported(path: str, server_url: str) -> None:
+    """Refuses to impersonate on a server that would ignore the header.
+
+    Until a response has told the client the server's version, asks with a
+    health check first. The server ignores the header on health checks, so
+    that one is safe to send before the version is known.
+    """
+    if (versions.get_remote_api_version() is None and
+            not path.startswith('/api/health')):
+        get_api_server_status(server_url)
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version <
+            server_constants.MIN_IMPERSONATION_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Acting as another user is not supported by the remote API '
+                f'server version {versions.get_remote_version()!r}. Please '
+                'upgrade the remote server.')
+
+
 def _prepare_authenticated_request_params(
         path: str,
         server_url: Optional[str] = None,
@@ -368,6 +388,8 @@ def _prepare_authenticated_request_params(
 
     # Prepare headers and URL for service account authentication
     headers = service_account_auth.get_service_account_headers()
+    if server_constants.IMPERSONATE_USER_HEADER in headers:
+        _check_impersonation_supported(path, server_url)
 
     # Merge with existing headers
     if 'headers' in kwargs:

@@ -16,6 +16,7 @@ from sky.utils import config_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from sky.server.auth import impersonation as impersonation_mod
     from sky.server.blob import blob_storage as blob_storage_mod
     from sky.server.requests import log_provider as log_provider_mod
     from sky.server.requests import storage as storage_mod
@@ -169,6 +170,27 @@ class ExtensionContext:
         # pylint: disable=import-outside-toplevel
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
+
+    def register_impersonation_policy(
+        self,
+        policy: 'impersonation_mod.ImpersonationPolicy',
+    ) -> None:
+        """Register who may act as whom through the impersonation header.
+
+        Replaces the default policy (admin service accounts, when
+        `rbac.allow_impersonation` is on). The policy is called on a worker
+        thread with the authenticated caller and the resolved target user, and
+        returns None to allow or the reason for refusing. The server still
+        refuses callers that are not service accounts, service accounts and
+        built-in users as targets, targets whose role outranks the caller's,
+        endpoints the caller's own role denies, and changes to users or
+        service account tokens. A plugin endpoint that issues a session or
+        token for the authenticated user must refuse when
+        `request.state.impersonator` is set.
+        """
+        # pylint: disable=import-outside-toplevel
+        from sky.server.auth import impersonation
+        impersonation.set_policy(policy)
 
 
 @dataclasses.dataclass

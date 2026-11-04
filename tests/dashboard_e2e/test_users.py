@@ -559,6 +559,64 @@ def test_service_accounts_tab(make_user, open_as, uid, twist):
 
 
 @with_twists(
+    Twist('dom-edit-sa-does-nothing',
+          'dom',
+          expect=r'Edit service account must open a dialog named after it',
+          apply=_swallow_clicks_on('button[title="Edit service account"]')),
+    Twist('req-update-sa-role-sends-admin',
+          'req',
+          expect=r'.*-ci must show the User role after saving',
+          apply=rewrite_request('/users/service-account-tokens/update-role',
+                                lambda b: {
+                                    **b, 'role': 'admin'
+                                })),
+)
+def test_edit_service_account_role_in_dialog(make_user, open_as, admin_api, uid,
+                                             twist):
+    admin = make_user('admin', role='admin')
+    ci = make_user('ci', role='viewer')
+    page = _open_users(open_as, admin, '?tab=service-accounts')
+    page.get_by_placeholder(SA_TAB_SEARCH).fill(uid)
+    row = _row(page, ci.name)
+    expect(row, f'service account {ci.name} must be listed').to_have_count(1)
+
+    row.get_by_role('button', name='Edit service account').click()
+    dialog = page.get_by_role('dialog')
+    expect(dialog.get_by_role('heading', name=ci.name),
+           'Edit service account must open a dialog named after it'
+          ).to_be_visible()
+    picker = dialog.get_by_role('combobox', name='Role')
+    expect(picker, 'the dialog must show the current Viewer role').to_have_text(
+        re.compile('Viewer'))
+    save = dialog.get_by_role('button', name='Save')
+    expect(save, 'Save must wait for a change').to_be_disabled()
+    picker.click()
+    page.get_by_role('option', name='User', exact=True).click()
+    since = page.recorder.mark()
+    save.click()
+
+    posts = _wait_posts(page, '/users/service-account-tokens/update-role',
+                        since)
+    assert posts, 'Save must send POST /users/service-account-tokens/update-role'
+    assert posts[-1].get('token_id') == ci.token_id, (
+        f'Save must name {ci.name} ({ci.token_id}), got {posts[-1]}')
+    expect(dialog, 'Save must close the dialog').to_be_hidden()
+    expect(
+        row.locator('span.capitalize').first,
+        f'{ci.name} must show the User role after saving').to_have_text(
+            _role_text('user'))
+    # Service accounts are not in GET /users; their roles come with the tokens.
+    r = admin_api.get(f'{admin_api.base_url}{SA_TOKENS}', timeout=60)
+    r.raise_for_status()
+    roles = next((t.get('service_account_roles')
+                  for t in r.json()
+                  if t.get('token_id') == ci.token_id), None)
+    assert roles == [
+        'user'
+    ], (f'{ci.name} must show the User role after saving: server has {roles!r}')
+
+
+@with_twists(
     Twist('srv-users-sa-create-ignores-role',
           'srv',
           expect=r'the new service account must have the Viewer role'),
