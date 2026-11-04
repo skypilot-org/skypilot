@@ -3772,6 +3772,8 @@ def impersonate(user: str) -> Iterator[None]:
     Raises:
         ValueError: If ``user`` is empty, or if a request is sent in the
             context without a service account token.
+        exceptions.PermissionDeniedError: If the API server refuses to let
+            the caller act as ``user``; the message says why.
         exceptions.APINotSupportedError: If a request is sent in the context
             to an API server that does not support impersonation.
     """

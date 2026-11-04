@@ -729,9 +729,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
 class _ImpersonationRejected(Exception):
     """The impersonation header names a user the caller may not act as."""
 
-    def __init__(self, status_code: int, detail: str):
+    def __init__(self, detail: str):
         super().__init__(detail)
-        self.status_code = status_code
         self.detail = detail
 
 
@@ -753,19 +752,18 @@ def _resolve_impersonated_user(target: str) -> models.User:
     if user is None:
         matches = global_user_state.get_user_by_name(target)
         if not matches:
-            raise _ImpersonationRejected(400, f'User {target!r} not found.')
+            raise _ImpersonationRejected(f'User {target!r} not found.')
         if len(matches) > 1:
             raise _ImpersonationRejected(
-                400, f'User name {target!r} matches {len(matches)} users. '
+                f'User name {target!r} matches {len(matches)} users. '
                 'Use the user ID instead.')
         user = matches[0]
     user_type = users_rest.get_user_type(user)
     if user_type == models.UserType.SA.value:
-        raise _ImpersonationRejected(
-            403, 'Service accounts cannot be impersonated.')
+        raise _ImpersonationRejected('Service accounts cannot be impersonated.')
     if user_type == models.UserType.SYSTEM.value:
         raise _ImpersonationRejected(
-            403, 'Built-in system users cannot be impersonated.')
+            'Built-in system users cannot be impersonated.')
     return user
 
 
@@ -778,33 +776,37 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
     the user. Only a service account whose role is admin may impersonate, so
     the request can never do more than the caller could on its own. Every
     impersonated request is logged with the service account behind it, which
-    stays on `request.state.impersonator`.
+    stays on `request.state.impersonator`. A refused impersonation is a 403
+    whose detail says why.
     """
 
     async def on_request(self, request: fastapi.Request):
         target = request.headers.get(server_constants.IMPERSONATE_USER_HEADER)
         if target is None:
             return None
+        # Clients run a health check before each call; a refusal there would
+        # read as an unreachable server instead of the reason.
+        if request.url.path.startswith('/api/health'):
+            return None
         target = target.strip()
         caller = request.state.auth_user
         if caller is None or not caller.is_service_account():
             return self._reject(
-                request, 403, 'Impersonation requires a service account token.')
+                request, 'Impersonation requires a service account token.')
         if not target:
-            return self._reject(request, 400,
+            return self._reject(request,
                                 'The user to impersonate must not be empty.')
         try:
             is_admin = await db_lookup.call_with_deadline(
                 _has_only_admin_role, caller.id)
             if not is_admin:
                 return self._reject(
-                    request, 403,
-                    'Only service accounts with the admin role can '
+                    request, 'Only service accounts with the admin role can '
                     'impersonate users.')
             user = await db_lookup.call_with_deadline(
                 _resolve_impersonated_user, target)
         except _ImpersonationRejected as e:
-            return self._reject(request, e.status_code, e.detail)
+            return self._reject(request, e.detail)
         except asyncio.TimeoutError:
             logger.error('Impersonation DB lookup timed out')
             return db_lookup.db_timeout_response(request)
@@ -822,12 +824,11 @@ class ImpersonationMiddleware(middleware_utils.ASGIMiddleware):
         return None
 
     @staticmethod
-    def _reject(request: fastapi.Request, status_code: int,
+    def _reject(request: fastapi.Request,
                 detail: str) -> fastapi.responses.JSONResponse:
-        if status_code == 403:
-            middleware_utils.mark_rejection(
-                request, middleware_utils.REJECT_REASON_FORBIDDEN)
-        return fastapi.responses.JSONResponse(status_code=status_code,
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_FORBIDDEN)
+        return fastapi.responses.JSONResponse(status_code=403,
                                               content={'detail': detail})
 
 

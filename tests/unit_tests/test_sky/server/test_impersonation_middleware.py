@@ -1,5 +1,6 @@
 """An admin service account can act as another user via a request header."""
 
+import json
 import unittest.mock as mock
 
 import fastapi
@@ -142,19 +143,34 @@ async def test_admin_role_granted_on_another_worker_is_honored():
     assert request.state.auth_user.id == _ALICE.id
 
 
-@pytest.mark.parametrize('target,status_code', [
-    ('', 400),
-    ('nobody', 400),
-    ('dup', 400),
-    ('sa-other', 403),
-    (constants.SKYPILOT_SYSTEM_USER_ID, 403),
+@pytest.mark.parametrize('target,reason', [
+    ('', 'must not be empty'),
+    ('nobody', 'not found'),
+    ('dup', 'matches 2 users'),
+    ('sa-other', 'Service accounts cannot'),
+    (constants.SKYPILOT_SYSTEM_USER_ID, 'system users cannot'),
 ])
 @pytest.mark.asyncio
-async def test_rejected_targets(target, status_code):
+async def test_rejected_targets(target, reason):
     request = _request(target)
     response, logger, _ = await _dispatch(request)
-    assert response.status_code == status_code
+    # 403 with a detail is what clients render as a permission error.
+    assert response.status_code == 403
+    assert reason in json.loads(response.body)['detail']
     assert request.state.auth_user is _ADMIN_SA
+    logger.info.assert_not_called()
+
+
+@pytest.mark.parametrize('caller,target', [
+    (_ADMIN_SA, 'nobody'),
+    (models.User(id='a1b2c3d4', name='alice@example.com'), _ALICE.name),
+])
+@pytest.mark.asyncio
+async def test_health_check_ignores_the_header(caller, target):
+    request = _request(target, path='/api/health', method='GET')
+    response, logger, _ = await _dispatch(request, caller=caller)
+    assert response.status_code == 200
+    assert request.state.auth_user is caller
     logger.info.assert_not_called()
 
 
