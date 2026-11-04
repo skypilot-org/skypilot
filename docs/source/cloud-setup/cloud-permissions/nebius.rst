@@ -85,6 +85,35 @@ Next steps:
 - Nebius Object Storage uses a separate access key; see the Nebius section of
   the :ref:`installation guide <installation>`.
 
+Attaching a service account to VMs
+----------------------------------
+
+To run SkyPilot VMs as an existing Nebius service account instead of uploading
+your local credentials to them, set ``nebius.remote_identity`` to the service
+account ID (see :ref:`config-yaml-nebius-remote-identity`):
+
+.. code-block:: yaml
+
+    nebius:
+      remote_identity: serviceaccount-e00xxxxxxxxxxx
+
+The service account must be in the project the VMs are launched in. For
+autostop and autodown, it needs permission to stop and delete the cluster's VMs
+(e.g. membership in the ``editors`` group).
+
+Workloads on the VMs can then get a token for this service account from the
+instance metadata service, for example to access other clouds through
+`workload identity federation <https://docs.nebius.com/iam/wif>`_.
+
+SkyPilot on the VMs (for example for autostop and autodown) authenticates as this
+service account with the token served by the instance metadata service
+(``http://metadata.nebius.internal/v1/iam/sa/token``). On older VM images that
+still have the legacy ``/mnt/cloud-metadata/token`` file (Nebius removed this
+mount on September 30, 2026), the file is used as a fallback.
+
+If the jobs controller runs on Nebius with an attached service account, also
+set ``nebius.tenant_id`` in the config, as the tenant ID file is not uploaded.
+
 Using internal IPs
 -----------------------
 For security reasons, users may only want to use internal IPs for SkyPilot instances.

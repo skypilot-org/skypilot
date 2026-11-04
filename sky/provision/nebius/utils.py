@@ -562,7 +562,8 @@ def launch(cluster_name_on_cloud: str,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None,
-           security_group_ids: Optional[List[str]] = None) -> str:
+           security_group_ids: Optional[List[str]] = None,
+           service_account_id: Optional[str] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -708,6 +709,7 @@ def launch(cluster_name_on_cloud: str,
                         PreemptionPolicy.STOP) if use_spot else None,
                     follows_spot_price=nebius.compute().FollowsSpotPriceSpec()
                     if use_spot else None,
+                    service_account_id=service_account_id,
                 ))))
         instance_id = ''
         retry_count = 0
