@@ -2853,12 +2853,6 @@ function ServiceAccountTokensView({
 }) {
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
-  // Columns contributed via useTableColumns() are rendered after Role and
-  // sorted among themselves by header.order.
-  const extraColumns = useTableColumns('service-accounts');
-  const sortedExtraColumns = [...extraColumns].sort(
-    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
-  );
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [tokenToDelete, setTokenToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
@@ -2877,8 +2871,15 @@ function ServiceAccountTokensView({
   const [rotatedTokenInDialog, setRotatedTokenInDialog] = useState(null);
 
   // Role editing state
-  const [editingTokenId, setEditingTokenId] = useState(null);
-  const [currentEditingRole, setCurrentEditingRole] = useState('');
+  // The service account open in the edit dialog, and its draft role.
+  const [editingToken, setEditingToken] = useState(null);
+  const [draftRole, setDraftRole] = useState('');
+  const [savingAccess, setSavingAccess] = useState(false);
+  const [accessError, setAccessError] = useState(null);
+  // Sections plugins add to the edit dialog: {id: {dirty, valid}}, and their
+  // save callbacks.
+  const [accessSections, setAccessSections] = useState({});
+  const accessSectionSaves = useRef({});
 
   // Enhanced tokens with cluster/job counts
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
@@ -3068,51 +3069,92 @@ function ServiceAccountTokensView({
     fetchTokensAndCounts();
   }, [fetchTokensAndCounts]);
 
-  // Role editing functions
-  const handleEditClick = async (tokenId, currentRole) => {
+  // Edit dialog: the role, plus whatever sections plugins add.
+  const openAccessDialog = async (token) => {
     await checkPermissionAndAct('cannot edit service account role', () => {
-      setEditingTokenId(tokenId);
-      setCurrentEditingRole(currentRole);
+      setEditingToken(token);
+      setDraftRole(token.primaryRole);
+      setAccessError(null);
     });
   };
 
-  const handleCancelEdit = () => {
-    setEditingTokenId(null);
-    setCurrentEditingRole('');
+  const closeAccessDialog = () => {
+    setEditingToken(null);
+    setDraftRole('');
+    setAccessError(null);
   };
 
-  const handleSaveEdit = async (tokenId) => {
-    if (!tokenId || !currentEditingRole) {
-      console.error('Token ID or role is missing.');
-      setCreateError(new Error('Token ID or role is missing.'));
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await apiClient.post(
-        '/users/service-account-tokens/update-role',
-        {
-          token_id: tokenId,
-          role: currentEditingRole,
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to update role');
+  // Passed to plugin sections: each registers whether it has changes, whether
+  // they are valid, and how to save them. Returns the unregister function.
+  const registerAccessSection = useCallback((id, section) => {
+    accessSectionSaves.current[id] = section.save;
+    setAccessSections((prev) => {
+      const current = prev[id];
+      if (
+        current &&
+        current.dirty === section.dirty &&
+        current.valid === section.valid
+      ) {
+        return prev;
       }
+      return { ...prev, [id]: { dirty: section.dirty, valid: section.valid } };
+    });
+    return () => {
+      delete accessSectionSaves.current[id];
+      setAccessSections((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    };
+  }, []);
 
-      setCreateSuccess('Service account role updated successfully!');
+  const roleChanged =
+    Boolean(editingToken) && draftRole !== editingToken.primaryRole;
+  const sectionsDirty = Object.values(accessSections).some((s) => s.dirty);
+  const sectionsValid = Object.values(accessSections).every((s) => s.valid);
+
+  const handleSaveAccess = async () => {
+    if (!editingToken) return;
+    setSavingAccess(true);
+    setAccessError(null);
+    try {
+      if (roleChanged) {
+        const response = await apiClient.post(
+          '/users/service-account-tokens/update-role',
+          {
+            token_id: editingToken.token_id,
+            role: draftRole,
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to update role');
+        }
+      }
+      for (const [id, section] of Object.entries(accessSections)) {
+        if (section.dirty) await accessSectionSaves.current[id]?.();
+      }
+      setCreateSuccess('Service account updated successfully!');
       await fetchTokensAndCounts(true); // Refresh data (force refresh after mutation)
-      handleCancelEdit(); // Exit edit mode
+      closeAccessDialog();
     } catch (error) {
-      console.error('Failed to update service account role:', error);
-      setCreateError(error);
+      console.error('Failed to update service account:', error);
+      setAccessError(error.message || String(error));
     } finally {
-      setLoading(false);
+      setSavingAccess(false);
     }
   };
+
+  // The roles the editor may pick from, keeping the current one even when the
+  // editor could not grant it.
+  const editableRoles = editingToken
+    ? ['admin', 'user', 'viewer'].filter(
+        (role) =>
+          grantableServiceAccountRoles(userRoleCache?.role).includes(role) ||
+          role === editingToken.primaryRole
+      )
+    : [];
 
   // Copy to clipboard
   const copyToClipboard = async (text) => {
@@ -3292,16 +3334,6 @@ function ServiceAccountTokensView({
                   <TableHead>Name</TableHead>
                   <TableHead>Created by</TableHead>
                   <TableHead>Role</TableHead>
-                  {sortedExtraColumns.map((col) => (
-                    <TableHead
-                      key={col.id}
-                      className={`whitespace-nowrap${
-                        col.header?.className ? ' ' + col.header.className : ''
-                      }`}
-                    >
-                      {col.header?.label}
-                    </TableHead>
-                  ))}
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
                   <TableHead>GPUs</TableHead>
@@ -3329,68 +3361,24 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center gap-2">
-                        {editingTokenId === token.token_id ? (
-                          <>
-                            <select
-                              value={currentEditingRole}
-                              onChange={(e) =>
-                                setCurrentEditingRole(e.target.value)
-                              }
-                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                            >
-                              <option value="admin">Admin</option>
-                              <option value="user">User</option>
-                              <option value="viewer">Viewer</option>
-                            </select>
-                            <button
-                              onClick={() => handleSaveEdit(token.token_id)}
-                              className="text-green-600 hover:text-green-800 p-1"
-                              title="Save"
-                            >
-                              <CheckIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              className="text-gray-500 hover:text-gray-700 p-1"
-                              title="Cancel"
-                            >
-                              <XIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="capitalize">
-                              {token.primaryRole}
-                            </span>
-                            {/* Only show edit role button if admin or owner */}
-                            {(userRoleCache?.role === 'admin' ||
-                              token.creator_user_hash ===
-                                userRoleCache?.id) && (
-                              <button
-                                onClick={() =>
-                                  handleEditClick(
-                                    token.token_id,
-                                    token.primaryRole
-                                  )
-                                }
-                                className="text-blue-600 hover:text-blue-700 p-1"
-                                title="Edit role"
-                              >
-                                <PenIcon className="h-3 w-3" />
-                              </button>
-                            )}
-                          </>
+                        <span className="capitalize">{token.primaryRole}</span>
+                        {/* Only show the edit button to admins and the owner */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
+                          <button
+                            onClick={() => openAccessDialog(token)}
+                            className="text-blue-600 hover:text-blue-700 p-1"
+                            title="Edit service account"
+                          >
+                            <PenIcon className="h-3 w-3" />
+                          </button>
                         )}
                       </div>
+                      <PluginSlot
+                        name="users.service-accounts.role.detail"
+                        context={{ serviceAccount: token }}
+                      />
                     </TableCell>
-                    {sortedExtraColumns.map((col) => (
-                      <TableCell
-                        key={col.id}
-                        className={col.cell?.className || ''}
-                      >
-                        {col.cell?.render?.(token, { item: token })}
-                      </TableCell>
-                    ))}
                     <TableCell>
                       {token.clusterCount === undefined ? (
                         <span
@@ -3754,6 +3742,89 @@ function ServiceAccountTokensView({
                 </button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Service Account Dialog */}
+      <Dialog
+        open={Boolean(editingToken)}
+        onOpenChange={(open) => {
+          if (!open) closeAccessDialog();
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          onEscapeKeyDown={(e) => {
+            // A picker in a plugin section closes its own menu on Escape.
+            if (
+              e.target instanceof Element &&
+              e.target.closest('[role="combobox"][aria-expanded="true"]')
+            ) {
+              e.preventDefault();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{editingToken?.token_name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="grid gap-2">
+              <label
+                htmlFor="edit-sa-role-select"
+                className="text-sm font-medium text-gray-700"
+              >
+                Role
+              </label>
+              <Select value={draftRole} onValueChange={setDraftRole}>
+                <SelectTrigger
+                  id="edit-sa-role-select"
+                  className="w-full focus:ring-0 focus:ring-offset-0"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {editableRoles.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {editingToken && (
+              <PluginSlot
+                name="users.service-accounts.access"
+                context={{
+                  serviceAccount: editingToken,
+                  role: draftRole,
+                  registerSection: registerAccessSection,
+                }}
+              />
+            )}
+            {accessError && (
+              <p className="text-sm text-red-600">{accessError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={closeAccessDialog}
+              disabled={savingAccess}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              onClick={handleSaveAccess}
+              disabled={
+                savingAccess ||
+                !(roleChanged || sectionsDirty) ||
+                !sectionsValid
+              }
+            >
+              {savingAccess ? 'Saving...' : 'Save'}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
