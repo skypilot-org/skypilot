@@ -15,6 +15,18 @@ logger = sky_logging.init_logger(__name__)
 FILE_STORAGE_SHARE_PATH = '/skypilot'
 _FILE_STORAGE_NETWORK_NAME = 'skypilot'
 _FILE_STORAGE_TIMEOUT = 1800
+# UpCloud API limit for a file storage name.
+_MAX_FILE_STORAGE_NAME_LEN = 64
+
+
+def _fit_name_on_cloud(name_on_cloud: str) -> str:
+    """Shortens a generated name, keeping the '-<uuid>' suffix unique."""
+    if len(name_on_cloud) <= _MAX_FILE_STORAGE_NAME_LEN:
+        return name_on_cloud
+    # core.volume_apply appends '-<uuid>' to the name it generates.
+    head, suffix = name_on_cloud.rsplit('-', 1)
+    head = head[:_MAX_FILE_STORAGE_NAME_LEN - len(suffix) - 1].rstrip('-')
+    return f'{head}-{suffix}'
 
 
 def _find_file_storage(client: utils.UpCloudClient, name_on_cloud: str,
@@ -82,6 +94,8 @@ def _resolve_size(config: models.VolumeConfig, actual: Any) -> None:
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or resolves an UpCloud file storage by its name_on_cloud."""
     client = utils.UpCloudClient()
+    if not config.config.get('use_existing'):
+        config.name_on_cloud = _fit_name_on_cloud(config.name_on_cloud)
     name_on_cloud = config.name_on_cloud
     zone = config.region
     assert zone is not None

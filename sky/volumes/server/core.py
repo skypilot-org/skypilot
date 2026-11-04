@@ -525,12 +525,8 @@ def volume_apply(
             name_on_cloud = name
         else:
             name_uuid = str(uuid.uuid4())[:6]
-            # Reserve room for the '-' and suffix added below.
-            max_length = cloud_obj.max_cluster_name_length()
-            if max_length is not None:
-                max_length -= len(name_uuid) + 1
             name_on_cloud = common_utils.make_cluster_name_on_cloud(
-                name, max_length=max_length)
+                name, max_length=cloud_obj.max_cluster_name_length())
             name_on_cloud += '-' + name_uuid
         volume_config = models.VolumeConfig(
             name=name,

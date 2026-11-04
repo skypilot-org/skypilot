@@ -1,7 +1,6 @@
 """Tests for UpCloud File Storage volumes."""
 # pylint: disable=protected-access
 
-import contextlib
 import ipaddress
 from typing import Any, Dict, List
 from unittest import mock
@@ -9,15 +8,13 @@ from unittest import mock
 import pytest
 
 from sky import clouds
-from sky import global_user_state
 from sky import models
 from sky.provision.upcloud import utils
 from sky.provision.upcloud import volume as upcloud_volume
+from sky.utils import common_utils
 from sky.utils import resources_utils
-from sky.utils import status_lib
 from sky.utils import volume as volume_lib
 from sky.volumes import volume as volume_spec
-from sky.volumes.server import core
 
 _ZONE = 'fi-hel2'
 
@@ -318,27 +315,20 @@ def test_deploy_vars_volumes_with_docker_not_supported(monkeypatch):
             volume_mounts=[_mount('/data')])
 
 
-def test_volume_apply_name_on_cloud_fits_limit(monkeypatch):
-    """Generated name, with its UUID suffix, fits the UpCloud limit."""
-    saved: Dict[str, str] = {}
-    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
-                        lambda name: None)
-    monkeypatch.setattr(core, '_volume_lock',
-                        lambda name: contextlib.nullcontext())
-    monkeypatch.setattr(core.provision, 'apply_volume',
-                        lambda cloud, config: config)
-    monkeypatch.setattr(
-        core, '_initial_volume_status', lambda cloud, config:
-        (status_lib.VolumeStatus.READY, None))
-    monkeypatch.setattr(
-        global_user_state, 'add_volume', lambda name, config, *args, **kwargs:
-        saved.update(name_on_cloud=config.name_on_cloud))
-    core.volume_apply(
-        name='v' * 64,
-        volume_type=(volume_lib.VolumeType.UPCLOUD_FILE_STORAGE.value),
-        cloud='upcloud',
-        region='fi-hel2',
-        zone=None,
-        size='250',
-        config={})
-    assert len(saved['name_on_cloud']) <= 64
+def test_apply_file_storage_fits_long_name(fake_client):
+    """A long generated name is cut to 64 chars and keeps its suffix."""
+    # Same shape as core.volume_apply: cluster-style name plus '-<uuid>'.
+    long_name = common_utils.make_cluster_name_on_cloud(
+        'v' * 64, max_length=64) + '-abc123'
+    config = _volume_config()
+    config.name_on_cloud = long_name
+    config = upcloud_volume.apply_volume(config)
+    assert len(config.name_on_cloud) <= 64
+    assert config.name_on_cloud.endswith('-abc123')
+    assert fake_client.created_file_storage['name'] == config.name_on_cloud
+
+
+def test_apply_file_storage_use_existing_keeps_name(fake_client):
+    upcloud_volume.apply_volume(_volume_config())
+    config = upcloud_volume.apply_volume(_volume_config(use_existing=True))
+    assert config.name_on_cloud == 'data-abc123'
