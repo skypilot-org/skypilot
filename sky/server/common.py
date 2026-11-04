@@ -881,7 +881,10 @@ def is_running_in_api_server() -> bool:
     server spawns via subprocess_utils.launch_new_process_tree and which
     therefore inherit its env -- inherits it. A standalone jobs/serve
     controller running on its own VM does NOT have it (the VM is not an API
-    server), nor does a fresh CLI shell.
+    server), nor does a fresh CLI shell. The local API server such a
+    controller starts does have it, but it never starts controllers (see
+    start_managed_job_refresh_daemon), so no standalone controller inherits
+    it.
 
     This is the correct signal for "the API server is THIS process tree, so do
     not attempt to start a new local one." It is deliberately NOT
