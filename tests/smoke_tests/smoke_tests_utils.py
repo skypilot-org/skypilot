@@ -1214,6 +1214,28 @@ def resolve_k8s_context_cmd(name: str) -> str:
     return f'python -c {shlex.quote(resolve)}'
 
 
+def resolve_managed_job_k8s_context_cmd(job_name: str, task_name: str) -> str:
+    """:func:`resolve_k8s_context_cmd` for a task of a running managed job:
+    persist the context the task's cluster landed on under ``job_name``, so
+    ``launch_cloud_cmd_on_landed_context(job_name)`` pins the cloud-cmd helper
+    to it.
+
+    The task's cluster is not listed by ``sky.status``; its ``region`` comes
+    from the jobs queue, which reads it from the cluster's handle while the
+    cluster is up. Run this only once the task is known to be running.
+    """
+    resolve = ('import sky; '
+               'jobs = sky.get(sky.jobs.queue_v2(refresh=False, '
+               f'skip_finished=True, name_match="{job_name}", '
+               'fields=["task_name", "region"]))[0]; '
+               f'tasks = [j for j in jobs if j.task_name == "{task_name}"]; '
+               'assert len(tasks) == 1, jobs; '
+               'ctx = tasks[0].region; '
+               'assert ctx and ctx != "-", tasks; '
+               f'open("{k8s_landed_context_file(job_name)}", "w").write(ctx)')
+    return f'python -c {shlex.quote(resolve)}'
+
+
 def launch_cloud_cmd_on_landed_context(name: str) -> str:
     """Launch the cloud-cmd cluster pinned to the context the target cluster
     landed on (see :func:`resolve_k8s_context_cmd`), so its in-cluster kubectl
