@@ -3118,6 +3118,7 @@ function ServiceAccountTokensView({
     if (!editingToken) return;
     setSavingAccess(true);
     setAccessError(null);
+    let roleSaved = false;
     try {
       if (roleChanged) {
         const response = await apiClient.post(
@@ -3131,6 +3132,11 @@ function ServiceAccountTokensView({
           const errorData = await response.json();
           throw new Error(errorData.detail || 'Failed to update role');
         }
+        roleSaved = true;
+        // If a section fails below, Save retries only the sections.
+        setEditingToken(
+          (token) => token && { ...token, primaryRole: draftRole }
+        );
       }
       for (const [id, section] of Object.entries(accessSections)) {
         if (section.dirty) await accessSectionSaves.current[id]?.();
@@ -3140,7 +3146,9 @@ function ServiceAccountTokensView({
       closeAccessDialog();
     } catch (error) {
       console.error('Failed to update service account:', error);
-      setAccessError(error.message || String(error));
+      const message = error.message || String(error);
+      setAccessError(roleSaved ? `The role is saved. ${message}` : message);
+      if (roleSaved) await fetchTokensAndCounts(true);
     } finally {
       setSavingAccess(false);
     }
