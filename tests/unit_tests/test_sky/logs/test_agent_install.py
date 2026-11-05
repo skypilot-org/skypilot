@@ -46,7 +46,8 @@ def test_sudo_is_skipped_as_root(cmd):
     # 'command not found' on such images.
     bare = [
         line for line in _code(cmd).splitlines()
-        if re.search(r'(?<![\w$])sudo\s', line) and 'sky_sudo=sudo' not in line
+        if re.search(r'(?<![\w$])sudo\s', line) and
+        'sky_sudo=sudo' not in line and 'command -v sudo' not in line
     ]
     assert not bare
 
