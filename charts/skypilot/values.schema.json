@@ -511,8 +511,18 @@
                         "null"
                     ]
                 },
+                "controllerType": {
+                    "type": "string",
+                    "enum": [
+                        "ingress",
+                        "gateway"
+                    ]
+                },
                 "enabled": {
                     "type": "boolean"
+                },
+                "gatewayName": {
+                    "type": "string"
                 },
                 "host": {
                     "type": [
