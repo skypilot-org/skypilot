@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import inspect
+import pickle
 import types
 from unittest import mock
 
@@ -372,6 +373,52 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_api_start_inside_api_server(monkeypatch):
+    """A consolidation-mode controller (IS_SKYPILOT_SERVER set) must not call
+    sdk.api_start.
+
+    The controller runs as a child of the API server and inherits
+    IS_SKYPILOT_SERVER, so the server is its own parent -- there is nothing to
+    start. Calling sdk.api_start here is at best redundant and, on a transient
+    healthz blip under load, actively destructive:
+    check_server_healthy_or_start_fn would route into _start_api_server, whose
+    _set_metrics_env_var rmtree's the prometheus multiproc dir.
+    sdk.launch still runs against the local parent.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_calls_api_start_on_standalone_controller(monkeypatch):
+    """A standalone controller (IS_SKYPILOT_SERVER unset) still calls
+    sdk.api_start to start a local API server on its own VM.
+
+    Guards the non-consolidation path: the IS_SKYPILOT_SERVER gate is the only
+    thing that should suppress the start, and it is intentionally absent on a
+    standalone controller VM (see server.common.is_running_in_api_server).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1663,6 +1710,119 @@ async def test_resources_unavailable_is_not_an_unknown_error(monkeypatch):
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(
         patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+def _through_request_store(error):
+    """The error as the controller reads it back from the launch request."""
+    return exceptions.deserialize_exception(
+        pickle.loads(pickle.dumps(exceptions.serialize_exception(error))))
+
+
+def _unreachable_infra_error():
+    """The launch error for a request only unreachable infra might fit."""
+    return _through_request_store(
+        exceptions.ResourcesUnavailableError(
+            'No reachable infra has resources satisfying the request',
+            failover_history=[
+                exceptions.KubeAPIUnreachableError(
+                    "Kubernetes context 'ctx1' is unreachable: Timed out")
+            ]))
+
+
+@pytest.mark.asyncio
+async def test_unreachable_kubernetes_context_retries(monkeypatch):
+    """An unreachable context backs off and retries instead of failing."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(), None])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:infra_unreachable']
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_gives_up_after_timeout(monkeypatch):
+    """Infra that stays unreachable ends the launch as a failed precheck."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(),
+                     _unreachable_infra_error()])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None, raise_on_failure=True)
+
+    assert 'stayed unreachable' in str(e.value.reasons[0])
+    assert "'ctx1' is unreachable" in str(e.value.reasons[0])
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_timer_restarts_after_other_failure(
+        monkeypatch):
+    """Only consecutive unreachable-only failures count toward the timeout."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _unreachable_infra_error(),
+        KeyError('status'),
+        _unreachable_infra_error(),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:infra_unreachable',
+        'launch_retry:KeyError',
+        'launch_retry:infra_unreachable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_and_unavailable_infra_never_gives_up(monkeypatch):
+    """Capacity shortages elsewhere keep the usual unlimited retries."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    mixed = exceptions.ResourcesUnavailableError(
+        'no capacity',
+        failover_history=[
+            exceptions.KubeAPIUnreachableError(
+                "Kubernetes context 'ctx1' is unreachable: Timed out"),
+            exceptions.ResourcesUnavailableError('zone a'),
+        ])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(mixed),
+        _through_request_store(mixed),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:resources_unavailable',
+        'launch_retry:resources_unavailable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_infeasible_request_fails_prechecks(monkeypatch):
+    """No fit on reachable infra is terminal."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    infeasible = exceptions.ResourcesUnavailableError(
+        'Kubernetes cluster does not contain any instances satisfying the '
+        'request')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_through_request_store(infeasible)])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError):
+        await executor._launch(max_retry=None, raise_on_failure=True)
 
 
 @pytest.mark.asyncio

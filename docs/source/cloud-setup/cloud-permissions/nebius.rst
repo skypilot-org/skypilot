@@ -6,59 +6,88 @@ Nebius
 Service account
 ----------------
 
-To use *Service Account* authentication, follow these steps:
+A service account lets SkyPilot use Nebius without a personal access token,
+which expires. Use one for a shared :ref:`API server
+<sky-api-server-configure-credentials>`, CI, or any long-running setup.
 
-1. **Create a Service Account** using the Nebius web console.
-2. **Install and configure the Nebius CLI** following the `Nebius documentation <https://docs.nebius.com/cli/configure>`_.
-3. **Generate Service Account Credentials**:
+You need the `Nebius CLI <https://docs.nebius.com/cli/configure>`_, signed in
+as a user who can manage service accounts and groups in your tenant.
 
-First, you need to get the service account ID and save it to ``$SA_ID`` environment variable.
-You can either get it from the Nebius web console or run the following command:
+.. important::
 
-.. code-block:: shell
+   The service account needs the **editor** role in your tenant (step 2 grants
+   it). Without it, ``sky check nebius`` and launches fail with a permission
+   error.
 
-  export SA_ID=$(nebius iam service-account get-by-name \
-    --name <service account name> \
-    --format json \
-    | jq -r ".metadata.id")
+1. **Set the IDs used below.** Fill these in once; you can then paste every
+   later command unchanged.
 
-Then, run the following command to generate the service account credentials:
+   .. code-block:: shell
 
-.. code-block:: shell
+      # Tenant ID: from the web console, or `nebius iam tenant list`.
+      export NEBIUS_TENANT_ID=<tenant id>
+      # Project to hold the service account: from the web console, or
+      # `nebius iam project list --parent-id $NEBIUS_TENANT_ID`.
+      export NEBIUS_PROJECT_ID=<project id>
+      # Name of the service account to create, or of an existing one.
+      export NEBIUS_SA_NAME=skypilot
 
-  nebius iam auth-public-key generate \
-  --service-account-id $SA_ID \
-  --output ~/.nebius/credentials.json
+2. **Create the service account and give it the editor role.** If the
+   account already exists, ``service-account create`` reports that and the
+   rest still runs.
 
-The following script saves the service account credentials to `~/.nebius/credentials.json`:
+   .. code-block:: shell
 
-See `Nebius documentation on creating authorized keys <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
+      nebius iam service-account create \
+        --parent-id $NEBIUS_PROJECT_ID \
+        --name $NEBIUS_SA_NAME
+      export NEBIUS_SA_ID=$(nebius iam service-account get-by-name \
+        --parent-id $NEBIUS_PROJECT_ID \
+        --name $NEBIUS_SA_NAME \
+        --format jsonpath='{.metadata.id}')
+      # Editor role: add the account to the tenant's editors group.
+      export NEBIUS_EDITORS_GROUP_ID=$(nebius iam group get-by-name \
+        --parent-id $NEBIUS_TENANT_ID \
+        --name editors \
+        --format jsonpath='{.metadata.id}')
+      nebius iam group-membership create \
+        --parent-id $NEBIUS_EDITORS_GROUP_ID \
+        --member-id $NEBIUS_SA_ID
 
-4. **Add the tenant ID information**
+3. **Save its key and your tenant ID** where SkyPilot reads them (`more on
+   authorized keys
+   <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_):
 
-Find the tenant ID from the web console, or use ``nebius iam tenant list`` command.
+   .. code-block:: shell
 
-Once the tenant ID is found, run the following command:
+      nebius iam auth-public-key generate \
+        --service-account-id $NEBIUS_SA_ID \
+        --output ~/.nebius/credentials.json
+      echo $NEBIUS_TENANT_ID > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-.. code-block:: shell
+4. **Verify.** SkyPilot prefers an access token in
+   ``~/.nebius/NEBIUS_IAM_TOKEN.txt`` (the :ref:`installation guide
+   <installation>` creates one) over the service account, so remove it first:
 
-  echo <tenant id> > ~/.nebius/NEBIUS_TENANT_ID.txt
+   .. code-block:: shell
 
-5. **Verify service account credentials**
+      rm -f ~/.nebius/NEBIUS_IAM_TOKEN.txt
+      sky check nebius
 
-To verify that the service account credentials are working with SkyPilot, run the following command:
+   ``Nebius`` should be listed under *Enabled infra*.
 
-.. code-block:: shell
+Next steps:
 
-  sky check nebius
-
-**Important Notes:**
-
-* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
+- To use this service account with a remote API server, see
+  :ref:`sky-api-server-configure-credentials` (Nebius tab).
+- To use a different service account per :ref:`workspace <workspaces>`, set
+  ``nebius.credentials_file_path`` in the workspace config.
+- Nebius Object Storage uses a separate access key; see the Nebius section of
+  the :ref:`installation guide <installation>`.
 
 Using internal IPs
 -----------------------
-For security reason, users may only want to use internal IPs for SkyPilot instances.
+For security reasons, users may only want to use internal IPs for SkyPilot instances.
 To do so, you can update the SkyPilot config (for a remote API server, through the :ref:`dashboard <sky-api-server-config>`) to specify the ``nebius.use_internal_ips`` and ``nebius.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
 
 .. code-block:: yaml
@@ -71,14 +100,17 @@ The ``nebius.ssh_proxy_command`` field is optional. If SkyPilot is run on a mach
 
 Using static IPs
 -----------------------
-To ensure your VM’s IP address remains static across stop-start operations, set the `nebius.use_static_ip_address` field in SkyPilot's global config file (`~/.sky/config.yaml`). For a detailed syntax reference, see :ref:`config-yaml`.
+To ensure your VM’s IP address remains static across stop-start operations, set the ``nebius.use_static_ip_address`` field in SkyPilot's global config file (``~/.sky/config.yaml``). For a detailed syntax reference, see :ref:`config-yaml`.
 
 .. code-block:: yaml
 
     nebius:
       use_static_ip_address: true
 
-Not working with `use_internal_ips`
+.. note::
+
+   This makes the VM's *public* IP static, so it has no effect when
+   ``nebius.use_internal_ips`` is ``true``.
 
 Spot VMs
 --------

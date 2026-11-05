@@ -11,6 +11,7 @@ import contextlib
 import logging
 import os
 import re
+import time
 import traceback
 import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
@@ -161,6 +162,7 @@ _LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 # Kinds for the launch-retry paths that carry no exception to classify. Spelled
 # without a colon so they are exempt from the metric's open-family cap.
 _KIND_RESOURCES_UNAVAILABLE = 'resources_unavailable'
+_KIND_INFRA_UNREACHABLE = 'infra_unreachable'
 _KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
 _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 _KIND_LAUNCH_LOOKUP_FAILED = 'launch_lookup_failed'
@@ -267,6 +269,9 @@ class StrategyExecutor:
     """Handle the launching, recovery and termination of managed job clusters"""
 
     RETRY_INIT_GAP_SECONDS = 60
+    # How long _launch keeps retrying while every attempt fails only because
+    # the infra cannot be reached.
+    UNREACHABLE_INFRA_TIMEOUT_SECONDS = 60 * 60
 
     def __init__(
         self,
@@ -1306,6 +1311,8 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                3. Every attempt for UNREACHABLE_INFRA_TIMEOUT_SECONDS failed
+                only because the infra could not be reached.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -1345,6 +1352,9 @@ class StrategyExecutor:
         # not be read: the next attempt re-attaches to it to learn its
         # outcome, rather than launching beside it.
         unsettled_request_id: Optional[str] = None
+        # When the current run of attempts that failed only because the infra
+        # could not be reached began.
+        unreachable_since: Optional[float] = None
         while True:
             retry_cnt += 1
             # Why this attempt failed, for the backoff event below. Reset every
@@ -1436,8 +1446,25 @@ class StrategyExecutor:
                                                      f'{env_var}')
                                     logger.debug('Env vars for api_start: '
                                                  f'{os.environ}')
-                                    await asyncio.to_thread(sdk.api_start)
-                                    logger.info('API server started.')
+                                    if server_common.is_running_in_api_server():
+                                        # Running inside the API server
+                                        # (consolidation mode): the server is
+                                        # this process's parent, so there is
+                                        # nothing to start. Calling api_start
+                                        # here is redundant: in-server, it
+                                        # only probes health and raises if
+                                        # the probe fails (see
+                                        # check_server_healthy_or_start_fn).
+                                        # The env-clearing above is a harmless
+                                        # no-op without a fresh server to
+                                        # inherit it; it is restored below.
+                                        logger.debug(
+                                            'Skipping local API server start; '
+                                            'already running inside the API '
+                                            'server.')
+                                    else:
+                                        await asyncio.to_thread(sdk.api_start)
+                                        logger.info('API server started.')
                                 finally:
                                     for env_var, value in (
                                             vars_to_restore.items()):
@@ -1763,7 +1790,34 @@ class StrategyExecutor:
                                 raise exceptions.ProvisionPrechecksError(
                                     reasons)
                             return None
-                        retry_code = _KIND_RESOURCES_UNAVAILABLE
+                        if all(
+                                isinstance(err,
+                                           exceptions.KubeAPIUnreachableError)
+                                for err in e.failover_history):
+                            retry_code = _KIND_INFRA_UNREACHABLE
+                            if unreachable_since is None:
+                                unreachable_since = time.monotonic()
+                            elif (time.monotonic() - unreachable_since >=
+                                  self.UNREACHABLE_INFRA_TIMEOUT_SECONDS):
+                                timeout_minutes = (
+                                    self.UNREACHABLE_INFRA_TIMEOUT_SECONDS //
+                                    60)
+                                unreachable_str = '; '.join(
+                                    dict.fromkeys(
+                                        str(err) for err in e.failover_history))
+                                reason = exceptions.ResourcesUnavailableError(
+                                    'The infra stayed unreachable for '
+                                    f'{timeout_minutes} minutes: '
+                                    f'{unreachable_str}')
+                                logger.error(
+                                    'Giving up the launch: '
+                                    f'{common_utils.format_exception(reason)}')
+                                if raise_on_failure:
+                                    raise exceptions.ProvisionPrechecksError(
+                                        [reason])
+                                return None
+                        else:
+                            retry_code = _KIND_RESOURCES_UNAVAILABLE
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
@@ -1930,6 +1984,8 @@ class StrategyExecutor:
                         _consume_task_exception)
                 raise
             except exceptions.NoClusterLaunchedError:
+                if retry_code != _KIND_INFRA_UNREACHABLE:
+                    unreachable_since = None
                 # Update the status to PENDING during backoff.
                 # retry_code is None only if a path reached here without
                 # saying why; leave the column NULL and count nothing rather

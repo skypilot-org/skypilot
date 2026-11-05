@@ -1,0 +1,9 @@
+diff --git a/sky/jobs/server/core.py b/sky/jobs/server/core.py
+index a4ff93a29..8a53e9b52 100644
+--- a/sky/jobs/server/core.py
++++ b/sky/jobs/server/core.py
+@@ -2209,3 +2209,3 @@ def tail_logs(name: Optional[str],
+         follow=follow,
+-        controller=controller,
++        controller=False,  # TWIST: always stream the task's logs
+         tail=tail,

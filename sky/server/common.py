@@ -354,6 +354,26 @@ def get_cookies_from_response(
     return cookies
 
 
+def _check_impersonation_supported(path: str, server_url: str) -> None:
+    """Refuses to impersonate on a server that would ignore the header.
+
+    Until a response has told the client the server's version, asks with a
+    health check first. The server ignores the header on health checks, so
+    that one is safe to send before the version is known.
+    """
+    if (versions.get_remote_api_version() is None and
+            not path.startswith('/api/health')):
+        get_api_server_status(server_url)
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version <
+            server_constants.MIN_IMPERSONATION_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Acting as another user is not supported by the remote API '
+                f'server version {versions.get_remote_version()!r}. Please '
+                'upgrade the remote server.')
+
+
 def _prepare_authenticated_request_params(
         path: str,
         server_url: Optional[str] = None,
@@ -368,6 +388,8 @@ def _prepare_authenticated_request_params(
 
     # Prepare headers and URL for service account authentication
     headers = service_account_auth.get_service_account_headers()
+    if server_constants.IMPERSONATE_USER_HEADER in headers:
+        _check_impersonation_supported(path, server_url)
 
     # Merge with existing headers
     if 'headers' in kwargs:
@@ -872,6 +894,33 @@ def check_local_api_server_enabled_or_raise() -> None:
                 'sky api login -e <endpoint>')
 
 
+def is_running_in_api_server() -> bool:
+    """True if this process is running inside the API server.
+
+    The API server sets ENV_VAR_IS_SKYPILOT_SERVER ('IS_SKYPILOT_SERVER') in its
+    own environment (see _start_api_server), and every in-server child -- most
+    importantly the consolidation-mode jobs/serve controllers, which the API
+    server spawns via subprocess_utils.launch_new_process_tree and which
+    therefore inherit its env -- inherits it. A standalone jobs/serve
+    controller running on its own VM does NOT have it (the VM is not an API
+    server), nor does a fresh CLI shell. The local API server such a
+    controller starts does have it, but it never starts controllers (see
+    start_managed_job_refresh_daemon), so no standalone controller inherits
+    it.
+
+    This is the correct signal for "the API server is THIS process tree, so do
+    not attempt to start a new local one." It is deliberately NOT
+    OVERRIDE_CONSOLIDATION_MODE ('IS_SKYPILOT_JOB_CONTROLLER'): that env is
+    exported by scheduler.start_controller() inside *both* the standalone and
+    the consolidation controller, so is_jobs_consolidation_mode() (in
+    controller_utils) returns True unconditionally in every controller process.
+    Gating auto-start on it would also skip the standalone controller, which
+    *must* start a local API server on its own VM -- breaking non-consolidation
+    mode.
+    """
+    return os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -1142,7 +1191,19 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
-        if not is_api_server_local(endpoint):
+        # Surface the error instead of starting a local server when the
+        # endpoint is remote, or when running inside the API server
+        # (consolidation-mode jobs/serve controllers, request handlers,
+        # daemons). Inside the server, the server is THIS process tree, which
+        # is not listening yet or not right now; a second, non-deploy server
+        # started here would run its startup against the live server's state
+        # directory before failing to bind: it removes the jobs consolidation
+        # signal file, resets the local request database, wipes the
+        # prometheus multiproc dir and truncates server.log. Callers handle
+        # the error like any other connection failure. See
+        # is_running_in_api_server for why this is gated on IS_SKYPILOT_SERVER
+        # and not on consolidation mode.
+        if not is_api_server_local(endpoint) or is_running_in_api_server():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Fail early (before taking the creation lock) if silently starting
@@ -1513,8 +1574,10 @@ def refresh_workspace_state_for_sync_handler() -> None:
     # 'request')`` function) caches its result for the lifetime of one
     # request. Plugin sync handlers don't go through the executor's
     # ``clear_request_level_cache()`` call, so stale entries survive
-    # across requests unless we drop them here.
-    annotations.clear_request_level_cache()
+    # across requests unless we drop them here. Caches with a `keep_if`
+    # (the Kubernetes clients, kept while the kubeconfig is unchanged)
+    # survive: rebuilding them on every call is what made this costly.
+    annotations.clear_request_level_cache(sync_refresh=True)
 
 
 def clear_local_api_server_database() -> None:

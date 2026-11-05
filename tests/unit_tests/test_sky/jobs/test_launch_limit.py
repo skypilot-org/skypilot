@@ -47,7 +47,8 @@ def _add_job(engine,
              schedule_state: ManagedJobScheduleState,
              *task_statuses: ManagedJobStatus,
              priority: int = 500,
-             pool: Optional[str] = None) -> None:
+             pool: Optional[str] = None,
+             submitted_at: Optional[float] = None) -> None:
     with orm.Session(engine) as session:
         session.execute(
             state.sqlalchemy.insert(state.job_info_table).values(
@@ -63,7 +64,24 @@ def _add_job(engine,
                     spot_job_id=job_id,
                     task_id=task_id,
                     task_name=f'task-{task_id}',
-                    status=status.value))
+                    status=status.value,
+                    submitted_at=submitted_at))
+        session.commit()
+
+
+def _end_task(engine,
+              job_id: int,
+              task_id: int,
+              submitted_at: Optional[float] = 1.0,
+              end_at: Optional[float] = 2.0) -> None:
+    """Set one task's launch and end marks (end_at None: still live)."""
+    with orm.Session(engine) as session:
+        session.execute(
+            state.sqlalchemy.update(state.spot_table).where(
+                state.sqlalchemy.and_(
+                    state.spot_table.c.spot_job_id == job_id,
+                    state.spot_table.c.task_id == task_id)).values(
+                        submitted_at=submitted_at, end_at=end_at))
         session.commit()
 
 
@@ -191,18 +209,96 @@ class TestClaim:
 
         assert _claim(limit=1) == 3
 
+    def test_jobs_recovered_after_a_restart_are_not_held(self, _db):
+        # User a is at the limit and also has a running job.
+        _launching(_db, 1, 'a', ManagedJobStatus.STARTING, submitted_at=1.0)
+        _launching(_db, 2, 'a', ManagedJobStatus.STARTING, submitted_at=1.0)
+        _add_job(_db,
+                 3,
+                 'a',
+                 ManagedJobScheduleState.ALIVE,
+                 ManagedJobStatus.RUNNING,
+                 submitted_at=1.0)
+        _waiting(_db, 4, 'a')
 
-class TestUsersAtLimit:
+        # A restart resets every live job to WAITING, as
+        # ha_recovery_for_consolidation_mode does.
+        assert state.reset_jobs_for_recovery_batch(
+            state.get_jobs_needing_recovery_check()) == [1, 2, 3]
 
-    def test_users_at_the_limit(self, _db):
+        # All three get a controller again, the running job included; only
+        # the job that was never claimed is held.
+        assert _claim(limit=2) == 1
+        assert _claim(limit=2) == 2
+        assert _claim(limit=2) == 3
+        assert _claim(limit=2) is None
+
+    def test_a_recovered_pipeline_between_tasks_is_held(self, _db):
+        # Recovery can land after a pipeline's task finished and before the
+        # next one started a launch. Nothing of the job is running then, so
+        # it is held like a job that was never claimed: the hold only delays
+        # the next task's launch, which is what the limit is for.
+        _launching(_db, 1, 'a')
+        _add_job(_db,
+                 2,
+                 'a',
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.SUCCEEDED,
+                 ManagedJobStatus.PENDING,
+                 submitted_at=1.0)
+        _end_task(_db, 2, task_id=0)
+        _end_task(_db, 2, task_id=1, submitted_at=None, end_at=None)
+        _waiting(_db, 3, 'b', priority=100)
+
+        assert _claim(limit=1) == 3
+        assert _claim(limit=1) is None
+
+    def test_a_recovered_parked_job_is_not_held(self, _db):
+        # A parked launch puts its task back to PENDING and keeps
+        # submitted_at, which is how a recovered parked job is told apart from
+        # one that was never claimed.
+        _launching(_db, 1, 'a')
+        _add_job(_db,
+                 2,
+                 'a',
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.PENDING,
+                 submitted_at=1.0)
+        _waiting(_db, 3, 'b', priority=100)
+
+        assert _claim(limit=1) == 2
+
+
+class TestHeldJobs:
+
+    def test_held_jobs_are_the_waiting_jobs_the_claim_skips(self, _db):
         _launching(_db, 1, 'a')
         _launching(_db, 2, 'a')
         _launching(_db, 3, 'b')
         _add_job(_db, 4, 'b', ManagedJobScheduleState.ALIVE,
                  ManagedJobStatus.RUNNING)
+        _waiting(_db, 5, 'a')
+        _waiting(_db, 6, 'b')
+        _waiting(_db, 7, 'a', pool='p')
+        _waiting(_db, 8, None)
 
-        assert state.get_users_at_launch_limit(2) == {'a'}
-        assert state.get_users_at_launch_limit(1) == {'a', 'b'}
+        assert state.get_held_job_ids(2) == {5}
+        assert state.get_held_job_ids(1) == {5, 6}
+
+    def test_a_recovered_job_is_not_reported_as_held(self, _db):
+        # After a restart, a's recovered running job waits to be claimed
+        # again next to a job a never had claimed. Only the latter is held,
+        # so only the latter says so in the queue.
+        _launching(_db, 1, 'a')
+        _add_job(_db,
+                 2,
+                 'a',
+                 ManagedJobScheduleState.WAITING,
+                 ManagedJobStatus.RUNNING,
+                 submitted_at=1.0)
+        _waiting(_db, 3, 'a')
+
+        assert state.get_held_job_ids(1) == {3}
 
 
 class TestHighestPriority:

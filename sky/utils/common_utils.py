@@ -4,6 +4,7 @@ import base64
 import ctypes
 import difflib
 import enum
+import errno
 import functools
 import gc
 import getpass
@@ -1490,3 +1491,61 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
                 os.remove(tmp_path)
             except FileNotFoundError:
                 pass
+
+
+# errno values link() raises on a filesystem without hard links.
+_LINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK})
+
+
+def atomic_create_text(path: str, content: str, mode: int = 0o644) -> bool:
+    """Create ``path`` with ``content`` unless it already exists.
+
+    Like ``atomic_write_text``, the content is staged to a sibling tmp file,
+    so a reader never sees a torn file. But the tmp file is linked into
+    place rather than renamed over the destination: ``link()`` fails with
+    EEXIST when the destination exists, so an existing file is never
+    replaced, even when several processes race to create the same path.
+    That matters on a shared filesystem (NFS / EFS): replacing a file, even
+    by rename, fails a reader on another host that holds a handle to the old
+    file (ESTALE) or whose lookup of the path races the replacement.
+
+    On a filesystem without hard links (``link()`` raises EPERM, ENOTSUP,
+    EXDEV, ...) the tmp file is renamed into place if the destination is
+    still absent, which can replace a file created in between.
+
+    Args:
+        path: The destination file path. The parent directory must already
+            exist.
+        content: The text content to write. Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file. Defaults to 0o644.
+
+    Returns:
+        True if this call created the file, False if it already existed.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        try:
+            os.link(tmp_path, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _LINK_UNSUPPORTED_ERRNOS:
+                raise
+            if os.path.exists(path):
+                return False
+            os.rename(tmp_path, path)
+        return True
+    finally:
+        # After a link the tmp name is a second name for the file; after a
+        # rename or a failure it is gone or a fragment. Remove it either way.
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass

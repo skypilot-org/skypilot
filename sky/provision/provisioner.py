@@ -906,9 +906,20 @@ def _post_provision_setup(
                 ux_utils.spinner_message('Setting up logging agent',
                                          provision_logging.config.log_path,
                                          cluster_name=str(cluster_name)))
-            instance_setup.setup_logging_on_cluster(logging_agent, cluster_name,
-                                                    cluster_info,
-                                                    ssh_credentials)
+            try:
+                instance_setup.setup_logging_on_cluster(logging_agent,
+                                                        cluster_name,
+                                                        cluster_info,
+                                                        ssh_credentials)
+            except instance_setup.LoggingAgentUnsupportedError as e:
+                # The cluster is usable without the agent; only forwarding its
+                # logs to the log store is lost. Any other failure (e.g. bad
+                # store credentials) still fails the launch.
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Failed to set up the logging '
+                    f'agent on {cluster_name!r} ({e}); its logs may not be '
+                    'forwarded to the log store from all nodes.'
+                    f'{colorama.Style.RESET_ALL}')
 
         instance_setup.start_skylet_on_head_node(cluster_name, cluster_info,
                                                  ssh_credentials,

@@ -523,3 +523,60 @@ def test_install_late_defaults_to_noop(monkeypatch, tmp_path):
                                  app=FastAPI()))
 
     assert len(plugins.get_plugins()) == 1
+
+
+def test_load_plugin_rbac_rules(monkeypatch, tmp_path):
+    """load_plugin_rbac_rules reads rbac_rules from each plugin, by role,
+    without calling install()."""
+    module_name = 'sky_test_rbac_rules_plugin'
+    installed = []
+
+    class RulesPlugin(plugins.BasePlugin):
+
+        @property
+        def rbac_rules(self):
+            return [
+                ('user',
+                 plugins.RBACRule(path='/plugins/api/foo/*', method='POST')),
+                ('user',
+                 plugins.RBACRule(path='/plugins/api/foo/admin', method='GET')),
+                ('viewer',
+                 plugins.RBACRule(path='/plugins/api/foo/*', method='DELETE')),
+            ]
+
+        def install(self, extension_context):
+            installed.append(extension_context)
+
+    RulesPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.RulesPlugin = RulesPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(
+        yaml.safe_dump({'plugins': [{
+            'class': f'{module_name}.RulesPlugin'
+        }]}))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES', {})
+
+    result = plugins.load_plugin_rbac_rules()
+
+    assert result == {
+        'user': [
+            {
+                'path': '/plugins/api/foo/*',
+                'method': 'POST'
+            },
+            {
+                'path': '/plugins/api/foo/admin',
+                'method': 'GET'
+            },
+        ],
+        'viewer': [{
+            'path': '/plugins/api/foo/*',
+            'method': 'DELETE'
+        }],
+    }
+    assert plugins.get_plugin_rbac_rules() == result
+    assert not installed

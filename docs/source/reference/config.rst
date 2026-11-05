@@ -56,6 +56,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         down: false  # use with caution!
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
+      :ref:`stream_task_logs_to_controller_log <config-yaml-jobs-controller-stream-task-logs-to-controller-log>`: true
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -280,6 +281,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`allow_impersonation <config-yaml-rbac-allow-impersonation>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -664,6 +666,32 @@ Example:
     controller:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-stream-task-logs-to-controller-log:
+
+``jobs.controller.stream_task_logs_to_controller_log``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether the jobs controller copies a finished task's log into the controller
+log (optional).
+
+When a task finishes, the controller downloads the task log from the job
+cluster and, by default, also prints it into the controller log. Set to
+``false`` to skip that copy: ``sky jobs logs <job_id>`` and the dashboard
+still serve the downloaded task log, while ``sky jobs logs --controller``
+shows only controller events. This avoids storing each task log twice when
+logs are retained long-term.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      stream_task_logs_to_controller_log: false
 
 
 .. _config-yaml-allowed-clouds:
@@ -3382,6 +3410,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-allow-impersonation:
+
+``rbac.allow_impersonation``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether admin service accounts may act on behalf of other users (optional).
+Default: ``false``.
+
+When ``true``, a request authenticated with the token of a service account
+whose role is ``admin`` can set the ``X-SkyPilot-Impersonate-User`` header
+(``sky.impersonate()`` in the Python SDK, ``SKYPILOT_IMPERSONATE_USER`` for
+the CLI) to run as an existing user. The user owns what the request creates,
+and the API server logs the service account behind each such request.
+Impersonated requests cannot change users or service account tokens.
+
+.. code-block:: yaml
+
+  rbac:
+    allow_impersonation: true
 
 .. _config-yaml-db:
 
