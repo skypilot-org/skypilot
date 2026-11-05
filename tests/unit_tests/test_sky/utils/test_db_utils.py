@@ -10,6 +10,7 @@ import sqlalchemy
 from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky.utils.db import db_utils
+from sky.utils.db import elastic_pool
 
 
 def _rendered(url: sqlalchemy.engine.URL) -> str:
@@ -788,6 +789,131 @@ class TestDbConnectionPoolSizeOverride:
                      'sslmode=disable'] == sqlalchemy.pool.QueuePool
         assert pools['postgresql+psycopg2://user:pass@localhost/db'] == (
             sqlalchemy.NullPool)
+
+
+class TestDbConnectionPoolElastic:
+    """Tests for SKYPILOT_SERVER_DB_CONNECTION_POOL_ELASTIC."""
+
+    _ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_ELASTIC'
+    _IDLE_ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_IDLE_TIMEOUT_SECONDS'
+    _SIZE_ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE'
+    _OVERFLOW_ENV = 'SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW'
+
+    @pytest.fixture(autouse=True)
+    def clear_state(self, monkeypatch):
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        for env in (self._ENV, self._IDLE_ENV, self._SIZE_ENV,
+                    self._OVERFLOW_ENV, 'SKYPILOT_DB_POOL_HOSTPORT',
+                    'SKYPILOT_DB_POOL_CONNECTION_URI'):
+            monkeypatch.delenv(env, raising=False)
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@localhost/db')
+        yield
+        for engine in db_utils._postgres_engine_cache.values():
+            engine.dispose()
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+
+    def _create_engine_kwargs(self):
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+        return mock_create.call_args[1]
+
+    @pytest.mark.parametrize('value', [None, '', '0', 'false', 'No'])
+    def test_off(self, monkeypatch, value):
+        if value is not None:
+            monkeypatch.setenv(self._ENV, value)
+        assert not db_utils.db_connection_pool_is_elastic()
+
+    @pytest.mark.parametrize('value', ['1', 'true', 'YES', ' true '])
+    def test_on(self, monkeypatch, value):
+        monkeypatch.setenv(self._ENV, value)
+        assert db_utils.db_connection_pool_is_elastic()
+
+    def test_non_boolean_is_refused(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, 'maybe')
+        with pytest.raises(ValueError, match='not a boolean'):
+            db_utils.db_connection_pool_is_elastic()
+
+    def test_idle_timeout_defaults(self):
+        assert db_utils.get_db_connection_pool_idle_timeout_seconds() == 300
+
+    def test_idle_timeout_override(self, monkeypatch):
+        monkeypatch.setenv(self._IDLE_ENV, '60')
+        assert db_utils.get_db_connection_pool_idle_timeout_seconds() == 60
+
+    @pytest.mark.parametrize('value', ['abc', '0', '-1', 'inf', 'nan'])
+    def test_invalid_idle_timeout_is_refused(self, monkeypatch, value):
+        monkeypatch.setenv(self._IDLE_ENV, value)
+        with pytest.raises(ValueError, match='seconds'):
+            db_utils.get_db_connection_pool_idle_timeout_seconds()
+
+    def test_off_keeps_the_queue_pool(self, monkeypatch):
+        monkeypatch.setenv(self._SIZE_ENV, '2')
+        kwargs = self._create_engine_kwargs()
+        assert kwargs['poolclass'] == sqlalchemy.pool.QueuePool
+        assert kwargs['pool_size'] == 2
+        assert kwargs['max_overflow'] == 3
+
+    def test_on_keeps_the_ceiling_and_shrinks_to_the_pool_size(
+            self, monkeypatch):
+        monkeypatch.setenv(self._ENV, 'true')
+        monkeypatch.setenv(self._SIZE_ENV, '2')
+        kwargs = self._create_engine_kwargs()
+        assert kwargs['poolclass'] == elastic_pool.ElasticQueuePool
+        assert kwargs['pool_size'] == 5  # 2 + max(0, 5 - 2)
+        assert kwargs['min_size'] == 2
+        assert kwargs['idle_timeout'] == 300
+        assert 'max_overflow' not in kwargs
+
+    def test_on_takes_the_burst_and_idle_overrides(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, 'true')
+        monkeypatch.setenv(self._SIZE_ENV, '2')
+        monkeypatch.setenv(self._OVERFLOW_ENV, '20')
+        monkeypatch.setenv(self._IDLE_ENV, '60')
+        kwargs = self._create_engine_kwargs()
+        assert kwargs['pool_size'] == 22
+        assert kwargs['min_size'] == 2
+        assert kwargs['idle_timeout'] == 60
+
+    def test_on_leaves_an_unpooled_process_unpooled(self, monkeypatch):
+        monkeypatch.setenv(self._ENV, 'true')
+        assert self._create_engine_kwargs()['poolclass'] == sqlalchemy.NullPool
+
+    def test_on_leaves_the_direct_engine_unpooled_behind_a_pooler(
+            self, monkeypatch):
+        monkeypatch.setenv(self._ENV, 'true')
+        monkeypatch.setenv(self._SIZE_ENV, '2')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+
+        pools = {}
+
+        def rec(conn, **kwargs):
+            pools[_rendered(conn)] = kwargs.get('poolclass')
+            return mock.MagicMock()
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=rec):
+            db_utils.get_engine(db_name='ignored')
+            db_utils.get_engine(db_name='ignored', direct=True)
+
+        assert pools['postgresql+psycopg2://user:pass@127.0.0.1:6432/db?'
+                     'sslmode=disable'] == elastic_pool.ElasticQueuePool
+        assert pools['postgresql+psycopg2://user:pass@localhost/db'] == (
+            sqlalchemy.NullPool)
+
+    def test_engine_builds_the_elastic_pool(self, monkeypatch):
+        """create_engine hands min_size and idle_timeout to the pool."""
+        monkeypatch.setenv(self._ENV, 'true')
+        monkeypatch.setenv(self._SIZE_ENV, '1')
+        monkeypatch.setenv(self._IDLE_ENV, '60')
+        pool = db_utils.get_engine(db_name='ignored').pool
+        assert isinstance(pool, elastic_pool.ElasticQueuePool)
+        assert pool.size() == 5
+        assert pool._min_size == 1
+        assert pool._idle_timeout == 60
 
 
 class TestConnStringResolution:
