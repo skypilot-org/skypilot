@@ -446,3 +446,12 @@ MANAGED_INSTANCE_GROUP_CONFIG = 'managed-instance-group'
 DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT = 900  # 15 minutes
 MIG_NAME_PREFIX = 'sky-mig-'
 INSTANCE_TEMPLATE_NAME_PREFIX = 'sky-it-'
+
+# TPU generations that GCP offers as Compute Engine machine types (e.g.
+# tpu7x-standard-4t) instead of through the Cloud TPU API. They are
+# provisioned like GPU machine types: a regular Compute Engine instance with
+# the TPU chips built into the machine type.
+COMPUTE_ENGINE_TPU_ACCELERATORS = ('tpu7x',)
+# Machine type prefixes of the TPUs above.
+COMPUTE_ENGINE_TPU_MACHINE_SERIES = tuple(
+    f'{acc}-' for acc in COMPUTE_ENGINE_TPU_ACCELERATORS)

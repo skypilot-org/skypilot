@@ -128,6 +128,13 @@ _ACC_INSTANCE_TYPE_DICTS = {
     'B200': {
         8: ['a4-highgpu-8g'],
     },
+    # TPU7x (Ironwood) is offered as Compute Engine machine types rather than
+    # through the Cloud TPU API. The count is the number of TPU chips on the
+    # VM (each chip has two TensorCores). Only the single-host 4-chip shape
+    # is supported for now.
+    'tpu7x': {
+        4: ['tpu7x-standard-4t'],
+    },
     'RTXPRO6000': {
         1: ['g4-standard-48'],
         2: ['g4-standard-96'],

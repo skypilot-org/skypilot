@@ -210,8 +210,22 @@ SERIES_TO_DESCRIPTION = {
     'n4d': 'N4D Instance',
     't2a': 'T2A Arm Instance',
     't2d': 'T2D AMD Instance',
+    # NOTE: GCP does not provide separate CPU/RAM pricing for TPU7x machine
+    # types. The TPU7x chip SKU includes the full VM cost. See special
+    # handling in get_vm_price() which sets the TPU7x VM price to 0.
+    'tpu7x': 'TPU7x',
     'z3': 'Z3 Instance',
 }
+
+# TPU7x (Ironwood) is offered as Compute Engine machine types instead of
+# through the Cloud TPU API. Only the machine types listed here are kept in the
+# catalog; the others (e.g. the `-tpu` and `ultranet` variants) are for
+# multi-host slices, which are not supported yet.
+TPU7X_MACHINE_TYPES = ['tpu7x-standard-4t']
+# The number of TPU7x chips per VM for each supported machine type.
+TPU7X_CHIP_COUNTS = [4]
+# HBM per TPU7x chip. Refer to https://cloud.google.com/tpu/docs/tpu7x
+TPU7X_HBM_MIB = 192 * 1024
 
 creds, project_id = google.auth.default()
 gcp_client = discovery.build('compute', 'v1')
@@ -351,6 +365,8 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
     df = df[df['InstanceType'].str.startswith(
         tuple(f'{series}-' for series in SERIES_TO_DESCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
+    is_tpu7x = df['InstanceType'].str.startswith('tpu7x-')
+    df = df[~is_tpu7x | df['InstanceType'].isin(TPU7X_MACHINE_TYPES)]
 
     # TODO(woosuk): Make this more efficient.
     def get_vm_price(row: pd.Series, spot: bool) -> Optional[float]:
@@ -374,8 +390,8 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
                 continue
 
             resource_group = sku['category']['resourceGroup']
-            # Skip GPU SKUs.
-            if resource_group == 'GPU':
+            # Skip GPU and TPU SKUs.
+            if resource_group in ['GPU', 'TPU']:
                 continue
 
             # Is it CPU or memory?
@@ -415,6 +431,11 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         # the VM price to 0 so the entry is not dropped, and the GPU
         # pricing will provide the total cost.
         if series == 'a4':
+            cpu_price = 0.0
+            memory_price = 0.0
+
+        # Same for TPU7x: the TPU7x chip SKU includes the full VM cost.
+        if series == 'tpu7x':
             cpu_price = 0.0
             memory_price = 0.0
 
@@ -458,6 +479,26 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
         for sup in range(0, int(np.log2(gpu['maximumCardsPerInstance']) + 1)):
             count = int(2**sup)
             gpu_name = gpu['name']
+            if gpu_name == 'tpu7x':
+                # TPU7x VMs are Compute Engine machine types, so they are
+                # listed with the GPUs. Keep the lowercase name, which matches
+                # the GKE accelerator label value.
+                if count not in TPU7X_CHIP_COUNTS:
+                    continue
+                new_gpus.append({
+                    'AcceleratorName': gpu_name,
+                    'AcceleratorCount': count,
+                    'GpuInfo': {
+                        'Gpus': [{
+                            'MemoryInfo': {
+                                'SizeInMiB': TPU7X_HBM_MIB
+                            }
+                        }]
+                    },
+                    'Region': zone.rpartition('-')[0],
+                    'AvailabilityZone': zone,
+                })
+                continue
             gpu_name = gpu_name.replace('nvidia-', '')
             gpu_name = gpu_name.replace('tesla-', '')
             gpu_name = gpu_name.upper()
@@ -545,8 +586,10 @@ def _get_gpus(region_prefix: str) -> 'pd.DataFrame':
 
 def get_gpu_df(skus: List[Dict[str, Any]],
                region_prefix: str) -> 'pd.DataFrame':
+    # TPU7x chips are billed under the Compute Engine 'TPU' resource group.
     gpu_skus = [
-        sku for sku in skus if sku['category']['resourceGroup'] == 'GPU'
+        sku for sku in skus
+        if sku['category']['resourceGroup'] in ['GPU', 'TPU']
     ]
     df = _get_gpus(region_prefix)
     if df.empty:
@@ -584,6 +627,21 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             # accelerators (notably G4's RTX 6000), but they represent a
             # separate reservation product, not the standard hourly rate.
             if 'dws defined duration' in description.lower():
+                continue
+
+            if row_gpu_name == 'tpu7x':
+                # Example descriptions: 'TPU7x running in Americas' and
+                # 'TPU7x attached to Spot Preemptible VMs running in London'.
+                # Use a prefix match to skip other TPU7x SKUs, such as
+                # 'Capacity Optimized TPU7x running in Americas'. The price is
+                # per chip hour.
+                prefix = ('TPU7x attached to Spot Preemptible VMs'
+                          if spot else 'TPU7x running in')
+                if not description.startswith(prefix):
+                    continue
+                gpu_price = _get_unit_price(sku) * row['AcceleratorCount']
+                break
+            if sku['category']['resourceGroup'] != 'GPU':
                 continue
 
             gpu_names = [f'{row_gpu_name} GPU']

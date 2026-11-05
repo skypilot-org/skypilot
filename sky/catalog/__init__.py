@@ -402,7 +402,8 @@ def get_tpus() -> List[str]:
     return [
         'tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
         'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8', 'tpu-v5p-8',
-        'tpu-v5p-16', 'tpu-v5p-32', 'tpu-v6e-1', 'tpu-v6e-4', 'tpu-v6e-8'
+        'tpu-v5p-16', 'tpu-v5p-32', 'tpu-v6e-1', 'tpu-v6e-4', 'tpu-v6e-8',
+        'tpu7x'
     ]
 
 

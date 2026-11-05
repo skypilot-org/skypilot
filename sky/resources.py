@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
+from sky.clouds.utils import gcp_utils
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -978,7 +979,12 @@ class Resources:
                             f'Got: {acc_name!r}: {acc_count!r}.')
 
             acc, _ = list(accelerators.items())[0]
-            if 'tpu' in acc.lower():
+            # TPUs offered as Compute Engine machine types (e.g. tpu7x) are
+            # handled like GPUs: no Cloud TPU API settings, and the cloud is
+            # left to the optimizer so that it can choose between GCP and
+            # Kubernetes.
+            if ('tpu' in acc.lower() and
+                    not gcp_utils.is_compute_engine_tpu(acc)):
                 # TODO(syang): GCP TPU names are supported on both GCP and
                 # kubernetes (GKE), but this logic automatically assumes
                 # GCP TPUs can only be used on GCP.

@@ -212,7 +212,7 @@ available_node_types:
             value: |-
               {{ user_data | indent(14) }}
   {%- endif %}
-  {%- if use_spot or gpu is not none %}
+  {%- if use_spot or gpu is not none or compute_engine_tpu %}
       scheduling:
   {%- if use_spot %}
         automaticRestart: false
@@ -223,6 +223,8 @@ available_node_types:
   {%- endif %}
   {%- if gpu is not none %}
         onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+  {%- elif compute_engine_tpu %}
+        onHostMaintenance: TERMINATE  # Required for TPU VMs.
   {%- endif %}
   {%- endif %}
 {%- endif %}

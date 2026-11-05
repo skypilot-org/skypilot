@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sky import catalog
 from sky.catalog import common as catalog_common
+from sky.provision.gcp import constants as gcp_constants
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -89,7 +90,8 @@ def canonicalize_accelerator_name(accelerator: str,
         cloud_str = str(cloud)
 
     # TPU names are always lowercase.
-    if accelerator.lower().startswith('tpu-'):
+    if (accelerator.lower().startswith('tpu-') or accelerator.lower()
+            in gcp_constants.COMPUTE_ENGINE_TPU_ACCELERATORS):
         return accelerator.lower()
 
     # Common case: do not read the catalog files.

@@ -27,10 +27,26 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+def is_compute_engine_tpu(accelerator: Optional[str]) -> bool:
+    """Returns whether the accelerator is a TPU on a Compute Engine VM.
+
+    These TPUs (e.g. tpu7x) are Compute Engine machine types, provisioned like
+    GPU machine types. They are not created through the Cloud TPU API, so they
+    do not use TPU VM settings such as `runtime_version`. The accelerator
+    count is the number of TPU chips on the VM.
+    """
+    if accelerator is None:
+        return False
+    return accelerator.lower() in constants.COMPUTE_ENGINE_TPU_ACCELERATORS
+
+
 def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
+    """Returns whether the resources use a Cloud TPU API accelerator."""
     if resources is None or resources.accelerators is None:
         return False
     acc, _ = list(resources.accelerators.items())[0]
+    if is_compute_engine_tpu(acc):
+        return False
     return acc.startswith('tpu')
 
 

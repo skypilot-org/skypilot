@@ -877,6 +877,12 @@ class GCPComputeInstance(GCPInstance):
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # pylint: disable=line-too-long
         if config.get('sourceMachineImage') is not None:
             return False
+        # bulkInsert does not support TPU machine types (e.g.
+        # tpu7x-standard-4t), failing with: 'Bulk Insert is not supported for
+        # queued requests with TPU machine type ...'.
+        machine_type = config.get('machineType', '').rpartition('/')[2]
+        if machine_type.startswith(constants.COMPUTE_ENGINE_TPU_MACHINE_SERIES):
+            return False
         # bulkInsert does not support attaching existing
         # disks to the instances with READ_WRITE mode.
         if config.get('disks') is not None:

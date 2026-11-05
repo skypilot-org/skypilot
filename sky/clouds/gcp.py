@@ -134,6 +134,14 @@ _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Need to contact GCP support to build our own image for GPUDirect-TCPX support.
 # Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
+# Google's TPU host image for TPUs on Compute Engine machine types (TPU7x).
+# It ships the TPU driver; frameworks (JAX, PyTorch/XLA) bring their own
+# libtpu. Refer to
+# https://cloud.google.com/compute/docs/tpus/quickstart-create-tpu-instance
+_DEFAULT_COMPUTE_ENGINE_TPU_IMAGE_IDS = {
+    'tpu7x': ('projects/ubuntu-os-accelerator-images/global/images/family/'
+              'ubuntu-accel-2404-amd64-tpu-tpu7x'),
+}
 
 
 def _run_output(cmd):
@@ -567,6 +575,7 @@ class GCP(clouds.Cloud):
             'gpu_count': None,
             'tpu': None,
             'tpu_vm': False,
+            'compute_engine_tpu': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
@@ -591,7 +600,15 @@ class GCP(clouds.Cloud):
             resources_vars['custom_resources'] = json.dumps(accelerators,
                                                             separators=(',',
                                                                         ':'))
-            if 'tpu' in acc:
+            if gcp_utils.is_compute_engine_tpu(acc):
+                # The TPU chips are part of the machine type (e.g.
+                # tpu7x-standard-4t), so no guestAccelerators are set.
+                resources_vars['compute_engine_tpu'] = True
+                image_id = _DEFAULT_COMPUTE_ENGINE_TPU_IMAGE_IDS[acc.lower()]
+                # Docker containers need privileged mode to access the TPU
+                # devices.
+                resources_vars['docker_run_options'] = ['--privileged']
+            elif 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
 
@@ -1247,8 +1264,8 @@ class GCP(clouds.Cloud):
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
         if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4',
-                                                                 'g4'):
-            # a3-ultragpu, n4, a4, and g4 instances only support
+                                                                 'g4', 'tpu7x'):
+            # a3-ultragpu, n4, a4, g4, and tpu7x instances only support
             # hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
