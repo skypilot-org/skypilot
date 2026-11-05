@@ -91,6 +91,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`client-secret <helm-values-auth-oauth-client-secret>`: ""
       :ref:`client-details-from-secret <helm-values-auth-oauth-client-details-from-secret>`: ""
       :ref:`email-domain <helm-values-auth-oauth-email-domain>`: "*"
+      :ref:`scope <helm-values-auth-oauth-scope>`: null
       :ref:`session-store-type <helm-values-auth-oauth-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-auth-oauth-redis-url>`: null
       :ref:`redis-secret <helm-values-auth-oauth-redis-secret>`: null
@@ -103,6 +104,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`headerName <helm-values-auth-externalProxy-headerName>`: 'X-Auth-Request-Email'
       :ref:`headerFormat <helm-values-auth-externalProxy-headerFormat>`: 'plaintext'
       :ref:`jwtIdentityClaim <helm-values-auth-externalProxy-jwtIdentityClaim>`: 'sub'
+      :ref:`groupsHeaderName <helm-values-auth-externalProxy-groupsHeaderName>`: null
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -132,6 +134,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
       :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
       :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
+      :ref:`scope <helm-values-ingress-oauth2-proxy-scope>`: null
       :ref:`session-store-type <helm-values-ingress-oauth2-proxy-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
       :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
@@ -975,6 +978,7 @@ Default: see the yaml below.
       client-secret: ""
       client-details-from-secret: ""
       email-domain: "*"
+      scope: null
       session-store-type: "redis"
       redis-url: null
       cookie-refresh: null
@@ -1069,6 +1073,24 @@ Default: ``"*"``
   auth:
     oauth:
       email-domain: "mycompany.com"
+
+.. _helm-values-auth-oauth-scope:
+
+``auth.oauth.scope``
+''''''''''''''''''''''
+
+OIDC scopes requested by OAuth2 Proxy. Set this to include ``groups`` when an
+admin policy needs the identity provider's group claim as ``user.groups``; for
+example, ``"openid email profile groups"``. The identity provider must be
+configured to emit that claim. If unset, OAuth2 Proxy uses its default scopes.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      scope: "openid email profile groups"
 
 .. _helm-values-auth-oauth-session-store-type:
 
@@ -1266,6 +1288,22 @@ Default: ``'sub'``
     externalProxy:
       headerFormat: 'jwt'
       jwtIdentityClaim: 'email'
+
+.. _helm-values-auth-externalProxy-groupsHeaderName:
+
+``auth.externalProxy.groupsHeaderName``
+'''''''''''''''''''''''''''''''''''''''
+
+The header containing groups asserted by a trusted external proxy. Leave unset
+when the proxy does not overwrite a groups header.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      groupsHeaderName: 'X-Auth-Request-Groups'
 
 
 .. _helm-values-storage:
@@ -1548,6 +1586,7 @@ Default: see the yaml below.
       image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
       use-https: false
       email-domain: "*"
+      scope: null
       session-store-type: "redis"
       redis-url: null
       cookie-refresh: null
@@ -1612,6 +1651,25 @@ Default: ``""``
   ingress:
     oauth2-proxy:
       client-secret: "abcdef123456"
+
+.. _helm-values-ingress-oauth2-proxy-scope:
+
+``ingress.oauth2-proxy.scope``
+''''''''''''''''''''''''''''''
+
+OIDC scopes requested by the deprecated ingress OAuth2 Proxy. Set this to
+include ``groups`` when an admin policy needs the identity provider's group
+claim as ``user.groups``; for example, ``"openid email profile groups"``. The
+identity provider must be configured to emit that claim. If unset, OAuth2
+Proxy uses its default scopes.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      scope: "openid email profile groups"
 
 .. _helm-values-ingress-oauth2-proxy-client-details-from-secret:
 

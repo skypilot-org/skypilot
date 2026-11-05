@@ -16,11 +16,15 @@ data:
         header_name: {{ .Values.auth.externalProxy.headerName | quote }}
         header_format: {{ .Values.auth.externalProxy.headerFormat | quote }}
         jwt_identity_claim: {{ .Values.auth.externalProxy.jwtIdentityClaim | quote }}
+        {{- if .Values.auth.externalProxy.groupsHeaderName }}
+        groups_header_name: {{ .Values.auth.externalProxy.groupsHeaderName | quote }}
+        {{- end }}
         {{- else }}
         # Enabled for ingress.oauth2-proxy compatibility
         enabled: true
         header_name: "X-Auth-Request-Email"
         header_format: "plaintext"
         jwt_identity_claim: "sub"
+        groups_header_name: "X-Auth-Request-Groups"
         {{- end }}
 {{- end }}

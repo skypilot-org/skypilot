@@ -37,7 +37,7 @@ tests:
           value: "http://$host/oauth2/auth"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
-          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+          value: "X-Auth-Request-Email, X-Auth-Request-Groups, X-Skypilot-Auth"
       - matchRegex:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
           pattern: 'if \(\$http_authorization ~ "\^Bearer sky_\.\+"'
@@ -86,7 +86,7 @@ tests:
           value: "http://$host/oauth2/auth"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
-          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+          value: "X-Auth-Request-Email, X-Auth-Request-Groups, X-Skypilot-Auth"
 
   - it: should enable ingress OAuth2 proxy when auth.oauth is not configured
     set:
@@ -102,7 +102,7 @@ tests:
           value: "http://$host/oauth2/auth"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
-          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+          value: "X-Auth-Request-Email, X-Auth-Request-Groups, X-Skypilot-Auth"
 
   # Test basic auth annotations
   - it: should add basic auth annotations when authSecret is provided and user management disabled
