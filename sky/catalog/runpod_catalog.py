@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -33,8 +34,31 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+    """Returns hourly cost; candidate zone lists use the cheapest estimate.
+
+    For multiple candidate zones, both on-demand and spot costs are estimates,
+    not the price of the actual placement. Single-zone behavior is unchanged.
+    """
+    df = _df
+    if zone is not None and ',' in zone:
+        # RunPod provision records can contain all candidate zones, rather than
+        # the actual placement. Preserve that candidate set when estimating
+        # costs for existing clusters; do not look up the list as one zone.
+        candidate_zones = [z.strip() for z in zone.split(',')]
+        df = df[(df['InstanceType'] == instance_type) &
+                df['AvailabilityZone'].isin(candidate_zones)]
+        if region is not None:
+            df = df[df['Region'].str.lower() == region.lower()]
+        if df.empty:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Instance type {instance_type!r} not found in candidate '
+                    f'zones {candidate_zones!r} (region={region!r}).')
+        # RunPod CPU prices can differ within a region. After filtering, let
+        # the shared lookup select the minimum without its equal-price check.
+        region = None
+        zone = None
+    return common.get_hourly_cost_impl(df, instance_type, use_spot, region,
                                        zone)
 
 
