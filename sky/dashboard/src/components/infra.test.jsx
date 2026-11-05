@@ -522,8 +522,9 @@ describe('InfrastructureSection refreshing overlay', () => {
     expect(overlay(container)).toBeNull();
   });
 
-  it('dims the table while the whole section reloads', () => {
+  it('does not dim the table while the whole section reloads', () => {
+    // Refresh / Cmd+R: rows show their own placeholders instead.
     const { container } = renderSection({ ...PROPS, isLoading: true });
-    expect(overlay(container)).not.toBeNull();
+    expect(overlay(container)).toBeNull();
   });
 });

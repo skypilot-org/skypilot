@@ -635,12 +635,6 @@ export function InfrastructureSection({
     );
   }
 
-  // Determine if table should show refreshing state
-  // Only while the section itself reloads. A context that is still loading
-  // shows placeholders in its own row (and sorts to the bottom), so one slow
-  // or unreachable context does not dim the rows that already have data.
-  const isTableRefreshing = !isInitialLoad && isLoading;
-
   // Show table if we have contexts to display, even if some data is still
   // loading. Inactive rows count: a section whose only contexts are
   // not-enabled ones still has something to show (and an action to offer).
@@ -673,11 +667,12 @@ export function InfrastructureSection({
           {/* Desktop: unified full-width table. No inner vertical scroll —
               per-type sub-rows make row count = contexts x GPU types, so a
               fixed max-height would clip rows mid-way. */}
-          <div
-            className={`hidden md:block overflow-x-auto rounded-md border shadow-sm bg-card ${
-              isTableRefreshing ? 'infra-table-refreshing' : ''
-            }`}
-          >
+          {/* No glass overlay while refreshing: every row already shows its
+              own loading placeholders (and loading rows sort to the bottom),
+              and the page header shows the Loading spinner. Blurring the
+              whole table on Refresh / Cmd+R hid readable data for the
+              length of the sky check plus the slowest context. */}
+          <div className="hidden md:block overflow-x-auto rounded-md border shadow-sm bg-card">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
