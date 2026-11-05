@@ -67,6 +67,14 @@ SkyPilot supports installation with ``uv`` or ``pip``.
       # install dependencies for the clouds you want to use
       pip install "skypilot[kubernetes,aws,gcp]"
 
+.. note::
+
+  ``pip install skypilot`` installs the SkyPilot client only, which can connect
+  to a :ref:`remote API server <sky-api-server-remote>`.
+
+  To run SkyPilot on your own machine, which starts a local API server, install
+  it with the clouds you want to use, e.g.
+  ``pip install "skypilot[kubernetes,aws,gcp]"``.
 
 .. dropdown:: Install SkyPilot from nightly build or source
 

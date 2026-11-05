@@ -5227,6 +5227,7 @@ def test_dynamic_job_group_parallel_appends(generic_cloud: str):
 # Mutates the managed-jobs DB directly on the API server host, so it cannot
 # run against a remote API server (skip at collection, not just runtime).
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # Reads the managed-jobs DB in-process.
 def test_managed_jobs_emergency_recovery(generic_cloud: str):
     """An externally mutated schedule state triggers emergency recovery.
 

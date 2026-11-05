@@ -30,6 +30,7 @@ Every listener is defensive: a defect in here must never break database
 access, so each body is wrapped and failures are logged once and then
 swallowed. The whole module is inert unless ``sky.metrics.db.ENABLED``.
 """
+from __future__ import annotations
 
 import logging
 import operator
@@ -39,11 +40,17 @@ import time
 from typing import Any, Optional, Tuple
 import weakref
 
-import sqlalchemy
-from sqlalchemy import event
-from sqlalchemy.sql import compiler as sql_compiler
-
+from sky.adaptors import common as adaptors_common
 from sky.metrics import db as db_metrics
+from sky.utils.db import sqlalchemy_deps
+
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                        import_error_message=_SA_MSG)
+event = adaptors_common.LazyImport('sqlalchemy.event',
+                                   import_error_message=_SA_MSG)
+sql_compiler = adaptors_common.LazyImport('sqlalchemy.sql.compiler',
+                                          import_error_message=_SA_MSG)
 
 logger = logging.getLogger(__name__)
 

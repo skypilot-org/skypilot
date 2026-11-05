@@ -31,15 +31,27 @@ priority lookup must not take the claimed half down with it. There is
 deliberately no wrapper that runs both -- it would be one line, and its first
 use would undo that.
 """
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import math
 import os
 import time
+import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
-import sqlalchemy
+from sky.adaptors import common as adaptors_common
+from sky.utils.db import sqlalchemy_deps
 
+_SA_MSG = sqlalchemy_deps.SQLALCHEMY_INSTALL_MSG
+if typing.TYPE_CHECKING:
+    import sqlalchemy
+else:
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy',
+                                            import_error_message=_SA_MSG)
+
+# pylint: disable=wrong-import-position,ungrouped-imports
 from sky import global_user_state
 from sky import sky_logging
 from sky.jobs import state as managed_job_state

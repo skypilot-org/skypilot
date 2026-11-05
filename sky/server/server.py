@@ -123,6 +123,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.db import sqlalchemy_deps
 from sky.utils.kubernetes import exec_auth_cache
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
@@ -4762,6 +4763,8 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    # Fail with install hint before ORM init (not TypeError on missing SA).
+    sqlalchemy_deps.require_sqlalchemy()
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')

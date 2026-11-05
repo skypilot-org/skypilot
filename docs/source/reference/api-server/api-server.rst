@@ -25,7 +25,9 @@ Local API server (individual users)
 
 For an individual user, SkyPilot can be used as a normal command line
 tool. Whenever a SkyPilot command is run and an API server is not detected, SkyPilot will automatically start
-a SkyPilot API server running locally in the background. No user action is needed.
+a SkyPilot API server running locally in the background (requires SkyPilot installed with
+the clouds you use, e.g. ``skypilot[aws]``; the client-only ``skypilot`` cannot start one).
+No user action is needed.
 
 The dashboard is hosted at `http://127.0.0.1:46580/dashboard <http://127.0.0.1:46580/dashboard>`__ by default.
 
@@ -80,7 +82,8 @@ Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can co
 to connect to it.
 We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See `uv <https://docs.astral.sh/uv/>`_ or `conda <https://docs.conda.io/en/latest/>`_ for creating an environment with different python versions.
 
-:ref:`Install <installation>` the SkyPilot client on your local machine:
+:ref:`Install <installation>` the SkyPilot client on your local machine. No
+extras are needed to connect to a remote API server:
 
 .. code-block:: console
 
