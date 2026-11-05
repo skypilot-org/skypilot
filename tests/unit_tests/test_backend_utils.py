@@ -1,5 +1,6 @@
 import os
 import pathlib
+import subprocess
 from unittest import mock
 
 import pytest
@@ -915,3 +916,98 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+@pytest.mark.parametrize('target_prefix', ['', '~/', '$HOME/'])
+@pytest.mark.parametrize('existing',
+                         ['missing', 'symlink', 'file', 'directory'])
+def test_make_safe_symlink_command_paths_with_spaces(tmp_path, monkeypatch,
+                                                     target_prefix, existing):
+    home = tmp_path / 'home dir'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    target = home / 'target file'
+    target.write_text('payload')
+    source = tmp_path / 'mount dir' / 'mounted file'
+    if existing != 'missing':
+        source.parent.mkdir()
+    if existing == 'symlink':
+        source.symlink_to(tmp_path / 'old target')
+    elif existing == 'file':
+        source.write_text('keep')
+    elif existing == 'directory':
+        source.mkdir()
+    target_arg = target_prefix + target.name if target_prefix else str(target)
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=target_arg, sudo_cmd='')
+    # Never change ownership of the temporary directory's ancestors.
+    result = subprocess.run(['bash', '-c', 'chown() { :; }; ' + command],
+                            capture_output=True,
+                            text=True)
+    if existing in ('file', 'directory'):
+        assert result.returncode != 0
+        assert not source.is_symlink()
+        if existing == 'file':
+            assert source.read_text() == 'keep'
+        else:
+            assert source.is_dir()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert source.is_symlink()
+        assert source.read_text() == 'payload'
+
+
+@pytest.mark.parametrize('separator', ['/', '//', '///'])
+def test_make_safe_symlink_command_newline_ancestor(tmp_path, separator):
+    parent = tmp_path / 'group\n'
+    parent_path = separator + str(parent).lstrip('/')
+    source = parent_path + separator + 'child/file'
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=source, target=str(target), sudo_cmd='')
+    # Record ownership targets without changing any actual permissions.
+    result = subprocess.run(
+        ['bash', '-c', 'chown() { printf "%s\\0" "${@: -1}"; }; ' + command],
+        capture_output=True)
+    assert result.returncode == 0, result.stderr
+    visited = result.stdout.split(b'\0')[:-1]
+    assert os.fsencode(parent_path) in visited
+    assert os.fsencode(tmp_path / 'group') not in visited
+    assert all(path.strip(b'/') for path in visited)
+    assert pathlib.Path(source).read_text() == 'payload'
+
+
+def test_make_safe_symlink_command_deep_path(tmp_path):
+    source = tmp_path.joinpath(*(['ab'] * 200), 'file')
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=str(target), sudo_cmd='')
+    # Keep command size proportional to the path, rather than its ancestors.
+    assert len(command) < 20 * (len(str(source)) + len(str(target)))
+    result = subprocess.run(['bash', '-c', 'chown() { :; }; ' + command],
+                            capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert source.read_text() == 'payload'
+
+
+@pytest.mark.parametrize('parent_index', [0, -2])
+def test_make_safe_symlink_command_chown_failure(tmp_path, parent_index):
+    source = tmp_path / 'mount' / 'file'
+    target = tmp_path / 'payload'
+    target.write_text('payload')
+    command = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source=str(source), target=str(target), sudo_cmd='')
+    # Fail at an ancestor without changing any actual permissions.
+    env = dict(os.environ,
+               FAILED_PARENT=str(tuple(source.parents)[parent_index]))
+    result = subprocess.run([
+        'bash', '-c',
+        'chown() { [ "${@: -1}" != "$FAILED_PARENT" ] || return 37; }; ' +
+        command
+    ],
+                            env=env,
+                            capture_output=True)
+    assert result.returncode == 37, result.stderr
+    assert not source.is_symlink()
