@@ -9,8 +9,10 @@ from sky.provision import instance_setup
 from sky.utils import resources_utils
 
 
-def _setup(monkeypatch, returncode, stderr):
+def _setup(monkeypatch, returncode, output):
     """Sets up the agent on one node whose command exits `returncode`.
+
+    `output` is returned as stdout, as the runner merges stderr into it.
 
     Returns how many times the command ran, and the exception raised.
     """
@@ -19,7 +21,7 @@ def _setup(monkeypatch, returncode, stderr):
     def _run(*args, **kwargs):
         del args, kwargs
         calls.append(1)
-        return returncode, '', stderr
+        return returncode, output, ''
 
     monkeypatch.setattr(instance_setup, '_hint_worker_log_path', mock.Mock())
     monkeypatch.setattr(instance_setup.time, 'sleep', mock.Mock())
@@ -36,9 +38,8 @@ def _setup(monkeypatch, returncode, stderr):
 def test_unsupported_platform_is_reported_without_retries(monkeypatch):
     runs, error = _setup(
         monkeypatch, logs_agent.UNSUPPORTED_PLATFORM_EXIT_CODE,
-        'command terminated with exit code 87\n'
         'SkyPilot: cannot install fluent-bit: no fluent-bit packages for '
-        '\'fedora\'\n')
+        '\'fedora\'\ncommand terminated with exit code 87\n')
     assert isinstance(error, instance_setup.LoggingAgentUnsupportedError)
     assert str(error) == ('cannot install fluent-bit: no fluent-bit packages '
                           'for \'fedora\'')

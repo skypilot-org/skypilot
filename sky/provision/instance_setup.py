@@ -1029,9 +1029,10 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
             source_bashrc=True,
             timeout=_setup_command_timeout())
         if returncode == logs_agent.UNSUPPORTED_PLATFORM_EXIT_CODE:
+            # The runner merges stderr into stdout unless asked not to.
             reason = [
                 line[len('SkyPilot: '):]
-                for line in stderr.splitlines()
+                for line in f'{stdout}\n{stderr}'.splitlines()
                 if line.startswith('SkyPilot: ')
             ]
             raise LoggingAgentUnsupportedError(
