@@ -5,7 +5,6 @@ import { useRouter } from 'next/router';
 import {
   getWorkspaces,
   updateWorkspace,
-  createWorkspace,
   deleteWorkspace,
   getEnabledClouds,
 } from '@/data/connectors/workspaces';
@@ -405,18 +404,15 @@ function workspaceYaml(key, config) {
   );
 }
 
-// `workspaceName` is the workspace id (its URL key) for an existing
-// workspace, and the name being created for a new one.
-export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
+// `workspaceName` is the workspace id (its URL key). Creating a workspace
+// is its own flow, see workspace-new.js.
+export function WorkspaceEditor({ workspaceName }) {
   const router = useRouter();
   // The stored user-facing name. Kept out of the YAML: renaming goes through
   // the Rename dialog, which warns about configs still using the old name.
   const [storedName, setStoredName] = useState(null);
-  const displayName = isNewWorkspace
-    ? workspaceName
-    : workspaceName === 'default'
-      ? 'default'
-      : storedName || workspaceName;
+  const displayName =
+    workspaceName === 'default' ? 'default' : storedName || workspaceName;
   const [renameOpen, setRenameOpen] = useState(false);
   // All workspaces as last loaded, for the rename dialog's name-taken check.
   const [allWorkspaces, setAllWorkspaces] = useState({});
@@ -452,7 +448,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // Only admins can change a workspace's config or delete it (the server
   // enforces this); everyone else gets a read-only view. Null until known, so
   // the admin controls don't flash for a non-admin.
-  const [isAdmin, setIsAdmin] = useState(isNewWorkspace ? true : null);
+  const [isAdmin, setIsAdmin] = useState(null);
 
   // Delete state
   const [deleteState, setDeleteState] = useState({
@@ -538,8 +534,6 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // and the cache holds the new numbers for the next visit (Refresh).
   const fetchWorkspaceStats = useCallback(
     async ({ fresh = false } = {}) => {
-      if (isNewWorkspace) return;
-
       const request = ++statsRequestRef.current;
       const load = (fn, args = []) => {
         if (fresh) dashboardCache.invalidate(fn, args);
@@ -614,11 +608,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         if (request === statsRequestRef.current) setStatsLoading(false);
       }
     },
-    [workspaceName, isNewWorkspace]
+    [workspaceName]
   );
 
   useEffect(() => {
-    if (isNewWorkspace) return undefined;
     let cancelled = false;
     getUserRole()
       .then((data) => {
@@ -631,26 +624,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     return () => {
       cancelled = true;
     };
-  }, [isNewWorkspace]);
+  }, []);
 
   const canEdit = isAdmin === true;
 
   useEffect(() => {
-    if (!isNewWorkspace) {
-      fetchWorkspaceConfig();
-      fetchWorkspaceStats();
-    } else {
-      setLoading(false);
-      setYamlValue(
-        `${workspaceName}:\n  # New workspace configuration\n  # Leave empty to use all accessible infrastructure\n`
-      );
-    }
-  }, [
-    workspaceName,
-    isNewWorkspace,
-    fetchWorkspaceConfig,
-    fetchWorkspaceStats,
-  ]);
+    fetchWorkspaceConfig();
+    fetchWorkspaceStats();
+  }, [workspaceName, fetchWorkspaceConfig, fetchWorkspaceStats]);
 
   useEffect(() => {
     // Check for changes
@@ -724,36 +705,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         );
       }
 
-      if (isNewWorkspace) {
-        const created = await createWorkspace(workspaceName, workspaceConfig);
-        invalidateWorkspaceCaches();
-        setSuccess('Workspace created successfully!');
-        // The server keys the new workspace by a generated id.
-        const createdId =
-          Object.keys(created || {}).find(
-            (id) => created[id]?.name === workspaceName
-          ) || workspaceName;
-        setTimeout(() => {
-          router.push(`/workspaces/${createdId}`);
-        }, 1500);
-      } else {
-        const configToSave = withStoredName(workspaceConfig);
-        await updateWorkspace(
-          workspaceName,
-          configToSave,
-          force ? undefined : baseConfigRef.current
-        );
-        invalidateWorkspaceCaches();
-        setSuccess('Workspace updated successfully!');
-        setOriginalConfig(workspaceConfig);
-        serverYamlRef.current = savedYaml;
-        // The server stores the config as sent, so that is the new baseline.
-        // Not re-read: a change landing after this save must still show up
-        // as a conflict on the next Apply, not become the baseline.
-        baseConfigRef.current = configToSave;
-        // Refresh stats after successful save
-        fetchWorkspaceStats();
-      }
+      const configToSave = withStoredName(workspaceConfig);
+      await updateWorkspace(
+        workspaceName,
+        configToSave,
+        force ? undefined : baseConfigRef.current
+      );
+      invalidateWorkspaceCaches();
+      setSuccess('Workspace updated successfully!');
+      setOriginalConfig(workspaceConfig);
+      serverYamlRef.current = savedYaml;
+      // The server stores the config as sent, so that is the new baseline.
+      // Not re-read: a change landing after this save must still show up
+      // as a conflict on the next Apply, not become the baseline.
+      baseConfigRef.current = configToSave;
+      // Refresh stats after successful save
+      fetchWorkspaceStats();
     } catch (err) {
       if (err?.type === 'WorkspaceConfigConflictError') {
         setConflict(true);
@@ -882,9 +849,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     return <div>Loading...</div>;
   }
 
-  const title = isNewWorkspace
-    ? 'Create New Workspace | SkyPilot Dashboard'
-    : `Workspace: ${displayName} | SkyPilot Dashboard`;
+  const title = `Workspace: ${displayName} | SkyPilot Dashboard`;
 
   return (
     <>
@@ -900,16 +865,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             </Link>
             <span className="mx-2 text-gray-500">›</span>
             <Link
-              href={
-                isNewWorkspace
-                  ? `/workspace/new`
-                  : `/workspaces/${workspaceName}`
-              }
+              href={`/workspaces/${workspaceName}`}
               className="text-sky-blue hover:underline"
             >
-              {isNewWorkspace ? 'New Workspace' : displayName}
+              {displayName}
             </Link>
-            {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
+            {canEdit && workspaceName !== 'default' && (
               <RenameWorkspaceButton
                 onClick={() => setRenameOpen(true)}
                 disabled={
@@ -941,18 +902,16 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             )}
 
             <div className="flex items-center space-x-4">
-              {!isNewWorkspace && (
-                <button
-                  onClick={handleRefresh}
-                  disabled={loading || saving || statsLoading}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-                >
-                  <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                  Refresh
-                </button>
-              )}
+              <button
+                onClick={handleRefresh}
+                disabled={loading || saving || statsLoading}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1.5" />
+                Refresh
+              </button>
 
-              {!isNewWorkspace && canEdit && workspaceName !== 'default' && (
+              {canEdit && workspaceName !== 'default' && (
                 <button
                   onClick={() =>
                     setDeleteState({ ...deleteState, showDialog: true })
@@ -988,116 +947,106 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
             {/* Two-column layout */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left column - Workspace Details (only for existing workspaces) */}
-              {!isNewWorkspace && (
-                <div className="lg:col-span-1">
-                  <Card className="h-full">
-                    <CardHeader>
-                      <CardTitle className="text-base font-normal">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-semibold">Workspace:</span>{' '}
-                            {displayName}
-                            {displayName !== workspaceName && (
-                              <span className="ml-2 text-xs text-gray-500">
-                                ID: {workspaceName}
-                              </span>
-                            )}
-                          </div>
-                          <WorkspaceBadge
-                            isPrivate={originalConfig.private === true}
-                            readOnly={isReadOnlyVisible}
-                          />
+              {/* Left column - Workspace Details */}
+              <div className="lg:col-span-1">
+                <Card className="h-full">
+                  <CardHeader>
+                    <CardTitle className="text-base font-normal">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold">Workspace:</span>{' '}
+                          {displayName}
+                          {displayName !== workspaceName && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              ID: {workspaceName}
+                            </span>
+                          )}
                         </div>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-sm pb-2 flex-1">
-                      <div className="py-2 flex items-center justify-between">
-                        <div className="flex items-center text-gray-600">
-                          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
-                          <span>Clusters (Running / Total)</span>
-                        </div>
-                        <span className="font-normal text-gray-800">
-                          {statsLoading
-                            ? '...'
-                            : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
-                        </span>
-                      </div>
-                      <div className="py-2 flex items-center justify-between border-t border-gray-100">
-                        <div className="flex items-center text-gray-600">
-                          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
-                          <span>Managed Jobs</span>
-                        </div>
-                        <span className="font-normal text-gray-800">
-                          {statsLoading
-                            ? '...'
-                            : workspaceStats.managedJobsCount}
-                        </span>
-                      </div>
-                    </CardContent>
-
-                    <div className="px-6 pb-6 text-sm pt-3">
-                      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
-                        Enabled Infra
-                      </h4>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        {statsLoading ? (
-                          <span className="text-gray-500">Loading...</span>
-                        ) : workspaceStats.clouds.length > 0 ? (
-                          workspaceStats.clouds.map((cloud) => (
-                            <div
-                              key={cloud}
-                              className="flex items-center text-gray-700"
-                            >
-                              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
-                              <span>{cloud}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <span className="text-gray-500 italic">
-                            No enabled infrastructure
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Configuration hints */}
-                      <div className="mt-4">
-                        <WorkspaceConfigDescription
-                          workspaceName={workspaceName}
-                          config={originalConfig}
-                          enabledClouds={workspaceStats.clouds}
-                          isLoading={statsLoading}
+                        <WorkspaceBadge
+                          isPrivate={originalConfig.private === true}
+                          readOnly={isReadOnlyVisible}
                         />
                       </div>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm pb-2 flex-1">
+                    <div className="py-2 flex items-center justify-between">
+                      <div className="flex items-center text-gray-600">
+                        <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+                        <span>Clusters (Running / Total)</span>
+                      </div>
+                      <span className="font-normal text-gray-800">
+                        {statsLoading
+                          ? '...'
+                          : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
+                      </span>
+                    </div>
+                    <div className="py-2 flex items-center justify-between border-t border-gray-100">
+                      <div className="flex items-center text-gray-600">
+                        <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+                        <span>Managed Jobs</span>
+                      </div>
+                      <span className="font-normal text-gray-800">
+                        {statsLoading ? '...' : workspaceStats.managedJobsCount}
+                      </span>
+                    </div>
+                  </CardContent>
 
-                      {/* Detailed allowed users for private workspaces */}
-                      <DetailedAllowedUsers
+                  <div className="px-6 pb-6 text-sm pt-3">
+                    <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+                      Enabled Infra
+                    </h4>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      {statsLoading ? (
+                        <span className="text-gray-500">Loading...</span>
+                      ) : workspaceStats.clouds.length > 0 ? (
+                        workspaceStats.clouds.map((cloud) => (
+                          <div
+                            key={cloud}
+                            className="flex items-center text-gray-700"
+                          >
+                            <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+                            <span>{cloud}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-gray-500 italic">
+                          No enabled infrastructure
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Configuration hints */}
+                    <div className="mt-4">
+                      <WorkspaceConfigDescription
                         workspaceName={workspaceName}
-                        workspaceDisplayName={displayName}
-                        workspaceConfig={originalConfig}
-                        allUsers={allUsers}
-                        writable={isWritable}
-                        onChanged={() =>
-                          fetchWorkspaceConfig(false, { keepDraft: true })
-                        }
+                        config={originalConfig}
+                        enabledClouds={workspaceStats.clouds}
+                        isLoading={statsLoading}
                       />
                     </div>
-                  </Card>
-                </div>
-              )}
+
+                    {/* Detailed allowed users for private workspaces */}
+                    <DetailedAllowedUsers
+                      workspaceName={workspaceName}
+                      workspaceDisplayName={displayName}
+                      workspaceConfig={originalConfig}
+                      allUsers={allUsers}
+                      writable={isWritable}
+                      onChanged={() =>
+                        fetchWorkspaceConfig(false, { keepDraft: true })
+                      }
+                    />
+                  </div>
+                </Card>
+              </div>
 
               {/* Right column - YAML Editor */}
-              <div
-                className={isNewWorkspace ? 'lg:col-span-3' : 'lg:col-span-2'}
-              >
+              <div className="lg:col-span-2">
                 <Card className="h-full flex flex-col">
                   <CardHeader>
                     <CardTitle className="text-base font-normal">
-                      {isNewWorkspace
-                        ? 'New Workspace YAML'
-                        : canEdit
-                          ? 'Edit Workspace YAML'
-                          : 'Workspace YAML'}
+                      {canEdit ? 'Edit Workspace YAML' : 'Workspace YAML'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
@@ -1109,7 +1058,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         />
                       )}
                       <div className="flex-1 flex flex-col">
-                        {!isNewWorkspace && isAdmin === false && (
+                        {isAdmin === false && (
                           <p className="text-sm text-gray-600 mb-3">
                             Only admins can change this configuration.
                           </p>

@@ -41,7 +41,6 @@ jest.mock('@/data/connectors/workspaces', () => ({
   __esModule: true,
   getWorkspaces: (...args) => mockGetWorkspaces(...args),
   updateWorkspace: (...args) => mockUpdateWorkspace(...args),
-  createWorkspace: jest.fn(),
   deleteWorkspace: jest.fn(),
   getEnabledClouds: jest.fn(async () => []),
 }));
@@ -772,17 +771,6 @@ describe('WorkspaceEditor rename', () => {
           name: 'Delete',
         })
       );
-    });
-    expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
-  });
-});
-
-describe('WorkspaceEditor for a new workspace', () => {
-  test('creating drops the cached workspace views', async () => {
-    render(<WorkspaceEditor workspaceName="ml" isNewWorkspace />);
-    mockInvalidate.mockClear();
-    await act(async () => {
-      fireEvent.click(await screen.findByText('Apply'));
     });
     expect(mockInvalidate).toHaveBeenCalledWith(getWorkspaceContexts);
   });
