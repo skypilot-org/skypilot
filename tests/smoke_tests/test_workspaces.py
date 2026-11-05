@@ -433,6 +433,7 @@ def _verify_cluster_created_by_user(cluster_name: str,
 
 @pytest.mark.no_remote_server
 @pytest.mark.aws
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_workspace_multiple_aws_profiles():
     """Test AWS with multiple workspaces and AWS profiles."""
     # Extract default credentials.
