@@ -1,11 +1,17 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import os
 import subprocess
+import sys
 import tempfile
+import tracemalloc
+from typing import List
 import unittest
+from unittest import mock
 
 from sky.skylet import log_lib
+from sky.utils import context
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -164,6 +170,133 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+_LINE_BYTES = 100
+
+
+def _lines(prefix: str, count: int) -> List[str]:
+    body = 'x' * (_LINE_BYTES - len(prefix) - 9)
+    return [f'{prefix}{i:08d}{body}\n' for i in range(count)]
+
+
+def _emit_cmd(stdout_lines: int,
+              stderr_lines: int = 0,
+              exit_code: int = 0) -> List[str]:
+    """A child process that prints the lines `_lines` would build."""
+    script = (f'import sys\n'
+              f'body_out = "x" * {_LINE_BYTES - len("out") - 9}\n'
+              f'body_err = "x" * {_LINE_BYTES - len("err") - 9}\n'
+              f'for i in range({stdout_lines}):\n'
+              f'    sys.stdout.write(f"out{{i:08d}}{{body_out}}\\n")\n'
+              f'sys.stdout.flush()\n'
+              f'for i in range({stderr_lines}):\n'
+              f'    sys.stderr.write(f"err{{i:08d}}{{body_err}}\\n")\n'
+              f'sys.stderr.flush()\n'
+              f'sys.exit({exit_code})\n')
+    return [sys.executable, '-c', script]
+
+
+@context.contextual
+def _run_with_log_in_context(*args, **kwargs):
+    return log_lib.run_with_log(*args, **kwargs)
+
+
+class TestRunWithLogOutputCapture(unittest.TestCase):
+    """What run_with_log returns, logs, and keeps in memory."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.log_path = os.path.join(self._tmp_dir.name, 'run.log')
+
+    def tearDown(self):
+        self._tmp_dir.cleanup()
+
+    def _read_log(self) -> str:
+        with open(self.log_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    def test_require_outputs_returns_full_stdout_and_stderr(self):
+        returncode, stdout, stderr = log_lib.run_with_log(_emit_cmd(1000, 500),
+                                                          self.log_path,
+                                                          require_outputs=True)
+        self.assertEqual(returncode, 0)
+        self.assertEqual(stdout, ''.join(_lines('out', 1000)))
+        self.assertEqual(stderr, ''.join(_lines('err', 500)))
+
+    def test_require_outputs_with_ray_merges_stderr_into_stdout(self):
+        returncode, stdout, stderr = log_lib.run_with_log(_emit_cmd(1000, 500),
+                                                          self.log_path,
+                                                          require_outputs=True,
+                                                          with_ray=True)
+        self.assertEqual(returncode, 0)
+        self.assertEqual(stdout,
+                         ''.join(_lines('out', 1000) + _lines('err', 500)))
+        self.assertEqual(stderr, '')
+
+    def test_require_outputs_in_context_returns_full_stdout_and_stderr(self):
+        returncode, stdout, stderr = _run_with_log_in_context(
+            _emit_cmd(1000, 500), self.log_path, require_outputs=True)
+        self.assertEqual(returncode, 0)
+        self.assertEqual(stdout, ''.join(_lines('out', 1000)))
+        self.assertEqual(stderr, ''.join(_lines('err', 500)))
+
+    def test_no_outputs_logs_everything_and_keeps_exit_code(self):
+        returncode = log_lib.run_with_log(_emit_cmd(1000, 500, exit_code=3),
+                                          self.log_path,
+                                          with_ray=True)
+        self.assertEqual(returncode, 3)
+        self.assertEqual(self._read_log(),
+                         ''.join(_lines('out', 1000) + _lines('err', 500)))
+
+    def test_no_outputs_in_context_logs_everything_and_keeps_exit_code(self):
+        returncode = _run_with_log_in_context(_emit_cmd(1000, 500, exit_code=3),
+                                              self.log_path,
+                                              with_ray=True)
+        self.assertEqual(returncode, 3)
+        self.assertEqual(self._read_log(),
+                         ''.join(_lines('out', 1000) + _lines('err', 500)))
+
+    def test_no_outputs_still_streams_every_line(self):
+        expected = ''.join(_lines('out', 1000) + _lines('err', 500))
+        with mock.patch.object(sys, 'stdout', new=StringIO()) as streamed:
+            returncode = log_lib.run_with_log(_emit_cmd(1000, 500, exit_code=3),
+                                              self.log_path,
+                                              stream_logs=True,
+                                              with_ray=True)
+        self.assertEqual(returncode, 3)
+        self.assertEqual(streamed.getvalue(), expected)
+        self.assertEqual(self._read_log(), expected)
+
+    def _peak_traced_bytes(self, run, num_lines: int) -> int:
+        tracemalloc.start()
+        try:
+            run(_emit_cmd(num_lines), self.log_path, with_ray=True)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        return peak
+
+    def _assert_memory_flat_in_output_size(self, run) -> None:
+        small_lines, large_lines = 10_000, 40_000
+        small_peak = self._peak_traced_bytes(run, small_lines)
+        large_peak = self._peak_traced_bytes(run, large_lines)
+        extra_output = (large_lines - small_lines) * _LINE_BYTES
+        growth = large_peak - small_peak
+        # Retaining the output grows the peak by more than the extra output
+        # itself; draining it line by line keeps the peak flat.
+        self.assertLess(
+            growth, extra_output // 10,
+            f'peak traced memory {small_peak:,} B for '
+            f'{small_lines * _LINE_BYTES:,} B of output, {large_peak:,} B for '
+            f'{large_lines * _LINE_BYTES:,} B of output: grew {growth:,} B '
+            f'for {extra_output:,} B more output.')
+
+    def test_no_outputs_does_not_retain_output(self):
+        self._assert_memory_flat_in_output_size(log_lib.run_with_log)
+
+    def test_no_outputs_in_context_does_not_retain_output(self):
+        self._assert_memory_flat_in_output_size(_run_with_log_in_context)
 
 
 if __name__ == '__main__':
