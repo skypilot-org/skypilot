@@ -92,36 +92,74 @@ def test_facade_reexports_match_db_all(facade_mod, db_mod):
     assert not missing, f'{facade_mod} missing re-exports of {missing}'
 
 
+# Prepended to subprocess scripts: hide the DB stack the way a client-only
+# install lacks it. Runs in a fresh interpreter because this pytest process
+# already imported sky and sqlalchemy.
+_HIDE_DB_STACK = textwrap.dedent("""
+    import sys
+
+    BLOCKED = ('sqlalchemy', 'sqlalchemy_adapter', 'alembic', 'psycopg2',
+               'asyncpg', 'aiosqlite', 'casbin', 'greenlet')
+
+    class _Block:
+        def find_spec(self, name, path=None, target=None):
+            if name.split('.')[0] in BLOCKED:
+                # ValueError: can_import_modules() treats it as absent,
+                # while a real import still fails loudly.
+                raise ValueError('client-only import of ' + name)
+
+    sys.meta_path.insert(0, _Block())
+""")
+
+
+def _run_without_db_stack(script: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, '-c', _HIDE_DB_STACK + textwrap.dedent(script)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False)
+
+
 def test_client_surface_imports_without_db_stack():
     """A client-only install (no DB stack) must import and run ``sky --help``.
 
     AST checks only cover a few facade files and direct ``sqlalchemy``
-    imports. This subprocess hides the DB packages via ``sys.meta_path`` in a
-    fresh interpreter (pytest already imported ``sky`` / ``sqlalchemy``).
+    imports; this catches any transitive import of the DB stack.
     """
-    script = textwrap.dedent("""
-        import sys
-
-        BLOCKED = ('sqlalchemy', 'sqlalchemy_adapter', 'alembic', 'psycopg2',
-                   'asyncpg', 'aiosqlite', 'casbin', 'greenlet')
-
-        class _Block:
-            def find_spec(self, name, path=None, target=None):
-                if name.split('.')[0] in BLOCKED:
-                    # ValueError: can_import_modules() treats it as absent,
-                    # while a real import still fails loudly.
-                    raise ValueError('client-only import of ' + name)
-
-        sys.meta_path.insert(0, _Block())
+    result = _run_without_db_stack("""
         import sky, sky.client.sdk
         from click.testing import CliRunner
         from sky.client.cli import command
         result = CliRunner().invoke(command.cli, ['--help'])
         assert result.exit_code == 0, result.output
     """)
-    result = subprocess.run([sys.executable, '-c', script],
-                            capture_output=True,
-                            text=True,
-                            timeout=120,
-                            check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_unavailable_database_manager_raises_install_hint():
+    manager = sqlalchemy_deps.UnavailableDatabaseManager()
+    with pytest.raises(ImportError, match=r'skypilot\[server\]'):
+        manager.get_engine()
+
+
+def test_client_db_api_calls_raise_install_hint():
+    """On a client-only install, DB APIs raise the install hint instead of
+    ``'NoneType' object has no attribute 'get_engine'``."""
+    result = _run_without_db_stack("""
+        from sky import global_user_state
+        from sky.recipes import db as recipes_db
+
+        for call in (
+                lambda: global_user_state.get_handle_from_storage_name('x'),
+                lambda: recipes_db.get_recipe('x'),
+                global_user_state.initialize_and_get_db,
+        ):
+            try:
+                call()
+            except ImportError as e:
+                assert 'skypilot[server]' in str(e), repr(e)
+            else:
+                raise AssertionError('expected the install hint')
+    """)
     assert result.returncode == 0, result.stdout + result.stderr

@@ -170,7 +170,7 @@ else:
     orm = None  # type: ignore
     declarative = None  # type: ignore
     Base = None  # type: ignore  # pylint: disable=invalid-name
-    _db_manager = None  # type: ignore
+    _db_manager = sqlalchemy_deps.UnavailableDatabaseManager()  # type: ignore
 
 # =============================================================================
 # Data classes

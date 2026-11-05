@@ -49,3 +49,15 @@ def require_sqlalchemy() -> None:
     """Raise ImportError when SQLAlchemy is missing or too old."""
     if not sqlalchemy_available():
         raise ImportError(SQLALCHEMY_INSTALL_MSG)
+
+
+class UnavailableDatabaseManager:
+    """Stands in for a DatabaseManager on a client-only install.
+
+    DB-backed modules bind this instead of None when SQLAlchemy is missing,
+    so a DB API called on a client fails with the install hint rather than
+    ``'NoneType' object has no attribute 'get_engine'``.
+    """
+
+    def __getattr__(self, name: str):
+        raise ImportError(SQLALCHEMY_INSTALL_MSG)
