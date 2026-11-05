@@ -55,6 +55,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.pbs import utils as pbs_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server import common as server_common
@@ -337,6 +338,7 @@ def _get_cluster_config_template(cloud):
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.Slurm: 'slurm-ray.yml.j2',
+        clouds.PBS: 'pbs-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Paperspace: 'paperspace-ray.yml.j2',
         clouds.PrimeIntellect: 'primeintellect-ray.yml.j2',
@@ -2778,7 +2780,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Returns whether this handle has gRPC enabled and gRPC flag is set."""
         return (env_options.Options.ENABLE_GRPC.get() and
                 self.is_grpc_enabled and
-                not isinstance(self.launched_resources.cloud, clouds.Slurm))
+                not isinstance(self.launched_resources.cloud,
+                               (clouds.Slurm, clouds.PBS)))
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
@@ -7157,6 +7160,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 slurm_job_id,
                 container_name,
             )
+        elif isinstance(handle.launched_resources.cloud, clouds.PBS):
+            assert (handle.cached_cluster_info
+                    is not None), ('cached_cluster_info must be set')
+            head_instance = handle.cached_cluster_info.get_head_instance()
+            assert (head_instance is not None), (
+                'Head instance not found in cached cluster info')
+            pbs_job_id = head_instance.tags.get('job_id')
+            assert (pbs_job_id
+                    is not None), ('job_id tag not found in head instance')
+            launched = handle.launched_resources.assert_launchable()
+            inst = pbs_utils.PbsInstanceType.from_instance_type(
+                launched.instance_type)
+            node_capacity = {
+                'CPU': float(inst.cpus),
+                'GPU': float(inst.accelerator_count or 0),
+            }
+            return task_codegen.PbsCodeGen(pbs_job_id, node_capacity)
         else:
             return task_codegen.RayCodeGen()
 
@@ -7165,7 +7185,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                task: task_lib.Task) -> Dict[str, float]:
         """Returns task demands for the handle's execution backend."""
         resources_dict = backend_utils.get_task_demands_dict(task)
-        if (not isinstance(handle.launched_resources.cloud, clouds.Slurm) or
+        # Slurm and PBS reserve CPUs per job themselves, so the demand must
+        # be the task's real CPU request.
+        if (not isinstance(handle.launched_resources.cloud,
+                           (clouds.Slurm, clouds.PBS)) or
                 task.is_controller_task()):
             return resources_dict
 

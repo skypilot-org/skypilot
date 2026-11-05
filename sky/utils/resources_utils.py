@@ -397,7 +397,7 @@ def format_resource(
         if mem_element is not None:
             elements_full.append(mem_element[1])
 
-    is_slurm = resource.cloud.canonical_name() == 'slurm'
+    is_slurm = resource.cloud.canonical_name() in ('slurm', 'pbs')
     if not is_k8s and not is_slurm:
         instance_type_full = resource.instance_type
         instance_type_simple = common_utils.truncate_long_string(

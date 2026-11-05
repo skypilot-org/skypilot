@@ -1,7 +1,7 @@
 """Canonical GPU names shared across backends (Kubernetes, Slurm, etc.)."""
 
 import re
-from typing import Optional
+from typing import List, Optional
 
 # Canonical GPU names for GPU detection and labeling.
 #
@@ -101,3 +101,113 @@ def get_gpu_device_memory_gib(name: str) -> Optional[int]:
         if base in _CANONICAL_GPU_MEMORY_GIB_LOWER:
             return int(match.group(1))
     return None
+
+
+# Vendor prefixes stripped during normalization for matching purposes.
+_GPU_VENDOR_PREFIXES = ('nvidia', 'amd', 'intel', 'tesla')
+
+
+def normalize_gpu_name(name: str) -> str:
+    """Normalize a GPU name for fuzzy comparison.
+
+    Strips vendor prefixes, normalizes separators, and lowercases. Used only
+    for matching, never for submission.
+
+    Examples:
+        'nvidia_h100_80gb_hbm3' -> 'h100-80gb-hbm3'
+        'H100'                -> 'h100'
+        'A100-SXM-80GB'       -> 'a100-sxm-80gb'
+    """
+    result = name.lower().replace('_', '-')
+    for prefix in _GPU_VENDOR_PREFIXES:
+        if result.startswith(prefix + '-'):
+            result = result[len(prefix) + 1:]
+            break
+    return result
+
+
+def is_segment_subsequence(segments_a: List[str],
+                           segments_b: List[str]) -> bool:
+    """Check if segments_a appears as an ordered subsequence of segments_b.
+
+    Each segment must match exactly (preventing e.g. 'l4' matching 'l40').
+
+    Examples:
+        (['h100'], ['h100', '80gb', 's'])          -> True
+        (['a100', '80gb'], ['a100', 'sxm4', '80gb']) -> True
+        (['v100', '32gb'], ['v100', 'pcie', '16gb']) -> False
+        (['l4'], ['l40'])                           -> False
+    """
+    # The iterator is stateful: once an element is consumed it won't be
+    # revisited, so matches are always found in left-to-right order.
+    b_iter = iter(segments_b)
+    for seg in segments_a:
+        for b_seg in b_iter:
+            if seg == b_seg:
+                break
+        else:
+            return False
+    return True
+
+
+def accelerator_name_matches(requested_acc: str, candidate_raw: str) -> bool:
+    """Check if a requested accelerator name matches a scheduler's raw type.
+
+    Matching rules (checked in order):
+    1. Case-insensitive exact match of raw strings.
+    2. Normalized forms are equal (vendor-prefix stripped, separators unified).
+    3. Segment subsequence: the shorter name's dash-segments appear in order
+       within the longer name's segments. Handles both prefix cases
+       (H100 ~ H100-80GB-S) and non-contiguous memory variants
+       (A100-80GB ~ A100-SXM4-80GB, V100-32GB ~ V100-PCIE-32GB).
+       Exact segment matching prevents false positives (L4 != L40).
+
+    Args:
+        requested_acc: The accelerator name requested by the user
+            (e.g. 'H100', 'A100-80GB').
+        candidate_raw: A raw GPU type string from the scheduler's node
+            metadata (e.g. 'NVIDIA_H100_80GB_HBM3').
+    """
+    if requested_acc.lower() == candidate_raw.lower():
+        return True
+    req_norm = normalize_gpu_name(requested_acc)
+    cand_norm = normalize_gpu_name(candidate_raw)
+    if req_norm == cand_norm:
+        return True
+    req_segments = req_norm.split('-')
+    cand_segments = cand_norm.split('-')
+    if len(req_segments) < len(cand_segments):
+        return is_segment_subsequence(req_segments, cand_segments)
+    if len(cand_segments) < len(req_segments):
+        return is_segment_subsequence(cand_segments, req_segments)
+    return False
+
+
+def canonicalize_raw_gpu_name(raw_name: str) -> str:
+    """Convert a scheduler's raw GPU type to a canonical display name.
+
+    Iterates CANONICAL_GPU_NAMES (most-specific first) and returns the
+    first canonical name whose normalized form matches the raw string.
+    Falls back to uppercasing.
+
+    Examples:
+        'nvidia_h100_80gb_hbm3'  -> 'H100-80GB'
+        'nvidia_a100_sxm4_80gb'  -> 'A100-80GB'
+        'nvidia_l40s'            -> 'L40S'
+        'H100'                   -> 'H100'
+        'unknown_custom_gpu'     -> 'UNKNOWN_CUSTOM_GPU'
+    """
+    raw_norm = normalize_gpu_name(raw_name)
+    raw_segments = raw_norm.split('-')
+    for canonical in CANONICAL_GPU_NAMES:
+        can_norm = normalize_gpu_name(canonical)
+        if can_norm == raw_norm:
+            return canonical
+        # One-directional (canonical into raw) because the list is ordered
+        # most-specific first: a reverse match would let 'H100' resolve to
+        # 'H100-80GB'.
+        can_segments = can_norm.split('-')
+        if len(can_segments) < len(raw_segments):
+            if is_segment_subsequence(can_segments, raw_segments):
+                return canonical
+    return raw_name.upper()
