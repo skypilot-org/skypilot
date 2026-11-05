@@ -821,8 +821,9 @@ ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 #     serve/serve_utils.py): consolidation is forced on.
 #   - server/common.py get_server_url(): always use the loopback endpoint.
 #   - "This API server was started by a controller": the server heartbeat skip
-#     (server/daemons.py) and the controller memory headroom
-#     (utils/controller_utils.py compute_memory_reserved_for_controllers).
+#     (server/daemons.py), the controller memory headroom
+#     (utils/controller_utils.py compute_memory_reserved_for_controllers) and
+#     the managed-job refresh thread skip (jobs/managed_job_refresh_thread.py).
 ENV_VAR_IN_CONTROLLER_PROCESS_TREE = 'IS_SKYPILOT_JOB_CONTROLLER'
 IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is

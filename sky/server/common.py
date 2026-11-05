@@ -910,9 +910,9 @@ def is_running_in_api_server() -> bool:
 
     This is the correct signal for "the API server is THIS process tree, so do
     not attempt to start a new local one." It is deliberately NOT
-    OVERRIDE_CONSOLIDATION_MODE ('IS_SKYPILOT_JOB_CONTROLLER'): that env is
-    exported by scheduler.start_controller() inside *both* the standalone and
-    the consolidation controller, so is_jobs_consolidation_mode() (in
+    ENV_VAR_IN_CONTROLLER_PROCESS_TREE ('IS_SKYPILOT_JOB_CONTROLLER'): that env
+    is exported by scheduler.start_controller() inside *both* the standalone
+    and the consolidation controller, so is_jobs_consolidation_mode() (in
     controller_utils) returns True unconditionally in every controller process.
     Gating auto-start on it would also skip the standalone controller, which
     *must* start a local API server on its own VM -- breaking non-consolidation
