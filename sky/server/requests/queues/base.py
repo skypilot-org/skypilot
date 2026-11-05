@@ -3,6 +3,7 @@
 import abc
 import multiprocessing
 import queue as queue_lib
+import threading
 import time
 from typing import List, Optional, Tuple
 
@@ -182,13 +183,19 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
                 'is already in use by another process.')
 
         queue_names = self._get_queue_names()
-        process = multiprocessing.Process(target=mp_queue.start_queue_manager,
-                                          args=(queue_names, self._port))
-        process.start()
+        # A thread of the API server process, so the queues live exactly as
+        # long as the server that dispatches them. A separate process can die
+        # alone, leaving the server up with no queue, or outlive the server
+        # and keep the port.
+        server = threading.Thread(target=mp_queue.start_queue_manager,
+                                  args=(queue_names, self._port),
+                                  name='request-queue-manager',
+                                  daemon=True)
+        server.start()
         mp_queue.wait_for_queues_to_be_ready(queue_names,
-                                             process,
+                                             server,
                                              port=self._port)
-        return process
+        return None
 
     @staticmethod
     def _get_queue_names() -> List[str]:
