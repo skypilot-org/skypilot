@@ -1,5 +1,6 @@
 """Unit tests for CloudVmRayBackend task configuration redaction and locking."""
 
+import contextlib
 import multiprocessing
 import socket
 import time
@@ -20,6 +21,7 @@ from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.utils import locks
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 
@@ -737,6 +739,164 @@ class TestCloudVmRayBackendTeardownNoLock:
 
         mock_run_on_head.assert_not_called()
         mock_get_yaml.assert_called_once_with(refreshed_handle.cluster_yaml)
+
+    # --- Record removed by the pre-teardown refresh -----------------------
+    #
+    # The status refresh inside teardown_no_lock removes the cluster row when
+    # the cloud reports zero nodes. For a cluster whose launch was just
+    # cancelled that report can be premature (the cancelled worker may still
+    # be creating the nodes), so a terminate must still issue the cloud-side
+    # teardown by name instead of returning early.
+
+    @contextlib.contextmanager
+    def _record_gone(self,
+                     backend,
+                     yaml_dict=None,
+                     yaml_error=None,
+                     teardown_error=None):
+        get_yaml_kwargs = ({
+            'side_effect': yaml_error
+        } if yaml_error else {
+            'return_value': yaml_dict or {
+                'provider': {
+                    'namespace': 'ns'
+                }
+            }
+        })
+        with patch(
+                'sky.backends.cloud_vm_ray_backend.requests_lib.'
+                'kill_cluster_requests'), patch(
+                    'sky.backends.cloud_vm_ray_backend.backend_utils.'
+                    'refresh_cluster_status_handle',
+                    return_value=(None, None)) as mock_refresh, patch(
+                        'sky.backends.cloud_vm_ray_backend.'
+                        'global_user_state.get_cluster_yaml_dict',
+                        **get_yaml_kwargs), patch(
+                            'sky.backends.cloud_vm_ray_backend'
+                            '.provisioner.teardown_cluster',
+                            side_effect=teardown_error) as mock_teardown, patch(
+                                'sky.backends.cloud_vm_ray_backend'
+                                '.provision_lib.cleanup_cluster_resources'
+                            ) as mock_cleanup, patch.object(
+                                backend,
+                                'post_teardown_cleanup') as mock_post_cleanup:
+            yield mock_refresh, mock_teardown, mock_cleanup, mock_post_cleanup
+
+    def test_record_gone_still_terminates_cloud_resources(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', '/tmp/c.yaml', has_ray=False)
+
+        with self._record_gone(backend) as (mock_refresh, mock_teardown,
+                                            mock_cleanup, mock_post_cleanup):
+            backend.teardown_no_lock(handle, terminate=True)
+
+        # An empty node list is retried on this path.
+        assert mock_refresh.call_args.kwargs['retry_if_missing'] is True
+        mock_teardown.assert_called_once()
+        args, kwargs = mock_teardown.call_args
+        assert args[1] == resources_utils.ClusterName('test-cluster',
+                                                      'test-cluster-on-cloud')
+        assert kwargs['terminate'] is True
+        assert kwargs['provider_config'] == {'namespace': 'ns'}
+        mock_cleanup.assert_called_once()
+        # The row is already gone; nothing to remove from the DB.
+        mock_post_cleanup.assert_not_called()
+
+    def test_record_gone_without_yaml_skips_quietly(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', None, has_ray=False)
+
+        with self._record_gone(backend) as (_, mock_teardown, mock_cleanup, _):
+            backend.teardown_no_lock(handle, terminate=True)
+
+        mock_teardown.assert_not_called()
+        mock_cleanup.assert_not_called()
+
+    def test_record_gone_stop_skips_quietly(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', '/tmp/c.yaml', has_ray=False)
+
+        with self._record_gone(backend) as (_, mock_teardown, _, _):
+            backend.teardown_no_lock(handle, terminate=False)
+
+        mock_teardown.assert_not_called()
+
+    def test_record_gone_unreadable_yaml_skips_quietly(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', '/tmp/c.yaml', has_ray=False)
+
+        with self._record_gone(
+                backend,
+                yaml_error=ValueError('not found')) as (_, mock_teardown, _, _):
+            backend.teardown_no_lock(handle, terminate=True)
+
+        mock_teardown.assert_not_called()
+
+    def test_record_gone_teardown_error_propagates(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', '/tmp/c.yaml', has_ray=False)
+
+        with self._record_gone(backend,
+                               teardown_error=RuntimeError('api error')):
+            with pytest.raises(RuntimeError, match='api error'):
+                backend.teardown_no_lock(handle, terminate=True)
+
+    def test_record_gone_teardown_error_swallowed_with_purge(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = self._make_handle('test-cluster', '/tmp/c.yaml', has_ray=False)
+
+        with self._record_gone(backend,
+                               teardown_error=RuntimeError('api error')):
+            backend.teardown_no_lock(handle, terminate=True, purge=True)
+
+
+class TestCloudVmRayBackendTeardownLockGrace:
+    """_teardown waits for a cancelled holder before force-unlocking."""
+
+    def _run_teardown(self, grace_lock_held: bool):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        handle = TestCloudVmRayBackendTeardownNoLock._make_handle(
+            'test-cluster', '/tmp/c.yaml', has_ray=False)
+        main_lock = MagicMock()
+        grace_lock = MagicMock()
+        if grace_lock_held:
+            grace_lock.__enter__.side_effect = locks.LockTimeout('held')
+        grace_timeout = (
+            cloud_vm_ray_backend._TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS)
+
+        def fake_get_lock(lock_id, timeout=None, **kwargs):
+            del lock_id, kwargs
+            return grace_lock if timeout == grace_timeout else main_lock
+
+        with patch('sky.backends.cloud_vm_ray_backend.backend_utils.'
+                   'check_owner_identity'), patch(
+                       'sky.backends.cloud_vm_ray_backend.requests_lib.'
+                       'kill_cluster_requests') as mock_kill, patch(
+                           'sky.backends.cloud_vm_ray_backend.locks.get_lock',
+                           side_effect=fake_get_lock), patch.object(
+                               backend, 'teardown_no_lock') as mock_teardown:
+            backend._teardown(handle, terminate=True)  # pylint: disable=protected-access
+        return mock_kill, main_lock, grace_lock, mock_teardown
+
+    def test_waits_for_holder_then_tears_down(self):
+        mock_kill, main_lock, grace_lock, mock_teardown = self._run_teardown(
+            grace_lock_held=False)
+
+        mock_kill.assert_called_once()
+        # The grace wait acquires (and immediately releases) the lock ...
+        grace_lock.__enter__.assert_called_once()
+        grace_lock.__exit__.assert_called_once()
+        # ... and the pre-existing force-unlock + teardown still follow.
+        assert main_lock.force_unlock.call_count >= 1
+        mock_teardown.assert_called_once()
+
+    def test_force_unlocks_when_holder_does_not_release(self):
+        _, main_lock, grace_lock, mock_teardown = self._run_teardown(
+            grace_lock_held=True)
+
+        grace_lock.__enter__.assert_called_once()
+        assert main_lock.force_unlock.call_count >= 1
+        mock_teardown.assert_called_once()
 
 
 class TestNewHandleRuntimeMetadata:

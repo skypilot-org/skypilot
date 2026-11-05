@@ -224,7 +224,8 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 def run_in_parallel(func: Callable,
                     args: Union[List[Any], Set[Any]],
-                    num_threads: Optional[int] = None) -> List[Any]:
+                    num_threads: Optional[int] = None,
+                    wait_for_running_on_error: bool = False) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     Args:
@@ -232,6 +233,12 @@ def run_in_parallel(func: Callable,
         args: Iterable of arguments to pass to func
         num_threads: Number of threads to use. If None, uses
           get_parallel_threads()
+        wait_for_running_on_error: If a call raises, or the caller is
+          interrupted (e.g. a cancelled request), wait for the calls that are
+          already running to return before raising. Calls that have not
+          started are skipped either way. Without this, the running calls
+          finish in the background after this function has raised, so
+          cleanup by the caller cannot see what they create.
 
     Returns:
       A list of the return values of the function func, in the same order as the
@@ -243,16 +250,28 @@ def run_in_parallel(func: Callable,
     # Short-circuit for short lists
     if len(args) == 0:
         return []
-    if len(args) == 1:
+    if len(args) == 1 and not wait_for_running_on_error:
+        # An interrupt would abort the call midway. With
+        # wait_for_running_on_error, run it in the pool below instead, so the
+        # call always completes before this returns or raises.
         return [func(list(args)[0])]
 
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
-    # len(args) is guaranteed to be greater than 1.
+    # len(args) is guaranteed to be at least 1.
     processes = min(processes, len(args))
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
-        return list(ordered_iterators)
+        try:
+            ordered_iterators = p.imap(func, args)
+            return list(ordered_iterators)
+        except BaseException:
+            if wait_for_running_on_error:
+                # terminate() drops the calls that have not started, and
+                # join() waits for the running ones. The pool's __exit__ only
+                # terminates.
+                p.terminate()
+                p.join()
+            raise
 
 
 def handle_returncode(returncode: int,

@@ -4,6 +4,7 @@ import multiprocessing
 import signal
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from unittest import mock
@@ -513,3 +514,77 @@ class TestKillChildrenProcessesTolerates(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+
+
+class TestRunInParallelWaitForRunningOnError:
+    """run_in_parallel(wait_for_running_on_error=True) must not raise while
+    calls it started are still running, so that the caller's cleanup (e.g.
+    tearing down a cancelled launch) sees everything those calls created."""
+
+    @staticmethod
+    def _calls(fail: BaseException):
+        """Call 0 fails while call 1 is still running."""
+        call_1_running = threading.Event()
+        finished = []
+
+        def func(i):
+            if i == 0:
+                assert call_1_running.wait(timeout=5)
+                raise fail
+            if i == 1:
+                call_1_running.set()
+                time.sleep(0.5)
+            finished.append(i)
+            return i
+
+        return func, finished
+
+    @pytest.mark.parametrize('wait', [False, True])
+    def test_waits_for_running_calls_when_a_call_fails(self, wait):
+        func, finished = self._calls(ValueError('create failed'))
+
+        with pytest.raises(ValueError, match='create failed'):
+            subprocess_utils.run_in_parallel(func, [0, 1],
+                                             num_threads=2,
+                                             wait_for_running_on_error=wait)
+
+        assert finished == ([1] if wait else [])
+        # Let a call left running in the background finish.
+        time.sleep(0.7)
+
+    @pytest.mark.parametrize('num_args', [1, 2])
+    def test_waits_for_running_calls_when_interrupted(self, num_args):
+        """A cancelled request is interrupted by a signal on the main thread
+        while it waits for the calls."""
+        if threading.current_thread() is not threading.main_thread():
+            pytest.skip('signals are only delivered to the main thread')
+        main_thread_id = threading.main_thread().ident
+        assert main_thread_id is not None
+        all_started = threading.Barrier(num_args)
+        finished = []
+
+        def func(i):
+            # Interrupt only once every call is running: a call that has not
+            # started when the interrupt lands is skipped.
+            all_started.wait(timeout=5)
+            if i == 0:
+                signal.pthread_kill(main_thread_id, signal.SIGUSR1)
+                time.sleep(0.5)
+            finished.append(i)
+            return i
+
+        def interrupt(signum, frame):
+            del signum, frame
+            raise KeyboardInterrupt
+
+        previous_handler = signal.signal(signal.SIGUSR1, interrupt)
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                subprocess_utils.run_in_parallel(func,
+                                                 list(range(num_args)),
+                                                 num_threads=num_args,
+                                                 wait_for_running_on_error=True)
+        finally:
+            signal.signal(signal.SIGUSR1, previous_handler)
+
+        assert sorted(finished) == list(range(num_args))
