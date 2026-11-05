@@ -28,6 +28,7 @@ def test_endpoint_metrics_carries_autoscaling_dashboard_series():
     joined = '\n'.join(metrics_utils.ENDPOINT_METRICS_MATCH_PATTERNS)
     # Serving-engine series + replica panels + the HPA threshold line.
     assert 'vllm:' in joined
+    assert 'sglang:' in joined
     assert 'kube_deployment_' in joined
     assert 'kube_horizontalpodautoscaler_spec_target_metric' in joined
 
