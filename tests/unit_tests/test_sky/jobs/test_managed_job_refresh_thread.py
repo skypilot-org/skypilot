@@ -600,3 +600,21 @@ class TestStart:
                     return_value=True):
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_called_once_with()
+
+    def test_skips_in_server_started_by_a_jobs_controller(self, monkeypatch):
+        """A local server started by a jobs controller never starts the thread.
+
+        On a standalone controller cluster, the controller's sdk.api_start()
+        starts a local API server that inherits IS_SKYPILOT_JOB_CONTROLLER,
+        so consolidation mode reads as on there. Skylet owns that machine's
+        controllers; controllers started by this server would inherit
+        IS_SKYPILOT_SERVER and never restart the server if it died.
+        """
+        monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', 'true')
+        with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
+                               'start') as start_mock, \
+                mock.patch(
+                    'sky.jobs.utils.is_consolidation_mode',
+                    return_value=True):
+            mjrt.start_managed_job_refresh_daemon()
+        start_mock.assert_not_called()
