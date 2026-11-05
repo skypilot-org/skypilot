@@ -1221,10 +1221,11 @@ class JobController:
         # the cluster status is.
         # Handle resume logic before starting the monitoring loop.
         # If resuming from a controller failure, check the previous state
-        # and determine if we need to force recovery.
+        # and determine if we need to force recovery. A task whose launch was
+        # continued above has just been recorded as running, like a fresh one.
         force_transit_to_recovering = False
         emergency_reattach = False
-        if is_resume:
+        if is_resume and resumed_launch_from is None:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
@@ -1242,11 +1243,7 @@ class JobController:
                     logger.info(f'Task {task_id} was being cancelled, '
                                 're-raising cancellation')
                     raise asyncio.CancelledError()
-            if resumed_launch_from is not None:
-                # Its launch was continued above: the job is on the cluster,
-                # and the monitor loop watches it like any started task.
-                logger.info(f'Task {task_id} continued its launch.')
-            elif prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+            if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 # Force recovery (cleanup + relaunch): the task was mid-launch
                 # or mid-recovery when the previous attempt stopped (a
                 # controller restart, or an emergency retry), and its launch
@@ -1273,6 +1270,9 @@ class JobController:
                     logger.info(f'Task {task_id} kept its cluster through an '
                                 'emergency; re-attaching to the job.')
 
+        if is_resume:
+            # Also after a continued launch: the executor is fresh, and
+            # on_resume loads the task's persisted state for monitoring.
             await self._strategy_executor.on_resume(cluster_name)
 
         logger.info('Started monitoring.')

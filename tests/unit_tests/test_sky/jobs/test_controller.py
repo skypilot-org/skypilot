@@ -1281,6 +1281,7 @@ class TestResumeContinuesLaunch:
         assert state['set_started_async'].await_args.kwargs[
             'start_time'] == 55.0
         state['set_recovered_async'].assert_not_awaited()
+        executor.on_resume.assert_awaited_once()
         monitor_kwargs = executor.monitor_task.await_args.kwargs
         assert monitor_kwargs['force_transit_to_recovering'] is False
 
@@ -1297,6 +1298,7 @@ class TestResumeContinuesLaunch:
         assert state['set_recovered_async'].await_args.kwargs[
             'recovered_time'] == 55.0
         state['set_started_async'].assert_not_awaited()
+        executor.on_resume.assert_awaited_once()
         monitor_kwargs = executor.monitor_task.await_args.kwargs
         assert monitor_kwargs['force_transit_to_recovering'] is False
 
