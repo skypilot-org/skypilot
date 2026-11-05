@@ -31,6 +31,10 @@ _FLUENTBIT_VERSION = '4.*'
 
 _FLUENTBIT_PACKAGES_URL = 'https://packages.fluentbit.io'
 
+# Exit status of the setup command when fluent-bit cannot be installed on the
+# node's platform at all. Distinct from apt-get's own error status (100).
+UNSUPPORTED_PLATFORM_EXIT_CODE = 87
+
 # Acquire::Retries=0: retrying inside apt multiplies the stall by the number of
 # index files it has to fetch. The retry that actually helps is the one that
 # changes mirror, which is done below. Acquire::*::Timeout is an *inactivity*
@@ -170,8 +174,13 @@ _APT_HELPERS = textwrap.dedent("""\
 # manager runs with a system loader environment: a conda or CUDA image can put
 # libraries on LD_LIBRARY_PATH or LD_PRELOAD that break dnf itself.
 _RPM_INSTALL = textwrap.dedent("""\
+    if [ ! -f /etc/os-release ]; then
+      echo "SkyPilot: cannot install fluent-bit: /etc/os-release is missing" >&2
+      exit %(unsupported)s
+    fi
     sky_rpm_mgr=$(command -v dnf || command -v yum || command -v microdnf)
     sky_rpm_os_id=$(. /etc/os-release && echo "$ID")
+    sky_rpm_os_like=$(. /etc/os-release && echo " $ID_LIKE ")
     sky_rpm_os_major=$(. /etc/os-release && echo "$VERSION_ID" | cut -d. -f1)
     case "$sky_rpm_os_id" in
       rocky) sky_rpm_repo=rockylinux/$sky_rpm_os_major ;;
@@ -179,9 +188,14 @@ _RPM_INSTALL = textwrap.dedent("""\
       centos|rhel|ol) sky_rpm_repo=centos/$sky_rpm_os_major ;;
       amzn) sky_rpm_repo=amazonlinux/$sky_rpm_os_major ;;
       *)
-        echo "SkyPilot: fluent-bit publishes no packages for" \\
-          "'$sky_rpm_os_id'" >&2
-        exit 1 ;;
+        case "$sky_rpm_os_like" in
+          *" rhel "*|*" centos "*)
+            sky_rpm_repo=centos/$sky_rpm_os_major ;;
+          *)
+            echo "SkyPilot: cannot install fluent-bit: no fluent-bit" \\
+              "packages for '$sky_rpm_os_id'" >&2
+            exit %(unsupported)s ;;
+        esac ;;
     esac
     printf '%%s\\n' '[fluent-bit]' 'name=Fluent Bit' \\
       "baseurl=%(url)s/$sky_rpm_repo/" gpgcheck=1 repo_gpgcheck=1 \\
@@ -193,7 +207,47 @@ _RPM_INSTALL = textwrap.dedent("""\
     """) % {
     'url': _FLUENTBIT_PACKAGES_URL,
     'version': _FLUENTBIT_VERSION,
+    'unsupported': UNSUPPORTED_PLATFORM_EXIT_CODE,
 }
+
+# Installs fluent-bit unless the node already has it. Exits
+# UNSUPPORTED_PLATFORM_EXIT_CODE when the node's platform cannot get it.
+_INSTALL_FLUENTBIT = (
+    # pylint: disable=line-too-long
+    'if ! command -v fluent-bit >/dev/null 2>&1 && [ ! -f /opt/fluent-bit/bin/fluent-bit ]; then\n'
+    # Root images often ship without sudo.
+    'sky_sudo=sudo\n'
+    'if [ "$(id -u)" -eq 0 ]; then sky_sudo=""; fi\n'
+    'if [ -n "$sky_sudo" ] && ! command -v sudo >/dev/null 2>&1; then\n'
+    'echo "SkyPilot: cannot install fluent-bit: not root and no sudo" >&2\n'
+    f'exit {UNSUPPORTED_PLATFORM_EXIT_CODE}\n'
+    'fi\n'
+    'if command -v apt-get >/dev/null 2>&1; then\n'
+    f'{_APT_HELPERS}'
+    'case "$sky_apt_os_id" in\n'
+    'ubuntu|debian|raspbian) ;;\n'
+    '*) echo "SkyPilot: cannot install fluent-bit: no fluent-bit packages'
+    ' for \'$sky_apt_os_id\'" >&2\n'
+    f'exit {UNSUPPORTED_PLATFORM_EXIT_CODE} ;;\n'
+    'esac\n'
+    'sky_apt_update\n'
+    'sky_apt_install gnupg\n'
+    # pylint: disable=line-too-long
+    f'$sky_sudo sh -c \'curl -L {_FLUENTBIT_PACKAGES_URL}/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'\n'
+    # pylint: disable=line-too-long
+    f'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] {_FLUENTBIT_PACKAGES_URL}/$sky_apt_os_id/$sky_apt_codename $sky_apt_codename main" | $sky_sudo tee /etc/apt/sources.list.d/fluent-bit.list\n'
+    'sky_apt_update\n'
+    f'sky_apt_install "fluent-bit={_FLUENTBIT_VERSION}"\n'
+    'elif command -v dnf >/dev/null 2>&1 || '
+    'command -v yum >/dev/null 2>&1 || '
+    'command -v microdnf >/dev/null 2>&1; then\n'
+    f'{_RPM_INSTALL}'
+    'else\n'
+    'echo "SkyPilot: cannot install fluent-bit: no apt-get, dnf or yum on'
+    ' this node" >&2\n'
+    f'exit {UNSUPPORTED_PLATFORM_EXIT_CODE}\n'
+    'fi\n'
+    'fi')
 
 
 class LoggingAgent(abc.ABC):
@@ -220,32 +274,7 @@ class FluentbitAgent(LoggingAgent):
 
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:
-        install_cmd = (
-            # pylint: disable=line-too-long
-            'if ! command -v fluent-bit >/dev/null 2>&1 && [ ! -f /opt/fluent-bit/bin/fluent-bit ]; then\n'
-            # Root images often ship without sudo.
-            'sky_sudo=sudo\n'
-            'if [ "$(id -u)" -eq 0 ]; then sky_sudo=""; fi\n'
-            'if command -v apt-get >/dev/null 2>&1; then\n'
-            f'{_APT_HELPERS}'
-            'sky_apt_update\n'
-            'sky_apt_install gnupg\n'
-            # pylint: disable=line-too-long
-            f'$sky_sudo sh -c \'curl -L {_FLUENTBIT_PACKAGES_URL}/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'\n'
-            # pylint: disable=line-too-long
-            f'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] {_FLUENTBIT_PACKAGES_URL}/$sky_apt_os_id/$sky_apt_codename $sky_apt_codename main" | $sky_sudo tee /etc/apt/sources.list.d/fluent-bit.list\n'
-            'sky_apt_update\n'
-            f'sky_apt_install "fluent-bit={_FLUENTBIT_VERSION}"\n'
-            'elif command -v dnf >/dev/null 2>&1 || '
-            'command -v yum >/dev/null 2>&1 || '
-            'command -v microdnf >/dev/null 2>&1; then\n'
-            f'{_RPM_INSTALL}'
-            'else\n'
-            'echo "SkyPilot: cannot install fluent-bit: no apt-get, dnf or'
-            ' yum on this node" >&2\n'
-            'exit 1\n'
-            'fi\n'
-            'fi')
+        install_cmd = _INSTALL_FLUENTBIT
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')
         config_cmd = (

@@ -19,6 +19,7 @@ from sky import provision
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky.logs import agent as logs_agent
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -1001,6 +1002,10 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
             common_file_mounts, cluster_info.provider_name))
 
 
+class LoggingAgentUnsupportedError(RuntimeError):
+    """The logging agent cannot be installed on a node's platform."""
+
+
 @common.log_function_start_end
 @timeline.event
 def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
@@ -1011,7 +1016,8 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
     _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
                           'logging_setup')
 
-    @_auto_retry()
+    @_auto_retry(
+        should_retry=lambda e: not isinstance(e, LoggingAgentUnsupportedError))
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         cmd = logging_agent.get_setup_command(cluster_name)
         logger.info(f'Running command on node: {cmd}')
@@ -1022,6 +1028,15 @@ def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
             log_path=log_path,
             source_bashrc=True,
             timeout=_setup_command_timeout())
+        if returncode == logs_agent.UNSUPPORTED_PLATFORM_EXIT_CODE:
+            reason = [
+                line[len('SkyPilot: '):]
+                for line in stderr.splitlines()
+                if line.startswith('SkyPilot: ')
+            ]
+            raise LoggingAgentUnsupportedError(
+                reason[-1]
+                if reason else 'cannot install fluent-bit on this node')
         if returncode:
             raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '
