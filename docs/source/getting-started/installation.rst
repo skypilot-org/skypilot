@@ -69,14 +69,12 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
 .. note::
 
-  **Which extras do I need?**
+  ``pip install skypilot`` installs the SkyPilot client only, which can connect
+  to a :ref:`remote API server <sky-api-server-remote>`.
 
-  - **Run SkyPilot on this machine** (the default): install the extras for the
-    clouds you use, e.g. ``skypilot[kubernetes,aws,gcp]``, or ``skypilot[all]``.
-    Every cloud extra includes what the local API server needs.
-  - **Only connect to a** :ref:`remote API server <sky-api-server-remote>`:
-    plain ``skypilot`` (no extras) is enough. It is a lightweight client that
-    cannot start a local API server.
+  To run SkyPilot on your own machine, which starts a local API server, install
+  it with the clouds you want to use, e.g.
+  ``pip install "skypilot[kubernetes,aws,gcp]"``.
 
 .. dropdown:: Install SkyPilot from nightly build or source
 
@@ -153,8 +151,6 @@ SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, o
 
 **To run SkyPilot locally:**
 
-Install SkyPilot with at least one cloud extra (e.g. ``skypilot[aws]``); plain
-``skypilot`` without extras cannot start a local API server.
 Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the necessary dependencies for the clouds you want to use.
 
 .. tip::
