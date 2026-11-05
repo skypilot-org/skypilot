@@ -322,8 +322,8 @@ def list_kube_config_contexts():
         try:
             result = kubernetes.config.list_kube_config_contexts(config_file)
         except kubernetes.config.config_exception.ConfigException as e:
-            # Kept without its traceback, which holds the parsed files.
-            result = e.with_traceback(None)
+            # A copy never raised: no traceback or context to keep alive.
+            result = type(e)(*e.args)
         # A file that changed during the parse may hold either version.
         if _fingerprint(config_file) == fingerprint:
             with _contexts_cache_lock:

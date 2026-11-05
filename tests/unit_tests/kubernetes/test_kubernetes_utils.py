@@ -619,10 +619,14 @@ def test_unusable_kubeconfig_raises_on_every_call(tmp_path, monkeypatch,
     parses = []
     monkeypatch.setattr(config, 'list_kube_config_contexts',
                         lambda p: parses.append(1) or real(p))
+    raised = []
     for _ in range(2):
-        with pytest.raises(config.config_exception.ConfigException):
+        with pytest.raises(config.config_exception.ConfigException) as e:
             kubernetes_adaptor.list_kube_config_contexts()
+        raised.append(e.value)
     assert len(parses) == 1
+    # A fresh exception each time, so tracebacks do not pile up on one.
+    assert raised[0] is not raised[1]
     # The in-cluster fallback depends on the exception.
     monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: True)
     monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
@@ -644,6 +648,27 @@ def test_current_context_is_not_parsed_per_request(tmp_path, monkeypatch):
         annotations.clear_request_level_cache()
         assert utils.get_current_kube_config_context_name() == 'ctx-a'
     assert len(parses) == 1
+
+
+def test_cached_config_exception_keeps_nothing_alive(tmp_path, monkeypatch):
+    monkeypatch.setenv('KUBECONFIG', str(tmp_path / 'missing'))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+
+    def parse_while_handling_another_error(path):
+        try:
+            raise ValueError('unrelated')
+        except ValueError:
+            return real(path)
+
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        parse_while_handling_another_error)
+    with pytest.raises(config.config_exception.ConfigException):
+        kubernetes_adaptor.list_kube_config_contexts()
+    # pylint: disable-next=protected-access
+    (cached,) = kubernetes_adaptor._contexts_cache.values()
+    assert cached.__traceback__ is None
+    assert cached.__context__ is None
 
 
 @pytest.mark.parametrize('changed_to', ['a:b', 'a'])
