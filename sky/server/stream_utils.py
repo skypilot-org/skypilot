@@ -2,6 +2,7 @@
 
 import asyncio
 import collections
+import os
 import pathlib
 import random
 from typing import Any, AsyncGenerator, Deque, List, Optional
@@ -28,6 +29,9 @@ _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
 _READ_CHUNK_SIZE = 256 * 1024  # 256KB chunks for file reading
+# Leading bytes of a followed file that must stay the same. If they change, the
+# file was truncated and has grown again.
+_HEAD_CHECK_BYTES = 64
 
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
@@ -458,6 +462,10 @@ async def _tail_log_file(
         for line_str in lines:
             yield line_str
 
+    # Bytes consumed so far, and the first bytes of the file, to notice a file
+    # that was truncated in place.
+    read_offset = await f.tell()
+    log_head = os.pread(f.fileno(), _HEAD_CHECK_BYTES, 0)
     last_heartbeat_time = asyncio.get_event_loop().time()
     last_status_check_time = asyncio.get_event_loop().time()
     status_check_interval = _StatusCheckInterval(polling_interval)
@@ -496,6 +504,7 @@ async def _tail_log_file(
 
         # Read file in chunks for better I/O performance
         file_chunk: bytes = await f.read(_READ_CHUNK_SIZE)
+        read_offset += len(file_chunk)
         if not file_chunk:
             # Process any remaining incomplete line
             if incomplete_line:
@@ -570,6 +579,16 @@ async def _tail_log_file(
                 # The below checks (cluster status, heartbeat) are not needed
                 # for non-follow logs.
                 break
+            # server.log is capped by truncating it in place. After that, the
+            # file is shorter than the read offset, or it already grew past
+            # the offset with new content. In both cases, start over.
+            fd = f.fileno()
+            head = os.pread(fd, _HEAD_CHECK_BYTES, 0)
+            if (os.fstat(fd).st_size < read_offset or
+                    not head.startswith(log_head)):
+                await f.seek(0)
+                read_offset = 0
+            log_head = head
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
             if cluster_name is not None:
