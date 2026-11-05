@@ -17,6 +17,7 @@ import {
   InfrastructureSection,
   slurmRequestableCounts,
   countUpSlurmNodes,
+  sortContextsByLoadState,
 } from '@/components/infra';
 
 // The infrastructure table renders one sub-row per GPU type. A Slurm cluster
@@ -432,5 +433,97 @@ describe('InfrastructureSection inactive (not-enabled) context rows', () => {
     });
     expect(tableRows(container)).toHaveLength(1);
     expect(container.textContent).not.toContain('not enabled');
+  });
+});
+
+describe('sortContextsByLoadState', () => {
+  const contexts = ['a-loading', 'b-ok', 'c-dead', 'd-ok', 'e-loading'];
+  const loadedContexts = new Set(['b-ok', 'c-dead', 'd-ok']);
+  const contextErrors = { 'c-dead': 'Timed out' };
+
+  it('orders loaded, then failed, then loading, keeping input order', () => {
+    expect(
+      sortContextsByLoadState(contexts, { contextErrors, loadedContexts })
+    ).toEqual(['b-ok', 'd-ok', 'c-dead', 'a-loading', 'e-loading']);
+  });
+
+  it('ranks a failed context below loaded ones even if not marked loaded', () => {
+    expect(
+      sortContextsByLoadState(['x', 'y'], {
+        contextErrors: { x: 'boom' },
+        loadedContexts: new Set(['y']),
+      })
+    ).toEqual(['y', 'x']);
+  });
+
+  it('uses isContextLoading when given', () => {
+    expect(
+      sortContextsByLoadState(['p', 'q'], {
+        contextErrors: { p: 'boom' },
+        isContextLoading: () => false,
+      })
+    ).toEqual(['q', 'p']);
+  });
+
+  it('does not mutate its input', () => {
+    const input = [...contexts];
+    sortContextsByLoadState(input, { contextErrors, loadedContexts });
+    expect(input).toEqual(contexts);
+  });
+});
+
+describe('InfrastructureSection context row order', () => {
+  const gpuRow = (context) => [
+    { gpu_name: 'H100', gpu_total: 8, gpu_free: 8, context },
+  ];
+
+  it('puts healthy rows first, then failed, then loading', () => {
+    const { container } = renderSection({
+      title: 'Kubernetes',
+      contexts: ['ctx-dead', 'ctx-a', 'ctx-loading', 'ctx-b'],
+      gpus: [{ gpu_name: 'H100', gpu_total: 16, gpu_free: 16 }],
+      groupedPerContextGPUs: {
+        'ctx-a': gpuRow('ctx-a'),
+        'ctx-b': gpuRow('ctx-b'),
+      },
+      groupedPerNodeGPUs: {},
+      loadedContexts: new Set(['ctx-dead', 'ctx-a', 'ctx-b']),
+      contextErrors: { 'ctx-dead': 'Timed out' },
+    });
+    const order = tableRows(container)
+      .map((row) => row.querySelector('.cursor-pointer'))
+      .filter(Boolean)
+      .map((el) => normalize(el));
+    expect(order.map((t) => t.split(' ')[0])).toEqual([
+      'ctx-a',
+      'ctx-b',
+      'ctx-dead',
+      'ctx-loading',
+    ]);
+  });
+});
+
+describe('InfrastructureSection refreshing overlay', () => {
+  const PROPS = {
+    title: 'Kubernetes',
+    contexts: ['fast', 'slow'],
+    gpus: [],
+    groupedPerContextGPUs: {},
+    groupedPerNodeGPUs: {},
+  };
+  const overlay = (container) =>
+    container.querySelector('.infra-table-refreshing');
+
+  it('does not dim the table while a single context is still loading', () => {
+    const { container } = renderSection({
+      ...PROPS,
+      loadedContexts: new Set(['fast']),
+    });
+    expect(overlay(container)).toBeNull();
+  });
+
+  it('dims the table while the whole section reloads', () => {
+    const { container } = renderSection({ ...PROPS, isLoading: true });
+    expect(overlay(container)).not.toBeNull();
   });
 });
