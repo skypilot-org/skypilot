@@ -43,6 +43,8 @@ def _node(gpu_name, gpu_count, efa_count, label_key=_GPU_LABEL):
     if efa_count is not None:
         allocatable[_EFA_RESOURCE] = str(efa_count)
     node.status.allocatable = allocatable
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
     return node
 
 
@@ -132,6 +134,20 @@ def test_matching_accelerator_among_several_warm_nodes():
     assert meta == {
         'efa_count': 1
     }, (f'should have used the l4 node, not the h100 one; got {meta}')
+
+
+@pytest.mark.parametrize('not_ready, cordoned', [(True, False), (False, True)])
+def test_unavailable_matching_node_does_not_hide_a_schedulable_node(
+        not_ready, cordoned):
+    """A NotReady or cordoned node must not determine the EFA request."""
+    unavailable = _node('l4', 8, None)
+    unavailable.is_ready.return_value = not not_ready
+    unavailable.is_cordoned.return_value = cordoned
+    _, meta = _detect([unavailable, _node('l4', 8, 1)],
+                      acc_type='L4',
+                      acc_count=8,
+                      label_values=['l4'])
+    assert meta == {'efa_count': 1}
 
 
 @pytest.mark.parametrize('label_value', ['', 'not-an-accelerator'])
