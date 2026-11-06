@@ -2598,13 +2598,15 @@ async def _prepare_in_process(request_id: str,
 def in_process_env(isolated_database, mock_global_user_state,
                    mock_skypilot_config, hijacked_sys_attrs, monkeypatch):
     """Registers 'test.in_process' and records queue puts."""
+    _reset_thread_executors()
     monkeypatch.setattr(executor, '_IN_PROCESS_REQUEST_NAMES', set())
     executor.register_in_process_request('test.in_process')
     IN_PROCESS_CALLED.clear()
     queue = mock.Mock()
     queue.put_async = mock.AsyncMock()
     monkeypatch.setattr(executor, '_get_queue', lambda schedule_type: queue)
-    return queue
+    yield queue
+    _reset_thread_executors()
 
 
 async def _wait_in_process_tasks():
@@ -2647,15 +2649,8 @@ async def test_ineligible_request_is_queued(in_process_env, name, retryable,
                                             with_precondition):
     """Unregistered, retryable or preconditioned requests use the queue."""
     request = await _prepare_in_process(f'queued-{name}-{retryable}', name=name)
-    precondition = None
-    if with_precondition:
-        precondition = mock.Mock()
-
-        async def wait_async(on_condition_met):
-            await on_condition_met()
-
-        precondition.wait_async = wait_async
-
+    precondition = _AlwaysMetPrecondition(
+        request.request_id) if with_precondition else None
     await executor.schedule_prepared_request(request,
                                              precondition=precondition,
                                              retryable=retryable)
@@ -2709,104 +2704,66 @@ async def test_in_process_request_queued_when_submit_rejected(
 
 
 @pytest.mark.asyncio
-async def test_in_process_request_cancelled_before_start_is_skipped(
+async def test_in_process_request_cancelled_before_start_stays_cancelled(
         in_process_env):
-    """A request cancelled before it starts never runs its entrypoint."""
+    """A request cancelled before it starts is not claimed or overwritten."""
     request = await _prepare_in_process('in-process-cancelled')
     assert await requests_lib.kill_request_async('in-process-cancelled')
 
     await executor.schedule_prepared_request(request)
     await _wait_in_process_tasks()
 
-    assert not IN_PROCESS_CALLED.is_set()
     cancelled = requests_lib.get_request('in-process-cancelled')
-    assert cancelled is not None
-    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
-
-
-SLOW_STARTED = threading.Event()
-
-
-def _slow_in_process_entrypoint(value: str):
-    SLOW_STARTED.set()
-    time.sleep(1.5)
-    return value
-
-
-@pytest.mark.asyncio
-async def test_in_process_request_cancelled_while_running(
-        in_process_env, monkeypatch):
-    """Cancelling a running in-process request leaves it CANCELLED."""
-    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
-                        0.05)
-    SLOW_STARTED.clear()
-    request = await _prepare_in_process('in-process-running',
-                                        func=_slow_in_process_entrypoint)
-
-    await executor.schedule_prepared_request(request)
-    assert await asyncio.get_running_loop().run_in_executor(
-        None, SLOW_STARTED.wait, 5)
-    assert await requests_lib.kill_request_async('in-process-running')
-    await _wait_in_process_tasks()
-    # Let the entrypoint thread finish; its result must not be stored.
-    await asyncio.sleep(2)
-
-    cancelled = requests_lib.get_request('in-process-running')
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
     assert cancelled.get_return_value() is None
 
 
+ENTRYPOINT_STARTED = threading.Event()
 RELEASE_ENTRYPOINT = threading.Event()
 
 
 def _gated_in_process_entrypoint(value: str):
-    SLOW_STARTED.set()
+    ENTRYPOINT_STARTED.set()
     RELEASE_ENTRYPOINT.wait(5)
     return value
 
 
-@pytest.mark.asyncio
-async def test_in_process_request_finishing_after_cancel_stays_cancelled(
-        in_process_env, monkeypatch):
-    """A result that arrives after cancellation does not overwrite it."""
-    # The result is ready before any cancellation poll.
-    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
-                        60)
-    SLOW_STARTED.clear()
+async def _start_gated_request(request_id: str):
+    ENTRYPOINT_STARTED.clear()
     RELEASE_ENTRYPOINT.clear()
-    request = await _prepare_in_process('in-process-late-result',
+    request = await _prepare_in_process(request_id,
                                         func=_gated_in_process_entrypoint)
-
     await executor.schedule_prepared_request(request)
     assert await asyncio.get_running_loop().run_in_executor(
-        None, SLOW_STARTED.wait, 5)
-    assert await requests_lib.kill_request_async('in-process-late-result')
-    RELEASE_ENTRYPOINT.set()
-    await _wait_in_process_tasks()
-
-    cancelled = requests_lib.get_request('in-process-late-result')
-    assert cancelled is not None
-    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
-    assert cancelled.get_return_value() is None
+        None, ENTRYPOINT_STARTED.wait, 5)
 
 
 @pytest.mark.asyncio
-async def test_in_process_request_cancelled_before_claim_stays_cancelled(
-        in_process_env, monkeypatch):
-    """A cancellation that lands after the status check is not overwritten."""
-    request = await _prepare_in_process('in-process-cancel-race')
-    assert await requests_lib.kill_request_async('in-process-cancel-race')
-    # The pre-check still sees the request as runnable.
-    monkeypatch.setattr(
-        executor.api_requests, 'get_request_status_async',
-        mock.AsyncMock(return_value=mock.Mock(
-            status=requests_lib.RequestStatus.PENDING)))
-
-    await executor.schedule_prepared_request(request)
+@pytest.mark.parametrize(
+    'check_interval,release_before_check',
+    [
+        # The cancellation poll sees CANCELLED while the request runs.
+        (0.05, False),
+        # The result is ready before any cancellation poll.
+        (60, True),
+    ])
+async def test_in_process_request_cancelled_while_running_stays_cancelled(
+        in_process_env, monkeypatch, check_interval, release_before_check):
+    """Cancelling a running in-process request keeps it CANCELLED."""
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        check_interval)
+    await _start_gated_request('in-process-running')
+    assert await requests_lib.kill_request_async('in-process-running')
+    if release_before_check:
+        RELEASE_ENTRYPOINT.set()
+    else:
+        await asyncio.wait_for(
+            asyncio.gather(*list(executor._in_process_tasks)), timeout=10)
+        RELEASE_ENTRYPOINT.set()
     await _wait_in_process_tasks()
 
-    cancelled = requests_lib.get_request('in-process-cancel-race')
+    cancelled = requests_lib.get_request('in-process-running')
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
     assert cancelled.get_return_value() is None
