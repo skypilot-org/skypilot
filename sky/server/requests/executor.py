@@ -128,6 +128,9 @@ _COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS = 0.5
 _IN_PROCESS_REQUEST_NAMES: Set[str] = set()
 # Keeps in-process request tasks alive until they finish.
 _in_process_tasks: Set[asyncio.Task] = set()
+# Per server process; keeps most of the request thread executor for log
+# streaming and auth lookups, which have no queue to fall back to.
+_MAX_IN_PROCESS_REQUESTS = 16
 
 
 def register_in_process_request(request_name: str) -> None:
@@ -135,7 +138,8 @@ def register_in_process_request(request_name: str) -> None:
 
     A registered request skips the request queue and runs in the request
     thread executor of the server process that receives it; it falls back to
-    the queue when that executor has no free thread. Clients still get a
+    the queue when that process already runs _MAX_IN_PROCESS_REQUESTS
+    in-process requests or the executor has no free thread. Clients still get a
     request ID and fetch the result with /api/get. Only register short,
     read-only requests that are safe to run concurrently with other requests
     in one process: no process-global state, and helper threads must carry
@@ -152,7 +156,9 @@ def register_in_process_request(request_name: str) -> None:
                                   request_name)
 
 
-def _has_request_thread_available() -> bool:
+def _has_in_process_capacity() -> bool:
+    if len(_in_process_tasks) >= _MAX_IN_PROCESS_REQUESTS:
+        return False
     try:
         get_request_thread_executor().check_available()
     except exceptions.ConcurrentWorkerExhaustedError:
@@ -1362,8 +1368,22 @@ async def _execute_request_coroutine(
     assert ctx is not None, 'Context is not initialized'
     request_id = request.request_id
     status = api_requests.RequestStatus
-    if not await api_requests.transition_request_status_async(
-            request_id, status.executable_statuses(), status.RUNNING):
+    claim = asyncio.ensure_future(
+        api_requests.transition_request_status_async(
+            request_id, status.executable_statuses(), status.RUNNING))
+    try:
+        claimed = await asyncio.shield(claim)
+    except asyncio.CancelledError:
+        # The claim may still commit RUNNING; let it settle first.
+        await asyncio.wait({claim})
+        await api_requests.set_request_cancelled_async(request_id)
+        return
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to start request {request_id}: '
+                     f'{common_utils.format_exception(e)}')
+        await api_requests.set_request_failed_async(request_id, e)
+        return
+    if not claimed:
         logger.info(f'Request {request_id} is no longer executable, skipping')
         return
     logger.info(f'Executing request {request_id} in coroutine')
@@ -1654,7 +1674,7 @@ async def schedule_prepared_request(request_task: api_requests.Request,
         preconditions.background_tasks.add(task)
         task.add_done_callback(preconditions.background_tasks.discard)
     elif (not retryable and request_task.name in _IN_PROCESS_REQUEST_NAMES and
-          _has_request_thread_available()):
+          _has_in_process_capacity()):
         task = asyncio.create_task(
             _execute_request_coroutine(request_task,
                                        ignore_return_value=ignore_return_value,
