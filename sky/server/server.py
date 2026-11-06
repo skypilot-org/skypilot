@@ -690,14 +690,13 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
                 # The row may be cached: later hits must see it as fresh.
                 token_row['last_used_at'] = int(now)
-                sa_token_cache.run_in_background(
+                asyncio_utils.run_in_background(
                     _update_token_last_used(token_row['token_id']))
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,
                                     name=user_name or user_info.name)
             request.state.auth_user = auth_user
-            executor.remember_request_user(auth_user, user_info)
 
             logger.debug(f'Authenticated service account: {user_id}')
 
@@ -3259,32 +3258,40 @@ async def api_get(request: fastapi.Request,
     request_id = await get_expanded_request_id(
         request_id, scope_user_id=role_filter.request_owner_scope(request))
 
+    request_task: Optional[requests_lib.Request] = None
     in_process_done = executor.get_in_process_completion(request_id)
     if in_process_done is not None:
         metrics_utils.count_request_get_wait('signal')
         await in_process_done.wait()
+        request_task = await requests_lib.get_request_async(request_id)
+        if (request_task is not None and
+                request_task.status <= requests_lib.RequestStatus.RUNNING):
+            # Handed to the request queue instead of finishing here.
+            request_task = None
     else:
         metrics_utils.count_request_get_wait('poll')
-    # Exponential backoff: start fast (10ms) for short requests like
-    # status/queue, then back off to 100ms for long requests like
-    # launch/exec.
-    poll_interval = 0.01
-    while True:
-        req_status = await requests_lib.get_request_status_async(request_id)
-        if req_status is None:
-            print(f'No task with request ID {request_id}', flush=True)
-            raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id!r} not found')
-        if (req_status.status == requests_lib.RequestStatus.RUNNING and
-                daemons.is_daemon_request_id(request_id)):
-            # Daemon requests run forever, break without waiting for complete.
-            break
-        if req_status.status > requests_lib.RequestStatus.RUNNING:
-            break
-        await asyncio.sleep(poll_interval)
-        # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
-        poll_interval = min(poll_interval * 2, 0.1)
-    request_task = await requests_lib.get_request_async(request_id)
+    if request_task is None:
+        # Exponential backoff: start fast (10ms) for short requests like
+        # status/queue, then back off to 100ms for long requests like
+        # launch/exec.
+        poll_interval = 0.01
+        while True:
+            req_status = await requests_lib.get_request_status_async(request_id)
+            if req_status is None:
+                print(f'No task with request ID {request_id}', flush=True)
+                raise fastapi.HTTPException(
+                    status_code=404, detail=f'Request {request_id!r} not found')
+            if (req_status.status == requests_lib.RequestStatus.RUNNING and
+                    daemons.is_daemon_request_id(request_id)):
+                # Daemon requests run forever, break without waiting for
+                # complete.
+                break
+            if req_status.status > requests_lib.RequestStatus.RUNNING:
+                break
+            await asyncio.sleep(poll_interval)
+            # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
+            poll_interval = min(poll_interval * 2, 0.1)
+        request_task = await requests_lib.get_request_async(request_id)
     # Stamp the request name so PrometheusMiddleware can record this /api/get
     # call's latency broken out by request type (see
     # SKY_APISERVER_REQUEST_GET_DURATION_SECONDS). Set on every non-404 outcome

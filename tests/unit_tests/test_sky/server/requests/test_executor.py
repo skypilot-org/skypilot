@@ -14,7 +14,6 @@ from typing import List, Optional
 from unittest import mock
 import weakref
 
-import cachetools
 import pytest
 
 from sky import exceptions
@@ -2772,80 +2771,46 @@ async def test_in_process_request_cancelled_while_running_stays_cancelled(
 
 
 @pytest.fixture()
-def counted_user_upsert(monkeypatch):
-    """Stubs the override's dependencies and counts users-table upserts."""
-    monkeypatch.setattr('sky.server.common.reload_for_new_request', mock.Mock())
-    monkeypatch.setattr(
-        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
-        mock.Mock())
-    monkeypatch.setattr(executor, '_seed_role_if_missing', mock.Mock())
+def counted_user_upsert(stub_override_request_env_deps, monkeypatch):
+    """Counts users-table upserts and role seeds of the override."""
     upserts = []
 
     def fake_add_or_update_user(user, return_user=False, **kwargs):
         del kwargs
-        upserts.append(user.name)
-        row = models.User(id=user.id, name=user.name)
-        return (True, row) if return_user else True
+        upserts.append(user.id)
+        return (True, user) if return_user else True
 
     monkeypatch.setattr('sky.global_user_state.add_or_update_user',
                         fake_add_or_update_user)
+    monkeypatch.setattr(executor, '_seed_role_if_missing', mock.Mock())
     return upserts
 
 
-def _run_override_as(user_id: str, user_name: str) -> None:
+def _run_override(authenticated: bool) -> None:
     body = payloads.RequestBody(env_vars={
-        constants.USER_ID_ENV_VAR: user_id,
-        constants.USER_ENV_VAR: user_name,
-    })
+        constants.USER_ID_ENV_VAR: 'user-1',
+        constants.USER_ENV_VAR: 'alice',
+    },
+                                authenticated=authenticated)
     with executor.override_request_env_and_config(
             body, request_id='not-a-daemon-uuid', request_name='sky.status'):
         pass
 
 
-def test_request_user_upserted_once_while_cached(counted_user_upsert):
-    for _ in range(3):
-        _run_override_as('user-1', 'alice')
-    assert counted_user_upsert == ['alice']
+def test_authenticated_request_skips_user_upsert(counted_user_upsert):
+    _run_override(authenticated=True)
+    assert not counted_user_upsert
+    executor._seed_role_if_missing.assert_not_called()
+
+
+def test_unauthenticated_request_upserts_user(counted_user_upsert):
+    _run_override(authenticated=False)
+    assert counted_user_upsert == ['user-1']
     executor._seed_role_if_missing.assert_called_once_with('user-1')
 
 
-def test_request_user_upserted_again_on_new_name(counted_user_upsert):
-    _run_override_as('user-1', 'alice')
-    _run_override_as('user-1', 'alice2')
-    _run_override_as('user-1', 'alice2')
-    assert counted_user_upsert == ['alice', 'alice2']
-
-
-def test_request_user_upserted_again_after_ttl(counted_user_upsert,
-                                               monkeypatch):
-    now = [1000.0]
-    monkeypatch.setattr(
-        executor, '_request_users',
-        cachetools.TTLCache(maxsize=8,
-                            ttl=executor._REQUEST_USER_TTL_SECONDS,
-                            timer=lambda: now[0]))
-    _run_override_as('user-1', 'alice')
-    now[0] += executor._REQUEST_USER_TTL_SECONDS + 1
-    _run_override_as('user-1', 'alice')
-    assert counted_user_upsert == ['alice', 'alice']
-
-
-def test_remembered_auth_user_skips_upsert(counted_user_upsert):
-    row = models.User(id='user-1', name='alice')
-    executor.remember_request_user(models.User(id='user-1', name='alice'), row)
-    _run_override_as('user-1', 'alice')
-    assert not counted_user_upsert
-
-
-def test_remembered_row_with_another_name_is_ignored(counted_user_upsert):
-    executor.remember_request_user(models.User(id='user-1', name='alice'),
-                                   models.User(id='user-1', name='old-alice'))
-    _run_override_as('user-1', 'alice')
-    assert counted_user_upsert == ['alice']
-
-
-def test_cached_user_rereads_preferred_workspace_for_resolver(
-        counted_user_upsert, monkeypatch):
+def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
+                                                       monkeypatch):
     monkeypatch.setattr(executor, '_should_apply_workspace_resolver',
                         lambda *args: True)
     resolved_for = []
@@ -2858,16 +2823,36 @@ def test_cached_user_rereads_preferred_workspace_for_resolver(
 
     monkeypatch.setattr('sky.workspaces.core.resolve_workspace_for_user',
                         fake_resolve)
-    fresh = models.User(id='user-1', name='alice', preferred_workspace='ws-2')
-    get_user = mock.Mock(return_value=fresh)
-    monkeypatch.setattr('sky.global_user_state.get_user', get_user)
+    monkeypatch.setattr(
+        'sky.global_user_state.get_user',
+        mock.Mock(return_value=models.User(
+            id='user-1', name='alice', preferred_workspace='ws-2')))
 
-    _run_override_as('user-1', 'alice')
-    _run_override_as('user-1', 'alice')
+    _run_override(authenticated=True)
 
-    # The first request upserted the row; the second reads it fresh.
-    assert resolved_for == [None, 'ws-2']
-    get_user.assert_called_once_with('user-1')
+    assert resolved_for == ['ws-2']
+    assert not counted_user_upsert
+
+
+def test_stamp_sets_authenticated_from_auth_user():
+    """A client cannot claim to be authenticated."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'abcd1234',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                authenticated=True)
+    executor.stamp_request_body(body, auth_user=None)
+    assert body.authenticated is False
+
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.authenticated is True
+
+
+def test_to_kwargs_drops_authenticated():
+    body = payloads.RequestBody(env_vars={}, authenticated=True)
+    assert 'authenticated' not in body.to_kwargs()
 
 
 @pytest.mark.asyncio

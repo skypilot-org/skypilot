@@ -12,11 +12,11 @@ import starlette.datastructures
 from sky.server import middleware_utils
 from sky.server import server
 from sky.server.auth import db_lookup
-from sky.server.auth import sa_token_cache
 from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
 from sky.users import token_service as token_service_lib
+from sky.utils import asyncio_utils
 
 # The service-account auth path runs on the request event loop for every
 # request, so its DB lookups must be offloaded. A slow (mocked) DB call that
@@ -57,7 +57,7 @@ def _blocking(return_value, delay: float = _SLOW_DB_SECONDS):
 def background(monkeypatch):
     """Holds the auth bookkeeping the middleware runs in the background."""
     pending = []
-    monkeypatch.setattr(sa_token_cache, 'run_in_background', pending.append)
+    monkeypatch.setattr(asyncio_utils, 'run_in_background', pending.append)
     yield pending
     for coro in pending:
         coro.close()

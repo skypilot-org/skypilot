@@ -2,17 +2,16 @@
 
 Holds the token row and its user for a successfully authenticated token, keyed
 by the token's sha256 hash, for `constants.ENV_VAR_SA_AUTH_CACHE_TTL_SECONDS`.
-A hit on an entry older than half the TTL re-reads the rows in the background,
-so a token in steady use is never looked up on the request path. Revoking or
-rotating a token, or deleting its user, therefore takes effect on each server
-process within that TTL. Failed lookups are never cached.
+A hit in the last quarter of an entry's TTL re-reads the rows in the
+background, so a token in steady use is not looked up on the request path.
+Revoking or rotating a token, or deleting its user, therefore takes effect on
+each server process within that TTL. Failed lookups are never cached.
 
 Accessed only from the server's event loop, so no lock is needed.
 """
-import asyncio
 import math
 import os
-from typing import Any, Coroutine, Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import cachetools
 
@@ -21,6 +20,7 @@ from sky import models
 from sky import sky_logging
 from sky.server.auth import db_lookup
 from sky.skylet import constants
+from sky.utils import asyncio_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -50,9 +50,9 @@ TTL_SECONDS = _get_ttl_seconds()
 # token hash -> (token row, user, cache time the rows were read).
 _entries: 'cachetools.TTLCache[str, Tuple[TokenRow, models.User, float]]' = (
     cachetools.TTLCache(maxsize=_MAX_ENTRIES, ttl=TTL_SECONDS))
-# Hashes whose rows a background task is re-reading.
-_refreshing: Set[str] = set()
-_background_tasks: Set[asyncio.Task] = set()
+# token hash -> cache time before which no background re-read starts. Set
+# while a re-read is in flight and after a failed one.
+_next_refresh: Dict[str, float] = {}
 
 
 def fetch_token_and_user(
@@ -66,15 +66,16 @@ def fetch_token_and_user(
 
 
 def get(token_hash: str) -> Optional[Tuple[TokenRow, models.User]]:
-    """The cached rows, re-read in the background once half the TTL old."""
+    """The cached rows, re-read in the background near the end of the TTL."""
     entry = _entries.get(token_hash)
     if entry is None:
         return None
     token_row, user, read_at = entry
-    if (_entries.timer() - read_at >= TTL_SECONDS / 2 and
-            token_hash not in _refreshing):
-        _refreshing.add(token_hash)
-        run_in_background(_refresh(token_hash, user.id))
+    now = _entries.timer()
+    if (now - read_at >= TTL_SECONDS * 3 / 4 and
+            now >= _next_refresh.get(token_hash, 0.0)):
+        _next_refresh[token_hash] = now + TTL_SECONDS / 4
+        asyncio_utils.run_in_background(_refresh(token_hash, user.id))
     return token_row, user
 
 
@@ -85,14 +86,7 @@ def put(token_hash: str, token_row: TokenRow, user: models.User) -> None:
 
 def clear() -> None:
     _entries.clear()
-    _refreshing.clear()
-
-
-def run_in_background(coro: Coroutine[Any, Any, None]) -> None:
-    """Run auth bookkeeping off the request path on the current loop."""
-    task = asyncio.get_running_loop().create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    _next_refresh.clear()
 
 
 async def _refresh(token_hash: str, user_id: str) -> None:
@@ -100,12 +94,11 @@ async def _refresh(token_hash: str, user_id: str) -> None:
         token_row, user = await db_lookup.call_with_deadline(
             fetch_token_and_user, token_hash, user_id)
     except Exception as e:  # pylint: disable=broad-except
-        # The entry stays until its TTL; the next request after that looks
-        # the token up itself.
+        # The entry stays until its TTL; a later hit retries once
+        # `_next_refresh` passes.
         logger.debug(f'Failed to refresh a cached service account token: {e}')
         return
-    finally:
-        _refreshing.discard(token_hash)
+    _next_refresh.pop(token_hash, None)
     if token_row is None or user is None:
         _entries.pop(token_hash, None)
     else:

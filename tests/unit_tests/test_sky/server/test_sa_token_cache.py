@@ -14,6 +14,10 @@ from sky import global_user_state
 from sky.server import server
 from sky.server.auth import sa_token_cache
 from sky.skylet import constants
+from sky.utils import asyncio_utils
+
+# Age past which a hit re-reads the rows in the background.
+_STALE = sa_token_cache.TTL_SECONDS * 3 / 4
 
 
 @pytest.fixture
@@ -64,8 +68,8 @@ def db(monkeypatch, token_row, user_info):
 
 
 async def _drain_background():
-    while sa_token_cache._background_tasks:
-        await asyncio.gather(*list(sa_token_cache._background_tasks))
+    while asyncio_utils._background_tasks:
+        await asyncio.gather(*list(asyncio_utils._background_tasks))
 
 
 @pytest.fixture
@@ -107,7 +111,7 @@ async def test_hit_skips_db_lookups(db):
 @pytest.mark.asyncio
 async def test_entry_expires_after_ttl(db, clock):
     await _dispatch()
-    clock[0] += sa_token_cache.TTL_SECONDS / 2 - 0.5
+    clock[0] += _STALE - 0.5
     await _dispatch()
     await _drain_background()
     assert db.by_hash.call_count == 1
@@ -119,7 +123,7 @@ async def test_entry_expires_after_ttl(db, clock):
 @pytest.mark.asyncio
 async def test_stale_hit_refreshes_in_background(db, clock):
     await _dispatch()
-    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    clock[0] += _STALE + 0.5
     response, _ = await _dispatch()
     assert response.status_code == 200
     # Concurrent hits share one refresh.
@@ -127,9 +131,10 @@ async def test_stale_hit_refreshes_in_background(db, clock):
     await _drain_background()
     assert db.by_hash.call_count == 2
     # The refresh restarted the entry's TTL.
-    clock[0] += sa_token_cache.TTL_SECONDS - 1
+    clock[0] += _STALE - 0.5
     response, _ = await _dispatch()
     assert response.status_code == 200
+    await _drain_background()
     assert db.by_hash.call_count == 2
 
 
@@ -137,7 +142,7 @@ async def test_stale_hit_refreshes_in_background(db, clock):
 async def test_refresh_drops_revoked_token(db, clock):
     await _dispatch()
     db.by_hash.return_value = None
-    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    clock[0] += _STALE + 0.5
     response, _ = await _dispatch()
     assert response.status_code == 200
     await _drain_background()
@@ -147,15 +152,18 @@ async def test_refresh_drops_revoked_token(db, clock):
 
 
 @pytest.mark.asyncio
-async def test_failed_refresh_keeps_entry(db, clock):
+async def test_failed_refresh_keeps_entry_and_backs_off(db, clock):
     await _dispatch()
     db.by_hash.side_effect = RuntimeError('database unavailable')
-    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    clock[0] += _STALE + 0.1
     await _dispatch()
     await _drain_background()
+    assert db.by_hash.call_count == 2
+    # The entry still serves, and the next hit does not retry at once.
     response, _ = await _dispatch()
     assert response.status_code == 200
     await _drain_background()
+    assert db.by_hash.call_count == 2
 
 
 @pytest.mark.asyncio

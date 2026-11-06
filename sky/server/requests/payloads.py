@@ -198,6 +198,10 @@ class RequestBody(BasePayload):
     # and keeps the pre-upgrade (loopback) behavior; see `stamp_request_body`
     # and the override logic in `executor.py`.
     from_loopback: bool = False
+    # Whether the server authenticated the caller, so the users row and its
+    # role exist and the worker need not upsert them. Set server-side in
+    # `stamp_request_body`; a client-sent value is overwritten.
+    authenticated: bool = False
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -234,6 +238,7 @@ class RequestBody(BasePayload):
         kwargs.pop('client_api_version', None)
         kwargs.pop('workspace_access', None)
         kwargs.pop('from_loopback', None)
+        kwargs.pop('authenticated', None)
         return kwargs
 
     @property
