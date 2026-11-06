@@ -2578,7 +2578,9 @@ def _in_process_entrypoint(value: str):
     return {'value': value, 'user': os.environ.get(constants.USER_ID_ENV_VAR)}
 
 
-async def _prepare_in_process(request_id: str, name: str = 'test.in_process'):
+async def _prepare_in_process(request_id: str,
+                              name: str = 'test.in_process',
+                              func=_in_process_entrypoint):
     loopback.set_request_from_loopback(True)
     return await executor.prepare_request_async(
         request_id=request_id,
@@ -2588,7 +2590,7 @@ async def _prepare_in_process(request_id: str, name: str = 'test.in_process'):
                                         constants.USER_ID_ENV_VAR: 'user-1',
                                         constants.USER_ENV_VAR: 'user-1',
                                     }),
-        func=_in_process_entrypoint,
+        func=func,
         schedule_type=requests_lib.ScheduleType.SHORT)
 
 
@@ -2713,3 +2715,36 @@ async def test_in_process_request_cancelled_before_start_is_skipped(
     cancelled = requests_lib.get_request('in-process-cancelled')
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+
+
+SLOW_STARTED = threading.Event()
+
+
+def _slow_in_process_entrypoint(value: str):
+    SLOW_STARTED.set()
+    time.sleep(1.5)
+    return value
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_while_running(
+        in_process_env, monkeypatch):
+    """Cancelling a running in-process request leaves it CANCELLED."""
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        0.05)
+    SLOW_STARTED.clear()
+    request = await _prepare_in_process('in-process-running',
+                                        func=_slow_in_process_entrypoint)
+
+    await executor.schedule_prepared_request(request)
+    assert await asyncio.get_running_loop().run_in_executor(
+        None, SLOW_STARTED.wait, 5)
+    assert await requests_lib.kill_request_async('in-process-running')
+    await _wait_in_process_tasks()
+    # Let the entrypoint thread finish; its result must not be stored.
+    await asyncio.sleep(2)
+
+    cancelled = requests_lib.get_request('in-process-running')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
