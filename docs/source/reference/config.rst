@@ -3513,7 +3513,6 @@ Valid daemon names are:
 
 - ``skypilot-status-refresh-daemon``
 - ``skypilot-volume-status-refresh-daemon``
-- ``managed-job-status-refresh-daemon``
 
 ``log_level``
     Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
@@ -3525,8 +3524,6 @@ Valid daemon names are:
       log_level: DEBUG
     skypilot-volume-status-refresh-daemon:
       log_level: INFO
-    managed-job-status-refresh-daemon:
-      log_level: WARNING
 
 .. _config-yaml-metrics:
 
