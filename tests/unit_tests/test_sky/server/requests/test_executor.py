@@ -2360,7 +2360,7 @@ _SERVER_SETTING_ENV_VARS = {
     'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER': 'true',
     'SKYPILOT_POD_MEMORY_GB_LIMIT': '1',
     'SKYPILOT_FUTURE_SETTING': '1',
-    constants.OVERRIDE_CONSOLIDATION_MODE: 'true',
+    constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE: 'true',
     'LD_PRELOAD': '/tmp/x.so',
 }
 # What a remote client may set: identity and this request's logging.
@@ -2462,7 +2462,7 @@ def test_loopback_request_keeps_skypilot_env(stub_override_request_env_deps,
         assert ('KUBECONFIG' in os.environ) is (not enforce_containment)
         assert ('AWS_PROFILE' in os.environ) is (not enforce_containment)
         assert 'LD_PRELOAD' not in os.environ
-        assert constants.OVERRIDE_CONSOLIDATION_MODE not in os.environ
+        assert constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE not in os.environ
 
 
 def test_stamp_overwrites_client_from_loopback():

@@ -1097,7 +1097,7 @@ def test_controller_always_uses_local_server(monkeypatch):
     common.get_server_url.cache_clear()
     try:
         assert common.get_server_url() == 'http://remote.example.com:8080'
-        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        monkeypatch.setenv(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE, 'true')
         common.get_server_url.cache_clear()
         assert common.get_server_url() == common.get_default_server_url()
     finally:
@@ -1123,7 +1123,7 @@ def test_controller_ignores_config_api_server_endpoint(monkeypatch):
         # Without the controller marker, the config endpoint is honored.
         assert common.get_server_url() == 'http://remote.example.com:8080'
         # With it, the controller pins to its own loopback server.
-        monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+        monkeypatch.setenv(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE, 'true')
         common.get_server_url.cache_clear()
         assert common.get_server_url() == common.get_default_server_url()
     finally:

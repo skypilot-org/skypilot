@@ -172,9 +172,9 @@ class TestIsConsolidationMode:
     @mock.patch.dict('os.environ', {'IS_SKYPILOT_JOB_CONTROLLER': '1'},
                      clear=False)
     def test_override_env_forces_true_for_serve(self):
-        """OVERRIDE_CONSOLIDATION_MODE forces True in the serve (pool=False)
-        branch. Pool case goes through the helper which has its own OVERRIDE
-        short-circuit tested in controller_utils."""
+        """ENV_VAR_IN_CONTROLLER_PROCESS_TREE forces True in the serve
+        (pool=False) branch. Pool case goes through the helper which has its own
+        OVERRIDE short-circuit tested in controller_utils."""
         with mock.patch('sky.serve.serve_utils.skypilot_config'):
             assert serve_utils.is_consolidation_mode(pool=False) is True
 

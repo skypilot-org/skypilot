@@ -952,7 +952,7 @@ def test_a_suppressed_scan_reaches_no_request_scoped_reader(
     monkeypatch.setattr(stall.controller_utils,
                         'effective_jobs_consolidation_mode',
                         _REAL_CONSOLIDATION_READER)
-    monkeypatch.delenv(skylet_constants.OVERRIDE_CONSOLIDATION_MODE,
+    monkeypatch.delenv(skylet_constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
                        raising=False)
     monkeypatch.setattr(stall.controller_utils,
                         '_read_jobs_consolidation_signal', lambda: False)
