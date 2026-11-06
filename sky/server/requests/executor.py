@@ -128,18 +128,6 @@ _COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS = 0.5
 _IN_PROCESS_REQUEST_NAMES: Set[str] = set()
 # Keeps in-process request tasks alive until they finish.
 _in_process_tasks: Set[asyncio.Task] = set()
-# Request id -> event set when that in-process request stops running in this
-# process. Accessed only from the server's event loop.
-_in_process_done: Dict[str, asyncio.Event] = {}
-
-
-def get_in_process_completion(request_id: str) -> Optional[asyncio.Event]:
-    """An event set when the request stops running in this process.
-
-    None unless the request is running in this process. A set event does not
-    mean the request finished: it may have been handed to the request queue.
-    """
-    return _in_process_done.get(request_id)
 
 
 def register_in_process_request(request_name: str) -> None:
@@ -1666,21 +1654,12 @@ async def schedule_prepared_request(request_task: api_requests.Request,
         task.add_done_callback(preconditions.background_tasks.discard)
     elif (not retryable and request_task.name in _IN_PROCESS_REQUEST_NAMES and
           _has_request_thread_available()):
-        request_id = request_task.request_id
-        done = asyncio.Event()
-        _in_process_done[request_id] = done
-
-        def _on_done(task: asyncio.Task) -> None:
-            _in_process_tasks.discard(task)
-            _in_process_done.pop(request_id, None)
-            done.set()
-
         task = asyncio.create_task(
             _execute_request_coroutine(request_task,
                                        ignore_return_value=ignore_return_value,
                                        on_executor_exhausted=enqueue))
         _in_process_tasks.add(task)
-        task.add_done_callback(_on_done)
+        task.add_done_callback(_in_process_tasks.discard)
     else:
         await enqueue()
 

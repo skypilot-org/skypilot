@@ -2853,34 +2853,3 @@ def test_stamp_sets_authenticated_from_auth_user():
 def test_to_kwargs_drops_authenticated():
     body = payloads.RequestBody(env_vars={}, authenticated=True)
     assert 'authenticated' not in body.to_kwargs()
-
-
-@pytest.mark.asyncio
-async def test_in_process_completion_is_signalled(in_process_env, monkeypatch):
-    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
-                        60)
-    request = await _prepare_in_process('in-process-signal')
-    assert executor.get_in_process_completion('in-process-signal') is None
-
-    await executor.schedule_prepared_request(request)
-    done = executor.get_in_process_completion('in-process-signal')
-    assert done is not None
-    await asyncio.wait_for(done.wait(), timeout=10)
-    await _wait_in_process_tasks()
-
-    assert executor.get_in_process_completion('in-process-signal') is None
-    finished = requests_lib.get_request('in-process-signal')
-    assert finished is not None
-    assert finished.status == requests_lib.RequestStatus.SUCCEEDED
-
-
-@pytest.mark.asyncio
-async def test_queued_request_has_no_completion_signal(in_process_env,
-                                                       monkeypatch):
-    monkeypatch.setattr(executor, '_has_request_thread_available',
-                        lambda: False)
-    request = await _prepare_in_process('in-process-queued')
-
-    await executor.schedule_prepared_request(request)
-
-    assert executor.get_in_process_completion('in-process-queued') is None
