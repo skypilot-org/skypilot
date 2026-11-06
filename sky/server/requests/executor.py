@@ -1409,11 +1409,6 @@ async def _execute_request_coroutine(
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
     request_id = request.request_id
-    req_status = await api_requests.get_request_status_async(request_id)
-    if (req_status is None or req_status.status
-            not in api_requests.RequestStatus.executable_statuses()):
-        logger.info(f'Request {request_id} is no longer executable, skipping')
-        return
     logger.info(f'Executing request {request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
@@ -1424,21 +1419,16 @@ async def _execute_request_coroutine(
         fut: asyncio.Future = context_utils.to_thread_with_executor(
             get_request_thread_executor(), _execute_with_config_override, func,
             request_body, request_id, request.name, **request_body.to_kwargs())
-    except exceptions.ConcurrentWorkerExhaustedError as e:
+    except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
-        if on_executor_exhausted is not None:
+        if (on_executor_exhausted is not None and
+                isinstance(e, exceptions.ConcurrentWorkerExhaustedError)):
             try:
                 await on_executor_exhausted()
             except (Exception, asyncio.CancelledError):  # pylint: disable=broad-except
                 # The fallback logs and records its own failure.
                 pass
             return
-        await api_requests.set_request_failed_async(request_id, e)
-        logger.error(f'Failed to run request {request_id} due to '
-                     f'{common_utils.format_exception(e)}')
-        return
-    except Exception as e:  # pylint: disable=broad-except
-        ctx.redirect_log(original_output)
         await api_requests.set_request_failed_async(request_id, e)
         logger.error(f'Failed to run request {request_id} due to '
                      f'{common_utils.format_exception(e)}')
@@ -1463,18 +1453,14 @@ async def _execute_request_coroutine(
         try:
             result = await fut
             await api_requests.set_request_succeeded_async(
-                request_id,
-                None if ignore_return_value else result,
-                only_if_running=True)
+                request_id, None if ignore_return_value else result)
         except asyncio.CancelledError:
             # The task is cancelled by ctx.cancel(), where the status
             # should already be set to CANCELLED.
             pass
         except Exception as e:  # pylint: disable=broad-except
             ctx.redirect_log(original_output)
-            await api_requests.set_request_failed_async(request_id,
-                                                        e,
-                                                        only_if_running=True)
+            await api_requests.set_request_failed_async(request_id, e)
             logger.error(f'Request {request_id} failed due to '
                          f'{common_utils.format_exception(e)}')
     except asyncio.CancelledError:
