@@ -3264,8 +3264,8 @@ async def api_get(request: fastapi.Request,
         metrics_utils.count_request_get_wait('signal')
         await in_process_done.wait()
         request_task = await requests_lib.get_request_async(request_id)
-        if (request_task is not None and
-                request_task.status <= requests_lib.RequestStatus.RUNNING):
+        if (request_task is not None and request_task.status
+                not in requests_lib.RequestStatus.finished_status()):
             # Handed to the request queue instead of finishing here.
             request_task = None
     else:
