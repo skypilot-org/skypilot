@@ -17,6 +17,7 @@ import sky
 from sky import skypilot_config
 import sky.exceptions
 from sky.server import common as server_common
+from sky.server import plugins
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
@@ -3101,6 +3102,21 @@ def test_server_reload_no_empty_window(server_config_file, monkeypatch):
     assert observed == ['user']
     assert skypilot_config.get_nested(('rbac', 'default_role'),
                                       None) == 'viewer'
+
+
+def test_server_config_parsed_before_plugins_load_is_validated_again(
+        server_config_file, monkeypatch):
+    """The import-time parse is lenient; once plugins load, the same file
+    must be validated strictly instead of served from the cache."""
+    path, _ = server_config_file
+    path.write_text('workspaces:\n  default:\n    bogus_ws_key: 3\n')
+    monkeypatch.setattr(plugins, '_plugins_loaded', False)
+    skypilot_config.reload_config()
+    monkeypatch.setattr(plugins, '_plugins_loaded', True)
+    for reload in (skypilot_config.reload_config,
+                   skypilot_config.safe_reload_config):
+        with pytest.raises(sky.exceptions.InvalidSkyPilotConfigError):
+            reload()
 
 
 def test_reload_never_sees_a_partial_config_while_it_is_saved(

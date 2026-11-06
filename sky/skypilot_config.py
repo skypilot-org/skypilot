@@ -1007,7 +1007,7 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
 # file). Replaced by one assignment, so a lock-free reader never pairs a new
 # fingerprint with an old config.
 _server_config_cache: Optional[Tuple[Tuple[Optional[str], Optional[str],
-                                           Optional[str], Optional[str]],
+                                           Optional[str], Optional[str], bool],
                                      config_utils.Config, Optional[str]]] = None
 
 
@@ -1033,6 +1033,9 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     # `rbac.get_default_role()` fall back to admin. On any exception below the
     # previously-loaded config is left in place (stale is safer than empty).
     server_config_path = _resolve_server_config_path()
+    # Validation turns strict once plugins load, so a parse from before then
+    # must not be reused after.
+    strict = not schemas._allow_additional_properties()  # pylint: disable=protected-access
     content = None
     file_hash = None
     if server_config_path is not None:
@@ -1049,7 +1052,8 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = file_db_url
         db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
         db_value = _read_config_yaml_value() if db_url else None
-        if (server_config_path, file_hash, db_url, db_value) == fingerprint:
+        if (server_config_path, file_hash, db_url, db_value,
+                strict) == fingerprint:
             _set_loaded_config(copy.deepcopy(cached_config))
             _set_loaded_config_path(server_config_path)
             return True
@@ -1081,8 +1085,8 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
-    _server_config_cache = ((server_config_path, file_hash, db_url, db_value),
-                            server_config, file_db_url)
+    _server_config_cache = ((server_config_path, file_hash, db_url, db_value,
+                             strict), server_config, file_db_url)
     _set_loaded_config(copy.deepcopy(server_config))
     _set_loaded_config_path(server_config_path)
     return True

@@ -117,3 +117,22 @@ def test_dump_yaml_atomic_new_file_gets_the_default_mode(tmp_path):
         os.umask(umask)
     assert stat.S_IMODE(os.stat(tmp_path / 'new.yaml').st_mode) == 0o640
     assert os.listdir(tmp_path) == ['new.yaml']
+
+
+def test_dump_yaml_atomic_contents_are_never_more_readable(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'config.yaml'
+    path.write_text('db: postgresql://user:secret@host/db\n')
+    os.chmod(path, 0o600)
+    modes = []
+    real_fsync = os.fsync
+
+    def recording_fsync(fd):
+        modes.append(os.fstat(fd).st_mode & 0o777)
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, 'fsync', recording_fsync)
+    yaml_utils.dump_yaml_atomic(str(path), {'db': 'postgresql://other'})
+    # The temp file already had the target's mode when it was written.
+    assert modes == [0o600]
+    assert os.stat(path).st_mode & 0o777 == 0o600

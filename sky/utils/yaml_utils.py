@@ -151,11 +151,12 @@ def dump_yaml_atomic(path: str, config: Dict[str, Any]) -> None:
     replaced = False
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            if mode is not None:
+                # Before writing, so the contents are never more readable.
+                os.fchmod(f.fileno(), mode)
             f.write(contents)
             f.flush()
             os.fsync(f.fileno())
-        if mode is not None:
-            os.chmod(tmp_path, mode)
         os.replace(tmp_path, real_path)
         replaced = True
     finally:
