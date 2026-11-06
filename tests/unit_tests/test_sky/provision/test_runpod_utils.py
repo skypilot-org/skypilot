@@ -258,6 +258,8 @@ class TestLaunch:
         preemptible=False,
         bid_per_gpu=0.0,
         docker_login_config=None,
+        min_vcpu_count=8,
+        min_memory_in_gb=48,
     )
 
     def test_gpu_pod_body(self, fake_rest):
@@ -357,7 +359,8 @@ class TestLaunch:
         spot_kwargs = spot.call_args.kwargs
         assert spot_kwargs['gpu_type_id'] == 'NVIDIA GeForce RTX 4090'
         assert spot_kwargs['bid_per_gpu'] == 0.3
-        assert spot_kwargs['min_memory_in_gb'] == 24
+        assert spot_kwargs['min_vcpu_count'] == 8
+        assert spot_kwargs['min_memory_in_gb'] == 48
         assert spot_kwargs['ports'].startswith('22/tcp,8080/tcp,')
 
 

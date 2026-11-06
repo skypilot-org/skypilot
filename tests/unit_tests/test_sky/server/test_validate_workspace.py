@@ -8,6 +8,7 @@ Real state DB, config file and casbin policy; the handler is called directly.
 import asyncio
 import json
 import os
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -303,6 +304,40 @@ class TestClientEnvIsSanitized:
         with mock.patch('sky.dag.Dag.validate', side_effect=_record):
             assert env.validate(user='alice', extra_env=injected) is None
         assert seen == {name: None for name in injected}
+
+
+@pytest.mark.parametrize('api_version', [None, 65, 66])
+@pytest.mark.parametrize('config_source', ['task', 'request'])
+def test_modal_deadline_compatibility_inside_request_context(
+        env, api_version, config_source, monkeypatch):
+    # Expected validation failures suppress tracebacks; restore the global
+    # setting so later CLI tests can still exercise debug output.
+    monkeypatch.setattr(sys,
+                        'tracebacklimit',
+                        getattr(sys, 'tracebacklimit', 1000),
+                        raising=False)
+    env.configure({})
+    env.add_user('alice', ['default'])
+    config = {'modal': {'deadline': 2000000000.75}}
+    task = {'resources': {'infra': 'modal'}, 'run': 'echo hi'}
+    if config_source == 'task':
+        task['config'] = config
+    with env.record_workspace(), mock.patch.object(
+            admin_policy_utils, 'apply',
+            wraps=admin_policy_utils.apply) as policy:
+        detail = env.validate(
+            task=json.dumps(task),
+            api_version=api_version,
+            override_config=config if config_source == 'request' else None)
+    if api_version is None or api_version < 66:
+        assert detail['type'] == 'APINotSupportedError'
+        assert 'Modal Sandbox deadlines' in detail['message']
+        policy.assert_not_called()
+        assert not env.seen
+    else:
+        assert detail is None
+        policy.assert_called_once()
+        assert env.seen == ['default']
 
 
 class TestConcurrentRequests:

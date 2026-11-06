@@ -6,6 +6,8 @@ still go through the GraphQL API (``sky.provision.runpod.api``).
 """
 
 import base64
+import math
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -197,12 +199,6 @@ def _create_template_for_docker_login(
     return formatted_image, create_template_resp['id']
 
 
-def _get_gpu_memory_gb(gpu_type: str) -> int:
-    gpu_specs = runpod.rest_request(
-        'GET', f'/catalog/gpus/{runpod.path_segment(gpu_type)}')
-    return gpu_specs['memory']
-
-
 def _parse_cpu_instance_type(instance_type: str) -> Dict[str, Any]:
     """Splits a '<flavor>-<vcpus>-<memory>' CPU instance type."""
     flavor, vcpu_count, _ = instance_type.rsplit('-', 2)
@@ -225,20 +221,38 @@ def launch(
     *,
     network_volume_id: Optional[str] = None,
     volume_mount_path: Optional[str] = None,
+    min_vcpu_count: Optional[int] = None,
+    min_memory_in_gb: Optional[int] = None,
+    allowed_cuda_versions: Optional[List[str]] = None,
 ) -> str:
     """Launches an instance with the given parameters.
 
     For CPU instances, we directly use the instance_type for launching the
     instance.
 
-    For GPU instances, we convert the instance_type to the RunPod GPU name,
-    and finds the specs for the GPU, before launching the instance.
+    For GPU instances, convert the instance_type to the RunPod GPU name and
+    retain the selected host CPU/RAM minima and any CUDA compatibility filter.
 
     ``zone`` is a comma-separated list of RunPod data center ids.
 
     Returns:
         instance_id: The instance ID.
     """
+    is_cpu_instance = instance_type.startswith('cpu')
+    if not is_cpu_instance:
+        if any(not isinstance(value, int) or isinstance(value, bool) or
+               value <= 0 for value in (min_vcpu_count, min_memory_in_gb)):
+            raise ValueError('RunPod GPU launch requires positive integer '
+                             'host CPU and RAM minima. Re-render the launch '
+                             'configuration if these fields are missing.')
+        if allowed_cuda_versions is not None and (
+                not isinstance(allowed_cuda_versions, list) or
+                not allowed_cuda_versions or
+                any(not isinstance(version, str) or
+                    re.fullmatch(r'[0-9]+\.[0-9]+', version) is None
+                    for version in allowed_cuda_versions)):
+            raise ValueError('RunPod allowed_cuda_versions must be a nonempty '
+                             'list of major.minor version strings.')
     name = f'{cluster_name}-{node_type}'
 
     # TODO(zhwu): keep this align with setups in
@@ -287,12 +301,10 @@ def launch(
 
     # GPU instance types start with f'{gpu_count}x',
     # CPU instance types start with 'cpu'.
-    is_cpu_instance = instance_type.startswith('cpu')
     if not is_cpu_instance:
         gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
         gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
         cloud_type = instance_type.split('_')[2]
-        gpu_memory_gb = _get_gpu_memory_gb(gpu_type)
 
     if preemptible:
         if is_cpu_instance:
@@ -304,8 +316,9 @@ def launch(
             bid_per_gpu=bid_per_gpu,
             cloud_type=cloud_type,
             gpu_count=gpu_quantity,
-            min_vcpu_count=4 * gpu_quantity,
-            min_memory_in_gb=gpu_memory_gb * gpu_quantity,
+            min_vcpu_count=min_vcpu_count,
+            min_memory_in_gb=min_memory_in_gb,
+            allowed_cuda_versions=allowed_cuda_versions,
             container_disk_in_gb=disk_size,
             country_code=region,
             data_center_id=zone,
@@ -343,12 +356,16 @@ def launch(
     if is_cpu_instance:
         body['cpu'] = _parse_cpu_instance_type(instance_type)
     else:
+        assert min_vcpu_count is not None and min_memory_in_gb is not None
+        # REST v2 takes per-GPU integer floors; the catalog hands off totals.
         body['gpu'] = {
             'id': gpu_type,
             'count': gpu_quantity,
-            'minVcpuCountPerGpu': 4,
-            'minRamPerGpu': gpu_memory_gb,
+            'minVcpuCountPerGpu': math.ceil(min_vcpu_count / gpu_quantity),
+            'minRamPerGpu': math.ceil(min_memory_in_gb / gpu_quantity),
         }
+        if allowed_cuda_versions is not None:
+            body['gpu']['allowedCudaVersions'] = allowed_cuda_versions
         # Omitting the field defaults to SECURE, so an unknown tier must not
         # be dropped silently.
         if cloud_type not in ('SECURE', 'COMMUNITY'):

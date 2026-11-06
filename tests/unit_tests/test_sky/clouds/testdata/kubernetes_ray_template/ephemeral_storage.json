@@ -96,7 +96,7 @@
                 "requests": {
                   "cpu": 4,
                   "ephemeral-storage": "256G",
-                  "memory": "16G"
+                  "memory": "16Gi"
                 }
               },
               "volumeMounts": [

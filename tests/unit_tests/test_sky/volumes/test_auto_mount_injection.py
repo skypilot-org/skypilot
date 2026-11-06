@@ -104,7 +104,11 @@ def inject_fixture(monkeypatch, tmp_path):
     was asked about, and what was logged.
     """
 
-    def _inject(resolution, volume_mounts=None, volume_records=None):
+    def _inject(resolution,
+                volume_mounts=None,
+                volume_records=None,
+                namespace=None,
+                cloud=None):
         monkeypatch.setattr(volume_utils, 'resolve_auto_mounts',
                             lambda region: resolution)
         looked_up = []
@@ -161,7 +165,12 @@ def inject_fixture(monkeypatch, tmp_path):
 
         backend_utils.write_cluster_config(
             to_provision=Resources(
-                cloud=clouds.Kubernetes(),
+                cloud=cloud or clouds.Kubernetes(),
+                _cluster_config_overrides=({} if namespace is None else {
+                    'kubernetes': {
+                        'namespace': namespace
+                    }
+                }),
                 instance_type='2CPU--2GB').copy(region='my-context'),
             num_nodes=1,
             cluster_config_template='kubernetes-ray.yml.j2',
@@ -177,6 +186,35 @@ def inject_fixture(monkeypatch, tmp_path):
         return _Injected(rendered[-1], checked, warnings, debugs, looked_up)
 
     return _inject
+
+
+@pytest.mark.parametrize('source', ['task', 'auto'])
+@pytest.mark.parametrize('namespace', ['my-namespace', 'other'])
+def test_bound_namespace_matches_registered_volume(inject, source, namespace):
+    resolution = volume_utils.AutoMountResolution(
+        mounted=[_mounted('vol')] if source == 'auto' else [], skipped=[])
+    mounts = [_task_volume('vol')] if source == 'task' else None
+    if namespace != 'my-namespace':
+        with pytest.raises(exceptions.VolumeTopologyConflictError,
+                           match='but the task binds namespace'):
+            inject(resolution, volume_mounts=mounts, namespace=namespace)
+    else:
+        assert inject(resolution, volume_mounts=mounts,
+                      namespace=namespace).variables['volume_mounts']
+
+
+@pytest.mark.parametrize(
+    'cloud', [clouds.Kubernetes(),
+              clouds.SSH(), clouds.AWS()])
+def test_bound_namespace_applies_to_new_ephemeral_volume(inject, cloud):
+    mount = _task_volume('vol', is_ephemeral=True)
+    mount.volume_config.config.pop('namespace')
+    inject(_NOTHING_AUTO_MOUNTED,
+           volume_mounts=[mount],
+           namespace='models',
+           cloud=cloud)
+    assert mount.volume_config.config.get('namespace') == (
+        'models' if repr(cloud).lower() == 'kubernetes' else None)
 
 
 class TestAutoMountInjection:

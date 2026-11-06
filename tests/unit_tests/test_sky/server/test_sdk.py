@@ -932,9 +932,9 @@ def test_api_login_user_hash_token(monkeypatch: pytest.MonkeyPatch,
         assert user_hash_path.read_text() == user_hash
 
 
-def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
-                                        tmp_path: Path):
-    # Test that we set the user hash when we need auth.
+def test_api_login_user_hash_and_cookie_expiration_needs_auth(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    # Test that we set the user hash and cookie expiration when we need auth.
     config_path = tmp_path / "config.yaml"
     user_hash_path = tmp_path / "user_hash"
     monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
@@ -949,17 +949,21 @@ def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
 
     test_endpoint = "http://test.skypilot.co"
 
-    # Test needs auth.
+    fixed_time = 1_800_000_000
     auth_token = base64.b64encode(
         json.dumps({
             'v': 1,
             'user': user_hash,
-            'cookies': {}
+            'cookies': {
+                '_oauth2_proxy': 'session-cookie'
+            }
         }).encode('utf-8')).decode('utf-8')
 
     with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
          mock.patch('sky.server.versions.get_remote_api_version',
-                    return_value=None):
+                    return_value=None), \
+         mock.patch('sky.server.common.set_api_cookie_jar') as mock_set_jar, \
+         mock.patch('sky.client.sdk.time.time', return_value=fixed_time):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -989,6 +993,9 @@ def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
         # Verify the user hash is written to the file.
         assert user_hash_path.exists()
         assert user_hash_path.read_text() == user_hash
+        cookies = list(mock_set_jar.call_args.args[0])
+        assert len(cookies) == 1
+        assert cookies[0].expires == fixed_time + 30 * 24 * 60 * 60
 
 
 def test_api_login_user_hash_needs_auth_both(monkeypatch: pytest.MonkeyPatch,
