@@ -107,6 +107,8 @@ class DisposableExecutor:
                  initargs: Tuple = ()):
         self.max_workers: Optional[int] = max_workers
         self.workers: Dict[int, multiprocessing.Process] = {}
+        # Slots reserved by submit() for processes that are still starting.
+        self._starting: int = 0
         self._shutdown: bool = False
         self._lock: threading.Lock = threading.Lock()
         self._initializer: Optional[Callable] = initializer
@@ -148,19 +150,26 @@ class DisposableExecutor:
 
         with self._lock:
             if (self.max_workers is not None and
-                    len(self.workers) >= self.max_workers):
+                    len(self.workers) + self._starting >= self.max_workers):
                 raise exceptions.ExecutionPoolFullError(
                     'Maximum workers reached')
+            self._starting += 1
 
-        result_queue: multiprocessing.Queue = multiprocessing.Queue()
-        process = multiprocessing.Process(target=_disposable_worker,
-                                          args=(fn, self._initializer,
-                                                self._initargs, result_queue,
-                                                args, kwargs))
-        process.daemon = True
-        process.start()
+        try:
+            result_queue: multiprocessing.Queue = multiprocessing.Queue()
+            process = multiprocessing.Process(target=_disposable_worker,
+                                              args=(fn, self._initializer,
+                                                    self._initargs,
+                                                    result_queue, args, kwargs))
+            process.daemon = True
+            process.start()
+        except BaseException:
+            with self._lock:
+                self._starting -= 1
+            raise
 
         with self._lock:
+            self._starting -= 1
             pid = process.pid or 0
             if pid == 0:
                 raise RuntimeError('Failed to start process')
@@ -179,7 +188,7 @@ class DisposableExecutor:
         if self.max_workers is None:
             return True
         with self._lock:
-            return len(self.workers) < self.max_workers
+            return len(self.workers) + self._starting < self.max_workers
 
     def shutdown(self):
         """Shutdown the executor."""
@@ -207,7 +216,9 @@ class BurstableExecutor:
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
             self._guaranteed_pool_kwargs = kwargs
-            self._guaranteed_pool_lock = threading.Lock()
+            # Reentrant: submit_until_success holds it across the idle check
+            # and the submit so concurrent dispatchers don't overfill the pool.
+            self._guaranteed_pool_lock = threading.RLock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
                                           **kwargs)
         if burst_workers > 0:
@@ -230,8 +241,11 @@ class BurstableExecutor:
         """
 
         while True:
-            if self._executor is not None and self._executor.has_idle_workers():
-                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
+            if self._executor is not None:
+                with self._guaranteed_pool_lock:
+                    if self._executor.has_idle_workers():
+                        return self._submit_to_guaranteed_pool(
+                            fn, *args, **kwargs)
             if (self._burst_executor is not None and
                     self._burst_executor.has_idle_workers()):
                 try:

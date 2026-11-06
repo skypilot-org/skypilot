@@ -1817,6 +1817,29 @@ async def test_wrapper_releases_result_before_release_memory(
     ]
 
 
+@pytest.mark.asyncio
+async def test_wrapper_skips_release_memory_for_unexecuted_request(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """A request that is no longer executable skips release_memory()."""
+    req = requests_lib.Request(request_id='cancelled-skip',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.CANCELLED,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    release_memory = mock.Mock()
+    monkeypatch.setattr(executor.common_utils, 'release_memory', release_memory)
+
+    executor._request_execution_wrapper('cancelled-skip',
+                                        ignore_return_value=False)
+
+    release_memory.assert_not_called()
+    assert requests_lib.get_request(
+        'cancelled-skip').status == requests_lib.RequestStatus.CANCELLED
+
+
 def _install_gated_handler_in_worker():
     import signal as _signal
 
@@ -2564,3 +2587,155 @@ def test_config_override_infra_keys_gated_through_entry_point(
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+class _DispatchQueue:
+    """In-memory request queue that records which thread dequeued what."""
+
+    def __init__(self, items, dequeue_delay: float = 0.0):
+        self._items = queue_lib.Queue()
+        for item in items:
+            self._items.put(item)
+        self._dequeue_delay = dequeue_delay
+        self._lock = threading.Lock()
+        # Name of the calling thread for every get().
+        self.getters: List[str] = []
+        # Request id -> name of the thread that dequeued it.
+        self.dequeued_by = {}
+
+    def get(self):
+        name = threading.current_thread().name
+        with self._lock:
+            self.getters.append(name)
+        time.sleep(self._dequeue_delay)
+        try:
+            item = self._items.get(block=False)
+        except queue_lib.Empty:
+            return None
+        with self._lock:
+            self.dequeued_by[item[0]] = name
+        return item
+
+    def put(self, item):
+        self._items.put(item)
+
+
+class _RecordingExecutor:
+    """Records submitted request ids and completes them immediately."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.submitted: List[str] = []
+
+    def submit_until_success(self, fn, request_id, *args, **kwargs):
+        del fn, args, kwargs
+        with self._lock:
+            self.submitted.append(request_id)
+        fut = concurrent.futures.Future()
+        fut.set_result(None)
+        return fut
+
+    def shutdown(self):
+        pass
+
+
+class _InlineExecutor:
+    """Runs the submitted function in the calling thread."""
+
+    def submit_until_success(self, fn, *args, **kwargs):
+        fut = concurrent.futures.Future()
+        fut.set_result(fn(*args, **kwargs))
+        return fut
+
+
+def _wait_until(predicate, timeout: float = 10) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _start_short_worker(monkeypatch, request_queue, num_dispatchers):
+    executors: List[_RecordingExecutor] = []
+
+    def make_executor(**kwargs):
+        del kwargs
+        executors.append(_RecordingExecutor())
+        return executors[-1]
+
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: request_queue)
+    monkeypatch.setattr(process, 'BurstableExecutor', make_executor)
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0,
+                                          num_dispatchers=num_dispatchers))
+    worker.run_in_background()
+    return worker, executors
+
+
+def test_dispatch_does_not_run_cancelled_request(isolated_database):
+    """A request cancelled while queued is dispatched but never runs."""
+    CALLED_FLAG[0] = False
+    request_id = 'dispatch-cancelled'
+    asyncio.run(
+        requests_lib.create_if_not_exists_async(
+            _make_pending_request(request_id)))
+    assert asyncio.run(requests_lib.kill_request_async(request_id))
+
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    request_queue = _DispatchQueue([(request_id, False, False)])
+
+    assert worker.process_request(_InlineExecutor(), request_queue) is True
+    assert CALLED_FLAG[0] is False
+    updated = requests_lib.get_request(request_id)
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.CANCELLED
+    assert worker.process_request(_InlineExecutor(), request_queue) is False
+
+
+def test_helper_dispatchers_drain_backlog(monkeypatch):
+    """Helpers join the lead dispatcher while the queue has a backlog."""
+    items = [(f'req-{i}', False, False) for i in range(40)]
+    request_queue = _DispatchQueue(items, dequeue_delay=0.02)
+    worker, executors = _start_short_worker(monkeypatch,
+                                            request_queue,
+                                            num_dispatchers=4)
+    try:
+        assert _wait_until(lambda: len(request_queue.dequeued_by) == len(items))
+        assert _wait_until(lambda: len(executors[0].submitted) == len(items))
+    finally:
+        worker.cancel()
+
+    assert sorted(executors[0].submitted) == sorted(item[0] for item in items)
+    assert len(set(request_queue.dequeued_by.values())) > 1
+    assert worker._thread is not None and not worker._thread.is_alive()
+    assert not [
+        t for t in threading.enumerate()
+        if t.name.startswith(f'{worker}-dispatcher-')
+    ]
+
+
+def test_idle_queue_is_polled_by_lead_dispatcher_only(monkeypatch):
+    """Helpers stay parked while the queue is empty."""
+    request_queue = _DispatchQueue([])
+    worker, _ = _start_short_worker(monkeypatch,
+                                    request_queue,
+                                    num_dispatchers=4)
+    try:
+        assert _wait_until(lambda: len(request_queue.getters) >= 3)
+        # Longer than the helpers' park timeout.
+        time.sleep(1.5)
+    finally:
+        worker.cancel()
+
+    assert worker._thread is not None
+    assert set(request_queue.getters) == {worker._thread.name}
