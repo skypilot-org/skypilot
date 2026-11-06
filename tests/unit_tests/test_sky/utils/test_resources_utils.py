@@ -306,6 +306,54 @@ class TestNormalizeLocalDisk:
         with pytest.raises(ValueError, match='Invalid local_disk'):
             resources_utils.normalize_local_disk('nvme:')
 
+    # Invalid inputs - non-finite sizes. float() parses 'nan'/'inf' and
+    # overflowing literals (e.g. '1e400' -> inf), and the 'size <= 0' guard
+    # does not catch them (nan comparisons are always False), so they would
+    # otherwise become a silently unsatisfiable disk requirement.
+    @pytest.mark.parametrize('disk', [
+        'nan',
+        'inf',
+        'Infinity',
+        '1e400',
+        'nvme:nan',
+        'ssd:inf',
+        'nvme:NaN',
+        'nvme:inf+',
+        'nvme:1e400',
+    ])
+    def test_non_finite_size(self, disk):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(disk)
+
+    # A size may carry at most one trailing '+'. 'size++' previously passed
+    # validation (rstrip stripped every '+') yet then crashed
+    # parse_local_disk_str(), which drops only one '+'.
+    @pytest.mark.parametrize('disk', [
+        'nvme:1000++',
+        '1000++',
+        'ssd:500+++',
+        'nvme:1000.5++',
+    ])
+    def test_multiple_plus_rejected(self, disk):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(disk)
+
+    # Whatever normalize_local_disk() accepts must round-trip through
+    # parse_local_disk_str() without raising.
+    @pytest.mark.parametrize('disk', [
+        'nvme:1000+',
+        'ssd:500',
+        'nvme',
+        'ssd',
+        '1000+',
+        '500',
+        '1000.5',
+        'nvme:1000.5+',
+    ])
+    def test_normalized_output_parses(self, disk):
+        resources_utils.parse_local_disk_str(
+            resources_utils.normalize_local_disk(disk))
+
     # Invalid inputs - bad format
     def test_too_many_colons(self):
         with pytest.raises(ValueError, match='Invalid local_disk format'):
