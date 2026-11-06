@@ -149,7 +149,7 @@ function RecipeCard({ recipe, onPin }) {
           trackRecipeAction('view', { recipe_type: recipe.recipe_type })
         }
       >
-        <Card className="h-full hover:bg-surface-subtle transition-colors cursor-pointer group">
+        <Card className="h-full hover:bg-surface-hover transition-colors cursor-pointer group">
           <CardContent className="p-3">
             {/* Header with icon and name */}
             <div className="flex items-start gap-2 mb-1.5">
@@ -389,37 +389,37 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
             <TableHeader>
               <TableRow>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('recipe_type')}
                 >
                   Type{getSortDirection('recipe_type')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('name')}
                 >
                   Name{getSortDirection('name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('description')}
                 >
                   Description{getSortDirection('description')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('user_name')}
                 >
                   Owner{getSortDirection('user_name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('updated_by_name')}
                 >
                   Last Updated By{getSortDirection('updated_by_name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover"
                   onClick={() => requestSort('updated_at')}
                 >
                   Updated{getSortDirection('updated_at')}
@@ -461,7 +461,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                   return (
                     <TableRow
                       key={recipe.name}
-                      className="hover:bg-surface-subtle"
+                      className="hover:bg-surface-hover"
                     >
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -832,7 +832,7 @@ const RecipeFilterDropdown = ({
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-surface-subtle text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-surface-hover text-sm ${
                   index !== valueOptions.length - 1
                     ? 'border-b border-line-subtle'
                     : ''

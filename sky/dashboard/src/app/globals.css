@@ -36,6 +36,9 @@
        colors, so both themes work without per-component dark: variants. */
     --surface: 0 0% 100%;
     --surface-subtle: 210 20% 98.04%;
+    --surface-page: 210 20% 98.04%;
+    --surface-hover: 210 20% 98.04%;
+    --surface-editor: 0 0% 100%;
     --surface-muted: 220 14.29% 95.88%;
     --surface-strong: 220 13.04% 90.98%;
     --surface-stronger: 216 12.2% 83.92%;
@@ -152,56 +155,59 @@
   }
 
   .dark {
-    --background: 215 28.6% 7.8%;
-    --foreground: 214 15% 89%;
-    --card: 215 28.6% 7.8%;
-    --card-foreground: 214 15% 89%;
-    --popover: 213 25% 10.6%;
-    --popover-foreground: 214 15% 89%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 214 22% 14.3%;
-    --secondary-foreground: 214 15% 89%;
-    --muted: 214 22% 14.3%;
-    --muted-foreground: 215 12% 63%;
-    --accent: 214 22% 14.3%;
-    --accent-foreground: 214 15% 89%;
+    --background: 0 0% 9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 12.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 83%;
+    --muted: 0 0% 25%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 215 21% 19.6%;
-    --input: 215 19% 26%;
-    --ring: 212.7 26.8% 83.9%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 25%;
+    --ring: 0 0% 45%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    --text-strong: 214 15% 89%;
+    --text-strong: 0 0% 98%;
     color-scheme: dark;
-    --surface: 215 28.6% 7.8%;
-    --surface-subtle: 213 25% 10.6%;
-    --surface-muted: 214 22% 14.3%;
-    --surface-strong: 215 21% 19.6%;
-    --surface-stronger: 215 19% 26%;
-    --content-strong: 220 14.3% 95.9%;
-    --content-heavy: 214 15% 92%;
-    --content: 214 15% 89%;
-    --content-secondary: 214 14% 77%;
-    --content-tertiary: 215 12% 63%;
-    --content-faint: 215 11% 52%;
-    --content-faintest: 215 10% 42%;
-    --line-subtle: 214 22% 14.3%;
-    --line: 215 21% 19.6%;
-    --line-strong: 215 19% 26%;
-    --line-stronger: 215 16% 35%;
+    --surface: 0 0% 9%;
+    --surface-subtle: 0 0% 12.5%;
+    --surface-page: 0 0% 9%;
+    --surface-hover: 0 0% 15%;
+    --surface-editor: 0 0% 12.5%;
+    --surface-muted: 0 0% 15%;
+    --surface-strong: 0 0% 25%;
+    --surface-stronger: 0 0% 32%;
+    --content-strong: 0 0% 98%;
+    --content-heavy: 0 0% 98%;
+    --content: 0 0% 98%;
+    --content-secondary: 0 0% 83%;
+    --content-tertiary: 0 0% 64%;
+    --content-faint: 0 0% 64%;
+    --content-faintest: 0 0% 25%;
+    --line-subtle: 0 0% 12.5%;
+    --line: 0 0% 15%;
+    --line-strong: 0 0% 25%;
+    --line-stronger: 0 0% 32%;
     --brand: 217 89% 76%;
     --brand-bright: 214 92% 85%;
     --brand-solid: 217 68% 38%;
     --brand-solid-hover: 217 62% 47%;
-    --surface-log: 213 25% 10.6%;
-    --surface-code: 213 25% 10.6%;
+    --surface-log: 0 0% 12.5%;
+    --surface-code: 0 0% 12.5%;
     --code-string: 141.71 76.64% 73.14%;
-    --code-gutter: 215 11% 52%;
+    --code-gutter: 0 0% 64%;
     --red-tint: 0 74.68% 15.49%;
     --red-tint-strong: 0 66.67% 22.35%;
     --red-line: 0 70% 35.29%;
@@ -432,7 +438,7 @@
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border: 1px solid hsl(var(--line));
-  background: hsl(var(--surface));
+  background: hsl(var(--popover));
   font-family: inherit;
   margin: 8px;
   position: relative;
@@ -470,7 +476,7 @@
   font-size: 16px;
   line-height: 1.6 !important;
   color: hsl(var(--content-secondary));
-  background: hsl(var(--surface));
+  background: hsl(var(--popover));
   margin: 0 !important; /* Remove any default margins */
 }
 
@@ -522,7 +528,7 @@
 }
 
 .shepherd-footer {
-  background: hsl(var(--surface));
+  background: hsl(var(--popover));
   padding: 8px 24px 20px;
   border-radius: 0 0 0.5rem 0.5rem;
   display: flex;
@@ -634,7 +640,7 @@
 
 .shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
   border-width: 6px 6px 0 6px;
-  border-color: hsl(var(--surface)) transparent transparent transparent;
+  border-color: hsl(var(--popover)) transparent transparent transparent;
   bottom: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -642,7 +648,7 @@
 
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
   border-width: 0 6px 6px 6px;
-  border-color: transparent transparent hsl(var(--surface)) transparent;
+  border-color: transparent transparent hsl(var(--popover)) transparent;
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -650,7 +656,7 @@
 
 .shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
   border-width: 6px 0 6px 6px;
-  border-color: transparent transparent transparent hsl(var(--surface));
+  border-color: transparent transparent transparent hsl(var(--popover));
   right: -6px;
   top: 50%;
   transform: translateY(-50%);
@@ -658,7 +664,7 @@
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
   border-width: 6px 6px 6px 0;
-  border-color: transparent hsl(var(--surface)) transparent transparent;
+  border-color: transparent hsl(var(--popover)) transparent transparent;
   left: -6px;
   top: 50%;
   transform: translateY(-50%);

@@ -2385,7 +2385,7 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('add');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-hover rounded transition-colors whitespace-nowrap"
                   >
                     <PlusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Add to workspaces</span>
@@ -2397,7 +2397,7 @@ function UsersTable({
                       setWsDropdownOpen(false);
                       openBulkDialog('remove');
                     }}
-                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-subtle rounded transition-colors whitespace-nowrap"
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-content hover:bg-surface-hover rounded transition-colors whitespace-nowrap"
                   >
                     <MinusIcon className="h-4 w-4 text-content-tertiary flex-shrink-0" />
                     <span>Remove from workspaces</span>
@@ -2431,14 +2431,14 @@ function UsersTable({
                 )}
                 <TableHead
                   onClick={() => requestSort('usernameDisplay')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Name{getSortDirection('usernameDisplay')}
                 </TableHead>
                 {!deduplicateUsers && (
                   <TableHead
                     onClick={() => requestSort('fullEmailID')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                   >
                     User ID{getSortDirection('fullEmailID')}
                   </TableHead>
@@ -2446,7 +2446,7 @@ function UsersTable({
                 {!deduplicateUsers && !ingressBasicAuthEnabled && (
                   <TableHead
                     onClick={() => requestSort('role')}
-                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                   >
                     Role{getSortDirection('role')}
                   </TableHead>
@@ -2456,32 +2456,32 @@ function UsersTable({
                   !externalProxyAuthEnabled && (
                     <TableHead
                       onClick={() => requestSort('userType')}
-                      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                      className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                     >
                       Type{getSortDirection('userType')}
                     </TableHead>
                   )}
                 <TableHead
                   onClick={() => requestSort('created_at')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Joined{getSortDirection('created_at')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('gpuCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   GPUs{getSortDirection('gpuCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('clusterCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Clusters{getSortDirection('clusterCount')}
                 </TableHead>
                 <TableHead
                   onClick={() => requestSort('jobCount')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-subtle w-1/6"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-surface-hover w-1/6"
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
@@ -2493,7 +2493,7 @@ function UsersTable({
                       onClick={sortKey ? () => requestSort(sortKey) : undefined}
                       className={`whitespace-nowrap w-1/6${
                         sortKey
-                          ? ' sortable cursor-pointer hover:bg-surface-subtle'
+                          ? ' sortable cursor-pointer hover:bg-surface-hover'
                           : ''
                       }${col.header?.className ? ' ' + col.header.className : ''}`}
                     >

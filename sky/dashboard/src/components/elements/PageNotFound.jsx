@@ -58,7 +58,7 @@ export function PageNotFound() {
         asChild
         variant="outline"
         size="sm"
-        className="h-8 border-line-strong bg-surface text-content-strong hover:bg-surface-subtle"
+        className="h-8 border-line-strong bg-surface text-content-strong hover:bg-surface-hover"
       >
         <Link href="/infra">Go to Infra</Link>
       </Button>

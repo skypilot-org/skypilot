@@ -1834,7 +1834,7 @@ const FilterDropdown = ({
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-surface-subtle text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-surface-hover text-sm ${
                   index !== valueOptions.length - 1
                     ? 'border-b border-line-subtle'
                     : ''

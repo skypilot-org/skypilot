@@ -109,7 +109,7 @@ function App({ Component, pageProps }) {
               </VersionProvider>
             </PluginWrapperSlot>
           ) : (
-            <div className="min-h-screen bg-surface-subtle" />
+            <div className="min-h-screen bg-surface-page" />
           )}
         </PluginProvider>
       </ThemeProvider>

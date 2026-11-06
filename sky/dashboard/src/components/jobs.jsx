@@ -2564,8 +2564,8 @@ export function ManagedJobsTable({
                               <button
                                 key={status}
                                 onClick={() => handleStatusClick(status)}
-                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-surface-subtle ${
-                                  explicit ? 'bg-surface-subtle' : ''
+                                className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-surface-hover ${
+                                  explicit ? 'bg-surface-hover' : ''
                                 }`}
                               >
                                 <span className="flex items-center gap-2 min-w-0">
@@ -2911,7 +2911,7 @@ export function ManagedJobsTable({
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
-                        <TableRow className="hover:bg-surface-subtle">
+                        <TableRow className="hover:bg-surface-hover">
                           {visibleColumns.map((col) => {
                             const cell = col.renderCell(firstTask, parentCtx);
                             return cell

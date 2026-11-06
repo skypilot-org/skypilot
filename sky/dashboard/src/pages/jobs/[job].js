@@ -576,7 +576,7 @@ function JobDetails({
                           {allTasks.map((task, index) => (
                             <TableRow
                               key={task.task_job_id}
-                              className="hover:bg-surface-subtle"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link
@@ -677,7 +677,7 @@ function JobDetails({
                           {launchedJobs.map((job) => (
                             <TableRow
                               key={`dynamic-${job.id}`}
-                              className="hover:bg-surface-subtle"
+                              className="hover:bg-surface-hover"
                             >
                               <TableCell>
                                 <Link

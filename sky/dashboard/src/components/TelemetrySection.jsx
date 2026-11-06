@@ -183,7 +183,7 @@ export function TelemetrySection({
                           timeRange.from === `now-${preset.value}` &&
                           timeRange.to === 'now'
                             ? 'bg-brand-solid text-white border-brand'
-                            : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-subtle'
+                            : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
                         }`}
                       >
                         {preset.label}

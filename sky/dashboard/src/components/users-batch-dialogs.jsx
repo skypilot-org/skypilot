@@ -417,7 +417,7 @@ function WorkspacePickerDialog({
                       return (
                         <label
                           key={name}
-                          className="flex items-start gap-3 px-3 py-2 hover:bg-surface-subtle border-b border-line-subtle last:border-b-0 cursor-pointer"
+                          className="flex items-start gap-3 px-3 py-2 hover:bg-surface-hover border-b border-line-subtle last:border-b-0 cursor-pointer"
                         >
                           <input
                             type="checkbox"

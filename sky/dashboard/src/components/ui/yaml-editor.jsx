@@ -39,7 +39,7 @@ export const yamlColorTheme = (dark) =>
   EditorView.theme(
     {
       '&': {
-        backgroundColor: 'hsl(var(--surface))',
+        backgroundColor: 'hsl(var(--surface-editor))',
         ...(dark ? { color: 'hsl(var(--content))' } : {}),
       },
       ...(dark
@@ -66,7 +66,7 @@ export const yamlTextCursorTheme = EditorView.theme({
 
 export const yamlGutterTheme = EditorView.theme({
   '.cm-gutters': {
-    backgroundColor: 'hsl(var(--surface))',
+    backgroundColor: 'hsl(var(--surface-editor))',
     border: 'none',
     color: 'hsl(var(--code-gutter))',
   },
@@ -91,7 +91,7 @@ export const yamlGutterTheme = EditorView.theme({
 // editor is find-only). Match highlights are also colored to match the UI.
 export const yamlSearchPanelTheme = EditorView.theme({
   '.cm-panels': {
-    backgroundColor: 'hsl(var(--surface))',
+    backgroundColor: 'hsl(var(--surface-editor))',
     color: 'hsl(var(--content))',
   },
   '.cm-panels.cm-panels-bottom': {

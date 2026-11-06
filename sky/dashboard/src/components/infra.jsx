@@ -1637,7 +1637,7 @@ export function ContextDetails({
                       return (
                         <tr
                           key={`${node.node_name}-${nodesStartIndex + index}`}
-                          className="hover:bg-surface-subtle"
+                          className="hover:bg-surface-hover"
                         >
                           <td className="p-3 whitespace-nowrap text-content">
                             {node.node_name}
@@ -1784,7 +1784,7 @@ export function ContextDetails({
                               timeRange.from === `now-${preset.value}` &&
                               timeRange.to === 'now'
                                 ? 'bg-brand-solid text-white border-brand'
-                                : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-subtle'
+                                : 'bg-surface text-content-secondary border-line-strong hover:bg-surface-hover'
                             }`}
                           >
                             {preset.label}
@@ -2295,7 +2295,7 @@ function SSHNodePoolDetails({
                 Deploy
               </button>
               <button
-                className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-subtle flex items-center text-red-fg hover:text-red-fg-strong"
+                className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-hover flex items-center text-red-fg hover:text-red-fg-strong"
                 onClick={handleDeleteClick}
               >
                 <TrashIcon className="w-4 h-4 mr-2" />
@@ -2607,7 +2607,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             return (
               <tr
                 key={pool.name}
-                className="hover:bg-surface-subtle cursor-pointer"
+                className="hover:bg-surface-hover cursor-pointer"
                 onClick={() => handleContextClick(`ssh-${pool.name}`)}
               >
                 <td className="p-3 font-medium text-content">
@@ -4056,7 +4056,7 @@ export function GPUs() {
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
-          //   className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-subtle flex items-center"
+          //   className="px-3 py-1 text-sm border border-line-strong rounded hover:bg-surface-hover flex items-center"
           //   onClick={handleAddSSHPool}
           // >
           //   <PlusIcon className="w-4 h-4 mr-2" />
