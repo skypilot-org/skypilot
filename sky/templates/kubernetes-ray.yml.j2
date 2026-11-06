@@ -680,6 +680,16 @@ available_node_types:
                 resourceFieldRef:
                   containerName: ray-node
                   resource: requests.memory
+            {% if tpu_requested %}
+            # GKE injects the other TPU_* vars but not TPU_NAME, without which
+            # Ray registers no slice or TPU-<type>-head resource. Each pod is
+            # one single-host slice; Ray caps the name at 63 chars, which pod
+            # names stay under (cluster names are capped at 42).
+            - name: TPU_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {% endif %}
             # Disable Ray memory monitor to prevent Ray's memory manager
             # from interfering with kubernetes resource manager.
             # If ray memory monitor is enabled, the ray memory monitor kills

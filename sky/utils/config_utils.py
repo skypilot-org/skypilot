@@ -400,6 +400,13 @@ def merge_k8s_configs(
                                  if v.get(patch_merge_key) == override_item_name
                                 ), None)
                             if existing_base_item is not None:
+                                if key == 'env' and any(
+                                        override_item.get(k) is not None
+                                        for k in ('value', 'valueFrom')):
+                                    # An env var takes one source; the
+                                    # override's replaces the base's whole.
+                                    existing_base_item.pop('value', None)
+                                    existing_base_item.pop('valueFrom', None)
                                 merge_k8s_configs(existing_base_item,
                                                   override_item)
                             else:
