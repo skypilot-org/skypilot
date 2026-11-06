@@ -2777,6 +2777,11 @@ def get_config_schema():
             'restrict_config_to_admins': {
                 'type': 'boolean',
             },
+            # When true, admin service accounts may act as other users through
+            # the impersonation header. Defaults to false.
+            'allow_impersonation': {
+                'type': 'boolean',
+            },
             # Per-role permission overrides. Schema is intentionally
             # permissive (additionalProperties: True on
             # `permissions`) because admin/user use `blocklist`

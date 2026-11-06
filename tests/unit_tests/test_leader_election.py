@@ -6,6 +6,7 @@ exercised where a Postgres fixture is available.
 """
 import os
 import re
+import time
 from unittest import mock
 
 import pytest
@@ -13,6 +14,7 @@ import sqlalchemy
 
 from sky import global_user_state
 from sky.utils import leader_election
+from sky.utils import locks
 
 
 @pytest.mark.parametrize('env_value,expected', [
@@ -117,6 +119,8 @@ def test_lease_statements_use_the_dedicated_unpooled_engine(monkeypatch):
 def test_advisory_elector_filelock_lifecycle(monkeypatch):
     """On the (non-Postgres) file-lock path, renew is always true while held."""
     monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)
+    execute_bounded = mock.Mock()
+    monkeypatch.setattr(leader_election, '_execute_bounded', execute_bounded)
     lock_id = 'test-leader-election-lifecycle'
     a = leader_election.AdvisoryLockElector(lock_id)
     b = leader_election.AdvisoryLockElector(lock_id)
@@ -133,6 +137,41 @@ def test_advisory_elector_filelock_lifecycle(monkeypatch):
     assert a.renew() is False
     assert b.try_acquire() is True
     b.release()
+    # No lease can exist without Postgres, so the file-lock path never checks.
+    execute_bounded.assert_not_called()
+
+
+@pytest.mark.parametrize('lease_check,expected', [
+    (mock.Mock(return_value=None), True),
+    (mock.Mock(return_value=(1,)), False),
+    (mock.Mock(side_effect=RuntimeError('db down')), False),
+],
+                         ids=['no-lease', 'live-lease', 'check-failed'])
+def test_advisory_elector_yields_to_a_live_lease(monkeypatch, lease_check,
+                                                 expected):
+    """A live lease, or a lease check that fails, gives the lock back."""
+    lock = mock.create_autospec(locks.PostgresLock, instance=True)
+    lock.is_session_alive.return_value = True
+    monkeypatch.setattr(leader_election.locks, 'get_lock',
+                        lambda *args, **kwargs: lock)
+    monkeypatch.setattr(leader_election, '_execute_bounded', lease_check)
+    e = leader_election.AdvisoryLockElector('lock')
+    assert e.try_acquire() is expected
+    assert lock.release.called is not expected
+    assert e.renew() is expected
+
+
+@pytest.mark.parametrize('statement', ['try_acquire', 'renew'])
+def test_lease_statements_test_the_advisory_key_of_their_lock_id(
+        monkeypatch, statement):
+    """Bid and renew must test the same key a ``PostgresLock`` holds."""
+    execute_bounded = mock.Mock(return_value=(1,))
+    monkeypatch.setattr(leader_election, '_execute_bounded', execute_bounded)
+    e = leader_election.PgLeaseElector('some-lock', holder='a')
+    assert getattr(e, statement)() is True
+    sql, params = execute_bounded.call_args.args
+    assert 'pg_try_advisory_xact_lock(:advisory_key)' in str(sql)
+    assert params['advisory_key'] == locks.postgres_lock_key('some-lock')
 
 
 # --- Postgres-backed lease SQL (opt-in via SKYPILOT_TEST_PG_URL) -----------
@@ -256,3 +295,86 @@ def test_pg_release_hands_over_immediately(lease_db):
     assert a.fencing_token() is None
     assert b.try_acquire() is True
     assert b.fencing_token() == 2
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_lease_bid_waits_for_an_advisory_holder(lease_db):
+    advisory = locks.PostgresLock('lock')
+    advisory.acquire(blocking=False)
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    try:
+        assert lease.try_acquire() is False
+        with lease_db.connect() as conn:
+            assert conn.execute(
+                sqlalchemy.text(
+                    'SELECT count(*) FROM leader_leases')).scalar() == 0
+    finally:
+        advisory.release()
+    assert lease.try_acquire() is True
+    assert lease.fencing_token() == 1
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_advisory_bid_waits_for_a_live_lease(lease_db, monkeypatch):
+    monkeypatch.setattr(leader_election.locks, '_detect_lock_type',
+                        lambda: 'postgres')
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    advisory = leader_election.AdvisoryLockElector('lock')
+    assert lease.try_acquire() is True
+    assert advisory.try_acquire() is False
+    # The advisory lock was given back rather than held next to the lease.
+    probe = locks.PostgresLock('lock')
+    probe.acquire(blocking=False)
+    probe.release()
+    lease.release()
+    assert advisory.try_acquire() is True
+    advisory.release()
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_renew_fails_while_an_advisory_holder_exists(lease_db):
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    assert lease.try_acquire() is True
+    advisory = locks.PostgresLock('lock')
+    advisory.acquire(blocking=False)
+    try:
+        assert lease.renew() is False
+    finally:
+        advisory.release()
+    assert lease.renew() is True
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_delayed_renew_loses_to_an_advisory_leader(lease_db, monkeypatch):
+    """A renew whose transaction began before the expiry still sees the old
+    ``now()``; it must not extend a lease an advisory leader saw expire."""
+    monkeypatch.setattr(leader_election.locks, '_detect_lock_type',
+                        lambda: 'postgres')
+    lease = leader_election.PgLeaseElector('lock', holder='a')
+    assert lease.try_acquire() is True
+    with lease_db.connect() as delayed:
+        delayed.execute(sqlalchemy.text('SELECT now()'))
+        with lease_db.connect() as conn:
+            conn.execute(
+                sqlalchemy.text('UPDATE leader_leases SET expires_at = '
+                                'clock_timestamp() + make_interval(secs => '
+                                '0.2) WHERE lock_id = :l'), {'l': 'lock'})
+            conn.commit()
+        time.sleep(0.5)
+        advisory = leader_election.AdvisoryLockElector('lock')
+        assert advisory.try_acquire() is True
+        try:
+            assert delayed.execute(
+                lease._RENEW_SQL, {
+                    'lock_id': 'lock',
+                    'holder': 'a',
+                    'ttl': 60,
+                    'advisory_key': locks.postgres_lock_key('lock'),
+                }).fetchone() is None
+        finally:
+            delayed.rollback()
+            advisory.release()

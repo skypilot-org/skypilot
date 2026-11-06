@@ -31,8 +31,22 @@ def config_workspaces() -> Dict[str, Dict[str, Any]]:
     path = os.environ.get('SKYPILOT_GLOBAL_CONFIG')
     if not path or not os.path.exists(path):
         return {}
-    with open(path, encoding='utf-8') as f:
-        config = yaml.safe_load(f) or {}
+    # The server rewrites this file in place (truncate, then write), so a read
+    # can land in between and see an empty or partial file; the config is
+    # never empty (run_server.sh writes allowed_clouds), so retry until it is
+    # whole. Reading it as empty once made teardown skip deleting a workspace.
+    config: Any = None
+    for _ in range(50):
+        with open(path, encoding='utf-8') as f:
+            try:
+                config = yaml.safe_load(f)
+            except yaml.YAMLError:
+                config = None
+        if isinstance(config, dict) and config:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(f'{path} stayed empty or unreadable for 5s')
     return dict(config.get('workspaces') or {})
 
 

@@ -211,7 +211,15 @@ cloud_dependencies: Dict[str, List[str]] = {
     ],
     'ibm': [
         'ibm-cloud-sdk-core',
-        'ibm-vpc',
+        # ibm-vpc<=0.25.0 ship only an sdist whose setup.py imports
+        # pkg_resources, which no longer exists in the setuptools that build
+        # isolation installs. Every ibm-vpc release needs python-dateutil<3,
+        # while ibm-cloud-sdk-core>=3.28.1 (required by
+        # ibm-platform-services>=0.77.2) needs python-dateutil>=3. While
+        # resolving that conflict, uv can step back through ibm-vpc down to
+        # 0.25.0 and fail to build it. 0.26.3 is the first release with a
+        # wheel.
+        'ibm-vpc>=0.26.3',
         'ibm-platform-services>=0.48.0',
         'ibm-cos-sdk',
     ] + local_ray,
@@ -312,8 +320,11 @@ cloud_extras = {
 extras_require: Dict[str, List[str]] = {
     # Include server_dependencies with each cloud.
     **cloud_extras,
-    'all': list(set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])
-               ),
+    # Sorted so every build lists [all] in the same order. Set order changes
+    # with each build's string-hash seed, and the resolver's outcome can
+    # depend on requirement order.
+    'all': sorted(
+        set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])),
     'remote': remote,
     'server': server_dependencies,
 }

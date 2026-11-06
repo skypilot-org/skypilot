@@ -2175,10 +2175,67 @@ def _create_namespaced_pod_retrying_webhook_errors(
             time.sleep(sleep_seconds)
 
 
+def _invalid_pod_spec_message(e: Any) -> Optional[str]:
+    """Returns the API server's message if it rejected the pod as invalid.
+
+    A 422 response with reason `Invalid` is the API server's own validation
+    of the manifest (a duplicate volume name, a malformed field value, ...).
+    It depends only on the manifest and the API server's version, so the same
+    pod spec is rejected the same way on every attempt: no amount of waiting
+    for capacity will get it created. Rejections by an admission webhook are
+    not included: a webhook can decide on state other than the manifest.
+
+    Returns None for any other error.
+    """
+    if getattr(e, 'status', None) != 422:
+        return None
+    try:
+        body = json.loads(e.body)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(body, dict) or body.get('reason') != 'Invalid':
+        return None
+    message = str(body.get('message', ''))
+    if 'admission webhook' in message:
+        return None
+    return message
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
+
+    See _create_namespaced_pod_handling_known_errors for the errors that are
+    retried or worked around.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: the API server rejected the pod
+            spec as invalid, which retrying the same spec cannot fix.
+
+    Returns: The created Pod object.
+    """
+    try:
+        return _create_namespaced_pod_handling_known_errors(
+            namespace, pod_spec, context)
+    except kubernetes.api_exception() as e:
+        invalid_message = _invalid_pod_spec_message(e)
+        if invalid_message is None:
+            raise
+        # Not a ResourcesUnavailableError: failover still tries the other
+        # candidates (another context may render a valid spec), but a caller
+        # waiting for capacity, such as a managed job, stops when this is the
+        # only kind of failure (see ProvisionUnsupportedError).
+        raise exceptions.ProvisionUnsupportedError(
+            f'Kubernetes rejected the pod spec in context {context!r} as '
+            f'invalid: {invalid_message}. Retrying the same spec cannot '
+            'succeed; fix the pod spec (e.g. kubernetes.pod_config in the '
+            'task or in the config for this context) and launch again.') from e
+
+
+def _create_namespaced_pod_handling_known_errors(namespace: str, pod_spec: dict,
+                                                 context: Optional[str]) -> Any:
+    """Creates a Pod, handling the errors we know how to work around.
 
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.

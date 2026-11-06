@@ -1091,8 +1091,25 @@ class StrategyExecutor:
                                                      f'{env_var}')
                                     logger.debug('Env vars for api_start: '
                                                  f'{os.environ}')
-                                    await asyncio.to_thread(sdk.api_start)
-                                    logger.info('API server started.')
+                                    if server_common.is_running_in_api_server():
+                                        # Running inside the API server
+                                        # (consolidation mode): the server is
+                                        # this process's parent, so there is
+                                        # nothing to start. Calling api_start
+                                        # here is redundant: in-server, it
+                                        # only probes health and raises if
+                                        # the probe fails (see
+                                        # check_server_healthy_or_start_fn).
+                                        # The env-clearing above is a harmless
+                                        # no-op without a fresh server to
+                                        # inherit it; it is restored below.
+                                        logger.debug(
+                                            'Skipping local API server start; '
+                                            'already running inside the API '
+                                            'server.')
+                                    else:
+                                        await asyncio.to_thread(sdk.api_start)
+                                        logger.info('API server started.')
                                 finally:
                                     for env_var, value in (
                                             vars_to_restore.items()):

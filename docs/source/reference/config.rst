@@ -284,6 +284,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`allow_impersonation <config-yaml-rbac-allow-impersonation>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -3481,6 +3482,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-allow-impersonation:
+
+``rbac.allow_impersonation``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether admin service accounts may act on behalf of other users (optional).
+Default: ``false``.
+
+When ``true``, a request authenticated with the token of a service account
+whose role is ``admin`` can set the ``X-SkyPilot-Impersonate-User`` header
+(``sky.impersonate()`` in the Python SDK, ``SKYPILOT_IMPERSONATE_USER`` for
+the CLI) to run as an existing user. The user owns what the request creates,
+and the API server logs the service account behind each such request.
+Impersonated requests cannot change users or service account tokens.
+
+.. code-block:: yaml
+
+  rbac:
+    allow_impersonation: true
 
 .. _config-yaml-db:
 

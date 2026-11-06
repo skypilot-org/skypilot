@@ -6582,6 +6582,146 @@ def _core_api_reading(nodes, pod_events=None):
     return core_api
 
 
+class TestCreatePodInvalidSpec:
+    """A pod spec the API server rejects as invalid (422, reason Invalid) is
+    raised as ProvisionUnsupportedError: the same spec is rejected the same
+    way on every attempt, so a caller waiting for capacity must not retry it.
+    Every other rejection keeps its current handling."""
+
+    _INVALID_MSG = ('Pod "c-head" is invalid: [spec.volumes[4].name: '
+                    'Duplicate value: "dshm", spec.containers[0].volumeMounts'
+                    '[3].mountPath: Invalid value: "/dev/shm": must be unique]')
+
+    @staticmethod
+    def _status(code, reason, message):
+        return _make_api_exception(code,
+                                   reason,
+                                   body=json.dumps({
+                                       'kind': 'Status',
+                                       'status': 'Failure',
+                                       'message': message,
+                                       'reason': reason,
+                                       'code': code,
+                                   }))
+
+    @staticmethod
+    def _patch(monkeypatch, create_side_effect):
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = create_side_effect
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+        monkeypatch.setattr(instance.time, 'sleep', lambda seconds: None)
+        return core_api_mock
+
+    @staticmethod
+    def _create():
+        pod_spec = {
+            'metadata': {
+                'name': 'c-head',
+                'annotations': {}
+            },
+            'spec': {}
+        }
+        return instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, 'ctx-a')
+
+    def test_invalid_spec_raises_provision_unsupported(self, monkeypatch):
+        rejection = self._status(422, 'Invalid', self._INVALID_MSG)
+        core_api_mock = self._patch(monkeypatch, rejection)
+
+        with pytest.raises(
+                sky_exceptions.ProvisionUnsupportedError) as exc_info:
+            self._create()
+
+        message = str(exc_info.value)
+        assert 'context \'ctx-a\'' in message
+        assert 'Duplicate value: "dshm"' in message
+        assert exc_info.value.__cause__ is rejection
+        # Not a capacity failure: a managed job reading the failover history
+        # stops instead of retrying.
+        assert not isinstance(exc_info.value,
+                              sky_exceptions.ResourcesUnavailableError)
+        assert core_api_mock.create_namespaced_pod.call_count == 1
+
+    @pytest.mark.parametrize('code,reason,message', [
+        (403, 'Forbidden', 'pods "c-head" is forbidden: exceeded quota: '
+         'team, requested: pods=1, used: pods=4, limited: pods=4'),
+        (400, 'BadRequest', 'admission webhook "validate.example.com" '
+         'denied the request: missing label'),
+        (422, 'Invalid', 'admission webhook "validate.example.com" '
+         'denied the request: spec.priorityClassName: Invalid value'),
+        (422, '', 'something without a reason'),
+        (500, 'InternalError', 'etcdserver: request timed out'),
+    ],
+                             ids=[
+                                 'quota-403', 'webhook-400', 'webhook-422',
+                                 'no-reason-422', 'other-500'
+                             ])
+    def test_other_rejections_are_unchanged(self, monkeypatch, code, reason,
+                                            message):
+        """Quota, webhook denials and anything else stay raw ApiExceptions,
+        which failover reports as unavailable resources and retries."""
+        self._patch(monkeypatch, self._status(code, reason, message))
+
+        with pytest.raises(FakeApiException):
+            self._create()
+
+    def test_unparsable_body_is_unchanged(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            _make_api_exception(422, 'Unprocessable Entity', body='not json'))
+
+        with pytest.raises(FakeApiException):
+            self._create()
+
+    def test_apparmor_fallback_still_applies(self, monkeypatch):
+        """The AppArmor 422 is worked around, not reported as invalid."""
+        created_pod = mock.MagicMock()
+        apparmor = self._status(
+            422, 'Invalid', 'Pod "c-head" is invalid: FieldValueForbidden: '
+            'AppArmorProfile: nil')
+        core_api_mock = self._patch(monkeypatch, [apparmor, created_pod])
+        pod_spec = {
+            'metadata': {
+                'name': 'c-head',
+                'annotations': {
+                    'container.apparmor.security.beta.kubernetes.io/'
+                    f'{instance.k8s_constants.RAY_NODE_CONTAINER_NAME}': 'unconfined'
+                }
+            },
+            'spec': {}
+        }
+
+        assert instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, 'ctx-a') is created_pod
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_invalid_after_apparmor_fallback(self, monkeypatch):
+        """The create retried without the AppArmor annotation is classified
+        too."""
+        apparmor = self._status(
+            422, 'Invalid', 'Pod "c-head" is invalid: FieldValueForbidden: '
+            'AppArmorProfile: nil')
+        invalid = self._status(422, 'Invalid', self._INVALID_MSG)
+        self._patch(monkeypatch, [apparmor, invalid])
+        pod_spec = {
+            'metadata': {
+                'name': 'c-head',
+                'annotations': {
+                    'container.apparmor.security.beta.kubernetes.io/'
+                    f'{instance.k8s_constants.RAY_NODE_CONTAINER_NAME}': 'unconfined'
+                }
+            },
+            'spec': {}
+        }
+
+        with pytest.raises(sky_exceptions.ProvisionUnsupportedError):
+            instance._create_namespaced_pod_with_retries(
+                'default', pod_spec, 'ctx-a')
+
+
 class TestGetMissingNodeReason:
     """Tests for explaining a lost node from current Kubernetes node state."""
 
