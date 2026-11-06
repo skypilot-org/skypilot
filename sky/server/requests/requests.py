@@ -1251,19 +1251,20 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_running_if_executable_async(request_id: str) -> bool:
-    """Set a request to RUNNING only while it may still start executing.
+async def transition_request_status_async(request_id: str,
+                                          from_statuses: List[RequestStatus],
+                                          status: RequestStatus) -> bool:
+    """Set a request's status only while it is in one of from_statuses.
 
     Returns:
-        True if the request was transitioned to RUNNING; False if it is gone
-        or no longer in an executable status, e.g. already cancelled.
+        True if the request was transitioned; False if it is gone or in
+        another status, e.g. already cancelled.
     """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
-        if (request_task is None or
-                request_task.status not in RequestStatus.executable_statuses()):
+        if request_task is None or request_task.status not in from_statuses:
             return False
-        request_task.status = RequestStatus.RUNNING
+        request_task.status = status
         request_task.status_msg = None
         return True
 

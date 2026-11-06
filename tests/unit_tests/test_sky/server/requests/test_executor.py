@@ -2707,13 +2707,14 @@ async def test_in_process_request_queued_when_submit_rejected(
 @pytest.mark.asyncio
 async def test_in_process_request_cancelled_before_start_stays_cancelled(
         in_process_env):
-    """A request cancelled before it starts is not claimed or overwritten."""
+    """A request cancelled before it starts never runs its entrypoint."""
     request = await _prepare_in_process('in-process-cancelled')
     assert await requests_lib.kill_request_async('in-process-cancelled')
 
     await executor.schedule_prepared_request(request)
     await _wait_in_process_tasks()
 
+    assert not IN_PROCESS_CALLED.is_set()
     cancelled = requests_lib.get_request('in-process-cancelled')
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
