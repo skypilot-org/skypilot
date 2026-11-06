@@ -1,4 +1,6 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
+import asyncio
+import contextlib
 import os
 import sqlite3
 import time
@@ -147,6 +149,80 @@ async def test_execute_fetchall_async_error_does_not_stall_read_txn(
         values = [row[0] for row in rows]
 
     assert values == ['initial', 'external', 'after_error']
+
+
+def _item_values(db_path):
+    with contextlib.closing(sqlite3.connect(db_path)) as external_conn:
+        return [r[0] for r in external_conn.execute('SELECT value FROM items')]
+
+
+@pytest.mark.asyncio
+async def test_execute_many_and_commit_async_commits_all_statements(
+        isolated_database):
+    conn, db_path = isolated_database
+
+    await conn.execute_many_and_commit_async([
+        ('INSERT INTO items (value) VALUES (?)', ('a',)),
+        ('INSERT INTO items (value) VALUES (?)', ('b',)),
+    ])
+
+    assert _item_values(db_path) == ['a', 'b']
+
+
+@pytest.mark.asyncio
+async def test_execute_many_and_commit_async_rolls_back_on_failure(
+        isolated_database):
+    conn, db_path = isolated_database
+
+    with pytest.raises(sqlite3.OperationalError):
+        await conn.execute_many_and_commit_async([
+            ('INSERT INTO items (value) VALUES (?)', ('a',)),
+            ('INSERT INTO missing_table (value) VALUES (?)', ('b',)),
+        ])
+
+    assert _item_values(db_path) == []
+    # The connection stays usable after the rollback.
+    await conn.execute_and_commit_async('INSERT INTO items (value) VALUES (?)',
+                                        ('c',))
+    assert _item_values(db_path) == ['c']
+
+
+@pytest.mark.asyncio
+async def test_execute_many_and_commit_async_does_not_block_the_loop(
+        isolated_database):
+    conn, db_path = isolated_database
+    await conn.execute_and_commit_async('INSERT INTO items (value) VALUES (?)',
+                                        ('seed',))
+    # Hold the write lock from another connection for a while.
+    lock_conn = sqlite3.connect(db_path, isolation_level=None)
+    lock_conn.execute('BEGIN IMMEDIATE')
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    async def release_lock_later():
+        await asyncio.sleep(0.5)
+        lock_conn.execute('COMMIT')
+
+    ticker_task = asyncio.create_task(ticker())
+    release_task = asyncio.create_task(release_lock_later())
+    try:
+        await conn.execute_many_and_commit_async([
+            ('INSERT INTO items (value) VALUES (?)', ('a',)),
+            ('INSERT INTO items (value) VALUES (?)', ('b',)),
+        ])
+    finally:
+        ticker_task.cancel()
+        await release_task
+        lock_conn.close()
+
+    # The loop kept running while the writer waited for the lock.
+    assert ticks >= 10
+    assert _item_values(db_path) == ['seed', 'a', 'b']
 
 
 class TestGetEngine:

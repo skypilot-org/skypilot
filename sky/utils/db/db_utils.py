@@ -8,7 +8,8 @@ import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional,
+                    Tuple, Union)
 import urllib.parse
 
 import aiosqlite
@@ -20,6 +21,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils import common_utils
 from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
@@ -88,6 +90,25 @@ def safe_cursor_on_connection(conn: 'sqlite3.Connection'):
             yield cursor
         finally:
             cursor.close()
+
+
+def enable_wal_mode(cursor: 'sqlite3.Cursor') -> None:
+    """Enables WAL mode, to avoid locking issues.
+
+    See: issue #1441 and PR #1509
+    https://github.com/microsoft/WSL/issues/2395
+    """
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if common_utils.is_wsl():
+        return
+    try:
+        cursor.execute('PRAGMA journal_mode=WAL')
+    except sqlite3.OperationalError as e:
+        if 'database is locked' not in str(e):
+            raise
+        # If the database is locked, it is OK to continue, as the WAL mode
+        # is not critical and is likely to be enabled by other processes.
 
 
 def add_column_to_table(
@@ -370,6 +391,24 @@ class SQLiteConn(threading.local):
 
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
+
+    async def execute_many_and_commit_async(
+            self, statements: Iterable[Tuple[str, Iterable[Any]]]) -> None:
+        """Execute the statements in one transaction and commit once.
+
+        If any statement fails, none of them takes effect.
+        """
+        conn = await self._get_async_conn()
+        statements = list(statements)
+
+        def exec_all_and_commit(statements: List[Tuple[str, Iterable[Any]]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                for sql, parameters in statements:
+                    cursor.execute(sql, parameters)
+
+        # pylint: disable=protected-access
+        await conn._execute(exec_all_and_commit, statements)
 
     @aiosqlite.context.contextmanager
     async def execute_fetchall_async(self,
