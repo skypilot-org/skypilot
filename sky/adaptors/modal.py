@@ -1,0 +1,70 @@
+"""Modal cloud adaptor."""
+
+import os
+import threading
+from typing import Any
+
+from sky import sky_logging
+from sky.adaptors import common
+
+logger = sky_logging.init_logger(__name__)
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Modal. '
+                         'Try running: pip install "skypilot[modal]"')
+_UNSET = object()
+
+
+class _ModalImport(common.LazyImport):
+    """LazyImport of `modal` that follows changes to the Modal config file.
+
+    modal reads ~/.modal.toml (or $MODAL_CONFIG_PATH) once, at import, and
+    caches an API client built from it. A long-lived process -- e.g. an API
+    server request worker -- would otherwise never see `modal token new` or
+    a token uploaded after it first touched modal. Each access re-stats the
+    file and, when it changed, reloads modal's config and drops the cached
+    client.
+    """
+
+    def __init__(self):
+        super().__init__('modal', import_error_message=_IMPORT_ERROR_MESSAGE)
+        self._config_signature: Any = _UNSET
+        self._config_lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        self._refresh_config(self.load_module())
+        return super().__getattr__(name)
+
+    def _refresh_config(self, module: Any) -> None:
+        config = getattr(module, 'config', None)
+        if config is None:
+            return
+        try:
+            # Follows a symlinked config to the file it points at.
+            stat = os.stat(config.user_config_path)
+            signature = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+        except (OSError, AttributeError):
+            signature = None
+        if signature == self._config_signature:
+            return
+        with self._config_lock:
+            if signature == self._config_signature:
+                return
+            first_access = self._config_signature is _UNSET
+            self._config_signature = signature
+            if first_access:
+                # modal read this file when it was imported.
+                return
+            # modal has no public reload API. If these internals change, keep
+            # the config modal already loaded rather than break every access.
+            try:
+                # pylint: disable=protected-access
+                config._user_config = config._read_user_config()
+                config._profile = (os.environ.get('MODAL_PROFILE') or
+                                   config._config_active_profile())
+                module.Client.set_env_client(None)
+            except Exception:  # pylint: disable=broad-except
+                logger.debug('Failed to reload the Modal config.',
+                             exc_info=True)
+
+
+modal = _ModalImport()
