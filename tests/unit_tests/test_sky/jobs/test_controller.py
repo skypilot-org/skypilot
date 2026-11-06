@@ -1253,8 +1253,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-1-test-job') as mock_gen_name, \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]) as mock_get_cl:
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   return_value=mock_handle) as mock_get_cl:
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1265,11 +1265,7 @@ class TestDownloadLogsForCancelledJob:
                 pool=None)
 
             mock_gen_name.assert_called_once_with('test-job', job_id)
-            mock_get_cl.assert_called_once_with(
-                cluster_names=['sky-managed-1-test-job'],
-                refresh=common.StatusRefreshMode.NONE,
-                all_users=True,
-                _include_is_managed=True)
+            mock_get_cl.assert_called_once_with('sky-managed-1-test-job')
             controller.download_log_and_stream.assert_called_once_with(
                 task_id, mock_handle, None)
 
@@ -1287,8 +1283,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=('pool-cluster-1', 42)) as mock_pool_info, \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]):
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   return_value=mock_handle):
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1304,7 +1300,7 @@ class TestDownloadLogsForCancelledJob:
 
     @pytest.mark.asyncio
     async def test_cluster_not_found_skips_download(self):
-        """When get_clusters returns empty, log download is skipped."""
+        """When the cluster is not found, log download is skipped."""
         manager = self._make_manager()
         controller = MagicMock()
         job_id = 3
@@ -1318,8 +1314,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-3-test-job'), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[]):
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   return_value=None):
 
             await ControllerManager._download_logs_for_cancelled_job(
                 manager,
@@ -1344,7 +1340,7 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=(None, None)) as mock_pool_info, \
-             patch('sky.jobs.controller.backend_utils.get_clusters'
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name'
                    ) as mock_get_cl:
 
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1384,8 +1380,8 @@ class TestDownloadLogsForCancelledJob:
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-5-test-job'), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   return_value=[{'handle': mock_handle}]):
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   return_value=mock_handle):
 
             # Should NOT raise - exceptions are caught per-task
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1419,20 +1415,20 @@ class TestDownloadLogsForCancelledJob:
         mock_handle_0 = MagicMock()
         mock_handle_2 = MagicMock()
 
-        def get_clusters_side_effect(cluster_names, **kwargs):
-            name = cluster_names[0]
+        def get_handle_side_effect(cluster_name):
+            name = cluster_name
             if 'job-a' in name:
-                return [{'handle': mock_handle_0}]
+                return mock_handle_0
             elif 'job-c' in name:
-                return [{'handle': mock_handle_2}]
-            return []
+                return mock_handle_2
+            return None
 
         with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
                    ), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   side_effect=get_clusters_side_effect):
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   side_effect=get_handle_side_effect):
 
             # task 1 already succeeded, so only tasks 0 and 2 are active
             await ControllerManager._download_logs_for_cancelled_job(
@@ -1467,13 +1463,13 @@ class TestDownloadLogsForCancelledJob:
         mock_handle_0 = MagicMock()
         mock_handle_1 = MagicMock()
 
-        def get_clusters_side_effect(cluster_names, **kwargs):
-            name = cluster_names[0]
+        def get_handle_side_effect(cluster_name):
+            name = cluster_name
             if 'job-a' in name:
-                return [{'handle': mock_handle_0}]
+                return mock_handle_0
             elif 'job-b' in name:
-                return [{'handle': mock_handle_1}]
-            return []
+                return mock_handle_1
+            return None
 
         # Task 0 fails, task 1 succeeds
         call_count = [0]
@@ -1489,8 +1485,8 @@ class TestDownloadLogsForCancelledJob:
                    '.generate_managed_job_cluster_name',
                    side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
                    ), \
-             patch('sky.jobs.controller.backend_utils.get_clusters',
-                   side_effect=get_clusters_side_effect):
+             patch('sky.jobs.controller.global_user_state.get_handle_from_cluster_name',
+                   side_effect=get_handle_side_effect):
 
             # Should NOT raise despite task 0 failing
             await ControllerManager._download_logs_for_cancelled_job(
