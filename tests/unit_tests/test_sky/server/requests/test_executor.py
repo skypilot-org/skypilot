@@ -2611,6 +2611,13 @@ def in_process_env(isolated_database, mock_global_user_state,
 async def _wait_in_process_tasks():
     await asyncio.wait_for(asyncio.gather(*list(executor._in_process_tasks)),
                            timeout=10)
+    # A request thread can outlive its task (e.g. a cancelled request); it must
+    # finish before teardown restores os.environ, or its env restore leaks.
+    pool = executor._REQUEST_THREAD_EXECUTOR
+    deadline = time.monotonic() + 10
+    while (pool is not None and pool.running.get() > 0 and
+           time.monotonic() < deadline):
+        await asyncio.sleep(0.01)
 
 
 @pytest.mark.asyncio
