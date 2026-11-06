@@ -30,6 +30,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import threads
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import context_utils
@@ -2665,8 +2666,9 @@ async def test_ineligible_request_is_queued(in_process_env, name, retryable,
 async def test_in_process_request_queued_when_executor_full(
         in_process_env, monkeypatch):
     """A full request thread executor sends the request to the queue."""
-    monkeypatch.setattr(executor, '_has_request_thread_available',
-                        lambda: False)
+    monkeypatch.setattr(
+        executor, 'get_request_thread_executor',
+        lambda: threads.OnDemandThreadExecutor(name='full', max_workers=0))
     request = await _prepare_in_process('in-process-full')
 
     await executor.schedule_prepared_request(request)
@@ -2768,3 +2770,73 @@ async def test_in_process_request_cancelled_while_running_stays_cancelled(
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
     assert cancelled.get_return_value() is None
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_above_cap(in_process_env, monkeypatch):
+    """Requests beyond the per-process in-process cap use the queue."""
+    monkeypatch.setattr(executor, '_MAX_IN_PROCESS_REQUESTS', 1)
+    await _start_gated_request('in-process-holding')
+    second = await _prepare_in_process('in-process-over-cap')
+
+    await executor.schedule_prepared_request(second)
+
+    in_process_env.put_async.assert_awaited_once()
+    assert len(executor._in_process_tasks) == 1
+    RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+    held = requests_lib.get_request('in-process-holding')
+    assert held is not None
+    assert held.status == requests_lib.RequestStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_fails_when_claim_raises(
+        in_process_env, monkeypatch):
+    """A storage error while claiming the request marks it FAILED."""
+
+    async def _raise(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError('db down')
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async', _raise)
+    request = await _prepare_in_process('in-process-claim-error')
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    assert not IN_PROCESS_CALLED.is_set()
+    failed = requests_lib.get_request('in-process-claim-error')
+    assert failed is not None
+    assert failed.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_during_claim(
+        in_process_env, monkeypatch):
+    """Cancelling the task mid-claim ends CANCELLED once the claim commits."""
+    real_transition = requests_lib.transition_request_status_async
+    claim_started = asyncio.Event()
+    release_claim = asyncio.Event()
+
+    async def _slow_transition(*args, **kwargs):
+        claim_started.set()
+        await release_claim.wait()
+        return await real_transition(*args, **kwargs)
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async',
+                        _slow_transition)
+    request = await _prepare_in_process('in-process-claim-cancel')
+    await executor.schedule_prepared_request(request)
+    await asyncio.wait_for(claim_started.wait(), timeout=5)
+    (task,) = executor._in_process_tasks
+    task.cancel()
+    await asyncio.sleep(0)
+    release_claim.set()
+    await _wait_in_process_tasks()
+
+    assert not IN_PROCESS_CALLED.is_set()
+    cancelled = requests_lib.get_request('in-process-claim-cancel')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
