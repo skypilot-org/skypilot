@@ -1500,3 +1500,54 @@ def test_merge_k8s_configs_env_rule_applies_to_init_containers():
         'name': 'TPU_NAME',
         'value': 'custom'
     }]
+
+
+def test_merge_k8s_configs_env_malformed_value_from_still_rejected():
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError):
+        _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+            'name': 'TPU_NAME',
+            'valueFrom': 'oops'
+        })
+
+
+def test_merge_k8s_configs_env_empty_value_from_is_a_no_op():
+    env = _merged_env(copy.deepcopy(_TPU_NAME_FROM_POD), {
+        'name': 'TPU_NAME',
+        'valueFrom': {}
+    })
+    assert env == [_TPU_NAME_FROM_POD]
+
+
+def test_merge_k8s_configs_does_not_mutate_override_layers():
+    """An item appended from one layer must not be changed by a later one."""
+    first = {
+        'spec': {
+            'containers': [{
+                'name': 'c',
+                'env': [{
+                    'name': 'NEW',
+                    'valueFrom': _FROM_CONFIG_MAP
+                }]
+            }]
+        }
+    }
+    first_before = copy.deepcopy(first)
+    base = {'spec': {'containers': [{'name': 'c', 'env': []}]}}
+    config_utils.merge_k8s_configs(base, first)
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'containers': [{
+                    'name': 'c',
+                    'env': [{
+                        'name': 'NEW',
+                        'value': 'x'
+                    }]
+                }]
+            }
+        })
+    assert first == first_before
+    assert base['spec']['containers'][0]['env'] == [{
+        'name': 'NEW',
+        'value': 'x'
+    }]

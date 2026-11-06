@@ -406,7 +406,8 @@ def merge_k8s_configs(
                                 merge_k8s_configs(existing_base_item,
                                                   override_item)
                             else:
-                                base_config[key].append(override_item)
+                                base_config[key].append(
+                                    copy.deepcopy(override_item))
                         elif key == 'containers' and base_config[key]:
                             # Backward compatibility for containers: if no name
                             # is specified, merge into the first container
@@ -415,7 +416,8 @@ def merge_k8s_configs(
                                               next_allowed_override_keys,
                                               next_disallowed_override_keys)
                         else:
-                            base_config[key].append(override_item)
+                            base_config[key].append(
+                                copy.deepcopy(override_item))
             else:
                 base_config[key].extend(value)
         else:
@@ -433,11 +435,16 @@ def _drop_replaced_env_source(base_item: Dict[str, Any],
     """
     override_value = override_item.get('value')
     override_from = override_item.get('valueFrom')
-    if override_value is None and override_from is None:
+    # Malformed or empty sources fall through to the plain merge, which
+    # rejects a non-dict valueFrom and treats {} as a no-op, as before.
+    sets_value = (override_value is not None and
+                  not isinstance(override_value, (dict, list)))
+    sets_from = isinstance(override_from, dict) and bool(override_from)
+    if not (sets_value or sets_from):
         return
     base_item.pop('value', None)
     base_from = base_item.get('valueFrom')
-    same_kind = (override_value is None and isinstance(base_from, dict) and
+    same_kind = (not sets_value and isinstance(base_from, dict) and
                  isinstance(override_from, dict) and
                  set(base_from) == set(override_from))
     if not same_kind:
