@@ -6516,3 +6516,26 @@ def test_get_cluster_uid_rereads_after_kubeconfig_changes(
         os.replace(replacement, kubeconfig)
         assert utils.get_cluster_uid('ctx-a') == 'uid-b'
         assert core.read_namespace.call_count == 2
+
+
+def _gke_http_error(status: int = 403):
+    """A googleapiclient HttpError like the GKE API returns on denial."""
+    # pylint: disable=import-outside-toplevel
+    from googleapiclient import errors
+    import httplib2
+    resp = httplib2.Response({'status': status})
+    resp.reason = 'Forbidden'
+    return errors.HttpError(
+        resp, b'{"error": {"message": "Permission denied on cluster"}}')
+
+
+def test_gke_autoscaler_api_error_falls_back():
+    """A GKE API error (e.g. 403) uses the fallback instead of raising."""
+    context = 'gke_my-project_us-central1-a_my-cluster'
+    service = mock.MagicMock()
+    (service.projects.return_value.locations.return_value.clusters.return_value.
+     get.return_value.execute.side_effect) = _gke_http_error()
+    with mock.patch('sky.adaptors.gcp.build', return_value=service):
+        assert utils.GKEAutoscaler.can_create_new_instance_of_type(
+            context, 'ct6e-standard-1t')
+        assert utils.GKEAutoscaler.get_available_machine_types(context) == []
