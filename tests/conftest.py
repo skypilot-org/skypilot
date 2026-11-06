@@ -69,6 +69,18 @@ def _clear_request_level_cache():
     kubernetes_utils._kubeconfig_context_names = None
 
 
+@pytest.fixture(autouse=True)
+def _clear_request_users():
+    """Drop users-table rows cached by an earlier test's requests.
+
+    Tests swap in a fresh state database, where those users do not exist.
+    """
+    executor = sys.modules.get('sky.server.requests.executor')
+    if executor is not None:
+        executor._request_users.clear()  # pylint: disable=protected-access
+    yield
+
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.

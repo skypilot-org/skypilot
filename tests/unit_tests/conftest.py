@@ -45,12 +45,3 @@ def _clear_sa_token_cache():
     if cache is not None:
         cache.clear()
     yield
-
-
-@pytest.fixture(autouse=True)
-def _clear_request_users():
-    """Drop users-table rows an earlier test's requests cached."""
-    executor = sys.modules.get('sky.server.requests.executor')
-    if executor is not None:
-        executor._request_users.clear()  # pylint: disable=protected-access
-    yield
