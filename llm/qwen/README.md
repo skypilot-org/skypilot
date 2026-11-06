@@ -115,7 +115,7 @@ curl http://$ENDPOINT/v1/chat/completions \
         {
             "role": "user",
             "content": [
-                {"type" : "text", "text": "Covert this logo to ASCII art"},
+                {"type" : "text", "text": "Convert this logo to ASCII art"},
                 {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
             ]
         }],
