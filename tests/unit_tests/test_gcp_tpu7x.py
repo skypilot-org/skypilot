@@ -178,3 +178,36 @@ def test_bulk_insert_not_used_for_tpu_machine_types(machine_type, expected):
     config = {'machineType': machine_type}
     assert instance_utils.GCPComputeInstance._use_bulk_insert(  # pylint: disable=protected-access
         config) is expected
+
+
+@pytest.mark.usefixtures('tpu7x_catalog')
+@pytest.mark.parametrize('use_spot', [False, True])
+def test_tpu7x_dws_config_uses_flex_start(use_spot):
+    # MIG resize requests (the DWS path for GPU VMs) reject TPU machine types,
+    # so the same config creates a flex-start VM instead.
+    r = resources_lib.Resources(infra='gcp/us-central1/us-central1-c',
+                                instance_type='tpu7x-standard-4t',
+                                accelerators={'tpu7x': 4},
+                                use_spot=use_spot,
+                                _cluster_config_overrides={
+                                    'gcp': {
+                                        'managed_instance_group': {
+                                            'run_duration': 3600,
+                                            'provision_timeout': 600,
+                                        }
+                                    }
+                                })
+    with patch.object(GCP, 'get_project_id', return_value='test-project'):
+        deploy_vars = GCP().make_deploy_resources_variables(
+            r,
+            resources_utils.ClusterName('test', 'test'),
+            Region('us-central1'), [Zone('us-central1-c')],
+            num_nodes=1)
+    assert deploy_vars['gcp_use_managed_instance_group'] is False
+    if use_spot:
+        # Spot takes precedence; flex-start and spot cannot be combined.
+        assert deploy_vars['flex_start'] is False
+    else:
+        assert deploy_vars['flex_start'] is True
+        assert deploy_vars['flex_start_run_duration'] == 3600
+        assert deploy_vars['flex_start_provision_timeout'] == 600

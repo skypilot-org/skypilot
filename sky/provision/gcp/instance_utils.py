@@ -880,8 +880,7 @@ class GCPComputeInstance(GCPInstance):
         # bulkInsert does not support TPU machine types (e.g.
         # tpu7x-standard-4t), failing with: 'Bulk Insert is not supported for
         # queued requests with TPU machine type ...'.
-        machine_type = config.get('machineType', '').rpartition('/')[2]
-        if machine_type.startswith(constants.COMPUTE_ENGINE_TPU_MACHINE_SERIES):
+        if _is_compute_engine_tpu_machine_type(config.get('machineType', '')):
             return False
         # bulkInsert does not support attaching existing
         # disks to the instances with READ_WRITE mode.
@@ -957,9 +956,20 @@ class GCPComputeInstance(GCPInstance):
                 return errors
 
         logger.debug('Waiting GCP instances to be ready ...')
+        # A flex-start (DWS) insert operation stays running until capacity is
+        # found or its request deadline passes, so wait that long.
+        timeout = GCP_TIMEOUT
+        request_valid_for = config.get('params',
+                                       {}).get('requestValidForDuration',
+                                               {}).get('seconds')
+        if request_valid_for is not None:
+            timeout = max(timeout, int(request_valid_for) + GCP_TIMEOUT)
         try:
             for operation in operations:
-                cls.wait_for_operation(operation, project_id, zone=zone)
+                cls.wait_for_operation(operation,
+                                       project_id,
+                                       zone=zone,
+                                       timeout=timeout)
         except common.ProvisionerError as e:
             return e.errors
         except gcp.http_error_exception() as e:
@@ -1920,6 +1930,12 @@ def get_node_type(config: Dict[str, Any]) -> GCPNodeType:
         return GCPNodeType.MIG
 
     return GCPNodeType.COMPUTE
+
+
+def _is_compute_engine_tpu_machine_type(machine_type: str) -> bool:
+    """Returns whether the machine type (name or URL) has TPUs built in."""
+    machine_type = machine_type.rpartition('/')[2]
+    return machine_type.startswith(constants.COMPUTE_ENGINE_TPU_MACHINE_SERIES)
 
 
 def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],

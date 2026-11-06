@@ -689,6 +689,21 @@ class GCP(clouds.Cloud):
             default_value=None,
             override_configs=resources.cluster_config_overrides)
         use_mig = managed_instance_group_config is not None
+        resources_vars['flex_start'] = False
+        if use_mig and resources_vars['compute_engine_tpu']:
+            # DWS through MIG resize requests is not allowed for TPU machine
+            # types. Use a flex-start VM (also DWS) created with
+            # instances.insert instead, with the same settings.
+            assert managed_instance_group_config is not None
+            use_mig = False
+            if not r.use_spot:
+                resources_vars['flex_start'] = True
+                resources_vars['flex_start_run_duration'] = (
+                    managed_instance_group_config['run_duration'])
+                resources_vars['flex_start_provision_timeout'] = (
+                    managed_instance_group_config.get(
+                        'provision_timeout', constants.
+                        DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT))
         resources_vars['gcp_use_managed_instance_group'] = use_mig
         # Convert boolean to 0 or 1 in string, as GCP does not support boolean
         # value in labels for TPU VM APIs.

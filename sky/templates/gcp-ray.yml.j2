@@ -212,8 +212,21 @@ available_node_types:
             value: |-
               {{ user_data | indent(14) }}
   {%- endif %}
+  {%- if flex_start %}
+      # Flex-start (DWS) VM: wait up to the provision timeout for capacity,
+      # then run for at most the run duration.
+      params:
+        requestValidForDuration:
+          seconds: {{ flex_start_provision_timeout }}
+  {%- endif %}
   {%- if use_spot or gpu is not none or compute_engine_tpu %}
       scheduling:
+  {%- if flex_start %}
+        provisioningModel: FLEX_START
+        maxRunDuration:
+          seconds: {{ flex_start_run_duration }}
+        instanceTerminationAction: DELETE
+  {%- endif %}
   {%- if use_spot %}
         automaticRestart: false
         instanceTerminationAction: DELETE
