@@ -350,15 +350,16 @@ class RequestWorker:
         self.burstable_parallelism = config.burstable_parallelism
         self.num_db_connections_per_worker = (
             config.num_db_connections_per_worker)
+        self.num_dispatchers = max(1, config.num_dispatchers)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+        # Helper dispatchers park here until another dispatcher dequeues.
+        self._backlog = threading.Condition()
 
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
 
     def run_in_background(self) -> None:
-        # Thread dispatcher is sufficient for current scale, refer to
-        # tests/load_tests/test_queue_dispatcher.py for more details.
         # Use daemon thread for automatic cleanup.
         thread = threading.Thread(target=self.run, daemon=True)
         thread.start()
@@ -367,21 +368,21 @@ class RequestWorker:
     def cancel(self) -> None:
         if self._thread is not None:
             self._cancel_event.set()
+            with self._backlog:
+                self._backlog.notify_all()
             self._thread.join()
 
     def process_request(self, executor: process.BurstableExecutor,
-                        queue: RequestQueue) -> None:
+                        queue: RequestQueue) -> bool:
+        """Dispatches one request; returns False if the queue was empty."""
         try:
             request_element = queue.get()
             if request_element is None:
-                time.sleep(0.1)
-                return
+                return False
+            # Wake one parked helper to drain the rest of the backlog.
+            with self._backlog:
+                self._backlog.notify()
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
-            assert request is not None, f'Request with ID {request_id} is None'
-            if request.status == api_requests.RequestStatus.CANCELLED:
-                return
-            del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
@@ -411,12 +412,25 @@ class RequestWorker:
                 raise
 
             logger.info(f'[{self}] Submitted request: {request_id}')
+            return True
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+            return False
+
+    def _run_helper_dispatcher(self, executor: process.BurstableExecutor,
+                               queue: RequestQueue) -> None:
+        while not self._cancel_event.is_set():
+            with self._backlog:
+                woken = self._backlog.wait(timeout=1)
+            if not woken:
+                continue
+            while (not self._cancel_event.is_set() and
+                   self.process_request(executor, queue)):
+                pass
 
     def _mark_executor_free(self) -> None:
         """Increment the free-executor gauge for this worker's schedule type.
@@ -571,6 +585,7 @@ class RequestWorker:
             signal.signal(signal.SIGTERM, _sigterm_handler)
             setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
         queue = _get_queue(self.schedule_type)
+        helpers: List[threading.Thread] = []
 
         # Use concurrent.futures.ProcessPoolExecutor instead of
         # multiprocessing.Pool because the former is more efficient with the
@@ -597,12 +612,25 @@ class RequestWorker:
                 elif self.schedule_type == api_requests.ScheduleType.SHORT:
                     metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
                         total_executors)
+            for i in range(1, self.num_dispatchers):
+                helper = threading.Thread(target=self._run_helper_dispatcher,
+                                          args=(executor, queue),
+                                          name=f'{self}-dispatcher-{i}',
+                                          daemon=True)
+                helper.start()
+                helpers.append(helper)
             while not self._cancel_event.is_set():
-                self.process_request(executor, queue)
+                if not self.process_request(executor, queue):
+                    time.sleep(0.1)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
         except KeyboardInterrupt:
             pass
         finally:
+            self._cancel_event.set()
+            with self._backlog:
+                self._backlog.notify_all()
+            for helper in helpers:
+                helper.join()
             # In most cases, here we receive either ctrl-c in foreground
             # execution or SIGTERM on server exiting. Gracefully exit the
             # worker process and the executor.

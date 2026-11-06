@@ -1,11 +1,13 @@
 """Unit tests for sky/server/requests/process.py."""
 from concurrent.futures import Future
 import concurrent.futures.process
+import threading
 import time
 import unittest.mock
 
 import pytest
 
+from sky import exceptions
 from sky.server.requests.process import BurstableExecutor
 from sky.server.requests.process import DisposableExecutor
 from sky.server.requests.process import PoolExecutor
@@ -203,5 +205,40 @@ def test_burstable_executor_pool_recovery():
             # Verify that a new executor was created after the failure
             assert executor._executor is not original_executor
 
+    finally:
+        executor.shutdown()
+
+
+def test_disposable_executor_concurrent_submit_respects_max_workers():
+    """Concurrent submits never start more processes than max_workers."""
+    executor = DisposableExecutor(max_workers=2)
+    num_submitters = 8
+    barrier = threading.Barrier(num_submitters)
+    futures = []
+    rejected = []
+    lock = threading.Lock()
+
+    def submit():
+        barrier.wait()
+        try:
+            fut = executor.submit(dummy_task, 1)
+        except exceptions.ExecutionPoolFullError:
+            with lock:
+                rejected.append(True)
+            return
+        with lock:
+            futures.append(fut)
+
+    try:
+        threads = [
+            threading.Thread(target=submit) for _ in range(num_submitters)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(futures) == 2
+        assert len(rejected) == num_submitters - 2
+        assert wait_for_futures(futures)
     finally:
         executor.shutdown()

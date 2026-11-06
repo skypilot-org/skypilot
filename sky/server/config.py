@@ -47,6 +47,8 @@ _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 _MIN_LONG_WORKERS = 1
 # Minimal number of idle short workers to ensure responsiveness.
 _MIN_IDLE_SHORT_WORKERS = 1
+# Threads that dispatch short requests from the queue to workers.
+_SHORT_REQUEST_DISPATCHERS = 4
 
 # Default number of burstable workers for local API server. A heuristic number
 # that is large enough for most local cases.
@@ -77,6 +79,7 @@ class WorkerConfig:
     garanteed_parallelism: int
     burstable_parallelism: int
     num_db_connections_per_worker: int
+    num_dispatchers: int = 1
 
 
 @dataclasses.dataclass
@@ -232,7 +235,8 @@ def compute_server_config(
         short_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_short,
             burstable_parallelism=burstable_parallel_for_short,
-            num_db_connections_per_worker=num_db_connections_per_worker),
+            num_db_connections_per_worker=num_db_connections_per_worker,
+            num_dispatchers=_SHORT_REQUEST_DISPATCHERS),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
 
