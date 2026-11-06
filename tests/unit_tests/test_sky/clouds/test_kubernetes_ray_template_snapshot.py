@@ -633,6 +633,34 @@ def test_tpu_pod_sets_tpu_name_from_pod_name() -> None:
     assert 'TPU_NAME' not in _ray_node_env('base_cpu')
 
 
+def test_pod_config_tpu_name_overrides_template() -> None:
+    """A user TPU_NAME (today's workaround) wins and leaves one source."""
+    rendered = yaml.safe_load(_render(_build_variables('tpu')))
+    overrides = {
+        'kubernetes': {
+            'pod_config': {
+                'spec': {
+                    'containers': [{
+                        'name': 'ray-node',
+                        'env': [{
+                            'name': 'TPU_NAME',
+                            'value': 'custom'
+                        }]
+                    }]
+                }
+            }
+        }
+    }
+    merged = kubernetes_utils.combine_pod_config_fields(rendered, overrides)
+    pod = merged['available_node_types']['ray_head_default']['node_config']
+    container = next(
+        c for c in pod['spec']['containers'] if c['name'] == 'ray-node')
+    assert [e for e in container['env'] if e['name'] == 'TPU_NAME'] == [{
+        'name': 'TPU_NAME',
+        'value': 'custom'
+    }]
+
+
 def test_tpu_pod_name_fits_ray_slice_name_limit() -> None:
     """Ray uses TPU_NAME as a label value (<= 63 chars) and does not check it
     at `ray start`. Pod names are `<cluster>-head` / `<cluster>-worker<i>`."""
