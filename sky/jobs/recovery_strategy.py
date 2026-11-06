@@ -1708,8 +1708,14 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 original_resources = task.resources
                 launched_cloud = self._launched_resources.cloud
                 launched_region = self._launched_resources.region
+                # Retry the launched node count too, unless the task sets
+                # its own (it cannot also be set on the resources).
                 new_resources = self._launched_resources.copy(
-                    cloud=launched_cloud, region=launched_region, zone=None)
+                    cloud=launched_cloud,
+                    region=launched_region,
+                    zone=None,
+                    num_nodes=(None if task.num_nodes_on_task else
+                               self._launched_resources.num_nodes))
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = await self._launch(raise_on_failure=False,

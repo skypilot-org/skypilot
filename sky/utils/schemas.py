@@ -411,6 +411,12 @@ def _get_single_resources_schema():
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
                 'pattern': _get_infra_pattern(),
             },
+            # Set here instead of on the task (not both), so `any_of` /
+            # `ordered` candidates can differ in node count.
+            'num_nodes': {
+                'type': 'integer',
+                'minimum': 1,
+            },
             'cpus': {
                 'anyOf': [{
                     'type': 'string',
@@ -2015,6 +2021,8 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
+    # Controllers always run on a single node.
+    resources_schema['properties'].pop('num_nodes')
 
     def _get_controller_schema(extra_properties: Optional[Dict[str,
                                                                Any]] = None,):

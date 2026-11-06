@@ -1966,6 +1966,7 @@ class TestUserJobStatusClassification:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.candidate_num_nodes.return_value = [1]
 
         # No retries: deterministic OOM-style failures should not be retried.
         executor = MagicMock()
@@ -2104,6 +2105,7 @@ class TestUserJobFailureRecoveryEventReason:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.candidate_num_nodes.return_value = [1]
 
         handle = MagicMock()
         handle.launched_resources.need_cleanup_after_preemption_or_failure.\
@@ -2200,6 +2202,7 @@ class TestUserJobFailureRecoveryEventReason:
         executor = self._make_executor()
         task = MagicMock(name='task')
         task.num_nodes = 1
+        task.candidate_num_nodes.return_value = [1]
         handle = MagicMock(name='pre_refresh_handle')
         current_handle = [handle]
 
@@ -2324,6 +2327,7 @@ class TestTransientJobStatusRecoveryWindow:
             self, num_nodes):
         task = MagicMock()
         task.num_nodes = num_nodes
+        task.candidate_num_nodes.return_value = [num_nodes]
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -2404,6 +2408,7 @@ class TestTransientJobStatusRecoveryWindow:
         ]
         task = MagicMock()
         task.num_nodes = num_nodes
+        task.candidate_num_nodes.return_value = [num_nodes]
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -2746,6 +2751,7 @@ class TestTransientJobStatusRecoveryWindow:
 
         task = MagicMock(name='task')
         task.num_nodes = num_nodes
+        task.candidate_num_nodes.return_value = [num_nodes]
 
         mock_self = MagicMock()
         mock_self._job_id = 1
@@ -2828,6 +2834,7 @@ class TestRuntimeCursorReads:
     async def _run(self, instance, executor=None):
         task = MagicMock()
         task.num_nodes = 1
+        task.candidate_num_nodes.return_value = [1]
         with pytest.raises(self._StopLoop):
             await JobController._monitor_one_task_impl(
                 instance,
@@ -3065,6 +3072,7 @@ class TestStatusCheckGapJitter:
 
         task = MagicMock()
         task.num_nodes = 1
+        task.candidate_num_nodes.return_value = [1]
         instance = MagicMock()
         instance._job_id = 1
         instance._pool = None
@@ -3720,6 +3728,7 @@ class TestOnRecoveryClusterSetUpErrorHandling:
         mock_task = MagicMock()
         mock_task.name = 'test-task'
         mock_task.num_nodes = 1
+        mock_task.candidate_num_nodes.return_value = [1]
 
         executor = MagicMock()
         executor.recover = AsyncMock(return_value=12345.0)

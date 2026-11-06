@@ -723,11 +723,15 @@ def _start(
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
+    # The node count goes on the resources: `launched_resources` already
+    # carries it (unless launched before resources had a `num_nodes`), and a
+    # task cannot also set its own.
+    launched_resources = handle.launched_resources.copy(
+        num_nodes=handle.launched_nodes)
     with dag_lib.Dag():
-        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
+        dummy_task = task_lib.Task().set_resources(launched_resources)
     (handle, _) = backend.provision(dummy_task,
-                                    to_provision=handle.launched_resources,
+                                    to_provision=launched_resources,
                                     dryrun=False,
                                     stream_logs=True,
                                     cluster_name=cluster_name,
