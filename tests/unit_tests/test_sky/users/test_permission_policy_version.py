@@ -185,7 +185,8 @@ def test_unreadable_version_loads_every_time(new_service, engine,
 
 def test_reloads_never_record_a_version_newer_than_the_model(
         new_service, engine, monkeypatch):
-    """An older reload finishing last must not pass for the newer one."""
+    """An older build is never recorded as current.
+    """
     service = new_service()
     service.get_user_roles('alice')
     state = service._policy_version
@@ -276,6 +277,74 @@ def test_local_write_during_a_reload_is_kept(new_service, engine, monkeypatch,
         reader.join(timeout=10)
 
     assert service.roles_in_memory('alice') == ['admin']
+
+
+class _WriteFirst:
+    """A write lock whose first acquire by `thread` lets `write` run first."""
+
+    def __init__(self, real, thread, write):
+        self.real, self.thread, self.write = real, thread, write
+
+    def __enter__(self):
+        if threading.current_thread().name == self.thread and self.write:
+            writer = threading.Thread(target=self.write)
+            self.write = None
+            writer.start()
+            writer.join(timeout=10)
+        return self.real.__enter__()
+
+    def __exit__(self, *args):
+        return self.real.__exit__(*args)
+
+
+def test_local_write_just_before_the_swap_lock_is_kept(new_service, engine,
+                                                       monkeypatch):
+    """The swap decides on a version read while it holds the write lock."""
+    service = new_service()
+    service.update_role('alice', 'user')
+    service.get_user_roles('alice')
+    _grant(engine, 'zed', 'user')  # Forces a reload.
+    synced = service.enforcer
+
+    def demote():
+        synced.remove_filtered_grouping_policy(0, 'alice')
+        synced.add_grouping_policy('alice', 'admin')
+
+    monkeypatch.setattr(synced, '_wl',
+                        _WriteFirst(synced._wl, 'reloader', demote))
+    reloader = threading.Thread(target=service._load_policy_no_lock,
+                                name='reloader')
+    reloader.start()
+    reloader.join(timeout=10)
+    assert not reloader.is_alive()
+
+    assert service.roles_in_memory('alice') == ['admin']
+
+
+def test_write_during_the_in_place_load_is_seen_next(new_service, engine,
+                                                     monkeypatch):
+    """The in-place load records the version read before it, not after."""
+    service = new_service()
+    service.get_user_roles('carol')
+    _grant(engine, 'zed', 'user')  # Forces a reload.
+    adapter = service._policy_version.adapter
+    original = adapter.load_policy
+    after_load = [
+        # During the build: sends the swap down the in-place branch.
+        lambda: _grant(engine, 'other', 'user'),
+        # During the in-place load, after its rows were read.
+        lambda: _grant(engine, 'carol', 'viewer'),
+    ]
+
+    def load_then_write(model):
+        original(model)
+        if after_load:
+            after_load.pop(0)()
+
+    monkeypatch.setattr(adapter, 'load_policy', load_then_write)
+    service._load_policy_no_lock()
+    assert not after_load
+    assert service.get_user_roles('carol') == ['viewer']
 
 
 def test_concurrent_stale_readers_load_once(new_service, engine, monkeypatch):

@@ -136,6 +136,22 @@ def test_concurrent_migrators_converge():
     assert _triggers(url) == [(_PG_TRIGGER,)]
 
 
+@pytest.mark.skipif(not _PG_URL, reason='SKYPILOT_TEST_PG_URL is not set')
+@pytest.mark.xdist_group('rbac_policy_version_pg')
+def test_write_from_another_search_path_is_counted(url):
+    if str(url).startswith('sqlite'):
+        pytest.skip('Postgres only')
+    # This session's search_path does not include the schema.
+    other = sqlalchemy.create_engine(
+        _pg_url(), connect_args={'options': '-csearch_path=public'})
+    with other.begin() as conn:
+        conn.execute(
+            sqlalchemy.text(f'INSERT INTO {_PG_SCHEMA}.casbin_rule '
+                            '(ptype, v0, v1) VALUES (\'g\', \'a\', \'user\')'))
+    other.dispose()
+    assert _query(url, 'SELECT version FROM rbac_policy_version') == [(1,)]
+
+
 def test_downgrade_keeps_casbin_rule_writable(url):
     engine = sqlalchemy.create_engine(url)
     alembic_command.downgrade(

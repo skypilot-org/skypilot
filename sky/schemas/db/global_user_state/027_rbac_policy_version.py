@@ -64,9 +64,14 @@ def upgrade_on(connection: sa.engine.Connection) -> None:
         sa.text('INSERT INTO rbac_policy_version (id, version) '
                 'VALUES (1, 0) ON CONFLICT DO NOTHING'))
     if is_postgres:
+        # Pin the function to this schema, so a writer whose search_path
+        # lacks it (or resolves "$user" elsewhere) still finds the table.
+        schema = connection.execute(
+            sa.text('SELECT quote_ident(current_schema())')).scalar()
         connection.execute(
             sa.text(f'CREATE OR REPLACE FUNCTION {_PG_FUNCTION}() '
-                    f'RETURNS trigger AS $$ BEGIN {_BUMP}; RETURN NULL; END; '
+                    f'RETURNS trigger SET search_path = {schema} '
+                    f'AS $$ BEGIN {_BUMP}; RETURN NULL; END; '
                     '$$ LANGUAGE plpgsql'))
         # Not CREATE OR REPLACE TRIGGER, which needs Postgres 14.
         connection.execute(

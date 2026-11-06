@@ -238,8 +238,10 @@ def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
                    state: _PolicyVersion, version: Optional[int]) -> None:
     """Make `synced` serve `fresh`, built from the policy at `version`.
 
-    Readers are blocked only for the swap. casbin has no public API for this,
-    so if its private names change, reload in place as before.
+    Under the write lock, readers wait for one version read, plus a full load
+    in place if the version moved during the build or cannot be read. casbin
+    has no public API for this, so if its private names change, reload in
+    place as before.
     """
     # pylint: disable=protected-access
     if not (isinstance(getattr(synced, '_e', None), casbin.Enforcer) and
