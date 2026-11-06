@@ -2923,6 +2923,7 @@ async def test_in_process_completion_is_signalled(in_process_env, monkeypatch):
     done = executor.get_in_process_completion('in-process-signal')
     assert done is not None
     await asyncio.wait_for(done.wait(), timeout=10)
+    await _wait_in_process_tasks()
 
     assert executor.get_in_process_completion('in-process-signal') is None
     finished = requests_lib.get_request('in-process-signal')
