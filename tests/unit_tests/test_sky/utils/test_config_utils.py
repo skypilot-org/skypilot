@@ -1518,7 +1518,14 @@ def test_merge_k8s_configs_env_empty_value_from_is_a_no_op():
     assert env == [_TPU_NAME_FROM_POD]
 
 
-def test_merge_k8s_configs_does_not_mutate_override_layers():
+@pytest.mark.parametrize('base_container', [{
+    'name': 'c',
+    'env': []
+}, {
+    'name': 'c'
+}],
+                         ids=['base-has-env', 'base-lacks-env'])
+def test_merge_k8s_configs_does_not_mutate_override_layers(base_container):
     """An item appended from one layer must not be changed by a later one."""
     first = {
         'spec': {
@@ -1532,7 +1539,7 @@ def test_merge_k8s_configs_does_not_mutate_override_layers():
         }
     }
     first_before = copy.deepcopy(first)
-    base = {'spec': {'containers': [{'name': 'c', 'env': []}]}}
+    base = {'spec': {'containers': [copy.deepcopy(base_container)]}}
     config_utils.merge_k8s_configs(base, first)
     config_utils.merge_k8s_configs(
         base, {

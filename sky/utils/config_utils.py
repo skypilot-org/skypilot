@@ -389,7 +389,7 @@ def merge_k8s_configs(
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
                 if patch_merge_key is None:
                     # Atomic list field (e.g., args, command) - replace entirely
-                    base_config[key] = value
+                    base_config[key] = copy.deepcopy(value)
                 else:
                     for override_item in value:
                         override_item_name = override_item.get(patch_merge_key)
@@ -419,9 +419,11 @@ def merge_k8s_configs(
                             base_config[key].append(
                                 copy.deepcopy(override_item))
             else:
-                base_config[key].extend(value)
+                base_config[key].extend(copy.deepcopy(value))
         else:
-            base_config[key] = value
+            # Copies keep a later layer's merge (which may drop keys) from
+            # changing the caller's override in place.
+            base_config[key] = copy.deepcopy(value)
 
 
 def _drop_replaced_env_source(base_item: Dict[str, Any],
