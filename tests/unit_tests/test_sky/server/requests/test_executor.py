@@ -2786,7 +2786,7 @@ def counted_user_upsert(stub_override_request_env_deps, monkeypatch):
     return upserts
 
 
-def _run_override(authenticated: bool) -> None:
+def _run_override_as_user(authenticated: bool) -> None:
     body = payloads.RequestBody(env_vars={
         constants.USER_ID_ENV_VAR: 'user-1',
         constants.USER_ENV_VAR: 'alice',
@@ -2798,13 +2798,13 @@ def _run_override(authenticated: bool) -> None:
 
 
 def test_authenticated_request_skips_user_upsert(counted_user_upsert):
-    _run_override(authenticated=True)
+    _run_override_as_user(authenticated=True)
     assert not counted_user_upsert
     executor._seed_role_if_missing.assert_not_called()
 
 
 def test_unauthenticated_request_upserts_user(counted_user_upsert):
-    _run_override(authenticated=False)
+    _run_override_as_user(authenticated=False)
     assert counted_user_upsert == ['user-1']
     executor._seed_role_if_missing.assert_called_once_with('user-1')
 
@@ -2828,7 +2828,7 @@ def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
         mock.Mock(return_value=models.User(
             id='user-1', name='alice', preferred_workspace='ws-2')))
 
-    _run_override(authenticated=True)
+    _run_override_as_user(authenticated=True)
 
     assert resolved_for == ['ws-2']
     assert not counted_user_upsert
