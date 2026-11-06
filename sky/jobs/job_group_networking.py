@@ -31,6 +31,7 @@ from typing import Awaitable, Callable, List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.utils import asyncio_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 
@@ -585,8 +586,10 @@ async def _setup_node_with_retries(
     reason = f'{setup_type} failed'
     for attempt in range(1, _SETUP_MAX_ATTEMPTS + 1):
         try:
-            ok = await asyncio.wait_for(make_attempt(),
-                                        timeout=_SETUP_ATTEMPT_TIMEOUT_SECONDS)
+            # Not asyncio.wait_for: before Python 3.12 it can swallow a
+            # cancel of the managed job that lands as an attempt completes.
+            ok = await asyncio_utils.wait_for(
+                make_attempt(), timeout=_SETUP_ATTEMPT_TIMEOUT_SECONDS)
             if ok:
                 if attempt > 1:
                     logger.info(f'{setup_type} succeeded on {node_label} '
