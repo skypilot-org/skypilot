@@ -1515,8 +1515,11 @@ def reload_for_new_request(client_entrypoint: Optional[str],
         sync_refresh: Passed to annotations.clear_request_level_cache; True
             when the request shares its process with concurrent requests.
     """
-    # This should be called first to make sure the logger is up-to-date.
-    sky_logging.reload_logger()
+    # This should be called first to make sure the logger is up-to-date. A
+    # process shared with concurrent requests keeps its one handler, whose
+    # level follows each request's context; replacing it races other threads.
+    if not sync_refresh:
+        sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
     # We don't need to grab the lock here because this function is only
