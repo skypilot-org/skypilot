@@ -33,6 +33,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -309,6 +310,10 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         self.file_mounts_blob_id = file_mounts_blob_id
+        # Whether this controller process has cancelled launch requests
+        # left behind by a previous controller of this job. See
+        # _cancel_orphaned_launch_requests.
+        self._orphaned_launch_requests_checked = False
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -743,8 +748,13 @@ class StrategyExecutor:
                 f'Refreshed priority for job {self.job_id} to {new_priority} '
                 f'(priority_class={new_priority_class}) from persisted DAG.')
 
-    async def _cancel_launch_request(self, request_id: str) -> None:
-        """Cancel an inner launch/exec request of this job."""
+    async def _cancel_launch_request(self, request_id: str) -> bool:
+        """Cancel an inner launch/exec request of this job.
+
+        Returns:
+            Whether the cancellation was submitted and completed without
+            error. Never raises.
+        """
         try:
             req = await asyncio.to_thread(sdk.api_cancel, request_id)
         except Exception as e:  # pylint: disable=broad-except
@@ -755,13 +765,69 @@ class StrategyExecutor:
             # an unrelated failure here does not replace the in-flight
             # cancellation.
             logger.error(f'Failed to cancel the request: {e}')
-            return
+            return False
         logger.debug(f'sdk.api_cancel request ID: {req}')
         try:
             await asyncio.to_thread(sdk.get, req)
         except Exception as e:  # pylint: disable=broad-except
             # we must still propagate the cancellation
             logger.error(f'Failed to cancel the request: {e}')
+            return False
+        return True
+
+    async def _cancel_orphaned_launch_requests(self) -> None:
+        """Cancel launch requests left behind by a previous controller.
+
+        A launch request outlives the controller process that submitted it:
+        if the controller dies while the request is parked (WAITING), e.g.
+        in an API server rolling update, the request stays on the API server
+        and resumes on its own once its wait ends. Its id only lived in the
+        dead controller's memory, so the restarted controller cannot
+        re-attach to it and submits a fresh launch for the same cluster.
+        Left alone, the old request later re-runs provisioning on the
+        cluster the fresh launch already started the job on, which kills
+        the job's driver. So before this process's first fresh launch,
+        cancel every unfinished launch request for this job's cluster.
+
+        Once the listing succeeds and every cancellation goes through, later
+        fresh launches by this process skip the check: this process tracks
+        its own launch requests in _launch. If the listing or a cancellation
+        fails (e.g. the API server is restarting), the check runs again
+        before the next fresh launch attempt. Never raises: the launch
+        proceeds either way.
+        """
+        if self._orphaned_launch_requests_checked:
+            return
+        launch_request_name = server_constants.REQUEST_NAME_PREFIX + 'launch'
+        try:
+            # Without all_status, only unfinished requests are returned.
+            active = await asyncio.to_thread(
+                sdk.api_status,
+                cluster_name=self.cluster_name,
+                fields=['request_id', 'name', 'status', 'cluster_name'])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to list unfinished launch requests for '
+                           f'cluster {self.cluster_name!r}; will check again '
+                           'before the next launch attempt: '
+                           f'{common_utils.format_exception(e)}')
+            return
+        all_cancelled = True
+        for req in active:
+            request_id = getattr(req, 'request_id', None)
+            # Match the cluster here as well: an API server that predates
+            # the cluster_name filter ignores it and lists every cluster's
+            # requests, which must never be cancelled from here.
+            if (getattr(req, 'name', None) != launch_request_name or
+                    getattr(req, 'cluster_name', None) != self.cluster_name or
+                    request_id is None):
+                continue
+            logger.info(f'Cancelling launch request {request_id} '
+                        f'({getattr(req, "status", None)}) for cluster '
+                        f'{self.cluster_name!r}, left behind by a previous '
+                        'controller of this job.')
+            if not await self._cancel_launch_request(request_id):
+                all_cancelled = False
+        self._orphaned_launch_requests_checked = all_cancelled
 
     async def _get_request_payload(self, request_id: str) -> Optional[Any]:
         """Fetch the status and status_msg of a request.
@@ -1142,6 +1208,8 @@ class StrategyExecutor:
                             request_id: Optional[str] = None
                             try:
                                 if reattach_request_id is None:
+                                    await (
+                                        self._cancel_orphaned_launch_requests())
                                     extra_ctx = self.extra_launch_context()
                                     runtime_restarts = await (
                                         state.get_runtime_user_restarts_async(
