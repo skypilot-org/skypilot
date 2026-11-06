@@ -374,15 +374,23 @@ async def test_launch_cancels_orphaned_launch_request_before_fresh_launch(
     executor._await_launch_request = mock.AsyncMock(return_value=None)
     order = []
     api_status = mock.MagicMock(return_value=[
-        types.SimpleNamespace(
-            request_id='old-req', name='sky.launch', status='WAITING'),
+        types.SimpleNamespace(request_id='old-req',
+                              name='sky.launch',
+                              status='WAITING',
+                              cluster_name='test-cluster'),
         # Not a launch: must be left alone.
-        types.SimpleNamespace(
-            request_id='other-req', name='sky.status', status='RUNNING'),
+        types.SimpleNamespace(request_id='other-req',
+                              name='sky.status',
+                              status='RUNNING',
+                              cluster_name='test-cluster'),
     ])
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
-    cancel = mock.AsyncMock(
-        side_effect=lambda rid: order.append(('cancel', rid)))
+
+    def fake_cancel(rid):
+        order.append(('cancel', rid))
+        return True
+
+    cancel = mock.AsyncMock(side_effect=fake_cancel)
     executor._cancel_launch_request = cancel
     patches.sdk_launch.side_effect = (lambda *a, **k: order.append(
         ('launch', None)) or 'req-123')
@@ -410,6 +418,74 @@ async def test_launch_checks_for_orphaned_launch_requests_once(monkeypatch):
     await executor._launch(max_retry=1, raise_on_failure=True)
 
     api_status.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_orphan_check_ignores_other_clusters_launches(monkeypatch):
+    """An API server that predates the cluster_name filter ignores it and
+    lists every cluster's requests. Launches for other clusters must never
+    be cancelled."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_status',
+        mock.MagicMock(return_value=[
+            types.SimpleNamespace(request_id='mine',
+                                  name='sky.launch',
+                                  status='WAITING',
+                                  cluster_name='test-cluster'),
+            types.SimpleNamespace(request_id='someone-elses',
+                                  name='sky.launch',
+                                  status='RUNNING',
+                                  cluster_name='another-cluster'),
+        ]))
+    executor._cancel_launch_request = mock.AsyncMock(return_value=True)
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    executor._cancel_launch_request.assert_awaited_once_with('mine')
+
+
+@pytest.mark.asyncio
+async def test_orphan_check_retries_after_failed_listing(monkeypatch):
+    """If listing fails (e.g. the API server is restarting), the next fresh
+    launch attempt checks again instead of skipping the check for good."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    api_status = mock.MagicMock(side_effect=[RuntimeError('down'), [], []])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+    await executor._launch(max_retry=1, raise_on_failure=True)
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    # Failed, then succeeded; the third launch skips the check.
+    assert api_status.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_orphan_check_retries_after_failed_cancel(monkeypatch):
+    """If cancelling an orphaned launch fails, the next fresh launch attempt
+    checks again."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    orphan = types.SimpleNamespace(request_id='old-req',
+                                   name='sky.launch',
+                                   status='WAITING',
+                                   cluster_name='test-cluster')
+    api_status = mock.MagicMock(side_effect=[[orphan], [orphan], []])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    executor._cancel_launch_request = mock.AsyncMock(side_effect=[False, True])
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+    await executor._launch(max_retry=1, raise_on_failure=True)
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert executor._cancel_launch_request.await_count == 2
+    assert api_status.call_count == 2
 
 
 @pytest.mark.asyncio
