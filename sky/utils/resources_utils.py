@@ -140,10 +140,11 @@ def normalize_local_disk(local_disk: str) -> str:
     parts = local_disk.split(':')
 
     def _check_size(size_str: str) -> None:
-        size_to_check = size_str.rstrip('+')
+        # Strip at most one '+': parse_local_disk_str() only removes one.
+        size_to_check = size_str[:-1] if size_str.endswith('+') else size_str
         try:
             size = float(size_to_check)
-            if size <= 0:
+            if not math.isfinite(size) or size <= 0:
                 raise ValueError()
         except ValueError:
             with ux_utils.print_exception_no_traceback():
