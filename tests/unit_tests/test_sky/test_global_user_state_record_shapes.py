@@ -5,6 +5,8 @@ get_cluster_from_name, so a field that only the list builder fills silently
 disappears from refreshed responses (e.g. node_names).
 """
 import pytest
+import sqlalchemy
+from sqlalchemy import orm
 
 from sky import global_user_state
 from sky.skylet import constants
@@ -39,60 +41,86 @@ class _Handle:
     cached_cluster_info = _ClusterInfo()
 
 
-def _add_cluster(name: str, ready: bool) -> None:
+_LINKS = {'console': 'https://example.com/c'}
+_ABNORMAL = f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} a node is down.'
+
+
+def _add_cluster(name: str, state: str) -> None:
+    """state: 'up', 'launching' (new INIT) or 'unhealthy' (INIT by refresh)."""
     global_user_state.add_or_update_cluster(
         cluster_name=name,
         cluster_handle=_Handle(),
         requested_resources=set(),
-        ready=ready,
+        ready=state == 'up',
     )
+    if state == 'unhealthy':
+        global_user_state.add_cluster_event(
+            name, status_lib.ClusterStatus.INIT, _ABNORMAL,
+            global_user_state.ClusterEventType.STATUS_CHANGE)
+    with orm.Session(global_user_state._db_manager.get_engine()) as session:
+        session.execute(global_user_state.cluster_table.update().where(
+            global_user_state.cluster_table.c.name == name).values(
+                links=_LINKS))
+        session.commit()
 
 
-@pytest.mark.parametrize('ready', [True, False], ids=['up', 'init'])
+_SHARED = ('node_names', 'priority', 'priority_class', 'init_kind',
+           'init_status_reason')
+_EXPECTED_INIT = {
+    'up': (None, None),
+    'launching': (status_lib.INIT_KIND_LAUNCHING, None),
+    'unhealthy': (status_lib.INIT_KIND_UNHEALTHY, _ABNORMAL),
+}
+
+
+@pytest.mark.parametrize('state', ['up', 'launching', 'unhealthy'])
 @pytest.mark.parametrize('summary_response', [True, False])
-def test_single_record_carries_every_list_field(_fresh_db, ready,
+def test_single_record_carries_every_list_field(_fresh_db, state,
                                                 summary_response):
-    _add_cluster('c', ready)
+    _add_cluster('c', state)
     listed = global_user_state.get_clusters(
         summary_response=summary_response)[0]
     single = global_user_state.get_cluster_from_name(
         'c', summary_response=summary_response)
 
     assert set(listed) - set(single) == set()
-    for key in ('node_names', 'priority', 'priority_class', 'init_kind',
-                'init_status_reason'):
+    for key in _SHARED:
         assert single[key] == listed[key], key
     assert single['node_names'] == 'node-a,node-b'
-    expected_init = None if ready else status_lib.INIT_KIND_LAUNCHING
-    assert single['init_kind'] == expected_init
+    assert (single['init_kind'],
+            single['init_status_reason']) == _EXPECTED_INIT[state]
+    if not summary_response:
+        assert single['links'] == listed['links'] == _LINKS
 
 
-@pytest.mark.parametrize('ready', [True, False], ids=['up', 'init'])
-def test_batched_records_match_single_summary_shape(_fresh_db, ready):
-    _add_cluster('c', ready)
+@pytest.mark.parametrize('state', ['up', 'launching', 'unhealthy'])
+def test_batched_records_match_single_summary_shape(_fresh_db, state):
+    _add_cluster('c', state)
     single = global_user_state.get_cluster_from_name('c', summary_response=True)
     batched = global_user_state.get_clusters_from_names(
         ['c'], include_user_info=True)['c']
 
     assert set(batched) == set(single)
-    for key in ('node_names', 'priority', 'priority_class', 'init_kind',
-                'init_status_reason'):
+    for key in _SHARED:
         assert batched[key] == single[key], key
+    assert (batched['init_kind'],
+            batched['init_status_reason']) == _EXPECTED_INIT[state]
 
 
-def test_get_cluster_from_name_still_retries_db_errors(_fresh_db, monkeypatch):
+def test_get_cluster_from_name_retries_transient_db_errors(
+        _fresh_db, monkeypatch):
     """Callers such as the jobs controller rely on its transient-DB retry."""
-    _add_cluster('c', True)
-    calls = []
+    _add_cluster('c', 'up')
+    manager = global_user_state._db_manager
+    real_get_engine = manager.get_engine
+    failures = [sqlalchemy.exc.OperationalError('SELECT', {}, Exception())]
 
-    def _spy(fn, *args, **kwargs):
-        del args, kwargs
-        # retry() passes `lambda _attempt: fn(...)`; record which fn.
-        calls.extend(c.cell_contents.__name__
-                     for c in fn.__closure__ or ()
-                     if callable(c.cell_contents))
-        return fn(0)
+    def _flaky_get_engine():
+        if failures:
+            raise failures.pop()
+        return real_get_engine()
 
-    monkeypatch.setattr(db_retries, 'with_db_retries', _spy)
+    monkeypatch.setattr(manager, 'get_engine', _flaky_get_engine)
+    monkeypatch.setattr(db_retries.time, 'sleep', lambda _: None)
     assert global_user_state.get_cluster_from_name('c')['name'] == 'c'
-    assert 'get_cluster_from_name' in calls
+    assert not failures
