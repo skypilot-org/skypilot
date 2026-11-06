@@ -36,8 +36,13 @@ class _ClusterInfo:
         return ['node-a', 'node-b']
 
 
+class _Resources:
+    priority = 7
+    priority_class = 'pc-a'
+
+
 class _Handle:
-    launched_resources = None
+    launched_resources = _Resources()
     cached_cluster_info = _ClusterInfo()
 
 
@@ -86,7 +91,8 @@ def test_single_record_carries_every_list_field(_fresh_db, state,
     assert set(listed) - set(single) == set()
     for key in _SHARED:
         assert single[key] == listed[key], key
-    assert single['node_names'] == 'node-a,node-b'
+    assert (single['node_names'], single['priority'],
+            single['priority_class']) == ('node-a,node-b', 7, 'pc-a')
     assert (single['init_kind'],
             single['init_status_reason']) == _EXPECTED_INIT[state]
     if not summary_response:
@@ -122,5 +128,6 @@ def test_get_cluster_from_name_retries_transient_db_errors(
 
     monkeypatch.setattr(manager, 'get_engine', _flaky_get_engine)
     monkeypatch.setattr(db_retries.time, 'sleep', lambda _: None)
-    assert global_user_state.get_cluster_from_name('c')['name'] == 'c'
+    assert global_user_state.get_cluster_from_name(
+        'c')['node_names'] == 'node-a,node-b'
     assert not failures
