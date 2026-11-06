@@ -14,8 +14,8 @@ import re
 import shutil
 import time
 import traceback
-from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict,
-                    TypeVar)
+from typing import (Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple,
+                    TypedDict, TypeVar)
 import zipfile
 
 import sky
@@ -1059,43 +1059,60 @@ def _copy_request_log_file(request_id: str, request_dir: str,
 # section. Clamped further by the overall deadline via _bounded_timeout.
 _REQUEST_LOG_COPY_TIMEOUT = 30
 
+# Worker threads for the requests section's per-request loop. The section is
+# bound by per-request LATENCY (one get_request DB round trip plus two log
+# copies, tens of ms each; the incident that motivated this measured ~60ms per
+# request, ~28ms of it the DB fetch), not by per-request work, so a large
+# request set is otherwise pure serial wall-clock. Deliberately small: the dump
+# usually runs to diagnose a SICK server, and each worker holds at most one
+# request's DB read at a time, so this caps the added load at three extra
+# concurrent DB readers -- no more than a handful of ordinary API requests
+# would add -- while already turning the incident's 579s section into ~145s.
+# A larger pool would amplify load on the very server being diagnosed for
+# little further gain (the section stays deadline-bounded regardless). If
+# even this pool cannot start its workers (e.g. a thread-exhausted server),
+# the section falls back to the serial per-request loop rather than failing.
+_REQUEST_DUMP_WORKERS = 4
 
-def _dump_request_id_info(
-        request_ids: Set[str],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None,
-        deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
-    """Collect request logs and metadata.
 
-    ``deadline`` (absolute monotonic) bounds the section two ways: each
-    per-request log copy is capped by ``_bounded_timeout`` (so a single
-    long-running request's still-streaming log can't dominate), and once the
-    budget is gone we stop starting new requests and skip the rest -- so the
-    dump still zips what it gathered. Per-request wall-clock is written to
-    ``requests/_timings.json``.
+class _RequestDumpResult(NamedTuple):
+    """One request's dump outcome (see _dump_one_request).
+
+    Produced on a worker thread; _dump_request_id_info merges these into the
+    section's shared lists in sorted request-id order, so the section's
+    output does not depend on thread scheduling.
     """
-    if not request_ids:
-        logger.debug('No requests to dump')
-        return
-    logger.debug(f'Entering _dump_request_id_info for '
-                 f'{len(request_ids)} requests')
+    errors: List[Dict[str, str]]
+    orphans: List[Dict[str, Any]]
+    # None when the request was skipped before starting.
+    timing: Optional[Dict[str, Any]]
 
-    requests_dir = os.path.join(dump_dir, 'requests')
-    os.makedirs(requests_dir, exist_ok=True)
 
-    timings: List[Dict[str, Any]] = []
-    for request_id in request_ids:
-        if _deadline_exceeded(deadline):
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': 'Skipped: overall debug-dump deadline exceeded.',
-                })
-            continue
-        request_start = time.monotonic()
-        request_dir = os.path.join(requests_dir, request_id)
+def _dump_one_request(request_id: str, requests_dir: str,
+                      deadline: Optional[float]) -> _RequestDumpResult:
+    """Dump one request's metadata and logs (one unit of the requests
+    section; see _dump_request_id_info).
+
+    Runs on a section worker thread, so it records into per-request lists
+    that the caller merges, keeping every list append single-threaded. Error
+    isolation is per request exactly as in the serial loop this replaced:
+    any failure below is recorded and never aborts the section -- including
+    one that escapes the per-phase handlers, such as a malformed request_id
+    breaking its directory creation, which the isolation boundary at the
+    end of this function catches.
+    """
+    request_errors: List[Dict[str, str]] = []
+    request_orphans: List[Dict[str, Any]] = []
+    if _deadline_exceeded(deadline):
+        request_errors.append({
+            'component': 'requests',
+            'resource': request_id,
+            'error': 'Skipped: overall debug-dump deadline exceeded.',
+        })
+        return _RequestDumpResult(request_errors, request_orphans, None)
+    request_start = time.monotonic()
+    request_dir = os.path.join(requests_dir, request_id)
+    try:
         os.makedirs(request_dir, exist_ok=True)
 
         # Get request metadata from DB
@@ -1144,13 +1161,12 @@ def _dump_request_id_info(
                 logger.debug(f'Request {request_id} not found in DB')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            request_errors.append({
+                'component': 'requests',
+                'resource': request_id,
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
 
         # Copy request log file. Routed through the LogProvider so that
         # deployments whose request logs are not on the local filesystem
@@ -1165,21 +1181,20 @@ def _dump_request_id_info(
                 _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
                 component='requests',
                 resource=f'{request_id}/log',
-                errors=errors,
-                orphans=orphans)
+                errors=request_errors,
+                orphans=request_orphans)
             if ok and copied:
                 logger.debug(f'Copied request log for {request_id}')
             elif ok:
                 logger.debug(f'Request log not found for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to copy log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            request_errors.append({
+                'component': 'requests',
+                'resource': f'{request_id}/log',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
 
         # Copy debug log file (only exists when
         # ENABLE_REQUEST_DEBUG_LOGGING is enabled). Deadline-bounded too.
@@ -1192,25 +1207,107 @@ def _dump_request_id_info(
                 _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
                 component='requests',
                 resource=f'{request_id}/request_debug.log',
-                errors=errors,
-                orphans=orphans)
+                errors=request_errors,
+                orphans=request_orphans)
             if ok and copied:
                 logger.debug(f'Copied debug log for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to copy debug log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/request_debug.log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            request_errors.append({
+                'component': 'requests',
+                'resource': f'{request_id}/request_debug.log',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
+    except Exception as e:  # pylint: disable=broad-except
+        # Isolation boundary: nothing above may take down the section (or,
+        # under the worker pool, the other in-flight requests).
+        logger.warning(f'Failed to dump request {request_id}: {e}')
+        request_errors.append({
+            'component': 'requests',
+            'resource': request_id,
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
 
-        timings.append({
+    return _RequestDumpResult(
+        request_errors, request_orphans, {
             'request_id': request_id,
             'duration_s': round(time.monotonic() - request_start, 2),
         })
+
+
+def _dump_request_id_info(
+        request_ids: Set[str],
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None,
+        deadline: Optional[float] = None,
+        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+    """Collect request logs and metadata.
+
+    ``deadline`` (absolute monotonic) bounds the section two ways: each
+    per-request log copy is capped by ``_bounded_timeout`` (so a single
+    long-running request's still-streaming log can't dominate), and once the
+    budget is gone we stop starting new requests and skip the rest -- so the
+    dump still zips what it gathered. Per-request wall-clock is written to
+    ``requests/_timings.json``.
+
+    Requests run on a small fixed worker pool (see _REQUEST_DUMP_WORKERS):
+    the section is bound by per-request latency, not per-request work, so
+    bounded parallelism converts directly into section wall-clock on large
+    request sets. Each worker checks the deadline before starting its
+    request -- a finer-grained version of the serial loop's per-iteration
+    check -- so budget exhaustion still skips the not-yet-started requests
+    with one record each, exactly as before. Results are merged in sorted
+    request-id order, so errors.json and _timings.json do not depend on
+    thread scheduling. Each request is isolated (see _dump_one_request):
+    even a failure that escapes the per-phase handlers is recorded as that
+    request's error and never aborts the section. If the pool itself cannot
+    start workers (e.g. a thread-exhausted server), the section falls back
+    to the serial per-request loop instead of failing.
+    """
+    if not request_ids:
+        logger.debug('No requests to dump')
+        return
+    logger.debug(f'Entering _dump_request_id_info for '
+                 f'{len(request_ids)} requests')
+
+    requests_dir = os.path.join(dump_dir, 'requests')
+    os.makedirs(requests_dir, exist_ok=True)
+
+    timings: List[Dict[str, Any]] = []
+    # Sorted (not set-iteration) order: workers complete out of order, but
+    # the merged output must be reproducible run to run. pool.map yields
+    # results in submission order, and each worker's failures stay inside
+    # its own _RequestDumpResult, so one request failing never aborts the
+    # section.
+    sorted_ids = sorted(request_ids)
+    dump_one = functools.partial(_dump_one_request,
+                                 requests_dir=requests_dir,
+                                 deadline=deadline)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=_REQUEST_DUMP_WORKERS) as pool:
+            results = list(pool.map(dump_one, sorted_ids))
+    except RuntimeError:
+        # The pool could not take the work -- e.g. a thread-exhausted
+        # server where ThreadPoolExecutor.submit cannot start a worker.
+        # Leaving the `with` block above drained any futures submitted
+        # before the failure; discard that partial pass and re-run every
+        # request serially (the section's pre-pool behavior), so a sick
+        # server still gets its dump instead of losing the section.
+        logger.warning(
+            'Debug-dump request pool unavailable; falling back to serial '
+            'per-request collection.')
+        results = [dump_one(request_id) for request_id in sorted_ids]
+    for result in results:
+        if errors is not None:
+            errors.extend(result.errors)
+        if orphans is not None:
+            orphans.extend(result.orphans)
+        if result.timing is not None:
+            timings.append(result.timing)
 
     try:
         with open(os.path.join(requests_dir, '_timings.json'),
