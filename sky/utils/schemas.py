@@ -2890,6 +2890,9 @@ def get_config_schema():
                         'remote_identity': {
                             'type': 'string'
                         },
+                        'federated_token_file': {
+                            'type': 'string'
+                        },
                         'disabled': {
                             'type': 'boolean'
                         },

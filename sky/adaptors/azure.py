@@ -37,6 +37,10 @@ _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 # Kubernetes-projected service account token in this file is exchanged for an
 # Entra token of that identity. No `az login`, no secret, no ~/.azure.
 WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR = 'AZURE_FEDERATED_TOKEN_FILE'
+# A workspace can name its own token file (`azure.federated_token_file`), so
+# that one server can present a different federated subject per workspace;
+# otherwise the file in WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR is used.
+WORKSPACE_TOKEN_FILE_KEY = 'federated_token_file'
 # Where `az login` keeps its state.
 _AZURE_CLI_DIR = '~/.azure'
 
@@ -47,8 +51,11 @@ def _workspace_config() -> Any:
     return skypilot_config.get_workspace_cloud('azure')
 
 
-def get_workspace_identity() -> Optional[Tuple[str, str]]:
-    """(tenant_id, client_id) of the active workspace's Azure identity.
+def get_workspace_identity() -> Optional[Tuple[str, str, Optional[str]]]:
+    """(tenant_id, client_id, token_file) of the active workspace's identity.
+
+    token_file is the workspace's `federated_token_file`, else the file named
+    by AZURE_FEDERATED_TOKEN_FILE (None if neither is set).
 
     None when the workspace names no identity, in which case the Azure CLI
     login is used, as before.
@@ -57,7 +64,9 @@ def get_workspace_identity() -> Optional[Tuple[str, str]]:
     tenant_id = config.get('tenant_id')
     client_id = config.get('client_id')
     if tenant_id and client_id:
-        return tenant_id, client_id
+        token_file = (config.get(WORKSPACE_TOKEN_FILE_KEY) or
+                      os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR))
+        return tenant_id, client_id, token_file
     if tenant_id or client_id:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -108,7 +117,7 @@ def get_current_account_user() -> str:
     """Get the default account user."""
     identity = get_workspace_identity()
     if identity is not None:
-        tenant_id, client_id = identity
+        tenant_id, client_id, _ = identity
         return f'{client_id} [tenant_id={tenant_id}]'
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
@@ -116,17 +125,23 @@ def get_current_account_user() -> str:
 
 @annotations.lru_cache(scope='global')
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def get_workload_identity_credential(tenant_id: str, client_id: str) -> Any:
-    """One credential per (tenant, client), so its token cache is shared."""
+def get_workload_identity_credential(tenant_id: str, client_id: str,
+                                     token_file: Optional[str]) -> Any:
+    """One credential per (tenant, client, token file).
+
+    Shared by every client of that identity, so its token cache is too. The
+    token file is part of the key: two workspaces with the same identity but
+    different federated subjects never share a credential.
+    """
     from azure import identity
-    token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR)
     if not token_file:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'The workspace names Azure identity {client_id} in tenant '
-                f'{tenant_id}, but {WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR} is '
-                'not set. Mount a service account token with audience '
-                'api://AzureADTokenExchange and point the variable at it.')
+                f'{tenant_id}, but neither azure.{WORKSPACE_TOKEN_FILE_KEY} '
+                f'nor {WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR} is set. Mount a '
+                'service account token with audience '
+                'api://AzureADTokenExchange and point one of them at it.')
     return identity.WorkloadIdentityCredential(tenant_id=tenant_id,
                                                client_id=client_id,
                                                token_file_path=token_file)
@@ -157,7 +172,7 @@ def get_client(name: str,
 
     The client authenticates as the active workspace's identity (workload
     identity) when it names one, else as the Azure CLI login. Clients are
-    cached per (name, subscription, tenant, client).
+    cached per (name, subscription, tenant, client, token file).
 
     Args:
         name: The type of Azure client to create.
@@ -173,14 +188,15 @@ def get_client(name: str,
 @annotations.lru_cache(scope='global')
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def _get_client(name: str, subscription_id: Optional[str],
-                workload_identity: Optional[Tuple[str,
-                                                  str]], **kwargs) -> Client:
+                workload_identity: Optional[Tuple[str, str, Optional[str]]],
+                **kwargs) -> Client:
     """See get_client.
 
     Args:
         name: The type of Azure client to create.
         subscription_id: The Azure subscription ID. Defaults to None.
-        workload_identity: (tenant_id, client_id), or None for the CLI login.
+        workload_identity: (tenant_id, client_id, token_file), or None for
+            the CLI login.
 
     Returns:
         An instance of the specified Azure client.

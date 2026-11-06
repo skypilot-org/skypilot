@@ -62,6 +62,23 @@ def workspaces(monkeypatch, tmp_path):
 def test_workspace_azure_schema_accepts_identity_and_refuses_others():
     config = {'workspaces': {'w': {'azure': _WS_A}}}
     common_utils.validate_schema(config, schemas.get_config_schema(), '')
+    config = {
+        'workspaces': {
+            'w': {
+                'azure': dict(_WS_A, federated_token_file='/t/azure-token')
+            }
+        }
+    }
+    common_utils.validate_schema(config, schemas.get_config_schema(), '')
+    with pytest.raises(ValueError):
+        common_utils.validate_schema(
+            {'workspaces': {
+                'w': {
+                    'azure': {
+                        'federated_token_file': 3
+                    }
+                }
+            }}, schemas.get_config_schema(), '')
     with pytest.raises(ValueError):
         common_utils.validate_schema(
             {'workspaces': {
@@ -95,6 +112,75 @@ def test_clients_use_the_workspace_identity_and_are_cached_per_identity(
             assert azure.get_client('compute', 'sub-a') is not c1
     assert sorted(set(made)) == [('tenant-a', 'client-a', token_file),
                                  ('tenant-b', 'client-b', token_file)]
+
+
+@pytest.fixture
+def per_workspace_token_files(workspaces, tmp_path):
+    """ws-a's identity in two more workspaces, each with its own token file."""
+    config, env_token_file = workspaces
+    files = {}
+    for ws in ('ws-a1', 'ws-a2'):
+        files[ws] = tmp_path / ws / 'azure-token'
+        files[ws].parent.mkdir()
+        files[ws].write_text(f'token-{ws}')
+        config['workspaces'][ws] = {
+            'azure': dict(_WS_A, federated_token_file=str(files[ws]))
+        }
+    config['workspaces']['ws-gone'] = {
+        'azure': dict(_WS_A,
+                      federated_token_file=str(tmp_path / 'gone' /
+                                               'azure-token'))
+    }
+    return {ws: str(f) for ws, f in files.items()}, env_token_file
+
+
+def test_a_workspace_token_file_is_used_and_keys_the_caches(
+        per_workspace_token_files):
+    files, env_token_file = per_workspace_token_files
+    made = []
+
+    class _FakeCredential:
+
+        def __init__(self, *, tenant_id, client_id, token_file_path):
+            made.append((tenant_id, client_id, token_file_path))
+
+    with mock.patch('azure.identity.WorkloadIdentityCredential',
+                    _FakeCredential):
+        with skypilot_config.local_active_workspace_ctx('ws-a1'):
+            assert azure.get_workspace_identity() == ('tenant-a', 'client-a',
+                                                      files['ws-a1'])
+            c1 = azure.get_client('compute', 'sub-a')
+        with skypilot_config.local_active_workspace_ctx('ws-a2'):
+            c2 = azure.get_client('compute', 'sub-a')
+        with skypilot_config.local_active_workspace_ctx('ws-a'):
+            c3 = azure.get_client('compute', 'sub-a')
+    # Same identity and subscription, different federated subjects: never a
+    # shared client or credential.
+    assert len({id(c1), id(c2), id(c3)}) == 3
+    assert made == [('tenant-a', 'client-a', files['ws-a1']),
+                    ('tenant-a', 'client-a', files['ws-a2']),
+                    ('tenant-a', 'client-a', env_token_file)]
+
+
+def test_check_credentials_names_a_missing_workspace_token_file(
+        per_workspace_token_files):
+    del per_workspace_token_files
+    with mock.patch('azure.identity.WorkloadIdentityCredential',
+                    side_effect=AssertionError('credential built')):
+        with skypilot_config.local_active_workspace_ctx('ws-gone'):
+            ok, reason = azure_cloud.Azure._check_credentials()
+    assert not ok
+    assert 'gone/azure-token' in reason
+
+
+def test_a_workspace_token_file_needs_no_environment_variable(
+        per_workspace_token_files, monkeypatch):
+    files, _ = per_workspace_token_files
+    monkeypatch.delenv(azure.WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR)
+    with skypilot_config.local_active_workspace_ctx('ws-a1'):
+        assert azure.get_workspace_identity()[2] == files['ws-a1']
+    with skypilot_config.local_active_workspace_ctx('ws-a'):
+        assert azure.get_workspace_identity()[2] is None
 
 
 def test_subscription_and_identity_come_from_the_workspace(workspaces):

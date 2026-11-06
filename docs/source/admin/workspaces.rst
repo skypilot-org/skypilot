@@ -130,6 +130,9 @@ The above is achieved by configuring the following section in the config file:
              resource_group_vm: resource-group-name
              # Same values as the global `azure.remote_identity`.
              remote_identity: SERVICE_ACCOUNT
+             # Federated token for this workspace's identity (optional).
+             # Defaults to the file in AZURE_FEDERATED_TOKEN_FILE.
+             federated_token_file: /var/run/secrets/team-a/azure-token
 
            nebius:
              disabled: false
@@ -255,8 +258,15 @@ server, through workload identity federation:
 * The API server pod needs that token projected and ``AZURE_FEDERATED_TOKEN_FILE``
   set. AKS workload identity does both; on other clusters (e.g. EKS), mount a
   projected service account token with that audience.
-* Azure clients are cached per (tenant, client, subscription), so workspaces never
-  share a client.
+* Azure clients are cached per (tenant, client, subscription, token file), so
+  workspaces never share a client.
+* ``federated_token_file`` (optional) names the token file this workspace's
+  identity reads instead of ``AZURE_FEDERATED_TOKEN_FILE``. With one file per
+  workspace, each workspace presents its own federated subject (for example, a
+  token minted for its own Kubernetes service account with the
+  ``TokenRequest`` API), so one team's identity can trust only that team's
+  subject rather than the API server's own service account. The file is re-read
+  as the token is refreshed; whoever writes it must keep it current.
 * With ``resource_group_vm`` set, SkyPilot launches into that existing resource
   group and never creates or deletes it; ``sky down`` deletes only the cluster's
   own resources.

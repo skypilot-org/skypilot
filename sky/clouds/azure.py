@@ -615,7 +615,8 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _check_workload_identity_credentials(
-            cls, tenant_id: str, client_id: str) -> Tuple[bool, Optional[str]]:
+            cls, tenant_id: str, client_id: str,
+            token_file: Optional[str]) -> Tuple[bool, Optional[str]]:
         """Checks the workspace's identity can get an Azure token."""
         if not azure.get_workspace_subscription_id():
             return False, (f'The workspace azure config names identity '
@@ -626,9 +627,13 @@ class Azure(clouds.Cloud):
         ]):
             return False, ('Azure dependencies are not installed. Run: '
                            'pip install skypilot[azure]')
+        if token_file and not os.path.isfile(os.path.expanduser(token_file)):
+            return False, (f'Azure workload identity {client_id}: the '
+                           f'federated token file {token_file} does not '
+                           'exist.')
         try:
             azure.get_workload_identity_credential(
-                tenant_id, client_id).get_token(_ARM_TOKEN_SCOPE)
+                tenant_id, client_id, token_file).get_token(_ARM_TOKEN_SCOPE)
         except Exception as e:  # pylint: disable=broad-except
             return False, (f'Azure workload identity {client_id} in tenant '
                            f'{tenant_id} could not get a token: '
@@ -726,7 +731,7 @@ class Azure(clouds.Cloud):
         del workspace_config  # Only the cache key.
         workload_identity = azure.get_workspace_identity()
         if workload_identity is not None:
-            tenant_id, client_id = workload_identity
+            tenant_id, client_id, _ = workload_identity
             return [[
                 f'{client_id} [tenant_id={tenant_id}] '
                 f'[subscription_id={cls.get_project_id()}]'
