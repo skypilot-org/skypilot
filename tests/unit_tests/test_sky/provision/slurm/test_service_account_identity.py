@@ -1,14 +1,17 @@
 """Service-account submit identity and server-owned configuration tests."""
 # pylint: disable=redefined-outer-name,unused-argument,protected-access
+import pickle
 import subprocess
 from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky import models
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.clouds import slurm as slurm_cloud
+from sky.provision import common as provision_common
 from sky.provision.slurm import instance
 from sky.provision.slurm import utils
 from sky.utils import command_runner
@@ -162,6 +165,62 @@ def test_submit_validation_failure(rc, stderr):
         assert f'code {rc}' in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    'stderr', ['sudo: a password is required', 'sudo: unknown user alice'])
+def test_submit_validation_refusal(stderr):
+    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+    with mock.patch.object(command_runner.SSHCommandRunner,
+                           'run',
+                           return_value=(1, '', stderr)) as run:
+        with pytest.raises(slurm.SubmitUserRefusedError) as e:
+            client.validate_submit_user('cluster', 'alice')
+    run.assert_called_once()
+    assert ('(`sudo --non-interactive -H -u alice -- id -un`) exited with '
+            'code 1') in str(e.value)
+    assert stderr in str(e.value)
+
+
+# Only a refusal is final. Everything else stays retryable, including output
+# this check cannot interpret.
+@pytest.mark.parametrize('rc,stdout,stderr', [(255, '', 'ssh: connect failed'),
+                                              (126, '', ''), (137, '', ''),
+                                              (0, 'login\n', ''), (0, '', ''),
+                                              (0, 'Welcome alice\n', '')])
+def test_submit_validation_failure_is_not_a_refusal(rc, stdout, stderr):
+    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+    with mock.patch.object(command_runner.SSHCommandRunner,
+                           'run',
+                           return_value=(rc, stdout, stderr)):
+        with pytest.raises(RuntimeError) as e:
+            client.validate_submit_user('cluster', 'alice')
+    assert not isinstance(e.value, slurm.SubmitUserRefusedError)
+
+
+def test_submit_validation_timeout_is_not_a_refusal():
+    with mock.patch(
+            'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
+    ) as runner:
+        runner.return_value.run.side_effect = subprocess.TimeoutExpired(
+            'ssh', 15)
+        client = slurm.SlurmClient('host', 22, 'login', slurm_user='svc')
+        with pytest.raises(RuntimeError) as e:
+            client.validate_submit_user('a', 'svc')
+    assert not isinstance(e.value, slurm.SubmitUserRefusedError)
+
+
+def test_submit_validation_timeout_through_the_ssh_runner():
+    """The SSH runner returns its timeout as an exit code, not an exception."""
+    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=subprocess.TimeoutExpired('ssh', 15)):
+        with pytest.raises(RuntimeError,
+                           match='Account validation timed out after 15 '
+                           'seconds') as e:
+            client.validate_submit_user('cluster', 'alice')
+    assert not isinstance(e.value, slurm.SubmitUserRefusedError)
+
+
 def test_submit_validation_uses_bounded_submit_runner():
     with mock.patch(
             'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
@@ -222,7 +281,11 @@ def test_allocation_client_uses_stored_identity(identity_config):
         assert client.call_args.kwargs['slurm_user'] == 'original-user'
 
 
-def test_validation_failure_stops_allocation_creation():
+@pytest.mark.parametrize('raised,expected',
+                         [(RuntimeError('denied'), RuntimeError),
+                          (slurm.SubmitUserRefusedError('denied'),
+                           exceptions.ProvisionUnsupportedError)])
+def test_validation_failure_stops_allocation_creation(raised, expected):
     config = mock.Mock()
     config.provider_config = {
         'partition': 'cpu',
@@ -235,10 +298,15 @@ def test_validation_failure_stops_allocation_creation():
         },
     }
     with mock.patch('sky.provision.slurm.instance.slurm.SlurmClient') as client:
-        client.return_value.validate_submit_user.side_effect = RuntimeError(
-            'denied')
-        with pytest.raises(RuntimeError, match='denied'):
+        client.return_value.validate_submit_user.side_effect = raised
+        with pytest.raises(provision_common.NothingCreatedError) as e:
             instance.run_instances('a', 'test', 'test-on-cloud', config)
+        # Only a builtin or sky.exceptions class may reach clients.
+        assert type(e.value.error) is expected  # pylint: disable=unidiomatic-typecheck
+        assert 'denied' in str(e.value.error)
+        payload = pickle.dumps(e.value.error)
+        assert b'sky.adaptors' not in payload
+        assert b'sky.provision' not in payload
         assert client.return_value.method_calls == [
             mock.call.validate_submit_user('a', 'svc')
         ]
@@ -295,3 +363,26 @@ def test_service_account_creator_chain(identity_config, monkeypatch):
     monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
                         creators.get)
     assert utils.get_submit_user('b') == 'jane'
+
+
+def test_failure_after_validation_is_not_marked_nothing_created():
+    """Only the read-only account check may claim nothing was created."""
+    config = mock.Mock()
+    config.provider_config = {
+        'partition': 'cpu',
+        'cluster': 'a',
+        'slurm_user': 'svc',
+        'ssh': {
+            'hostname': 'host',
+            'port': 22,
+            'user': 'login'
+        },
+    }
+    with mock.patch('sky.provision.slurm.instance.slurm.SlurmClient') as client, \
+            mock.patch.object(instance.slurm_utils, 'get_proctrack_type'), \
+            mock.patch.object(instance.slurm_utils, 'get_partition_info'):
+        client.return_value.query_jobs.side_effect = RuntimeError(
+            'squeue failed')
+        with pytest.raises(RuntimeError, match='squeue failed') as e:
+            instance.run_instances('a', 'test', 'test-on-cloud', config)
+    assert not isinstance(e.value, provision_common.NothingCreatedError)
