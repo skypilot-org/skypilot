@@ -154,6 +154,8 @@ SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_
 1. ``run_duration``: duration for a created instance to be kept alive (in seconds, required).
 2. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
+For TPU7x (``tpu7x``), GCP does not support managed instance group resize requests, so SkyPilot creates flex-start VMs directly with the same two settings. See :ref:`tpu-7x`.
+
 See :ref:`config-yaml` for more details.
 
 In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):

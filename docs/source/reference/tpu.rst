@@ -244,6 +244,25 @@ To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
 
 
+.. _tpu-7x:
+
+TPU7x (Ironwood)
+----------------
+
+GCP offers TPU7x as Compute Engine machine types (``tpu7x-standard-4t``) rather than through the Cloud TPU API. SkyPilot launches these like GPU VMs: request ``tpu7x`` with the number of TPU chips, and SkyPilot picks the machine type and a TPU host image.
+
+.. code-block:: console
+
+   $ sky launch --gpus tpu7x:4 --use-spot
+
+Each ``tpu7x-standard-4t`` VM has 4 TPU7x chips (8 TensorCores, so JAX shows 8 devices), 224 vCPUs and 960 GB of memory. ``--use-spot`` and the normal cross-zone/region failover work as for GPUs. No ``accelerator_args`` are needed.
+
+To use flex-start (Dynamic Workload Scheduler), set the same ``gcp.managed_instance_group`` config used for :ref:`DWS on GPU VMs <gcp-dws>`. For TPU7x, SkyPilot creates a single flex-start VM per node instead of a managed instance group, because GCP does not allow managed instance group resize requests for TPU machine types.
+
+Only the single-host 4-chip shape (``tpu7x:4``) is supported for now. Multi-host TPU7x slices are not supported yet.
+
+
+
 TPU nodes (legacy)
 ------------------
 
