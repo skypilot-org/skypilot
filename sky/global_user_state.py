@@ -2662,6 +2662,49 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+def _latest_init_reasons(rows: List[Any]) -> Dict[str, str]:
+    """Newest launch/status-change reason per INIT row, keyed by hash."""
+    init_cluster_hashes = {
+        row.cluster_hash
+        for row in rows
+        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
+    }
+    return get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes,
+        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
+
+
+def _shared_record_fields(handle: Any, status: status_lib.ClusterStatus,
+                          node_names_json: Optional[str],
+                          init_reason: Optional[str]) -> Dict[str, Any]:
+    """Record fields every cluster record shape carries.
+
+    Shared by get_clusters, get_cluster_from_name and get_clusters_from_names
+    so that a refreshed record (built by get_cluster_from_name) keeps the
+    fields a list call returns.
+    """
+    launched = getattr(handle, 'launched_resources', None)
+    priority = launched.priority if launched is not None else None
+    # init_kind disambiguates the overloaded INIT state: 'launching'
+    # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
+    # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
+    is_init = status is status_lib.ClusterStatus.INIT
+    init_kind = None
+    if is_init:
+        init_kind = (status_lib.INIT_KIND_UNHEALTHY
+                     if is_unhealthy_init_reason(init_reason) else
+                     status_lib.INIT_KIND_LAUNCHING)
+    return {
+        'priority':
+            (priority if priority is not None else constants.DEFAULT_PRIORITY),
+        'priority_class':
+            (launched.priority_class if launched is not None else None),
+        'node_names': common_utils.get_display_node_names(node_names_json),
+        'init_kind': init_kind,
+        'init_status_reason': init_reason if is_init else None,
+    }
+
+
 @db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
@@ -2688,11 +2731,13 @@ def get_cluster_from_name(
         cluster_table.c.config_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
+        cluster_table.c.node_names,
     ]
     if not summary_response:
         query_fields.extend([
             cluster_table.c.last_creation_yaml,
             cluster_table.c.last_creation_command,
+            cluster_table.c.links,
         ])
     with orm.Session(engine) as session:
         query = session.query(*query_fields)
@@ -2706,13 +2751,15 @@ def get_cluster_from_name(
     if not summary_response:
         last_event = get_terminal_or_last_status_change_event(
             row.cluster_hash, row.status, row.launched_at)
+    handle = pickle.loads(row.handle)
+    status = status_lib.ClusterStatus[row.status]
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
         'launched_at': row.launched_at,
-        'handle': pickle.loads(row.handle),
+        'handle': handle,
         'last_use': row.last_use,
-        'status': status_lib.ClusterStatus[row.status],
+        'status': status,
         'autostop': row.autostop,
         'to_down': bool(row.to_down),
         'owner': _load_owner(row.owner),
@@ -2723,11 +2770,15 @@ def get_cluster_from_name(
         'workspace': row.workspace,
         'is_managed': bool(row.is_managed),
         'config_hash': row.config_hash,
+        **_shared_record_fields(
+            handle, status, row.node_names,
+            _latest_init_reasons([row]).get(row.cluster_hash)),
     }
     if not summary_response:
         record['last_creation_yaml'] = row.last_creation_yaml
         record['last_creation_command'] = row.last_creation_command
         record['last_event'] = last_event
+        record['links'] = row.links if isinstance(row.links, dict) else {}
     if include_user_info:
         record['user_hash'] = user_hash
         record['user_name'] = user_name
@@ -2790,38 +2841,47 @@ def get_clusters_from_names(
         cluster_table.c.config_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
+        cluster_table.c.node_names,
     ]
+    rows = []
     with orm.Session(engine) as session:
         for offset in range(0, len(cluster_names),
                             _CLUSTER_IN_QUERY_CHUNK_SIZE):
             batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
-            rows = session.query(*query_fields).filter(
-                cluster_table.c.name.in_(batch)).all()
-            for row in rows:
-                record: Dict[str, Any] = {
-                    'name': row.name,
-                    'launched_at': row.launched_at,
-                    'handle': pickle.loads(row.handle),
-                    'last_use': row.last_use,
-                    'status': status_lib.ClusterStatus[row.status],
-                    'autostop': row.autostop,
-                    'to_down': bool(row.to_down),
-                    'owner': _load_owner(row.owner),
-                    'metadata': json.loads(row.metadata),
-                    'cluster_hash': row.cluster_hash,
-                    'cluster_ever_up': bool(row.cluster_ever_up),
-                    'status_updated_at': row.status_updated_at,
-                    'workspace': row.workspace,
-                    'is_managed': bool(row.is_managed),
-                    'config_hash': row.config_hash,
-                }
-                if include_user_info:
-                    user_hash = _get_user_hash_or_current_user(row.user_hash)
-                    user = get_user(user_hash)
-                    record['user_hash'] = user_hash
-                    record['user_name'] = (user.name
-                                           if user is not None else None)
-                result[row.name] = record
+            rows.extend(
+                session.query(*query_fields).filter(
+                    cluster_table.c.name.in_(batch)).all())
+    # Outside the session: this opens its own, and holding two pool
+    # connections per call would be wasteful.
+    init_reasons = _latest_init_reasons(rows)
+    for row in rows:
+        handle = pickle.loads(row.handle)
+        status = status_lib.ClusterStatus[row.status]
+        record: Dict[str, Any] = {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': handle,
+            'last_use': row.last_use,
+            'status': status,
+            'autostop': row.autostop,
+            'to_down': bool(row.to_down),
+            'owner': _load_owner(row.owner),
+            'metadata': json.loads(row.metadata),
+            'cluster_hash': row.cluster_hash,
+            'cluster_ever_up': bool(row.cluster_ever_up),
+            'status_updated_at': row.status_updated_at,
+            'workspace': row.workspace,
+            'is_managed': bool(row.is_managed),
+            'config_hash': row.config_hash,
+            **_shared_record_fields(handle, status, row.node_names,
+                                    init_reasons.get(row.cluster_hash)),
+        }
+        if include_user_info:
+            user_hash = _get_user_hash_or_current_user(row.user_hash)
+            user = get_user(user_hash)
+            record['user_hash'] = user_hash
+            record['user_name'] = (user.name if user is not None else None)
+        result[row.name] = record
     return result
 
 
@@ -2934,17 +2994,10 @@ def get_clusters(
     # `_get_cluster_and_validate` in server.py). The helper
     # short-circuits on an empty set, so this is a no-op when no INIT
     # clusters are in the result.
-    init_cluster_hashes = {
-        row.cluster_hash
-        for row in rows
-        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
-    }
     # Newest launch/status-change event per INIT cluster. Its reason both tells
     # an actively-launching cluster apart from one stuck in an abnormal state
     # (see ABNORMAL_STATUS_REASON_PREFIX) and provides the message to display.
-    latest_init_event_dict = get_last_cluster_event_of_type_multiple(
-        init_cluster_hashes,
-        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
+    latest_init_event_dict = _latest_init_reasons(rows)
 
     # get last cluster event for each row
     if not summary_response:
@@ -2953,19 +3006,13 @@ def get_clusters(
 
     for row in rows:
         handle = pickle.loads(row.handle)
-        priority = (handle.launched_resources.priority
-                    if handle.launched_resources is not None else None)
-        priority_class = (handle.launched_resources.priority_class
-                          if handle.launched_resources is not None else None)
+        status = status_lib.ClusterStatus[row.status]
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
             'handle': handle,
-            'status': status_lib.ClusterStatus[row.status],
-            'priority': priority
-                        if priority is not None else constants.DEFAULT_PRIORITY,
-            'priority_class': priority_class,
+            'status': status,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -2977,23 +3024,12 @@ def get_clusters(
             'workspace': row.workspace,
             'is_managed': False
                           if exclude_managed_clusters else bool(row.is_managed),
-            'node_names': common_utils.get_display_node_names(row.node_names),
+            # Outside the summary_response gate: both the list page and the
+            # detail page show the INIT badge/banner.
+            **_shared_record_fields(
+                handle, status, row.node_names,
+                latest_init_event_dict.get(row.cluster_hash)),
         }
-        # init_kind / init_status_reason are populated outside the
-        # summary_response gate so both the list page (summary_response=True)
-        # and detail page (summary_response=False) get the badge/banner data.
-        # init_kind disambiguates the overloaded INIT state: 'launching'
-        # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
-        # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
-        if record['status'] is status_lib.ClusterStatus.INIT:
-            latest_reason = latest_init_event_dict.get(row.cluster_hash)
-            record['init_kind'] = (status_lib.INIT_KIND_UNHEALTHY
-                                   if is_unhealthy_init_reason(latest_reason)
-                                   else status_lib.INIT_KIND_LAUNCHING)
-            record['init_status_reason'] = latest_reason
-        else:
-            record['init_kind'] = None
-            record['init_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
