@@ -395,9 +395,9 @@ Creating service accounts
 
    * **Token Name**: Descriptive name (e.g., "pipeline")
    * **Expiration**: Optional (defaults to 30 days)
+   * **Role**: Admin, User, or Viewer (defaults to :ref:`config-yaml-rbac-default-role`)
 
 3. **Save the token immediately** - it won't be shown again
-4. Assign appropriate role (admin/user)
 
 .. image:: ../images/client-server/service-account.png
     :alt: Service account
@@ -608,19 +608,22 @@ Test that the configuration is working:
     # Should complete login without browser redirect
 
 
+.. _skypilot-rbac:
+
 SkyPilot RBAC
 -------------
 
-SkyPilot provides basic RBAC (role-based access control) support. Two roles are supported:
+SkyPilot provides basic RBAC (role-based access control) support. Three roles are supported:
 
-- **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
+- **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
+- **Viewer**: Read-only access. View clusters, jobs, logs, and users in the workspaces the viewer can access, but cannot launch, cancel, or delete resources, or change any settings.
 
 RBAC support is enabled only when :ref:`SSO authentication <api-server-oauth>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
-SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
-set to ``admin`` to ease first-time setup.
+SkyPilot user is created with the ``admin``, ``user``, or ``viewer`` role. By
+default, it is set to ``admin`` to ease first-time setup.
 
 User management
 ~~~~~~~~~~~~~~~
@@ -636,4 +639,4 @@ Admins can click on the **Users** tab in the SkyPilot dashboard to manage users 
 Supported operations:
 
 * ``Admin`` role can update the role for all users, and delete users.
-* ``User`` role can view all users and their roles.
+* ``User`` and ``Viewer`` roles can view all users and their roles.
