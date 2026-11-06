@@ -2538,6 +2538,17 @@ def get_config_schema():
                 },
             }
         },
+        'upcloud': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+                'network_name': {
+                    'type': 'string',
+                },
+            }
+        },
         'nebius': {
             'type': 'object',
             'required': [],

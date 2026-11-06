@@ -71,6 +71,7 @@ CLOUD_QUEUE_MAP = {
     'lambda': QUEUE_GENERIC_CLOUD,
     'runpod': QUEUE_GENERIC_CLOUD,
     'slurm': QUEUE_GENERIC_CLOUD,
+    'upcloud': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KIND
 }
 

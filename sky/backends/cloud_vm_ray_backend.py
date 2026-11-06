@@ -351,6 +351,7 @@ def _get_cluster_config_template(cloud):
         clouds.Nebius: 'nebius-ray.yml.j2',
         clouds.Hyperbolic: 'hyperbolic-ray.yml.j2',
         clouds.Seeweb: 'seeweb-ray.yml.j2',
+        clouds.UpCloud: 'upcloud-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
         clouds.Verda: 'verda-ray.yml.j2',

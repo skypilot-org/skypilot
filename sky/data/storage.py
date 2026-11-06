@@ -33,6 +33,7 @@ from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
 from sky.adaptors import oci_s3
+from sky.adaptors import upcloud
 from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
@@ -150,6 +151,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    UPCLOUD = 'UPCLOUD'
     COREWEAVE = 'COREWEAVE'
     VASTDATA = 'VASTDATA'
     HF = 'HF'
@@ -1223,8 +1225,8 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
-                    'vastdata', 'hf'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius',
+                    'upcloud', 'cw', 'vastdata', 'hf'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -1252,7 +1254,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, cw://, '
+                        f'r2://, cos://, oci://, nebius://, upcloud://, cw://, '
                         f'vastdata://, hf://. Got: {source}')
         return source, is_local_source
 
@@ -1276,6 +1278,7 @@ class Storage(object):
                     'cos',
                     'oci',
                     'nebius',
+                    'upcloud',
                     'cw',
                     'vastdata',
                     'hf',
@@ -5132,6 +5135,63 @@ class NebiusStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.NEBIUS.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.NEBIUS.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            config)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class UpCloudStore(S3CompatibleStore):
+    """UpCloudStore represents UpCloud Managed Object Storage buckets."""
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for UpCloud Managed Object Storage."""
+        return S3CompatibleConfig(
+            store_type='UPCLOUD',
+            url_prefix='upcloud://',
+            client_factory=lambda region: data_utils.create_upcloud_client(),
+            resource_factory=lambda name: upcloud.resource('s3').Bucket(name),
+            split_path=data_utils.split_upcloud_path,
+            verify_bucket=data_utils.verify_upcloud_bucket,
+            aws_profile=upcloud.UPCLOUD_PROFILE_NAME,
+            # MOS rejects uploads with the AWS CLI's optional trailing checksum.
+            extra_cli_env={
+                'AWS_REQUEST_CHECKSUM_CALCULATION': 'when_required',
+                'AWS_RESPONSE_CHECKSUM_VALIDATION': 'when_required',
+            },
+            cloud_name=str(clouds.UpCloud()),
+            mount_cmd_factory=cls._get_upcloud_mount_cmd,
+        )
+
+    @classmethod
+    def _get_upcloud_mount_cmd(cls,
+                               bucket_name: str,
+                               mount_path: str,
+                               bucket_sub_path: Optional[str],
+                               read_only: bool = False) -> str:
+        """Factory method for UpCloud mount command."""
+        client = data_utils.create_upcloud_client()
+        endpoint_url = client.meta.endpoint_url
+        return mounting_utils.get_upcloud_mount_cmd(
+            upcloud.UPCLOUD_PROFILE_NAME,
+            bucket_name,
+            endpoint_url,
+            mount_path,
+            bucket_sub_path,
+            read_only=read_only)
+
+    def mount_cached_command(self,
+                             mount_path: str,
+                             config: Optional[MountCachedConfig] = None) -> str:
+        """UpCloud-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.UPCLOUD.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.UPCLOUD.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
