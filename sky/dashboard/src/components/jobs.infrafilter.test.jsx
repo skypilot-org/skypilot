@@ -184,6 +184,9 @@ const lastParams = () =>
 describe('managed jobs Infra filter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // The page remembers the Mine/Everyone toggle; start each test on the
+    // default.
+    window.localStorage.clear();
     getCurrentUserInfo.mockResolvedValue({ id: 'local', name: 'local' });
     cachePreloader.preloadForPage.mockResolvedValue(undefined);
     respondWith(PAGE);
