@@ -1232,15 +1232,47 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_failed_async(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+async def set_request_failed_async(request_id: str,
+                                   e: BaseException,
+                                   only_if_running: bool = False) -> bool:
+    """Set a request to failed and populate the error message.
+
+    Args:
+        only_if_running: Leave the request unchanged unless it is RUNNING,
+            e.g. when it was cancelled while its thread was finishing.
+
+    Returns:
+        True if the request was transitioned to FAILED.
+    """
     set_exception_stacktrace(e)
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if only_if_running and request_task.status != RequestStatus.RUNNING:
+            return False
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()
         request_task.set_error(e)
+        return True
+
+
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_running_if_executable_async(request_id: str) -> bool:
+    """Set a request to RUNNING only while it may still start executing.
+
+    Returns:
+        True if the request was transitioned to RUNNING; False if it is gone
+        or no longer in an executable status, e.g. already cancelled.
+    """
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        if (request_task is None or
+                request_task.status not in RequestStatus.executable_statuses()):
+            return False
+        request_task.status = RequestStatus.RUNNING
+        request_task.status_msg = None
+        return True
 
 
 @metrics_lib.time_me_async
@@ -1282,15 +1314,27 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
-                                      result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+                                      result: Optional[Any],
+                                      only_if_running: bool = False) -> bool:
+    """Set a request to succeeded and populate the result.
+
+    Args:
+        only_if_running: Leave the request unchanged unless it is RUNNING,
+            e.g. when it was cancelled while its thread was finishing.
+
+    Returns:
+        True if the request was transitioned to SUCCEEDED.
+    """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if only_if_running and request_task.status != RequestStatus.RUNNING:
+            return False
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
             request_task.set_return_value(result)
+        return True
 
 
 @metrics_lib.time_me_async

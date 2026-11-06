@@ -1391,8 +1391,11 @@ async def _execute_request_coroutine(
         return
 
     try:
-        await api_requests.update_status_async(
-            request_id, api_requests.RequestStatus.RUNNING)
+        if not await api_requests.set_request_running_if_executable_async(
+                request_id):
+            logger.info(f'Request {request_id} is no longer executable, '
+                        'skipping')
+            return
         while True:
             done, _ = await asyncio.wait(
                 {fut}, timeout=_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS)
@@ -1406,14 +1409,18 @@ async def _execute_request_coroutine(
         try:
             result = await fut
             await api_requests.set_request_succeeded_async(
-                request_id, None if ignore_return_value else result)
+                request_id,
+                None if ignore_return_value else result,
+                only_if_running=True)
         except asyncio.CancelledError:
             # The task is cancelled by ctx.cancel(), where the status
             # should already be set to CANCELLED.
             pass
         except Exception as e:  # pylint: disable=broad-except
             ctx.redirect_log(original_output)
-            await api_requests.set_request_failed_async(request_id, e)
+            await api_requests.set_request_failed_async(request_id,
+                                                        e,
+                                                        only_if_running=True)
             logger.error(f'Request {request_id} failed due to '
                          f'{common_utils.format_exception(e)}')
     except asyncio.CancelledError:

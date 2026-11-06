@@ -2748,3 +2748,58 @@ async def test_in_process_request_cancelled_while_running(
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
     assert cancelled.get_return_value() is None
+
+
+RELEASE_ENTRYPOINT = threading.Event()
+
+
+def _gated_in_process_entrypoint(value: str):
+    SLOW_STARTED.set()
+    RELEASE_ENTRYPOINT.wait(5)
+    return value
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_finishing_after_cancel_stays_cancelled(
+        in_process_env, monkeypatch):
+    """A result that arrives after cancellation does not overwrite it."""
+    # The result is ready before any cancellation poll.
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        60)
+    SLOW_STARTED.clear()
+    RELEASE_ENTRYPOINT.clear()
+    request = await _prepare_in_process('in-process-late-result',
+                                        func=_gated_in_process_entrypoint)
+
+    await executor.schedule_prepared_request(request)
+    assert await asyncio.get_running_loop().run_in_executor(
+        None, SLOW_STARTED.wait, 5)
+    assert await requests_lib.kill_request_async('in-process-late-result')
+    RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+
+    cancelled = requests_lib.get_request('in-process-late-result')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_before_claim_stays_cancelled(
+        in_process_env, monkeypatch):
+    """A cancellation that lands after the status check is not overwritten."""
+    request = await _prepare_in_process('in-process-cancel-race')
+    assert await requests_lib.kill_request_async('in-process-cancel-race')
+    # The pre-check still sees the request as runnable.
+    monkeypatch.setattr(
+        executor.api_requests, 'get_request_status_async',
+        mock.AsyncMock(return_value=mock.Mock(
+            status=requests_lib.RequestStatus.PENDING)))
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    cancelled = requests_lib.get_request('in-process-cancel-race')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
