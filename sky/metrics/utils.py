@@ -228,6 +228,15 @@ SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# How /api/get waited for a request to finish: `signal` when the request ran in
+# the same server process and its completion woke the call, `poll` when the
+# call polled the request table.
+SKY_APISERVER_REQUEST_GET_WAITS_TOTAL = prom.Counter(
+    'sky_apiserver_request_get_waits_total',
+    'How /api/get calls waited for the request to finish',
+    ['mode'],
+)
+
 # Aggregated across all worker processes — the prometheus_client multiprocess
 # collector sums per-process histograms automatically. For per-process
 # visibility, see SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS below.
@@ -706,6 +715,16 @@ SKY_LAUNCH_QUEUE_WAIT_SECONDS = prom.Histogram(
     ['workspace', 'queue'],
     buckets=_LAUNCH_PHASE_BUCKETS,
 )
+
+
+def count_request_get_wait(mode: str) -> None:
+    """Record how one /api/get call waited for its request."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_REQUEST_GET_WAITS_TOTAL.labels(mode=mode).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count /api/get wait: {e}')
 
 
 def observe_launch_queue_wait(workspace: str, queue_name: str,

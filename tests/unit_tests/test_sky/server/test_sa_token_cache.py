@@ -2,6 +2,7 @@
 
 # pylint: disable=protected-access,redefined-outer-name
 
+import asyncio
 import types
 import unittest.mock as mock
 
@@ -62,6 +63,22 @@ def db(monkeypatch, token_row, user_info):
         yield calls
 
 
+async def _drain_background():
+    while sa_token_cache._background_tasks:
+        await asyncio.gather(*list(sa_token_cache._background_tasks))
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(
+        sa_token_cache, '_entries',
+        cachetools.TTLCache(maxsize=8,
+                            ttl=sa_token_cache.TTL_SECONDS,
+                            timer=lambda: now[0]))
+    return now
+
+
 async def _call_next(request):
     del request
     return fastapi.responses.JSONResponse({'message': 'success'})
@@ -88,20 +105,57 @@ async def test_hit_skips_db_lookups(db):
 
 
 @pytest.mark.asyncio
-async def test_entry_expires_after_ttl(db, monkeypatch):
-    now = [1000.0]
-    monkeypatch.setattr(
-        sa_token_cache, '_entries',
-        cachetools.TTLCache(maxsize=8,
-                            ttl=sa_token_cache.TTL_SECONDS,
-                            timer=lambda: now[0]))
+async def test_entry_expires_after_ttl(db, clock):
     await _dispatch()
-    now[0] += sa_token_cache.TTL_SECONDS - 0.5
+    clock[0] += sa_token_cache.TTL_SECONDS / 2 - 0.5
     await _dispatch()
+    await _drain_background()
     assert db.by_hash.call_count == 1
-    now[0] += 1
+    clock[0] += sa_token_cache.TTL_SECONDS
     await _dispatch()
     assert db.by_hash.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stale_hit_refreshes_in_background(db, clock):
+    await _dispatch()
+    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    response, _ = await _dispatch()
+    assert response.status_code == 200
+    # Concurrent hits share one refresh.
+    await _dispatch()
+    await _drain_background()
+    assert db.by_hash.call_count == 2
+    # The refresh restarted the entry's TTL.
+    clock[0] += sa_token_cache.TTL_SECONDS - 1
+    response, _ = await _dispatch()
+    assert response.status_code == 200
+    assert db.by_hash.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_drops_revoked_token(db, clock):
+    await _dispatch()
+    db.by_hash.return_value = None
+    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    response, _ = await _dispatch()
+    assert response.status_code == 200
+    await _drain_background()
+    response, _ = await _dispatch()
+    assert response.status_code == 401
+    assert db.by_hash.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_keeps_entry(db, clock):
+    await _dispatch()
+    db.by_hash.side_effect = RuntimeError('database unavailable')
+    clock[0] += sa_token_cache.TTL_SECONDS / 2 + 0.5
+    await _dispatch()
+    await _drain_background()
+    response, _ = await _dispatch()
+    assert response.status_code == 200
+    await _drain_background()
 
 
 @pytest.mark.asyncio
@@ -143,6 +197,7 @@ async def test_cached_row_still_checks_expiry(db, token_row):
 async def test_last_used_written_once_across_hits(db):
     for _ in range(5):
         await _dispatch()
+    await _drain_background()
     db.update_last_used.assert_called_once_with(
         'token_db_id_456', server._SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 

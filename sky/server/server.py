@@ -510,6 +510,15 @@ class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
 _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
+async def _update_token_last_used(token_id: str) -> None:
+    try:
+        await db_lookup.call_with_deadline(
+            global_user_state.update_service_account_token_last_used, token_id,
+            _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to update token last used time: {e}')
+
+
 @middleware_utils.websocket_aware
 class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
@@ -681,19 +690,14 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
                 # The row may be cached: later hits must see it as fresh.
                 token_row['last_used_at'] = int(now)
-                try:
-                    await db_lookup.call_with_deadline(
-                        global_user_state.
-                        update_service_account_token_last_used,
-                        token_row['token_id'],
-                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to update token last used time: {e}')
+                sa_token_cache.run_in_background(
+                    _update_token_last_used(token_row['token_id']))
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,
                                     name=user_name or user_info.name)
             request.state.auth_user = auth_user
+            executor.remember_request_user(auth_user, user_info)
 
             logger.debug(f'Authenticated service account: {user_id}')
 
@@ -3255,6 +3259,12 @@ async def api_get(request: fastapi.Request,
     request_id = await get_expanded_request_id(
         request_id, scope_user_id=role_filter.request_owner_scope(request))
 
+    in_process_done = executor.get_in_process_completion(request_id)
+    if in_process_done is not None:
+        metrics_utils.count_request_get_wait('signal')
+        await in_process_done.wait()
+    else:
+        metrics_utils.count_request_get_wait('poll')
     # Exponential backoff: start fast (10ms) for short requests like
     # status/queue, then back off to 100ms for long requests like
     # launch/exec.

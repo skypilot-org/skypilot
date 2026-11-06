@@ -33,6 +33,7 @@ import typing
 from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
                     Set, TextIO, Tuple)
 
+import cachetools
 import psutil
 import setproctitle
 
@@ -128,6 +129,56 @@ _COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS = 0.5
 _IN_PROCESS_REQUEST_NAMES: Set[str] = set()
 # Keeps in-process request tasks alive until they finish.
 _in_process_tasks: Set[asyncio.Task] = set()
+# Request id -> event set when that in-process request stops running in this
+# process. Accessed only from the server's event loop.
+_in_process_done: Dict[str, asyncio.Event] = {}
+
+# How long a process reuses the users-table row its requests ran as. A request
+# whose user carries the cached name skips the row's upsert, so a change made
+# to the row elsewhere can take this long to reach the process's requests.
+_REQUEST_USER_TTL_SECONDS = 10.0
+_request_users: 'cachetools.TTLCache[str, models.User]' = cachetools.TTLCache(
+    maxsize=4096, ttl=_REQUEST_USER_TTL_SECONDS)
+_request_users_lock = threading.Lock()
+
+
+def remember_request_user(auth_user: models.User, row: models.User) -> None:
+    """Records the users-table row auth read for ``auth_user``.
+
+    Requests this process runs for the user then skip the upsert of the row
+    while it is fresh and still carries the authenticated name.
+    """
+    if row.name != auth_user.name:
+        return
+    with _request_users_lock:
+        _request_users[auth_user.id] = row
+
+
+def _get_request_user(user: models.User) -> Tuple[models.User, bool]:
+    """The users-table row for the request's user, upserting it if needed.
+
+    Returns:
+        The row, and whether it came from this process's cache instead of the
+        database.
+    """
+    with _request_users_lock:
+        cached = _request_users.get(user.id)
+    if cached is not None and cached.name == user.name:
+        return cached, True
+    _, row = global_user_state.add_or_update_user(user, return_user=True)
+    _seed_role_if_missing(row.id)
+    with _request_users_lock:
+        _request_users[user.id] = row
+    return row, False
+
+
+def get_in_process_completion(request_id: str) -> Optional[asyncio.Event]:
+    """An event set when the request stops running in this process.
+
+    None unless the request is running in this process. A set event does not
+    mean the request finished: it may have been handed to the request queue.
+    """
+    return _in_process_done.get(request_id)
 
 
 def register_in_process_request(request_name: str) -> None:
@@ -836,6 +887,7 @@ def override_request_env_and_config(
     # did not already have.
     from_loopback = getattr(request_body, 'from_loopback', None) is not False
     original_env = os.environ.copy()
+    user_from_cache = False
     try:
         if is_daemon:
             # The SkyPilot system user is already upserted at scheduling
@@ -872,9 +924,7 @@ def override_request_env_and_config(
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                 name=request_body.env_vars[constants.USER_ENV_VAR])
-            _, user = global_user_state.add_or_update_user(user,
-                                                           return_user=True)
-            _seed_role_if_missing(user.id)
+            user, user_from_cache = _get_request_user(user)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -930,6 +980,10 @@ def override_request_env_and_config(
                              workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
+                    if user_from_cache:
+                        # The resolver honors the preferred workspace, which
+                        # must not lag behind the user's own change of it.
+                        user = global_user_state.get_user(user.id) or user
                     resolution = workspaces_core.resolve_workspace_for_user(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
@@ -1657,12 +1711,21 @@ async def schedule_prepared_request(request_task: api_requests.Request,
         task.add_done_callback(preconditions.background_tasks.discard)
     elif (not retryable and request_task.name in _IN_PROCESS_REQUEST_NAMES and
           _has_request_thread_available()):
+        request_id = request_task.request_id
+        done = asyncio.Event()
+        _in_process_done[request_id] = done
+
+        def _on_done(task: asyncio.Task) -> None:
+            _in_process_tasks.discard(task)
+            _in_process_done.pop(request_id, None)
+            done.set()
+
         task = asyncio.create_task(
             _execute_request_coroutine(request_task,
                                        ignore_return_value=ignore_return_value,
                                        on_executor_exhausted=enqueue))
         _in_process_tasks.add(task)
-        task.add_done_callback(_in_process_tasks.discard)
+        task.add_done_callback(_on_done)
     else:
         await enqueue()
 

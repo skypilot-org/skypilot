@@ -2261,3 +2261,49 @@ def test_a_configured_store_cap_is_read_as_bytes(monkeypatch):
     monkeypatch.setenv(server_constants.MAX_STORED_FILE_MOUNTS_BYTES_ENV_VAR,
                        '12345')
     assert server._max_stored_file_mounts_bytes() == 12345
+
+
+def _api_get_stubs(monkeypatch, done):
+    """Stubs /api/get's lookups; returns the status poll mock."""
+    monkeypatch.setattr(server, 'get_expanded_request_id',
+                        mock.AsyncMock(side_effect=lambda rid, **_: rid))
+    monkeypatch.setattr(server.role_filter, 'request_owner_scope',
+                        lambda request: None)
+    monkeypatch.setattr(executor, 'get_in_process_completion', lambda rid: done)
+    polled_after_done = []
+
+    async def get_status(request_id):
+        del request_id
+        polled_after_done.append(done is None or done.is_set())
+        return server.requests_lib.StatusWithMsg(
+            server.requests_lib.RequestStatus.SUCCEEDED, None)
+
+    monkeypatch.setattr(server.requests_lib, 'get_request_status_async',
+                        get_status)
+    request_task = mock.Mock()
+    request_task.name = 'sky.status'
+    request_task.get_error.return_value = None
+    request_task.should_retry = False
+    monkeypatch.setattr(server.requests_lib, 'get_request_async',
+                        mock.AsyncMock(return_value=request_task))
+    return polled_after_done
+
+
+@pytest.mark.asyncio
+async def test_api_get_waits_for_in_process_completion(monkeypatch):
+    done = asyncio.Event()
+    polled_after_done = _api_get_stubs(monkeypatch, done)
+    asyncio.get_running_loop().call_later(0.05, done.set)
+
+    await server.api_get(mock.Mock(), 'req-1')
+
+    assert polled_after_done == [True]
+
+
+@pytest.mark.asyncio
+async def test_api_get_polls_request_running_elsewhere(monkeypatch):
+    polled_after_done = _api_get_stubs(monkeypatch, None)
+
+    await server.api_get(mock.Mock(), 'req-1')
+
+    assert polled_after_done == [True]
