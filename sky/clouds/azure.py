@@ -1,4 +1,5 @@
 """Azure."""
+import json
 import os
 import re
 import subprocess
@@ -62,6 +63,9 @@ _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 _DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid-ray256'
 
 _COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
+
+# The token a workload identity is checked with: Azure Resource Manager.
+_ARM_TOKEN_SCOPE = 'https://management.azure.com/.default'
 
 
 def _run_output(cmd):
@@ -444,12 +448,14 @@ class Azure(clouds.Cloud):
                 'image_version': version,
             }
 
-        # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_effective_region_config(
-            cloud='azure',
-            region=region_name,
-            keys=('resource_group_vm',),
-            default_value=None)
+        # Determine resource group for deploying the instance. A workspace's
+        # own resource_group_vm wins over the global one.
+        resource_group_name = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='azure',
+                region=region_name,
+                keys=('resource_group_vm',),
+                default_value=None))
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
@@ -608,8 +614,36 @@ class Azure(clouds.Cloud):
         return cls._check_credentials()
 
     @classmethod
+    def _check_workload_identity_credentials(
+            cls, tenant_id: str, client_id: str) -> Tuple[bool, Optional[str]]:
+        """Checks the workspace's identity can get an Azure token."""
+        if not azure.get_workspace_subscription_id():
+            return False, (f'The workspace azure config names identity '
+                           f'{client_id} but no subscription_id.')
+        if not adaptors_common.can_import_modules([
+                'azure.identity', 'azure.mgmt.compute', 'azure.mgmt.network',
+                'azure.mgmt.resource'
+        ]):
+            return False, ('Azure dependencies are not installed. Run: '
+                           'pip install skypilot[azure]')
+        try:
+            azure.get_workload_identity_credential(
+                tenant_id, client_id).get_token(_ARM_TOKEN_SCOPE)
+        except Exception as e:  # pylint: disable=broad-except
+            return False, (f'Azure workload identity {client_id} in tenant '
+                           f'{tenant_id} could not get a token: '
+                           f'{common_utils.format_exception(e)}')
+        return True, None
+
+    @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        try:
+            workload_identity = azure.get_workspace_identity()
+        except ValueError as e:
+            return False, str(e)
+        if workload_identity is not None:
+            return cls._check_workload_identity_credentials(*workload_identity)
 
         help_str = (
             ' Run the following commands:'
@@ -659,6 +693,14 @@ class Azure(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
+        try:
+            workload_identity = azure.get_workspace_identity()
+        except ValueError:
+            workload_identity = None
+        if workload_identity is not None:
+            # A workspace that authenticates as a workload identity has no
+            # ~/.azure of its own, and must never upload the server's.
+            return {}
         return {
             f'~/.azure/{filename}': f'~/.azure/{filename}'
             for filename in _CREDENTIAL_FILES
@@ -668,10 +710,27 @@ class Azure(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, clouds='azure')
 
     @classmethod
-    @annotations.lru_cache(scope='global',
-                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
+        # Keyed by the workspace's azure config, so that one workspace's
+        # identity is never reported for another's.
+        azure_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('azure'), sort_keys=True)
+        return cls._get_user_identities(azure_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='global',
+                           maxsize=8)  # Cache since getting identity is slow.
+    def _get_user_identities(
+            cls, workspace_config: str) -> Optional[List[List[str]]]:
+        del workspace_config  # Only the cache key.
+        workload_identity = azure.get_workspace_identity()
+        if workload_identity is not None:
+            tenant_id, client_id = workload_identity
+            return [[
+                f'{client_id} [tenant_id={tenant_id}] '
+                f'[subscription_id={cls.get_project_id()}]'
+            ]]
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
         while True:
@@ -727,6 +786,9 @@ class Azure(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
+        workspace_subscription_id = azure.get_workspace_subscription_id()
+        if workspace_subscription_id:
+            return workspace_subscription_id
         try:
             azure_subscription_id = azure.get_subscription_id()
             if not azure_subscription_id:

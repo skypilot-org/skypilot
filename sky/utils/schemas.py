@@ -2782,7 +2782,7 @@ def get_config_schema():
     # gcp, kubernetes, ssh, nebius, slurm.
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names if cloud.lower() not in
-        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
+        ['aws', 'azure', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     slurm_allowed_clusters_schema = cloud_configs['slurm']['properties'][
@@ -2865,6 +2865,35 @@ def get_config_schema():
                         **_CAPABILITIES_SCHEMA,
                         'remote_identity':
                             (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    },
+                    'additionalProperties': False,
+                },
+                # A workspace can run as its own Azure identity in its own
+                # subscription: tenant_id + client_id name an Entra identity
+                # that trusts this server's projected service account token
+                # (workload identity federation).
+                'azure': {
+                    'type': 'object',
+                    'properties': {
+                        'subscription_id': {
+                            'type': 'string'
+                        },
+                        'tenant_id': {
+                            'type': 'string'
+                        },
+                        'client_id': {
+                            'type': 'string'
+                        },
+                        'resource_group_vm': {
+                            'type': 'string'
+                        },
+                        'remote_identity': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },

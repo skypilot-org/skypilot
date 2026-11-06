@@ -4,9 +4,10 @@
 import asyncio
 import datetime
 import logging
+import os
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 import uuid
 
 from sky import exceptions as sky_exceptions
@@ -31,11 +32,58 @@ _LAZY_MODULES = (azure,)
 _session_creation_lock = threading.RLock()
 _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 
+# A workspace that names an Entra identity (`workspaces.<ws>.azure.tenant_id`
+# and `client_id`) authenticates with workload identity federation: the
+# Kubernetes-projected service account token in this file is exchanged for an
+# Entra token of that identity. No `az login`, no secret, no ~/.azure.
+WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR = 'AZURE_FEDERATED_TOKEN_FILE'
+# Where `az login` keeps its state.
+_AZURE_CLI_DIR = '~/.azure'
+
+
+def _workspace_config() -> Any:
+    # pylint: disable=import-outside-toplevel
+    from sky import skypilot_config
+    return skypilot_config.get_workspace_cloud('azure')
+
+
+def get_workspace_identity() -> Optional[Tuple[str, str]]:
+    """(tenant_id, client_id) of the active workspace's Azure identity.
+
+    None when the workspace names no identity, in which case the Azure CLI
+    login is used, as before.
+    """
+    config = _workspace_config()
+    tenant_id = config.get('tenant_id')
+    client_id = config.get('client_id')
+    if tenant_id and client_id:
+        return tenant_id, client_id
+    if tenant_id or client_id:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'The workspace azure config must set both tenant_id and '
+                'client_id to use workload identity; it sets only '
+                f'{"tenant_id" if tenant_id else "client_id"}.')
+    return None
+
+
+def get_workspace_subscription_id() -> Optional[str]:
+    """The subscription the active workspace names, if any."""
+    return _workspace_config().get('subscription_id')
+
+
+def get_subscription_id() -> str:
+    """The active workspace's subscription, else the Azure CLI default."""
+    subscription_id = get_workspace_subscription_id()
+    if subscription_id:
+        return subscription_id
+    return _get_cli_subscription_id()
+
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 @annotations.lru_cache(scope='global', maxsize=1)
-def get_subscription_id() -> str:
-    """Get the default subscription id."""
+def _get_cli_subscription_id() -> str:
+    """Get the default subscription id of the Azure CLI login."""
     from azure.common import credentials
     retry = 0
     backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
@@ -58,8 +106,30 @@ def get_subscription_id() -> str:
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
+    identity = get_workspace_identity()
+    if identity is not None:
+        tenant_id, client_id = identity
+        return f'{client_id} [tenant_id={tenant_id}]'
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
+
+
+@annotations.lru_cache(scope='global')
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def get_workload_identity_credential(tenant_id: str, client_id: str) -> Any:
+    """One credential per (tenant, client), so its token cache is shared."""
+    from azure import identity
+    token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR)
+    if not token_file:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'The workspace names Azure identity {client_id} in tenant '
+                f'{tenant_id}, but {WORKLOAD_IDENTITY_TOKEN_FILE_ENV_VAR} is '
+                'not set. Mount a service account token with audience '
+                'api://AzureADTokenExchange and point the variable at it.')
+    return identity.WorkloadIdentityCredential(tenant_id=tenant_id,
+                                               client_id=client_id,
+                                               token_file_path=token_file)
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -80,19 +150,37 @@ def azure_mgmt_models(name: str):
         return models
 
 
-# We should keep the order of the decorators having 'lru_cache' followed
-# by 'load_lazy_modules' as we need to make sure a caller can call
-# 'get_client.cache_clear', which is a function provided by 'lru_cache'
-@annotations.lru_cache(scope='global')
-@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_client(name: str,
                subscription_id: Optional[str] = None,
                **kwargs) -> Client:
     """Creates and returns an Azure client for the specified service.
 
+    The client authenticates as the active workspace's identity (workload
+    identity) when it names one, else as the Azure CLI login. Clients are
+    cached per (name, subscription, tenant, client).
+
     Args:
         name: The type of Azure client to create.
         subscription_id: The Azure subscription ID. Defaults to None.
+    """
+    return _get_client(name, subscription_id, get_workspace_identity(),
+                       **kwargs)
+
+
+# We should keep the order of the decorators having 'lru_cache' followed
+# by 'load_lazy_modules' as we need to make sure a caller can call
+# 'get_client.cache_clear', which is a function provided by 'lru_cache'
+@annotations.lru_cache(scope='global')
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def _get_client(name: str, subscription_id: Optional[str],
+                workload_identity: Optional[Tuple[str,
+                                                  str]], **kwargs) -> Client:
+    """See get_client.
+
+    Args:
+        name: The type of Azure client to create.
+        subscription_id: The Azure subscription ID. Defaults to None.
+        workload_identity: (tenant_id, client_id), or None for the CLI login.
 
     Returns:
         An instance of the specified Azure client.
@@ -107,13 +195,23 @@ def get_client(name: str,
         TimeoutError: If unable to get the container client within the
             specified time.
     """
-    # Sky only supports Azure CLI credential for now.
-    # Increase the timeout to fix the Azure get-access-token timeout issue.
-    # Tracked in
-    # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     from azure import identity
     with _session_creation_lock:
-        credential = identity.AzureCliCredential(process_timeout=30)
+        if workload_identity is not None:
+            credential = get_workload_identity_credential(*workload_identity)
+        else:
+            # Increase the timeout to fix the Azure get-access-token timeout
+            # issue. Tracked in
+            # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+            # With no Azure CLI state at all, use the machine's own managed
+            # identity: on a cluster launched with `azure.remote_identity`,
+            # autostop/autodown run on the head node, which has that identity
+            # and no `az login`. (Calling the CLI there would also create a
+            # ~/.azure on the node.)
+            if os.path.isdir(os.path.expanduser(_AZURE_CLI_DIR)):
+                credential = identity.AzureCliCredential(process_timeout=30)
+            else:
+                credential = identity.ManagedIdentityCredential()
         if name == 'compute':
             from azure.mgmt import compute
             return compute.ComputeManagementClient(credential, subscription_id)
@@ -262,6 +360,10 @@ def get_client(name: str,
                     ' seconds.')
         else:
             raise ValueError(f'Client not supported: "{name}"')
+
+
+# Callers clear the client cache through get_client (e.g. data_utils).
+get_client.cache_clear = _get_client.cache_clear  # type: ignore[attr-defined]
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

@@ -117,6 +117,20 @@ The above is achieved by configuring the following section in the config file:
              # {cluster-name-glob: role} mappings selects per cluster name.
              remote_identity: skypilot-team-a-v1
 
+           azure:
+             disabled: false
+             # Run this workspace as its own Azure identity in its own
+             # subscription, through workload identity federation (optional).
+             # See "Azure: per-workspace subscription and identity" below.
+             subscription_id: Azure subscription ID
+             tenant_id: Microsoft Entra tenant ID
+             client_id: Client ID of a user-assigned managed identity
+             # Existing resource group to launch into (optional). SkyPilot
+             # never creates or deletes it.
+             resource_group_vm: resource-group-name
+             # Same values as the global `azure.remote_identity`.
+             remote_identity: SERVICE_ACCOUNT
+
            nebius:
              disabled: false
              tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
@@ -209,6 +223,44 @@ What ``remote_identity`` controls per cloud:
   ``SERVICE_ACCOUNT``, or ``NO_UPLOAD``. Unlike AWS and Kubernetes, GCP cannot
   pin a specific service account email per workspace; the VM uses the default
   SkyPilot service account.
+* **Azure** — the managed identity attached to launched VMs. Takes the same
+  values as the global :ref:`azure.remote_identity <config-yaml-azure-remote-identity>`;
+  with a user-assigned identity name or resource ID, SkyPilot creates no managed
+  identity and no role assignment.
+
+Azure: per-workspace subscription and identity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, every Azure call is made as the API server's ``az`` CLI login, in its
+default subscription. A workspace can instead launch into its own subscription as
+its own Microsoft Entra identity, with no long-lived Azure secret on the API
+server, through workload identity federation:
+
+.. code-block:: yaml
+
+   workspaces:
+     team-a:
+       azure:
+         subscription_id: <subscription-id>
+         tenant_id: <tenant-id>
+         client_id: <client-id-of-a-user-assigned-managed-identity>
+         resource_group_vm: <existing-resource-group>
+         remote_identity: /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<node-identity>
+
+* The identity named by ``client_id`` needs a federated identity credential that
+  trusts the API server's Kubernetes service account token (issuer: the
+  cluster's OIDC issuer URL; subject:
+  ``system:serviceaccount:<namespace>:<service-account>``; audience:
+  ``api://AzureADTokenExchange``).
+* The API server pod needs that token projected and ``AZURE_FEDERATED_TOKEN_FILE``
+  set. AKS workload identity does both; on other clusters (e.g. EKS), mount a
+  projected service account token with that audience.
+* Azure clients are cached per (tenant, client, subscription), so workspaces never
+  share a client.
+* With ``resource_group_vm`` set, SkyPilot launches into that existing resource
+  group and never creates or deletes it; ``sky down`` deletes only the cluster's
+  own resources.
+* Workspaces without ``tenant_id`` and ``client_id`` keep using the ``az`` CLI login.
 
 .. _workspaces-remote-identity-precedence:
 
