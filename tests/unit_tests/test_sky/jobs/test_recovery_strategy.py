@@ -253,6 +253,7 @@ def _make_launch_executor():
     executor.cluster_name = 'test-cluster'
     executor.dag = mock.MagicMock()
     executor.file_mounts_blob_id = None
+    executor._orphaned_launch_requests_checked = False
     executor.starting = set()
     lock = asyncio.Lock()
     executor.starting_lock = lock
@@ -295,6 +296,8 @@ def _patch_launch_environment(monkeypatch):
                         'get_runtime_user_restarts_async',
                         mock.AsyncMock(return_value=0))
     monkeypatch.setattr(recovery_strategy.sdk, 'api_start', mock.MagicMock())
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status',
+                        mock.MagicMock(return_value=[]))
     sdk_launch = mock.MagicMock(return_value='req-123')
     monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
     monkeypatch.setattr(recovery_strategy.global_user_state,
@@ -371,20 +374,18 @@ async def test_launch_cancels_orphaned_launch_request_before_fresh_launch(
     executor._await_launch_request = mock.AsyncMock(return_value=None)
     order = []
     api_status = mock.MagicMock(return_value=[
-        types.SimpleNamespace(request_id='old-req',
-                              name='sky.launch',
-                              status='WAITING'),
+        types.SimpleNamespace(
+            request_id='old-req', name='sky.launch', status='WAITING'),
         # Not a launch: must be left alone.
-        types.SimpleNamespace(request_id='other-req',
-                              name='sky.status',
-                              status='RUNNING'),
+        types.SimpleNamespace(
+            request_id='other-req', name='sky.status', status='RUNNING'),
     ])
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
-    cancel = mock.AsyncMock(side_effect=lambda rid: order.append(('cancel',
-                                                                  rid)))
+    cancel = mock.AsyncMock(
+        side_effect=lambda rid: order.append(('cancel', rid)))
     executor._cancel_launch_request = cancel
-    patches.sdk_launch.side_effect = (
-        lambda *a, **k: order.append(('launch', None)) or 'req-123')
+    patches.sdk_launch.side_effect = (lambda *a, **k: order.append(
+        ('launch', None)) or 'req-123')
 
     result = await executor._launch(max_retry=1, raise_on_failure=True)
 

@@ -33,6 +33,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import observation as provision_observation
 from sky.serve import serve_utils
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -309,6 +310,10 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         self.file_mounts_blob_id = file_mounts_blob_id
+        # Whether this controller process has cancelled launch requests
+        # left behind by a previous controller of this job. See
+        # _cancel_orphaned_launch_requests.
+        self._orphaned_launch_requests_checked = False
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -763,6 +768,50 @@ class StrategyExecutor:
             # we must still propagate the cancellation
             logger.error(f'Failed to cancel the request: {e}')
 
+    async def _cancel_orphaned_launch_requests(self) -> None:
+        """Cancel launch requests left behind by a previous controller.
+
+        A launch request outlives the controller process that submitted it:
+        if the controller dies while the request is parked (WAITING), e.g.
+        in an API server rolling update, the request stays on the API server
+        and resumes on its own once its wait ends. Its id only lived in the
+        dead controller's memory, so the restarted controller cannot
+        re-attach to it and submits a fresh launch for the same cluster.
+        Left alone, the old request later re-runs provisioning on the
+        cluster the fresh launch already started the job on, which kills
+        the job's driver. So before this process's first fresh launch,
+        cancel every unfinished launch request for this job's cluster.
+
+        Runs once per controller process: later launches by this process
+        are tracked in _launch itself. Best effort: on failure, log and let
+        the launch proceed.
+        """
+        if self._orphaned_launch_requests_checked:
+            return
+        self._orphaned_launch_requests_checked = True
+        launch_request_name = server_constants.REQUEST_NAME_PREFIX + 'launch'
+        try:
+            # Without all_status, only unfinished requests are returned.
+            active = await asyncio.to_thread(
+                sdk.api_status,
+                cluster_name=self.cluster_name,
+                fields=['request_id', 'name', 'status'])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to list unfinished launch requests for '
+                           f'cluster {self.cluster_name!r}: '
+                           f'{common_utils.format_exception(e)}')
+            return
+        for req in active:
+            request_id = getattr(req, 'request_id', None)
+            if (getattr(req, 'name', None) != launch_request_name or
+                    request_id is None):
+                continue
+            logger.info(f'Cancelling launch request {request_id} '
+                        f'({getattr(req, "status", None)}) for cluster '
+                        f'{self.cluster_name!r}, left behind by a previous '
+                        'controller of this job.')
+            await self._cancel_launch_request(request_id)
+
     async def _get_request_payload(self, request_id: str) -> Optional[Any]:
         """Fetch the status and status_msg of a request.
 
@@ -1142,6 +1191,8 @@ class StrategyExecutor:
                             request_id: Optional[str] = None
                             try:
                                 if reattach_request_id is None:
+                                    await (
+                                        self._cancel_orphaned_launch_requests())
                                     extra_ctx = self.extra_launch_context()
                                     runtime_restarts = await (
                                         state.get_runtime_user_restarts_async(
