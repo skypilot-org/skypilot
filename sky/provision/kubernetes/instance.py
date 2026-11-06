@@ -2113,7 +2113,8 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
 # such outages are often intermittent.
 _WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
 # Kept under its old name for callers outside this module.
-_WEBHOOK_UNAVAILABLE_PATTERN = api_errors.WEBHOOK_UNAVAILABLE_PATTERN
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
 
 
 def _create_namespaced_pod_retrying_webhook_errors(

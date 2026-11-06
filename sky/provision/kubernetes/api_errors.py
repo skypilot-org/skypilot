@@ -19,7 +19,8 @@ from sky.adaptors import kubernetes
 # An admission webhook with failurePolicy: Fail that has no ready endpoints
 # (e.g. its controller is restarting) fails every create with a 500 whose
 # message names the webhook.
-WEBHOOK_UNAVAILABLE_PATTERN = re.compile(r'failed calling webhook "([^"]+)"')
+WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = re.compile(
+    r'failed calling webhook "([^"]+)"')
 
 
 def status_message(e: Any) -> str:
