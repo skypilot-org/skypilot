@@ -30,6 +30,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import threads
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import context_utils
@@ -54,7 +55,16 @@ def isolated_database(tmp_path):
 
 
 @pytest.fixture()
-def mock_skypilot_config(tmp_path):
+def isolated_config_env(monkeypatch):
+    """Use the config sources selected by each test."""
+    for name in (skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                 skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                 skypilot_config.ENV_VAR_PROJECT_CONFIG):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture()
+def mock_skypilot_config(tmp_path, isolated_config_env):
     config_content = """
 aws:
   labels:
@@ -2508,7 +2518,8 @@ def test_old_pickle_body_is_treated_as_loopback(stub_override_request_env_deps,
 
 @pytest.mark.parametrize('from_loopback', [True, False])
 def test_config_override_infra_keys_gated_through_entry_point(
-        stub_override_request_env_deps, monkeypatch, tmp_path, from_loopback):
+        stub_override_request_env_deps, isolated_config_env, monkeypatch,
+        tmp_path, from_loopback):
     """Through the real entry point: a remote request cannot widen the three
     infra keys the server allows, while a non-infra override still applies; a
     loopback request layers both.
@@ -2564,3 +2575,278 @@ def test_config_override_infra_keys_gated_through_entry_point(
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+class _InProcessBody(payloads.RequestBody):
+    value: str
+
+
+IN_PROCESS_CALLED = threading.Event()
+
+
+def _in_process_entrypoint(value: str):
+    IN_PROCESS_CALLED.set()
+    return {'value': value, 'user': os.environ.get(constants.USER_ID_ENV_VAR)}
+
+
+async def _prepare_in_process(request_id: str,
+                              name: str = 'test.in_process',
+                              func=_in_process_entrypoint):
+    loopback.set_request_from_loopback(True)
+    return await executor.prepare_request_async(
+        request_id=request_id,
+        request_name=name,
+        request_body=_InProcessBody(value='v',
+                                    env_vars={
+                                        constants.USER_ID_ENV_VAR: 'user-1',
+                                        constants.USER_ENV_VAR: 'user-1',
+                                    }),
+        func=func,
+        schedule_type=requests_lib.ScheduleType.SHORT)
+
+
+@pytest.fixture()
+def in_process_env(isolated_database, mock_global_user_state,
+                   mock_skypilot_config, hijacked_sys_attrs, monkeypatch):
+    """Registers 'test.in_process' and records queue puts."""
+    _reset_thread_executors()
+    monkeypatch.setattr(executor, '_IN_PROCESS_REQUEST_NAMES', set())
+    executor.register_in_process_request('test.in_process')
+    IN_PROCESS_CALLED.clear()
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock()
+    monkeypatch.setattr(executor, '_get_queue', lambda schedule_type: queue)
+    yield queue
+    _reset_thread_executors()
+
+
+async def _wait_in_process_tasks():
+    await asyncio.wait_for(asyncio.gather(*list(executor._in_process_tasks)),
+                           timeout=10)
+    # A request thread can outlive its task (e.g. a cancelled request); it must
+    # finish before teardown restores os.environ, or its env restore leaks.
+    pool = executor._REQUEST_THREAD_EXECUTOR
+    deadline = time.monotonic() + 10
+    while (pool is not None and pool.running.get() > 0 and
+           time.monotonic() < deadline):
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_registered_request_runs_in_process(in_process_env, monkeypatch):
+    """A registered request runs in-process and finishes without polling."""
+    # Completion must not wait for the cancellation check.
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        60)
+    request = await _prepare_in_process('in-process-ok')
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    done = requests_lib.get_request('in-process-ok')
+    assert done is not None
+    assert done.status == requests_lib.RequestStatus.SUCCEEDED
+    assert done.get_return_value() == {'value': 'v', 'user': 'user-1'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name,retryable,with_precondition', [
+    ('test.other', False, False),
+    ('test.in_process', True, False),
+    ('test.in_process', False, True),
+])
+async def test_ineligible_request_is_queued(in_process_env, name, retryable,
+                                            with_precondition):
+    """Unregistered, retryable or preconditioned requests use the queue."""
+    request = await _prepare_in_process(f'queued-{name}-{retryable}', name=name)
+    precondition = _AlwaysMetPrecondition(
+        request.request_id) if with_precondition else None
+    await executor.schedule_prepared_request(request,
+                                             precondition=precondition,
+                                             retryable=retryable)
+    await asyncio.gather(*list(preconditions.background_tasks))
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not executor._in_process_tasks
+    assert not IN_PROCESS_CALLED.is_set()
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_when_executor_full(
+        in_process_env, monkeypatch):
+    """A full request thread executor sends the request to the queue."""
+    monkeypatch.setattr(
+        executor, 'get_request_thread_executor',
+        lambda: threads.OnDemandThreadExecutor(name='full', max_workers=0))
+    request = await _prepare_in_process('in-process-full')
+
+    await executor.schedule_prepared_request(request)
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not IN_PROCESS_CALLED.is_set()
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_when_submit_rejected(
+        in_process_env, monkeypatch):
+    """A thread executor that fills up before submit sends it to the queue."""
+
+    class _FullExecutor(concurrent.futures.Executor):
+
+        def check_available(self, borrow=False):
+            del borrow
+            return 0
+
+        def submit(self, fn, /, *args, **kwargs):
+            raise exceptions.ConcurrentWorkerExhaustedError('full')
+
+    monkeypatch.setattr(executor, 'get_request_thread_executor',
+                        lambda: _FullExecutor())
+    request = await _prepare_in_process('in-process-rejected')
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_awaited_once()
+    assert not IN_PROCESS_CALLED.is_set()
+    pending = requests_lib.get_request('in-process-rejected')
+    assert pending is not None
+    assert pending.status == requests_lib.RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_before_start_stays_cancelled(
+        in_process_env):
+    """A request cancelled before it starts never runs its entrypoint."""
+    request = await _prepare_in_process('in-process-cancelled')
+    assert await requests_lib.kill_request_async('in-process-cancelled')
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    assert not IN_PROCESS_CALLED.is_set()
+    cancelled = requests_lib.get_request('in-process-cancelled')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
+
+
+ENTRYPOINT_STARTED = threading.Event()
+RELEASE_ENTRYPOINT = threading.Event()
+
+
+def _gated_in_process_entrypoint(value: str):
+    ENTRYPOINT_STARTED.set()
+    RELEASE_ENTRYPOINT.wait(5)
+    return value
+
+
+async def _start_gated_request(request_id: str):
+    ENTRYPOINT_STARTED.clear()
+    RELEASE_ENTRYPOINT.clear()
+    request = await _prepare_in_process(request_id,
+                                        func=_gated_in_process_entrypoint)
+    await executor.schedule_prepared_request(request)
+    assert await asyncio.get_running_loop().run_in_executor(
+        None, ENTRYPOINT_STARTED.wait, 5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'check_interval,release_before_check',
+    [
+        # The cancellation poll sees CANCELLED while the request runs.
+        (0.05, False),
+        # The result is ready before any cancellation poll.
+        (60, True),
+    ])
+async def test_in_process_request_cancelled_while_running_stays_cancelled(
+        in_process_env, monkeypatch, check_interval, release_before_check):
+    """Cancelling a running in-process request keeps it CANCELLED."""
+    monkeypatch.setattr(executor, '_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS',
+                        check_interval)
+    await _start_gated_request('in-process-running')
+    assert await requests_lib.kill_request_async('in-process-running')
+    if release_before_check:
+        RELEASE_ENTRYPOINT.set()
+    else:
+        await asyncio.wait_for(
+            asyncio.gather(*list(executor._in_process_tasks)), timeout=10)
+        RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+
+    cancelled = requests_lib.get_request('in-process-running')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+    assert cancelled.get_return_value() is None
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_queued_above_cap(in_process_env, monkeypatch):
+    """Requests beyond the per-process in-process cap use the queue."""
+    monkeypatch.setattr(executor, '_MAX_IN_PROCESS_REQUESTS', 1)
+    await _start_gated_request('in-process-holding')
+    second = await _prepare_in_process('in-process-over-cap')
+
+    await executor.schedule_prepared_request(second)
+
+    in_process_env.put_async.assert_awaited_once()
+    assert len(executor._in_process_tasks) == 1
+    RELEASE_ENTRYPOINT.set()
+    await _wait_in_process_tasks()
+    held = requests_lib.get_request('in-process-holding')
+    assert held is not None
+    assert held.status == requests_lib.RequestStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_fails_when_claim_raises(
+        in_process_env, monkeypatch):
+    """A storage error while claiming the request marks it FAILED."""
+
+    async def _raise(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError('db down')
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async', _raise)
+    request = await _prepare_in_process('in-process-claim-error')
+
+    await executor.schedule_prepared_request(request)
+    await _wait_in_process_tasks()
+
+    in_process_env.put_async.assert_not_called()
+    assert not IN_PROCESS_CALLED.is_set()
+    failed = requests_lib.get_request('in-process-claim-error')
+    assert failed is not None
+    assert failed.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_in_process_request_cancelled_during_claim(
+        in_process_env, monkeypatch):
+    """Cancelling the task mid-claim ends CANCELLED once the claim commits."""
+    real_transition = requests_lib.transition_request_status_async
+    claim_started = asyncio.Event()
+    release_claim = asyncio.Event()
+
+    async def _slow_transition(*args, **kwargs):
+        claim_started.set()
+        await release_claim.wait()
+        return await real_transition(*args, **kwargs)
+
+    monkeypatch.setattr(requests_lib, 'transition_request_status_async',
+                        _slow_transition)
+    request = await _prepare_in_process('in-process-claim-cancel')
+    await executor.schedule_prepared_request(request)
+    await asyncio.wait_for(claim_started.wait(), timeout=5)
+    (task,) = executor._in_process_tasks
+    task.cancel()
+    await asyncio.sleep(0)
+    release_claim.set()
+    await _wait_in_process_tasks()
+
+    assert not IN_PROCESS_CALLED.is_set()
+    cancelled = requests_lib.get_request('in-process-claim-cancel')
+    assert cancelled is not None
+    assert cancelled.status == requests_lib.RequestStatus.CANCELLED
