@@ -1442,3 +1442,61 @@ def test_merge_k8s_configs_env_layered_overrides_last_source_wins():
         'value': 'task'
     })
     assert env == [{'name': 'TPU_NAME', 'value': 'task'}]
+
+
+def test_merge_k8s_configs_env_same_kind_value_from_still_deep_merges():
+    """Adding a field to an existing source keeps the rest of it."""
+    env = _merged_env(
+        {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'name': 's',
+                    'key': 'k'
+                }
+            }
+        }, {
+            'name': 'S',
+            'valueFrom': {
+                'secretKeyRef': {
+                    'optional': True
+                }
+            }
+        })
+    assert env == [{
+        'name': 'S',
+        'valueFrom': {
+            'secretKeyRef': {
+                'name': 's',
+                'key': 'k',
+                'optional': True
+            }
+        }
+    }]
+
+
+def test_merge_k8s_configs_env_rule_applies_to_init_containers():
+    base = {
+        'spec': {
+            'initContainers': [{
+                'name': 'init',
+                'env': [copy.deepcopy(_TPU_NAME_FROM_POD)]
+            }]
+        }
+    }
+    config_utils.merge_k8s_configs(
+        base, {
+            'spec': {
+                'initContainers': [{
+                    'name': 'init',
+                    'env': [{
+                        'name': 'TPU_NAME',
+                        'value': 'custom'
+                    }]
+                }]
+            }
+        })
+    assert base['spec']['initContainers'][0]['env'] == [{
+        'name': 'TPU_NAME',
+        'value': 'custom'
+    }]

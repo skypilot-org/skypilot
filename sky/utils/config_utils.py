@@ -400,13 +400,9 @@ def merge_k8s_configs(
                                  if v.get(patch_merge_key) == override_item_name
                                 ), None)
                             if existing_base_item is not None:
-                                if key == 'env' and any(
-                                        override_item.get(k) is not None
-                                        for k in ('value', 'valueFrom')):
-                                    # An env var takes one source; the
-                                    # override's replaces the base's whole.
-                                    existing_base_item.pop('value', None)
-                                    existing_base_item.pop('valueFrom', None)
+                                if key == 'env':
+                                    _drop_replaced_env_source(
+                                        existing_base_item, override_item)
                                 merge_k8s_configs(existing_base_item,
                                                   override_item)
                             else:
@@ -424,6 +420,28 @@ def merge_k8s_configs(
                 base_config[key].extend(value)
         else:
             base_config[key] = value
+
+
+def _drop_replaced_env_source(base_item: Dict[str, Any],
+                              override_item: Dict[str, Any]) -> None:
+    """Drops the base env var's source when the override sets another one.
+
+    An env var takes exactly one source, so merging a literal over a
+    valueFrom (or a fieldRef over a configMapKeyRef) would yield one that
+    Kubernetes rejects. A valueFrom of the same kind still deep-merges, e.g.
+    adding `optional: true` to an existing secretKeyRef.
+    """
+    override_value = override_item.get('value')
+    override_from = override_item.get('valueFrom')
+    if override_value is None and override_from is None:
+        return
+    base_item.pop('value', None)
+    base_from = base_item.get('valueFrom')
+    same_kind = (override_value is None and isinstance(base_from, dict) and
+                 isinstance(override_from, dict) and
+                 set(base_from) == set(override_from))
+    if not same_kind:
+        base_item.pop('valueFrom', None)
 
 
 def get_cloud_config_value_from_dict(dict_config: Dict[str, Any],
