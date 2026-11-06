@@ -2662,9 +2662,6 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
-@db_retries.retry
-@metrics_lib.time_me
-@context_utils.cancellation_guard
 def _latest_init_reasons(rows: List[Any]) -> Dict[str, str]:
     """Newest launch/status-change reason per INIT row, keyed by hash."""
     init_cluster_hashes = {
@@ -2708,6 +2705,9 @@ def _shared_record_fields(handle: Any, status: status_lib.ClusterStatus,
     }
 
 
+@db_retries.retry
+@metrics_lib.time_me
+@context_utils.cancellation_guard
 def get_cluster_from_name(
         cluster_name: Optional[str],
         *,
@@ -2843,42 +2843,45 @@ def get_clusters_from_names(
         cluster_table.c.is_managed,
         cluster_table.c.node_names,
     ]
+    rows = []
     with orm.Session(engine) as session:
         for offset in range(0, len(cluster_names),
                             _CLUSTER_IN_QUERY_CHUNK_SIZE):
             batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
-            rows = session.query(*query_fields).filter(
-                cluster_table.c.name.in_(batch)).all()
-            init_reasons = _latest_init_reasons(rows)
-            for row in rows:
-                handle = pickle.loads(row.handle)
-                status = status_lib.ClusterStatus[row.status]
-                record: Dict[str, Any] = {
-                    'name': row.name,
-                    'launched_at': row.launched_at,
-                    'handle': handle,
-                    'last_use': row.last_use,
-                    'status': status,
-                    'autostop': row.autostop,
-                    'to_down': bool(row.to_down),
-                    'owner': _load_owner(row.owner),
-                    'metadata': json.loads(row.metadata),
-                    'cluster_hash': row.cluster_hash,
-                    'cluster_ever_up': bool(row.cluster_ever_up),
-                    'status_updated_at': row.status_updated_at,
-                    'workspace': row.workspace,
-                    'is_managed': bool(row.is_managed),
-                    'config_hash': row.config_hash,
-                    **_shared_record_fields(handle, status, row.node_names,
-                                            init_reasons.get(row.cluster_hash)),
-                }
-                if include_user_info:
-                    user_hash = _get_user_hash_or_current_user(row.user_hash)
-                    user = get_user(user_hash)
-                    record['user_hash'] = user_hash
-                    record['user_name'] = (user.name
-                                           if user is not None else None)
-                result[row.name] = record
+            rows.extend(
+                session.query(*query_fields).filter(
+                    cluster_table.c.name.in_(batch)).all())
+    # Outside the session: this opens its own, and holding two pool
+    # connections per call would be wasteful.
+    init_reasons = _latest_init_reasons(rows)
+    for row in rows:
+        handle = pickle.loads(row.handle)
+        status = status_lib.ClusterStatus[row.status]
+        record: Dict[str, Any] = {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': handle,
+            'last_use': row.last_use,
+            'status': status,
+            'autostop': row.autostop,
+            'to_down': bool(row.to_down),
+            'owner': _load_owner(row.owner),
+            'metadata': json.loads(row.metadata),
+            'cluster_hash': row.cluster_hash,
+            'cluster_ever_up': bool(row.cluster_ever_up),
+            'status_updated_at': row.status_updated_at,
+            'workspace': row.workspace,
+            'is_managed': bool(row.is_managed),
+            'config_hash': row.config_hash,
+            **_shared_record_fields(handle, status, row.node_names,
+                                    init_reasons.get(row.cluster_hash)),
+        }
+        if include_user_info:
+            user_hash = _get_user_hash_or_current_user(row.user_hash)
+            user = get_user(user_hash)
+            record['user_hash'] = user_hash
+            record['user_name'] = (user.name if user is not None else None)
+        result[row.name] = record
     return result
 
 
