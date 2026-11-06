@@ -75,11 +75,12 @@ async def _drain_background():
 @pytest.fixture
 def clock(monkeypatch):
     now = [1000.0]
-    monkeypatch.setattr(
-        sa_token_cache, '_entries',
-        cachetools.TTLCache(maxsize=8,
-                            ttl=sa_token_cache.TTL_SECONDS,
-                            timer=lambda: now[0]))
+    for name in ('_entries', '_next_refresh'):
+        monkeypatch.setattr(
+            sa_token_cache, name,
+            cachetools.TTLCache(maxsize=8,
+                                ttl=sa_token_cache.TTL_SECONDS,
+                                timer=lambda: now[0]))
     return now
 
 
@@ -164,6 +165,13 @@ async def test_failed_refresh_keeps_entry_and_backs_off(db, clock):
     assert response.status_code == 200
     await _drain_background()
     assert db.by_hash.call_count == 2
+    # The back-off outlasts the entry, which then expires and is looked up on
+    # the request path.
+    db.by_hash.side_effect = None
+    clock[0] += sa_token_cache.TTL_SECONDS / 4
+    response, _ = await _dispatch()
+    assert response.status_code == 200
+    assert db.by_hash.call_count == 3
 
 
 @pytest.mark.asyncio
