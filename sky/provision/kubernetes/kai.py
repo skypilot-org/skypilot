@@ -1,17 +1,24 @@
 """KAI Scheduler support for Kubernetes clusters.
 
 When kubernetes.kai.queue is set, each cluster gets a KAI PodGroup so KAI
-schedules its pods as a gang.
+schedules its pods as a gang. KAI does not gate pending pods, so the pod wait
+loop checks the PodGroup and parks the launch request while KAI queues it.
 """
+import asyncio
+import dataclasses
 import datetime
+import math
 import re
-from typing import Any, Dict, Optional, Tuple
+import time
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import common_utils
 
 SCHEDULER_NAME = 'kai-scheduler'
 QUEUE_LABEL = 'kai.scheduler/queue'
@@ -19,6 +26,7 @@ QUEUE_LABEL = 'kai.scheduler/queue'
 POD_GROUP_ANNOTATION = 'pod-group-name'
 
 _KAI_GROUP = 'scheduling.run.ai'
+_QUEUE_API = (_KAI_GROUP, 'v2')
 POD_GROUP_API = (_KAI_GROUP, 'v2alpha2')
 _TOPOLOGY_API = ('kai.scheduler', 'v1alpha1')
 # provider_config key -> PodGroup topologyConstraint field.
@@ -27,9 +35,22 @@ _TOPOLOGY_LEVEL_FIELDS = (
     ('kai_preferred_topology_level', 'preferredTopologyLevel'),
 )
 
+# Maps a KAI quota reason to (requested resources field, Queue limit field).
+_QUOTA_REASONS = {
+    'OverLimit': ('podGroupRequestedResources', 'limit'),
+    'NonPreemptibleOverQuota':
+        ('podGroupRequestedNonPreemptibleResources', 'quota'),
+}
+_GPU_RESOURCE = 'nvidia.com/gpu'
 _IMMUTABLE_SPEC_FIELDS = ('queue', 'priorityClassName', 'preemptibility',
                           'topologyConstraint')
 _EVICTOR_ACTION_ANNOTATION = 'evictor-action-type'
+_PARKED_POLL_SECONDS = 30
+_WAIT_CHECK_SECONDS = 10
+
+# Called by the pod wait loop with context, namespace, cluster name on cloud
+# and cluster name.
+SchedulingCallback = Callable[[Optional[str], str, str, str], None]
 
 
 def uses_kai(provider_config: Dict[str, Any]) -> bool:
@@ -272,3 +293,187 @@ def eviction_reason(context: Optional[str], namespace: str, pod_name: str,
     except (kubernetes.api_exception(), kubernetes.urllib3_http_error()):
         return None
     return None
+
+
+def _queued_reasons(pod_group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Returns KAI's reasons for keeping the gang queued, if it evaluated it."""
+    status = pod_group.get('status', {})
+    if status.get('resourcesStatus', {}).get('allocated'):
+        return []
+    return [
+        reason for condition in status.get('schedulingConditions', [])
+        for reason in condition.get('reasons') or [condition]
+    ]
+
+
+def _format_reasons(reasons: List[Dict[str, Any]]) -> str:
+    messages = (f'{r["reason"]}: {" ".join(r.get("message", "").split())}'
+                for r in reasons)
+    return '; '.join(dict.fromkeys(messages))
+
+
+def _gpu_limit(context: Optional[str], queue_name: str, field: str) -> float:
+    """Returns the lowest GPU value of field along the queue's parent chain."""
+    limit = math.inf
+    # KAI's webhook does not reject a cycle of parent queues.
+    walked = set()
+    while queue_name and queue_name not in walked:
+        walked.add(queue_name)
+        queue = _get_cluster_object(context, _QUEUE_API, 'queues', queue_name)
+        if queue is None:
+            break
+        # -1 is unlimited; an unset value is 0.
+        value = queue['spec'].get('resources', {}).get('gpu', {}).get(field, 0)
+        if value >= 0:
+            limit = min(limit, value)
+        queue_name = queue['spec'].get('parentQueue', '')
+    return limit
+
+
+def _never_fits(context: Optional[str], pod_group: Dict[str, Any],
+                reasons: List[Dict[str, Any]]) -> bool:
+    """Whether the gang can never be scheduled in its queue.
+
+    Only GPU limits are checked: Queue CPU and memory are in millicores and MB,
+    not the quantities the reasons carry. KAI reports an unlimited limit as 0,
+    so the limit is read from the Queue objects instead of the reason.
+    """
+    for reason in reasons:
+        if reason['reason'] == 'QueueDoesNotExist':
+            return True
+        fields = _QUOTA_REASONS.get(reason['reason'])
+        if fields is None:
+            continue
+        requested_field, limit_field = fields
+        requested_resources = reason.get('details',
+                                         {}).get('queueDetails',
+                                                 {}).get(requested_field, {})
+        requested = float(
+            kubernetes.parse_quantity(
+                requested_resources.get(_GPU_RESOURCE, '0')))
+        if requested > 0 and _gpu_limit(context, pod_group['spec']['queue'],
+                                        limit_field) < requested:
+            return True
+    return False
+
+
+def _queued_pod_group(context: Optional[str], namespace: str,
+                      name: str) -> Optional[Dict[str, Any]]:
+    """The cluster's PodGroup, if KAI keeps it queued.
+
+    None if the PodGroup is gone, KAI scheduled the gang, or KAI has not
+    evaluated it yet.
+    """
+    pod_group = _get_pod_group(context, namespace, name)
+    if pod_group is None or not _queued_reasons(pod_group):
+        return None
+    return pod_group
+
+
+@dataclasses.dataclass
+class PodGroupScheduledCondition:
+    """Resumes a parked launch once KAI schedules its PodGroup or rules it out.
+
+    Implements the continue-condition contract the request scheduler consumes
+    for ``exceptions.ExecutionPausedError``, duck-typed like
+    ``locks.LockAcquirableCondition``. Errors propagate to the scheduler,
+    which retries the launch after a backoff.
+    """
+
+    context: Optional[str]
+    namespace: str
+    # Also the name of the cluster's PodGroup.
+    cluster_name_on_cloud: str
+    cluster_name: str
+
+    async def wait_async(
+        self,
+        *,
+        is_cancelled: Callable[[], Awaitable[bool]],
+        fallback_wait_seconds: float,
+        update_status_msg: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> bool:
+        # The PodGroup poll below is the resume signal, not a fixed backoff.
+        del fallback_wait_seconds
+        loop = asyncio.get_running_loop()
+        checked_reason = None
+        while not await is_cancelled():
+            pod_group = await loop.run_in_executor(None, _queued_pod_group,
+                                                   self.context, self.namespace,
+                                                   self.cluster_name_on_cloud)
+            if pod_group is None:
+                # Resumed, the launch proceeds or fails on KAI's verdict.
+                return True
+            reasons = _queued_reasons(pod_group)
+            reason = _format_reasons(reasons)
+            # Checking the queue chain costs a request per queue, and KAI's
+            # reason, which states the allocation, changes whenever the
+            # answer can.
+            if reason != checked_reason:
+                if await loop.run_in_executor(None, _never_fits, self.context,
+                                              pod_group, reasons):
+                    return True
+                if update_status_msg is not None:
+                    # The same message the launch parked with.
+                    await update_status_msg(
+                        _queued_message(self.cluster_name, reasons))
+                checked_reason = reason
+            await asyncio.sleep(_PARKED_POLL_SECONDS)
+        return False
+
+
+def _queued_message(cluster_name: str, reasons: List[Dict[str, Any]]) -> str:
+    return f'{cluster_name} is queued in KAI: {_format_reasons(reasons)}'
+
+
+def queued_launch_check() -> SchedulingCallback:
+    """Returns a pod wait loop callback that checks the gang every 10s."""
+    last_check: Optional[float] = None
+
+    def check(context: Optional[str], namespace: str,
+              cluster_name_on_cloud: str, cluster_name: str) -> None:
+        nonlocal last_check
+        now = time.monotonic()
+        if last_check is not None and now - last_check < _WAIT_CHECK_SECONDS:
+            return
+        last_check = now
+        _park_or_fail_if_queued(context, namespace, cluster_name_on_cloud,
+                                cluster_name)
+
+    return check
+
+
+def _park_or_fail_if_queued(context: Optional[str], namespace: str,
+                            cluster_name_on_cloud: str,
+                            cluster_name: str) -> None:
+    """Parks the launch if KAI queued the gang; fails it if it never fits.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: The gang can never be scheduled.
+        exceptions.ExecutionPausedError: KAI queued the gang.
+    """
+    try:
+        pod_group = _queued_pod_group(context, namespace, cluster_name_on_cloud)
+        if pod_group is None:
+            return
+        reasons = _queued_reasons(pod_group)
+        never_fits = _never_fits(context, pod_group, reasons)
+    except (kubernetes.api_exception(), kubernetes.urllib3_http_error()) as e:
+        if not api_errors.is_transport_error(e):
+            raise
+        return
+    if never_fits:
+        raise exceptions.ProvisionUnsupportedError(
+            f'KAI cannot schedule {cluster_name} in its queue: '
+            f'{_format_reasons(reasons)}')
+    if not common_utils.is_in_request_context():
+        return
+    raise exceptions.ExecutionPausedError(
+        _queued_message(cluster_name, reasons),
+        hint='The launch resumes when KAI schedules it.',
+        retry_wait_seconds=_PARKED_POLL_SECONDS,
+        continue_condition=PodGroupScheduledCondition(
+            context=context,
+            namespace=namespace,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            cluster_name=cluster_name))

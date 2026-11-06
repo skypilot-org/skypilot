@@ -1076,13 +1076,15 @@ def _count_transport_error(e: Exception, first_error_time: Optional[float],
     return first_error_time
 
 
-def _wait_for_pods_to_schedule(namespace,
-                               context,
-                               new_nodes,
-                               timeout: int,
-                               cluster_name: str,
-                               create_pods_start: datetime.datetime,
-                               admission_timeout: Optional[int] = None):
+def _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        new_nodes,
+        timeout: int,
+        cluster_name: str,
+        create_pods_start: datetime.datetime,
+        admission_timeout: Optional[int] = None,
+        scheduling_callback: Optional[kai.SchedulingCallback] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -1300,6 +1302,9 @@ def _wait_for_pods_to_schedule(namespace,
                     LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
+            if scheduling_callback is not None:
+                scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                    cluster_name)
             last_gated_pod_names = gated_pod_names
             # Keep calling the per-poll spinner update while gated, as the
             # ungated loop below does. The message set above is written
@@ -1439,6 +1444,11 @@ def _wait_for_pods_to_schedule(namespace,
                     namespace=namespace,
                     cluster_name_on_cloud=cluster_name_on_cloud,
                     cluster_name=cluster_name)
+
+        # Last, so parking or failing here cannot hide the volume status.
+        if scheduling_callback is not None:
+            scheduling_callback(context, namespace, cluster_name_on_cloud,
+                                cluster_name)
 
         iteration += 1
         time.sleep(1)
@@ -2424,7 +2434,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
-    if kai.uses_kai(provider_config):
+    uses_kai = kai.uses_kai(provider_config)
+    if uses_kai:
         # Created before the pods so KAI schedules them as one gang.
         kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
                              provider_config, config.node_config, config.count)
@@ -2855,8 +2866,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         provision_timeout,
         cluster_name,
         create_pods_start,
-        admission_timeout=provider_config.get('queue_admission_timeout'))
-    if kai.uses_kai(provider_config):
+        admission_timeout=provider_config.get('queue_admission_timeout'),
+        scheduling_callback=kai.queued_launch_check() if uses_kai else None)
+    if uses_kai:
         # A no-op for a new cluster. A resize adds pods to a running gang, and
         # a higher minMember before they are bound lets KAI evict the gang.
         kai.set_gang_size(context, namespace, cluster_name_on_cloud,
