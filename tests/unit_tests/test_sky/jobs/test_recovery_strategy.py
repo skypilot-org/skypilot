@@ -353,6 +353,81 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_launch_cancels_orphaned_launch_request_before_fresh_launch(
+        monkeypatch):
+    """A restarted controller must cancel the launch request its previous
+    incarnation left behind before submitting a fresh launch.
+
+    When the controller process dies while its launch request is parked
+    (e.g. an API server rolling update in consolidation mode), the parked
+    request survives on the API server, but the in-memory parked_request_id
+    dies with the controller. The restarted controller submits a fresh launch
+    for the same cluster; if the old request is left alone, it resumes once
+    its wait ends and re-provisions the cluster under the already running
+    job, killing the job's driver (FAILED_DRIVER).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    order = []
+    api_status = mock.MagicMock(return_value=[
+        types.SimpleNamespace(request_id='old-req',
+                              name='sky.launch',
+                              status='WAITING'),
+        # Not a launch: must be left alone.
+        types.SimpleNamespace(request_id='other-req',
+                              name='sky.status',
+                              status='RUNNING'),
+    ])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    cancel = mock.AsyncMock(side_effect=lambda rid: order.append(('cancel',
+                                                                  rid)))
+    executor._cancel_launch_request = cancel
+    patches.sdk_launch.side_effect = (
+        lambda *a, **k: order.append(('launch', None)) or 'req-123')
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    assert api_status.call_args.kwargs['cluster_name'] == 'test-cluster'
+    # Only the orphaned launch is cancelled, and before the fresh launch.
+    assert order == [('cancel', 'old-req'), ('launch', None)]
+
+
+@pytest.mark.asyncio
+async def test_launch_checks_for_orphaned_launch_requests_once(monkeypatch):
+    """The orphan check runs once per controller process: later launches
+    (e.g. recovery after preemption) are this controller's own, and it
+    tracks those itself."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    api_status = mock.MagicMock(return_value=[])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+
+    await executor._launch(max_retry=1, raise_on_failure=True)
+    await executor._launch(max_retry=1, raise_on_failure=True)
+
+    api_status.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_proceeds_when_orphan_check_fails(monkeypatch):
+    """The orphan check is best effort: an API error must not block the
+    launch."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status',
+                        mock.MagicMock(side_effect=RuntimeError('down')))
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_launch_skips_api_start_inside_api_server(monkeypatch):
     """A consolidation-mode controller (IS_SKYPILOT_SERVER set) must not call
     sdk.api_start.
