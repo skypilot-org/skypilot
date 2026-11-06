@@ -2252,6 +2252,10 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
+                'subnet_id': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',

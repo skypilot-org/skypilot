@@ -509,6 +509,12 @@ class Azure(clouds.Cloud):
             **image_config,
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
+            'azure_subnet_id': skypilot_config.get_effective_region_config(
+                cloud='azure',
+                region=region_name,
+                keys=('subnet_id',),
+                default_value=None,
+                override_configs=resources.cluster_config_overrides),
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': resource_group_name,
             'use_external_resource_group': use_external_resource_group,
