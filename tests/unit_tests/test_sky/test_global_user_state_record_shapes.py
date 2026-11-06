@@ -10,6 +10,7 @@ from sky import global_user_state
 from sky.skylet import constants
 from sky.utils import status_lib
 from sky.utils.db import db_utils
+from sky.utils.db import retries as db_retries
 
 
 @pytest.fixture
@@ -77,3 +78,21 @@ def test_batched_records_match_single_summary_shape(_fresh_db, ready):
     for key in ('node_names', 'priority', 'priority_class', 'init_kind',
                 'init_status_reason'):
         assert batched[key] == single[key], key
+
+
+def test_get_cluster_from_name_still_retries_db_errors(_fresh_db, monkeypatch):
+    """Callers such as the jobs controller rely on its transient-DB retry."""
+    _add_cluster('c', True)
+    calls = []
+
+    def _spy(fn, *args, **kwargs):
+        del args, kwargs
+        # retry() passes `lambda _attempt: fn(...)`; record which fn.
+        calls.extend(c.cell_contents.__name__
+                     for c in fn.__closure__ or ()
+                     if callable(c.cell_contents))
+        return fn(0)
+
+    monkeypatch.setattr(db_retries, 'with_db_retries', _spy)
+    assert global_user_state.get_cluster_from_name('c')['name'] == 'c'
+    assert 'get_cluster_from_name' in calls
