@@ -1128,3 +1128,20 @@ def test_controller_ignores_config_api_server_endpoint(monkeypatch):
         assert common.get_server_url() == common.get_default_server_url()
     finally:
         common.get_server_url.cache_clear()
+
+
+@pytest.mark.parametrize('sync_refresh', [False, True])
+def test_reload_for_new_request_passes_sync_refresh(mock_all_dependencies,
+                                                    sync_refresh):
+    """sync_refresh decides whether keep_if caches survive the reload."""
+    with mock.patch(
+            'sky.utils.annotations.clear_request_level_cache') as mock_clear:
+        common.reload_for_new_request(
+            client_entrypoint='test_entry',
+            client_command='test_cmd',
+            using_remote_api_server=False,
+            user=mock.Mock(id='test_user'),
+            request_id='dummy-request-id',
+            sync_refresh=sync_refresh,
+        )
+    mock_clear.assert_called_once_with(sync_refresh=sync_refresh)
