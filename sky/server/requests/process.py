@@ -216,7 +216,9 @@ class BurstableExecutor:
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
             self._guaranteed_pool_kwargs = kwargs
-            self._guaranteed_pool_lock = threading.Lock()
+            # Reentrant: submit_until_success holds it across the idle check
+            # and the submit so concurrent dispatchers don't overfill the pool.
+            self._guaranteed_pool_lock = threading.RLock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
                                           **kwargs)
         if burst_workers > 0:
@@ -239,8 +241,11 @@ class BurstableExecutor:
         """
 
         while True:
-            if self._executor is not None and self._executor.has_idle_workers():
-                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
+            if self._executor is not None:
+                with self._guaranteed_pool_lock:
+                    if self._executor.has_idle_workers():
+                        return self._submit_to_guaranteed_pool(
+                            fn, *args, **kwargs)
             if (self._burst_executor is not None and
                     self._burst_executor.has_idle_workers()):
                 try:

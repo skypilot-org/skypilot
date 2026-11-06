@@ -242,3 +242,51 @@ def test_disposable_executor_concurrent_submit_respects_max_workers():
         assert wait_for_futures(futures)
     finally:
         executor.shutdown()
+
+
+def test_burstable_executor_concurrent_submit_fills_idle_guaranteed_once():
+    """Concurrent submits send at most one task to one idle guaranteed
+    worker; the rest go to the burst pool."""
+    executor = BurstableExecutor(garanteed_workers=1, burst_workers=4)
+    pool = executor._executor
+    real_has_idle_workers = pool.has_idle_workers
+    real_submit = pool.submit
+    guaranteed = []
+
+    def slow_has_idle_workers():
+        idle = real_has_idle_workers()
+        # Widen the gap between the idle check and the submit.
+        time.sleep(0.05)
+        return idle
+
+    def counting_submit(fn, *args, **kwargs):
+        guaranteed.append(fn)
+        return real_submit(fn, *args, **kwargs)
+
+    num_submitters = 4
+    barrier = threading.Barrier(num_submitters)
+    futures = []
+    lock = threading.Lock()
+
+    def submit():
+        barrier.wait()
+        fut = executor.submit_until_success(dummy_task, 0.5)
+        with lock:
+            futures.append(fut)
+
+    try:
+        with unittest.mock.patch.object(pool, 'has_idle_workers',
+                                        slow_has_idle_workers), \
+                unittest.mock.patch.object(pool, 'submit', counting_submit):
+            threads = [
+                threading.Thread(target=submit) for _ in range(num_submitters)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        assert len(guaranteed) == 1
+        assert len(futures) == num_submitters
+        assert wait_for_futures(futures)
+    finally:
+        executor.shutdown()

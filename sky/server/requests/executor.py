@@ -1214,23 +1214,27 @@ def _request_execution_wrapper(request_id: str,
     finally:
         _in_request_execution = False
         _restore_output()
-        try:
-            # Capture the peak RSS while the request's result is still
-            # referenced.
-            peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
-            # Unreference the request's payload and result before
-            # release_memory() so that their memory can be returned too.
-            return_value = request_task = None
-            # Clear request level cache to release all memory used by the
-            # request.
-            annotations.clear_request_level_cache()
-            with metrics_utils.time_it(name='release_memory', group='internal'):
-                common_utils.release_memory()
-            if request_name is not None:
+        # request_name is only set once the request is claimed to run; a
+        # request that never ran has no memory to release.
+        if request_name is not None:
+            try:
+                # Capture the peak RSS while the request's result is still
+                # referenced.
+                peak_rss = max(proc.memory_info().rss,
+                               metrics_lib.peak_rss_bytes)
+                # Unreference the request's payload and result before
+                # release_memory() so that their memory can be returned too.
+                return_value = request_task = None
+                # Clear request level cache to release all memory used by the
+                # request.
+                annotations.clear_request_level_cache()
+                with metrics_utils.time_it(name='release_memory',
+                                           group='internal'):
+                    common_utils.release_memory()
                 _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Failed to record memory metrics: '
-                         f'{common_utils.format_exception(e)}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to record memory metrics: '
+                             f'{common_utils.format_exception(e)}')
 
 
 _first_request = True

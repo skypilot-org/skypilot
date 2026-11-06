@@ -1817,6 +1817,29 @@ async def test_wrapper_releases_result_before_release_memory(
     ]
 
 
+@pytest.mark.asyncio
+async def test_wrapper_skips_release_memory_for_unexecuted_request(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    """A request that is no longer executable skips release_memory()."""
+    req = requests_lib.Request(request_id='cancelled-skip',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.CANCELLED,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    release_memory = mock.Mock()
+    monkeypatch.setattr(executor.common_utils, 'release_memory', release_memory)
+
+    executor._request_execution_wrapper('cancelled-skip',
+                                        ignore_return_value=False)
+
+    release_memory.assert_not_called()
+    assert requests_lib.get_request(
+        'cancelled-skip').status == requests_lib.RequestStatus.CANCELLED
+
+
 def _install_gated_handler_in_worker():
     import signal as _signal
 
