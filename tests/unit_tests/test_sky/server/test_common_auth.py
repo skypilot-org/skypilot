@@ -2,6 +2,8 @@
 
 import unittest.mock as mock
 
+import pytest
+
 from sky.server import common
 
 
@@ -276,3 +278,51 @@ class TestServerCommonAuth:
         mock_get_cookie_jar.assert_not_called()
 
         assert result == mock_response
+
+
+class TestCryptContext:
+    """Test cases for basic-auth password hashing."""
+
+    def test_hash_and_verify_bcrypt(self):
+        password_hash = common.crypt_ctx.hash('s3cret')
+        assert password_hash.startswith('$2b$12$')
+        assert common.crypt_ctx.identify(password_hash) == 'bcrypt'
+        assert common.crypt_ctx.verify('s3cret', password_hash)
+        assert not common.crypt_ctx.verify('wrong', password_hash)
+
+    def test_long_password_matches_hash_from_bcrypt_4_0(self):
+        # Made with passlib and bcrypt 4.0.1, which ignored everything after
+        # the first 72 bytes. bcrypt>=5.0 raises on such passwords instead.
+        old_hash = ('$2b$04$8uXZPeES3beBZltfUDIDEe'
+                    'GzhJ/EGdsckHLiW.xshU0E9pje0fw.G')
+        assert common.crypt_ctx.verify('p' * 72 + 'tail', old_hash)
+        assert common.crypt_ctx.verify('p' * 72, old_hash)
+        assert not common.crypt_ctx.verify('p' * 71, old_hash)
+
+        password_hash = common.crypt_ctx.hash('p' * 100)
+        assert common.crypt_ctx.verify('p' * 100, password_hash)
+
+    @pytest.mark.parametrize(
+        'password_hash,scheme',
+        [
+            # Output of `htpasswd -nbB`, `htpasswd -nb` and `htpasswd -nbs`.
+            ('$2y$04$gZzlqSevxBNrzwftI7A9lODAFVCETULOVRbK8OrnhBPRbKGEpQlE2',
+             'bcrypt'),
+            ('$apr1$DBoub2RH$.SZT0U4RgHS2UHtzXSlxg.', 'apr_md5_crypt'),
+            ('{SHA}/vNB+F2HQ559kaLUZbmHHvZrXpg=', 'ldap_sha1'),
+        ])
+    def test_verify_htpasswd_hashes(self, password_hash, scheme):
+        assert common.crypt_ctx.identify(password_hash) == scheme
+        assert common.crypt_ctx.verify('s3cret', password_hash)
+        assert not common.crypt_ctx.verify('wrong', password_hash)
+
+    def test_verify_legacy_2_prefix_bcrypt(self):
+        # Made with passlib's bcrypt handler using ident='2'.
+        old_hash = ('$2$04$d68bVANrfLADcCGODOAVve'
+                    'ZPbwfsc3dP2862JbDyoAfldEGeUvKbi')
+        assert common.crypt_ctx.identify(old_hash) == 'bcrypt'
+        assert common.crypt_ctx.verify('s3cret', old_hash)
+        assert not common.crypt_ctx.verify('wrong', old_hash)
+
+    def test_identify_plain_password(self):
+        assert common.crypt_ctx.identify('not-a-hash') is None
