@@ -203,7 +203,8 @@ export async function getClusters({
 export async function getClusterHistory(
   clusterHash = null,
   days = 30,
-  clusterName = null
+  clusterName = null,
+  includeDeleted = false
 ) {
   try {
     const requestBody = {
@@ -215,6 +216,13 @@ export async function getClusterHistory(
       // the "Show history" view consistent.
       exclude_managed_clusters: true,
     };
+
+    // Ask for soft-deleted rows only when the caller wants to show (and
+    // restore) them; each row carries its `is_deleted` flag so the table
+    // can tell them apart. Without the flag the server filters them out.
+    if (includeDeleted) {
+      requestBody.include_deleted = true;
+    }
 
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
@@ -291,6 +299,7 @@ export async function getClusterHistory(
         cluster_name_on_cloud: null,
         node_names: cluster.node_names || null,
         usage_intervals: cluster.usage_intervals,
+        is_deleted: !!cluster.is_deleted,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
         events: [
@@ -314,6 +323,66 @@ export async function getClusterHistory(
   } catch (error) {
     console.error('Error fetching cluster history:', error);
     throw error;
+  }
+}
+
+/**
+ * Soft-delete (or restore) cluster history rows on the server.
+ *
+ * The rows are flagged server-side (cluster_history.is_deleted), so the
+ * hidden state persists across browsers and devices; history listings just
+ * stop returning them until they are restored.
+ *
+ * @param {string[]} clusterHashes - The history rows (by cluster_hash).
+ * @param {boolean} deleted - True to hide the rows, false to restore them.
+ * @returns {Promise<boolean>} Whether the update went through.
+ */
+export async function setClusterHistoryDeleted(clusterHashes, deleted) {
+  try {
+    const response = await apiClient.post('/cluster_history/soft_delete', {
+      cluster_hashes: clusterHashes,
+      deleted: deleted,
+    });
+    if (!response.ok) {
+      const msg = `Failed to update cluster history with status ${response.status}`;
+      console.error(msg);
+      showToast(msg, 'error');
+      return false;
+    }
+    const body = await response.json();
+    // The server returns how many rows it actually flagged. A zero-row
+    // update means the caller asked to remove/restore rows it does not own
+    // (or that do not exist), so surface that instead of claiming success
+    // and letting the stale row linger in the table.
+    if ((body.updated ?? 0) === 0 && (clusterHashes?.length ?? 0) > 0) {
+      const msg = 'No matching history rows were updated.';
+      console.error(msg);
+      showToast(msg, 'error');
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Error updating cluster history:', error);
+    showToast(`Error updating cluster history: ${error.message}`, 'error');
+    return false;
+  }
+}
+
+/**
+ * Drop every cached cluster-history response, so the next fetch observes the
+ * server's current soft-delete flags.
+ *
+ * Covers both the client-side pagination path (`getClusterHistory`) and the
+ * pagination-plugin path (`window.__skyPaginationFetch`), whose per-page
+ * entries (including the prefetched next page) are cached separately. Without
+ * the plugin invalidation, restoring a hidden cluster only drops the client
+ * cache while `refresh()` reuses the stale plugin page, so the row stays
+ * hidden until a later refresh.
+ */
+export function invalidateClusterHistoryCache() {
+  dashboardCache.invalidateFunction(getClusterHistory);
+  if (isPaginationPluginAvailable()) {
+    dashboardCache.invalidateFunction(getPaginationFetch());
   }
 }
 
@@ -632,6 +701,9 @@ export function useClusterDetails({ cluster, job = null }) {
  *   client-side).
  * @param {Object} options.currentUser - Logged-in user {id, name}, used to
  *   scope the historical (cost_report) rows that the server doesn't filter.
+ * @param {boolean} options.includeHiddenHistory - When true, rows the user
+ *   removed from history (soft-deleted server-side) stay in the data so the
+ *   table can show and restore them.
  * @returns {Object} Cluster data with pagination state and actions
  */
 export function useClusterData(options = {}) {
@@ -643,6 +715,7 @@ export function useClusterData(options = {}) {
     filters = [],
     allUsers = true,
     currentUser = null,
+    includeHiddenHistory = false,
   } = options;
 
   // Convert sortConfig to API format
@@ -670,6 +743,7 @@ export function useClusterData(options = {}) {
   const [hasPrev, setHasPrev] = useState(false);
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
+  const [hiddenHistoryCount, setHiddenHistoryCount] = useState(0);
   const isInitialMount = useRef(true);
   // Monotonic id used to drop stale responses: if the fetch options change
   // (e.g. the ownership scope flips from all-users to current-user) while a
@@ -703,6 +777,10 @@ export function useClusterData(options = {}) {
         sortOrder,
         filters,
         allUsers,
+        // The plugin owns the /cost_report query; tell it whether soft-
+        // deleted rows should be listed (so it can request include_deleted
+        // and surface the "Show hidden" toggle).
+        includeHiddenHistory,
       },
     ]);
 
@@ -723,6 +801,7 @@ export function useClusterData(options = {}) {
         sortOrder,
         filters,
         allUsers,
+        includeHiddenHistory,
       };
       dashboardCache
         .get(pluginFetch, [nextPageOptions], { ttl: 30000 })
@@ -738,6 +817,16 @@ export function useClusterData(options = {}) {
       hasNext: resultHasNext,
       hasPrev: resultHasPrev,
       isServerPagination: true,
+      // The plugin reports how many of the caller's history rows are soft-
+      // deleted. It is the plugin's job to fetch those rows (and include
+      // them in items only when includeHiddenHistory is set); older plugins
+      // that omit the field leave the count at 0, which keeps the toggle
+      // hidden rather than rendering a broken restore affordance.
+      hiddenHistoryCount:
+        result.hiddenHistoryCount ??
+        result.hidden_history_count ??
+        result.deletedCount ??
+        0,
     };
   }, [
     page,
@@ -748,6 +837,7 @@ export function useClusterData(options = {}) {
     sortOrder,
     filters,
     allUsers,
+    includeHiddenHistory,
   ]);
 
   /**
@@ -768,13 +858,18 @@ export function useClusterData(options = {}) {
       c.user === currentUser.name;
 
     let allClusters;
+    let hiddenHistoryCount = 0;
     if (showHistory) {
       const activeClusters = await fetchActiveClusters();
       let historyClusters = [];
       try {
+        // Include soft-deleted rows so the table can offer "show hidden";
+        // they are filtered out below unless the caller opted in.
         historyClusters = await dashboardCache.get(getClusterHistory, [
           null,
           historyDays,
+          null,
+          true,
         ]);
       } catch (historyError) {
         console.error('Error fetching cluster history:', historyError);
@@ -783,15 +878,20 @@ export function useClusterData(options = {}) {
       const activeHashes = new Set(
         activeClusters.map((c) => c.cluster_hash).filter(Boolean)
       );
+      const inCurrentUserHistory = (c) =>
+        c.status === 'TERMINATED' &&
+        !activeHashes.has(c.cluster_hash) &&
+        belongsToCurrentUser(c);
+      hiddenHistoryCount = historyClusters.filter(
+        (c) => c.is_deleted && inCurrentUserHistory(c)
+      ).length;
       allClusters = [
         ...activeClusters.map((c) => ({ ...c, isHistorical: false })),
         // cost_report returns every user's rows, so scope history client-side.
         ...historyClusters
           .filter(
             (c) =>
-              c.status === 'TERMINATED' &&
-              !activeHashes.has(c.cluster_hash) &&
-              belongsToCurrentUser(c)
+              inCurrentUserHistory(c) && (includeHiddenHistory || !c.is_deleted)
           )
           .map((c) => ({ ...c, isHistorical: true })),
       ];
@@ -816,8 +916,17 @@ export function useClusterData(options = {}) {
       hasNext: page < clientTotalPages,
       hasPrev: page > 1,
       isServerPagination: false,
+      hiddenHistoryCount,
     };
-  }, [showHistory, historyDays, page, limit, allUsers, currentUser]);
+  }, [
+    showHistory,
+    historyDays,
+    page,
+    limit,
+    allUsers,
+    currentUser,
+    includeHiddenHistory,
+  ]);
 
   /**
    * Main fetch function - chooses server or client path
@@ -842,6 +951,7 @@ export function useClusterData(options = {}) {
       setHasNext(result.hasNext);
       setHasPrev(result.hasPrev);
       setIsServerPagination(result.isServerPagination);
+      setHiddenHistoryCount(result.hiddenHistoryCount || 0);
     } catch (fetchError) {
       if (fetchId !== fetchIdRef.current) {
         return;
@@ -850,6 +960,7 @@ export function useClusterData(options = {}) {
       setError(fetchError);
       setData([]);
       setFullData([]);
+      setHiddenHistoryCount(0);
     }
 
     setLoading(false);
@@ -900,5 +1011,8 @@ export function useClusterData(options = {}) {
     error,
     refresh: fetchData,
     isServerPagination,
+    // Number of the current user's history rows hidden via soft delete
+    // (client-side pagination path only; see fetchServerSide).
+    hiddenHistoryCount,
   };
 }

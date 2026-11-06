@@ -69,6 +69,9 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/storage/delete', 'POST'),
     ('/kubernetes_label_gpus', 'POST'),
     ('/check', 'POST'),  # mutates state.db
+    # Flags cluster_history rows (soft delete); mutates state.db, so the
+    # read-only viewer role must not call it.
+    ('/cluster_history/soft_delete', 'POST'),
     # --- Auth writes ---
     ('/api/v1/auth/authorize', 'POST'),
     ('/api/cancel', 'POST'),
