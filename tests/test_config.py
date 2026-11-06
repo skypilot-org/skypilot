@@ -7,13 +7,16 @@ import pathlib
 import shutil
 import sys
 import textwrap
+import threading
 from unittest import mock
 
 import pytest
+from sqlalchemy.dialects import sqlite
 
 import sky
 from sky import skypilot_config
 import sky.exceptions
+from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
@@ -23,6 +26,7 @@ from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import schemas
 from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -2832,3 +2836,314 @@ def test_remote_override_ignores_allowed_infra_keys(monkeypatch, tmp_path,
         assert got == ('all', ['other-pool'], 'all')
     else:
         assert got == (['server-ctx'], ['server-pool'], ['server-cluster'])
+
+
+# --- The server config is reloaded only when its source changed -------------
+
+
+@pytest.fixture
+def server_config_file(monkeypatch, tmp_path):
+    """A server-mode config file, with counts of parses and lock takes."""
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    path = tmp_path / 'config.yaml'
+    path.write_text('aws:\n  labels:\n    k: a\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(path))
+    monkeypatch.setattr(skypilot_config, '_server_config_cache', None)
+    monkeypatch.setattr(skypilot_config, '_global_config_context',
+                        skypilot_config.ConfigContext())
+
+    counts = {'parse': 0, 'lock': 0}
+    real_parse = skypilot_config._parse_and_validate_config
+
+    def counting_parse(*args, **kwargs):
+        counts['parse'] += 1
+        return real_parse(*args, **kwargs)
+
+    def counting_lock(*args, **kwargs):
+        counts['lock'] += 1
+        return _DummyLock()
+
+    monkeypatch.setattr(skypilot_config, '_parse_and_validate_config',
+                        counting_parse)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        counting_lock)
+    # Set before delenv, so monkeypatch removes the URI a parse of a `db:`
+    # file sets in os.environ itself.
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, '')
+    monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI)
+    yield path, counts
+
+
+def _label() -> str:
+    return skypilot_config.get_nested(('aws', 'labels', 'k'), None)
+
+
+def _sqlite_config_db(monkeypatch, value: str) -> str:
+    """Backs the config_yaml overlay with SQLite; returns a URL to use."""
+    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
+    # Created before the URL is set, so the engine is SQLite.
+    engine = db.get_engine()
+    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    _set_config_yaml_row(engine, value)
+    return str(engine.url)
+
+
+def _set_config_yaml_row(engine, value: str) -> None:
+    stmt = sqlite.insert(skypilot_config.config_yaml_table).values(
+        key=skypilot_config.API_SERVER_CONFIG_KEY, value=value)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[skypilot_config.config_yaml_table.c.key],
+        set_={skypilot_config.config_yaml_table.c.value: value})
+    with engine.begin() as conn:
+        conn.execute(stmt)
+
+
+def test_server_config_db_value_change_reloads(server_config_file, monkeypatch):
+    """A config_yaml change is reloaded; an unchanged source takes neither the
+    lock nor a parse."""
+    path, counts = server_config_file
+    path.write_text('')
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, url)
+
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-a'
+    assert counts == {'parse': 1, 'lock': 1}
+
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-a'
+    assert counts == {'parse': 1, 'lock': 1}
+
+    _set_config_yaml_row(skypilot_config._db_manager.get_engine(),
+                         'aws:\n  labels:\n    k: db-b\n')
+    skypilot_config.safe_reload_config()
+    assert _label() == 'db-b'
+    assert counts == {'parse': 2, 'lock': 2}
+
+
+def test_server_config_same_size_and_mtime_rewrite_reloads(server_config_file):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    assert _label() == 'a'
+    st = os.stat(path)
+
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert os.stat(path).st_size == st.st_size
+    assert os.stat(path).st_mtime_ns == st.st_mtime_ns
+
+    skypilot_config.reload_config()
+    assert _label() == 'b'
+    assert counts['parse'] == 2
+
+
+def test_server_config_cache_is_private(server_config_file):
+    """Mutating a loaded config never leaks into the cached one."""
+    _, counts = server_config_file
+    skypilot_config.reload_config()
+    skypilot_config._get_loaded_config().set_nested(('aws', 'labels', 'k'),
+                                                    'mutated-after-slow')
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert _label() == 'a'
+
+    skypilot_config._get_loaded_config().set_nested(('aws', 'labels', 'k'),
+                                                    'mutated-after-fast')
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert _label() == 'a'
+
+
+def test_sync_handler_refresh_clears_request_caches_when_unchanged(
+        server_config_file):
+    _, counts = server_config_file
+    calls = []
+
+    @annotations.lru_cache(scope='request')
+    def cached():
+        calls.append(None)
+        return len(calls)
+
+    server_common.refresh_workspace_state_for_sync_handler()
+    assert cached() == cached() == 1
+
+    server_common.refresh_workspace_state_for_sync_handler()
+    assert counts['parse'] == 1
+    assert cached() == 2
+
+
+def test_both_reload_entry_points_take_the_fast_path(server_config_file,
+                                                     monkeypatch, tmp_path):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    assert counts == {'parse': 1, 'lock': 0}
+
+    skypilot_config.reload_config()
+    skypilot_config.safe_reload_config()
+    assert counts == {'parse': 1, 'lock': 0}
+    assert _label() == 'a'
+    assert skypilot_config.loaded_config_path() == str(path)
+
+    # The internal file wins over the server config and is parsed every time,
+    # through either entry point, even while the server cache would match.
+    internal = tmp_path / 'internal.yaml'
+    internal.write_text('aws:\n  labels:\n    k: internal\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(internal))
+    skypilot_config.reload_config()
+    assert _label() == 'internal'
+    skypilot_config.reload_config()
+    assert counts['parse'] == 3
+    skypilot_config._set_loaded_config(config_utils.Config())
+    skypilot_config.safe_reload_config()
+    assert _label() == 'internal'
+    assert counts == {'parse': 4, 'lock': 1}
+
+
+def test_server_config_db_url_from_file_survives_env_restore(
+        server_config_file, monkeypatch):
+    """Executors restore os.environ after each request; the next request's
+    fast path must still set the URL the file names."""
+    path, counts = server_config_file
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    path.write_text(f'db: {url}\n')
+
+    # Request 1: the first parse sets the URL from the file.
+    skypilot_config.reload_config()
+    assert os.environ[constants.ENV_VAR_DB_CONNECTION_URI] == url
+    assert _label() == 'db-a'
+    # The executor restores the environment it had before request 1.
+    del os.environ[constants.ENV_VAR_DB_CONNECTION_URI]
+
+    # Request 2.
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == url
+    assert _label() == 'db-a'
+
+
+def test_server_config_db_url_from_env_is_left_alone(server_config_file,
+                                                     monkeypatch):
+    """A URL set outside the file is neither cleared nor replaced."""
+    path, counts = server_config_file
+    path.write_text('')
+    url = _sqlite_config_db(monkeypatch, 'aws:\n  labels:\n    k: db-a\n')
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, url)
+
+    skypilot_config.reload_config()
+    skypilot_config.reload_config()
+    assert counts['parse'] == 1
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == url
+
+    # Another URL set from outside is kept, not swapped back to the cached one.
+    other_url = f'{url}?other'
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, other_url)
+    skypilot_config.reload_config()
+    assert os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI) == other_url
+    assert _label() == 'db-a'
+
+
+def test_server_config_fast_path_sets_the_loaded_path(server_config_file,
+                                                      monkeypatch, tmp_path):
+    path, counts = server_config_file
+    skypilot_config.reload_config()
+    internal = tmp_path / 'internal.yaml'
+    internal.write_text('aws:\n  labels:\n    k: internal\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(internal))
+    skypilot_config.reload_config()
+    assert skypilot_config.loaded_config_path() == str(internal)
+
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    skypilot_config.reload_config()
+    assert counts['parse'] == 2
+    assert skypilot_config.loaded_config_path() == str(path)
+    assert _label() == 'a'
+
+
+def test_server_config_db_url_change_without_a_row_reloads(
+        server_config_file, monkeypatch):
+    """A URL set later is part of the source even when the DB has no row:
+    with a URL the file may hold nothing but `db`."""
+    path, _ = server_config_file
+    path.write_text('aws:\n  labels:\n    k: a\ngcp: {}\n')
+    skypilot_config.reload_config()
+    assert _label() == 'a'
+
+    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
+    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
+                       str(db.get_engine().url))
+    with pytest.raises(ValueError, match='no other config is allowed'):
+        skypilot_config.reload_config()
+
+
+def test_server_reload_no_empty_window(server_config_file, monkeypatch):
+    """Server-mode twin of test_reload_config_no_empty_window: mid-reload, a
+    reader still sees the previous config."""
+    path, _ = server_config_file
+    path.write_text('rbac:\n  default_role: user\n')
+    skypilot_config.reload_config()
+    path.write_text('rbac:\n  default_role: viewer\n')
+
+    observed = []
+    counting_parse = skypilot_config._parse_and_validate_config
+
+    def spy_parse(*args, **kwargs):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return counting_parse(*args, **kwargs)
+
+    monkeypatch.setattr(skypilot_config, '_parse_and_validate_config',
+                        spy_parse)
+    skypilot_config.reload_config()
+
+    assert observed == ['user']
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      None) == 'viewer'
+
+
+def test_reload_never_sees_a_partial_config_while_it_is_saved(
+        server_config_file, monkeypatch):
+    """The server config save replaces the file, so an unlocked reload never
+    parses an empty or half-written file."""
+    path, _ = server_config_file
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_POST_SAVE_HOOKS', [])
+    monkeypatch.setattr(skypilot_config, '_CONFIG_UPDATE_HOOKS', [])
+    monkeypatch.setattr(skypilot_config.config_map_utils,
+                        'is_running_in_kubernetes', lambda: False)
+    configs = [{
+        'aws': {
+            'labels': {f'key-{i}': f'{tag}-{i}' for i in range(500)}
+        }
+    } for tag in ('a', 'b')]
+    yaml_utils.dump_yaml(str(path), configs[0])
+    stop = threading.Event()
+    saves = []
+
+    def writer():
+        while not stop.is_set():
+            for config in configs:
+                skypilot_config.update_api_server_config_no_lock(
+                    config_utils.Config.from_dict(copy.deepcopy(config)))
+                saves.append(1)
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    bad = []
+    try:
+        for _ in range(300):
+            try:
+                skypilot_config.reload_config()
+                loaded = dict(skypilot_config.to_dict())
+            except Exception as e:  # pylint: disable=broad-except
+                loaded = repr(e)
+            if loaded not in configs:
+                bad.append(loaded)
+    finally:
+        stop.set()
+        thread.join(timeout=30)
+    # A writer that died would make this test vacuous.
+    assert saves and not thread.is_alive()
+    assert not bad, f'{len(bad)} torn reads, e.g. {str(bad[0])[:200]}'
