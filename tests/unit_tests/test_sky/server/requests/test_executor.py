@@ -55,7 +55,16 @@ def isolated_database(tmp_path):
 
 
 @pytest.fixture()
-def mock_skypilot_config(tmp_path):
+def isolated_config_env(monkeypatch):
+    """Use the config sources selected by each test."""
+    for name in (skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                 skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                 skypilot_config.ENV_VAR_PROJECT_CONFIG):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture()
+def mock_skypilot_config(tmp_path, isolated_config_env):
     config_content = """
 aws:
   labels:
@@ -2509,7 +2518,8 @@ def test_old_pickle_body_is_treated_as_loopback(stub_override_request_env_deps,
 
 @pytest.mark.parametrize('from_loopback', [True, False])
 def test_config_override_infra_keys_gated_through_entry_point(
-        stub_override_request_env_deps, monkeypatch, tmp_path, from_loopback):
+        stub_override_request_env_deps, isolated_config_env, monkeypatch,
+        tmp_path, from_loopback):
     """Through the real entry point: a remote request cannot widen the three
     infra keys the server allows, while a non-infra override still applies; a
     loopback request layers both.
