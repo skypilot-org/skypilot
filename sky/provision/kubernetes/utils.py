@@ -2512,6 +2512,22 @@ def _with_failure_hint(message: str, reason: str) -> str:
     return message
 
 
+def _kai_eviction_reason(context: Optional[str], namespace: str, pod_name: str,
+                         pod: Optional[Any]) -> Optional[str]:
+    """Why KAI evicted the pod, or None; ``pod`` is its object, if it exists."""
+    # In-function import: kai imports this module.
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import kai
+    if pod is None:
+        return kai.eviction_reason(context, namespace, pod_name, since=None)
+    if kai.POD_GROUP_ANNOTATION not in (pod.metadata.annotations or {}):
+        return None
+    return kai.eviction_reason(context,
+                               namespace,
+                               pod_name,
+                               since=pod.metadata.creation_timestamp)
+
+
 def _diagnose_deleted_pod(context: Optional[str], namespace: str,
                           pod_name: str) -> Optional[str]:
     """Why a pod that no longer exists was deleted; None when nothing says.
@@ -2532,6 +2548,8 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     except Exception:  # pylint: disable=broad-except
         return None
     reason = reason_from_pod_events(events)
+    if reason is None:
+        reason = _kai_eviction_reason(context, namespace, pod_name, pod=None)
     if reason is None:
         # A pod that is merely absent is not news: every `sky down` leaves
         # one, and the caller asks about all of them.
@@ -2608,6 +2626,11 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
         return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
+    # Checked first: a pod KAI is deleting may not show as terminated yet, and
+    # once it does, the exit status KAI caused reads as the workload failing.
+    eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
+    if eviction is not None:
+        return f'Pod {pod_name} terminated: {eviction}.'
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)

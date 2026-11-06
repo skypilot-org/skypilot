@@ -21,6 +21,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -2457,6 +2458,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    if kai.uses_kai(provider_config):
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2885,6 +2890,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name,
         create_pods_start,
         admission_timeout=provider_config.get('queue_admission_timeout'))
+    if kai.uses_kai(provider_config):
+        # A no-op for a new cluster. A resize adds pods to a running gang, and
+        # a higher minMember before they are bound lets KAI evict the gang.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud,
+                          config.count)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -3171,6 +3181,10 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    if worker_only and kai.uses_kai(provider_config):
+        # Without this, KAI evicts the head as a gang below its minMember.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud, 1)
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
@@ -3213,6 +3227,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -5125,6 +5141,11 @@ def query_instances(
                 # creation: a relaunch under the same cluster name must not
                 # be told why the pod it replaced was deleted.
                 since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:
