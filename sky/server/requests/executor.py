@@ -1355,6 +1355,11 @@ async def _execute_request_coroutine(
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
     request_id = request.request_id
+    status = api_requests.RequestStatus
+    if not await api_requests.transition_request_status_async(
+            request_id, status.executable_statuses(), status.RUNNING):
+        logger.info(f'Request {request_id} is no longer executable, skipping')
+        return
     logger.info(f'Executing request {request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
@@ -1370,6 +1375,9 @@ async def _execute_request_coroutine(
         if (on_executor_exhausted is not None and
                 isinstance(e, exceptions.ConcurrentWorkerExhaustedError)):
             try:
+                # Hand the request back to the queue unclaimed.
+                await api_requests.transition_request_status_async(
+                    request_id, [status.RUNNING], status.PENDING)
                 await on_executor_exhausted()
             except (Exception, asyncio.CancelledError):  # pylint: disable=broad-except
                 # The fallback logs and records its own failure.
@@ -1381,11 +1389,6 @@ async def _execute_request_coroutine(
         return
 
     try:
-        if not await api_requests.set_request_running_if_executable_async(
-                request_id):
-            logger.info(f'Request {request_id} is no longer executable, '
-                        'skipping')
-            return
         while True:
             done, _ = await asyncio.wait(
                 {fut}, timeout=_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS)
