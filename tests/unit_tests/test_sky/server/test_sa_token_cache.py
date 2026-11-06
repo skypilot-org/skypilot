@@ -3,6 +3,7 @@
 # pylint: disable=protected-access,redefined-outer-name
 
 import asyncio
+import threading
 import types
 import unittest.mock as mock
 
@@ -122,13 +123,26 @@ async def test_entry_expires_after_ttl(db, clock):
 
 
 @pytest.mark.asyncio
-async def test_stale_hit_refreshes_in_background(db, clock):
+async def test_stale_hit_refreshes_in_background(db, clock, token_row):
     await _dispatch()
+    # The re-read runs on an auth executor thread; hold it until released.
+    release = threading.Event()
+
+    def held_read(token_hash):
+        del token_hash
+        release.wait(10)
+        return token_row
+
+    db.by_hash.side_effect = held_read
     clock[0] += _STALE + 0.5
-    response, _ = await _dispatch()
-    assert response.status_code == 200
-    # Concurrent hits share one refresh.
-    await _dispatch()
+    try:
+        # Served from the cache while the re-read is still held.
+        response, _ = await asyncio.wait_for(_dispatch(), timeout=5)
+        assert response.status_code == 200
+        # Concurrent hits share one refresh.
+        await asyncio.wait_for(_dispatch(), timeout=5)
+    finally:
+        release.set()
     await _drain_background()
     assert db.by_hash.call_count == 2
     # The refresh restarted the entry's TTL.

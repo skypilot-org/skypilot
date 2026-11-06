@@ -1449,6 +1449,7 @@ def stamp_request_body(request_body: payloads.RequestBody,
         # Set user identity for executors.
         request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
         request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+        # The middleware that set `auth_user` has ensured its users row and role.
         request_body.authenticated = True
     else:
         request_body.authenticated = False

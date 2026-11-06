@@ -200,7 +200,8 @@ class RequestBody(BasePayload):
     from_loopback: bool = False
     # Whether the server authenticated the caller, so the users row and its
     # role exist and the worker need not upsert them. Set server-side in
-    # `stamp_request_body`; a client-sent value is overwritten.
+    # `stamp_request_body`; a client-sent value is overwritten. Relies on every
+    # middleware that sets `request.state.auth_user` ensuring both first.
     authenticated: bool = False
 
     def __init__(self, **data):
