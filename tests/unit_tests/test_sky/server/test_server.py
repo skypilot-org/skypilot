@@ -2267,7 +2267,7 @@ def _api_get_stubs(monkeypatch, done, statuses):
     """Stubs /api/get's lookups.
 
     `statuses` are the request's statuses at successive full reads. Returns
-    the status poll mock.
+    the status poll mock and the wait modes counted.
     """
     monkeypatch.setattr(server, 'get_expanded_request_id',
                         mock.AsyncMock(side_effect=lambda rid, **_: rid))
@@ -2287,27 +2287,31 @@ def _api_get_stubs(monkeypatch, done, statuses):
         tasks.append(task)
     monkeypatch.setattr(server.requests_lib, 'get_request_async',
                         mock.AsyncMock(side_effect=tasks))
-    return poll
+    modes = []
+    monkeypatch.setattr(server.metrics_utils, 'count_request_get_wait',
+                        modes.append)
+    return poll, modes
 
 
 @pytest.mark.asyncio
 async def test_api_get_waits_for_in_process_completion(monkeypatch):
     done = asyncio.Event()
-    poll = _api_get_stubs(monkeypatch, done,
-                          [server.requests_lib.RequestStatus.SUCCEEDED])
+    poll, modes = _api_get_stubs(monkeypatch, done,
+                                 [server.requests_lib.RequestStatus.SUCCEEDED])
     asyncio.get_running_loop().call_later(0.05, done.set)
 
     await server.api_get(mock.Mock(), 'req-1')
 
     assert done.is_set()
     poll.assert_not_awaited()
+    assert modes == ['signal']
 
 
 @pytest.mark.asyncio
 async def test_api_get_polls_after_in_process_request_is_queued(monkeypatch):
     done = asyncio.Event()
     done.set()
-    poll = _api_get_stubs(monkeypatch, done, [
+    poll, modes = _api_get_stubs(monkeypatch, done, [
         server.requests_lib.RequestStatus.PENDING,
         server.requests_lib.RequestStatus.SUCCEEDED
     ])
@@ -2315,13 +2319,15 @@ async def test_api_get_polls_after_in_process_request_is_queued(monkeypatch):
     await server.api_get(mock.Mock(), 'req-1')
 
     poll.assert_awaited_once()
+    assert modes == ['poll']
 
 
 @pytest.mark.asyncio
 async def test_api_get_polls_request_running_elsewhere(monkeypatch):
-    poll = _api_get_stubs(monkeypatch, None,
-                          [server.requests_lib.RequestStatus.SUCCEEDED])
+    poll, modes = _api_get_stubs(monkeypatch, None,
+                                 [server.requests_lib.RequestStatus.SUCCEEDED])
 
     await server.api_get(mock.Mock(), 'req-1')
 
     poll.assert_awaited_once()
+    assert modes == ['poll']

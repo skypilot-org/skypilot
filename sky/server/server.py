@@ -3261,16 +3261,16 @@ async def api_get(request: fastapi.Request,
     request_task: Optional[requests_lib.Request] = None
     in_process_done = executor.get_in_process_completion(request_id)
     if in_process_done is not None:
-        metrics_utils.count_request_get_wait('signal')
         await in_process_done.wait()
         request_task = await requests_lib.get_request_async(request_id)
         if (request_task is not None and request_task.status
                 not in requests_lib.RequestStatus.finished_status()):
             # Handed to the request queue instead of finishing here.
             request_task = None
+    if request_task is not None:
+        metrics_utils.count_request_get_wait('signal')
     else:
         metrics_utils.count_request_get_wait('poll')
-    if request_task is None:
         # Exponential backoff: start fast (10ms) for short requests like
         # status/queue, then back off to 100ms for long requests like
         # launch/exec.

@@ -51,8 +51,9 @@ TTL_SECONDS = _get_ttl_seconds()
 _entries: 'cachetools.TTLCache[str, Tuple[TokenRow, models.User, float]]' = (
     cachetools.TTLCache(maxsize=_MAX_ENTRIES, ttl=TTL_SECONDS))
 # token hash -> cache time before which no background re-read starts. Set
-# while a re-read is in flight and after a failed one.
-_next_refresh: Dict[str, float] = {}
+# while a re-read is in flight and after a failed one; bounded like `_entries`.
+_next_refresh: 'cachetools.TTLCache[str, float]' = cachetools.TTLCache(
+    maxsize=_MAX_ENTRIES, ttl=TTL_SECONDS)
 
 
 def fetch_token_and_user(
