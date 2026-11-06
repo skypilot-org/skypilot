@@ -84,6 +84,7 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 
@@ -609,6 +610,35 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+def _ray_node_env(case_name: str) -> Dict[str, Any]:
+    pod = yaml.safe_load(_render(_build_variables(
+        case_name)))['available_node_types']['ray_head_default']['node_config']
+    container = next(
+        c for c in pod['spec']['containers'] if c['name'] == 'ray-node')
+    return {e['name']: e for e in container['env']}
+
+
+def test_tpu_pod_sets_tpu_name_from_pod_name() -> None:
+    """GKE sets the other TPU_* vars but not TPU_NAME, which Ray needs."""
+    assert _ray_node_env('tpu')['TPU_NAME'] == {
+        'name': 'TPU_NAME',
+        'valueFrom': {
+            'fieldRef': {
+                'fieldPath': 'metadata.name'
+            }
+        },
+    }
+    assert 'TPU_NAME' not in _ray_node_env('base_cpu')
+
+
+def test_tpu_pod_name_fits_ray_slice_name_limit() -> None:
+    """Ray uses TPU_NAME as a label value (<= 63 chars) and does not check it
+    at `ray start`. Pod names are `<cluster>-head` / `<cluster>-worker<i>`."""
+    longest = ('x' * kubernetes.Kubernetes._MAX_CLUSTER_NAME_LEN_LIMIT +
+               '-worker9999')
+    assert len(longest) <= 63
 
 
 # Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
