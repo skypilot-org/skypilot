@@ -1,4 +1,5 @@
 """Tests for replica manager probe configuration behavior."""
+# pylint: disable=missing-class-docstring,protected-access
 from typing import Optional
 from unittest import mock
 
@@ -38,7 +39,9 @@ class TestSkypilotReplicaManager:
         mock_replica_manager._get_version_spec.return_value = spec
         mock_replica_manager._is_pool = spec.pool
         mock_replica_manager.latest_version = 1
-        mock_replica_manager._consecutive_failure_threshold_timeout.side_effect = (
+        timeout_mock = (
+            mock_replica_manager._consecutive_failure_threshold_timeout)
+        timeout_mock.side_effect = (
             lambda: replica_managers.SkyPilotReplicaManager.
             _consecutive_failure_threshold_timeout(mock_replica_manager))
         return mock_replica_manager
@@ -90,6 +93,46 @@ def _make_replica_info(replica_id: int = 1,
                                         location=None,
                                         version=1,
                                         resources_override=None)
+
+
+class TestReplicaReadinessProbe:
+    """Tests for replica readiness probe URL construction."""
+
+    def test_endpoint_scheme_is_preserved_by_default(self):
+        info = _make_replica_info()
+        response = mock.MagicMock(status_code=200)
+
+        with mock.patch.object(replica_managers.ReplicaInfo,
+                               'url',
+                               new_callable=mock.PropertyMock,
+                               return_value='https://replica.example.com'), \
+             mock.patch.object(replica_managers.requests,
+                               'get',
+                               return_value=response) as get:
+            _, is_ready, _ = info.probe('/health', None, None, 15, None)
+
+        assert is_ready
+        get.assert_called_once_with('https://replica.example.com/health',
+                                    headers=None,
+                                    timeout=15)
+
+    def test_https_scheme_is_used_for_probe(self):
+        info = _make_replica_info()
+        response = mock.MagicMock(status_code=200)
+
+        with mock.patch.object(replica_managers.ReplicaInfo,
+                               'url',
+                               new_callable=mock.PropertyMock,
+                               return_value='http://replica.example.com'), \
+             mock.patch.object(replica_managers.requests,
+                               'get',
+                               return_value=response) as get:
+            _, is_ready, _ = info.probe('/health', 'https', None, 15, None)
+
+        assert is_ready
+        get.assert_called_once_with('https://replica.example.com/health',
+                                    headers=None,
+                                    timeout=15)
 
 
 class TestToInfoDictStatusDetail:
