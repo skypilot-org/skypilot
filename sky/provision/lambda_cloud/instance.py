@@ -68,6 +68,24 @@ def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
     return private_ip
 
 
+def _file_system_mounts(
+        node_config: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
+    """Lambda `file_system_mounts` for the node's SkyPilot volume mounts."""
+    volume_mounts = node_config.get('VolumeMounts') or []
+    mounts = []
+    for volume_mount in volume_mounts:
+        file_system_id = volume_mount.get('VolumeIdOnCloud')
+        mount_point = volume_mount.get('MountPath')
+        if not file_system_id or not mount_point:
+            raise ValueError('Lambda filesystem ID and mount path must be '
+                             f'specified, got {volume_mount}.')
+        mounts.append({
+            'file_system_id': file_system_id,
+            'mount_point': mount_point,
+        })
+    return mounts or None
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
@@ -106,6 +124,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     created_instance_ids = []
     remote_ssh_key_name = config.authentication_config['remote_key_name']
+    file_system_mounts = _file_system_mounts(config.node_config)
 
     def launch_node(node_type: str) -> str:
         try:
@@ -117,6 +136,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 # https://github.com/skypilot-org/skypilot/issues/7084
                 quantity=1,
                 ssh_key_name=remote_ssh_key_name,
+                file_system_mounts=file_system_mounts,
             )
             logger.info(f'Launched {node_type} node, '
                         f'instance_id: {instance_ids[0]}')

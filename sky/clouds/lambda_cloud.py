@@ -1,4 +1,5 @@
 """Lambda Cloud."""
+import re
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -23,6 +24,11 @@ else:
 _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
+
+_MAX_FILESYSTEM_NAME_LENGTH = 60
+# https://docs.lambda.ai/api/cloud#launchInstance (file_system_mounts)
+_LAMBDA_MOUNT_POINT_PATTERN = re.compile(
+    r'^(/home|/lambda/nfs|/data)[/a-zA-Z0-9-]*$')
 
 
 @registry.CLOUD_REGISTRY.register
@@ -194,6 +200,7 @@ class Lambda(clouds.Cloud):
     ) -> Dict[str, Any]:
         del cluster_name, dryrun  # Unused.
         assert zones is None, 'Lambda does not support zones.'
+        self._validate_volume_mounts(volume_mounts)
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
@@ -213,6 +220,45 @@ class Lambda(clouds.Cloud):
             resources_vars['docker_run_options'] = ['--gpus all']
 
         return resources_vars
+
+    @staticmethod
+    def _validate_volume_mounts(
+            volume_mounts: Optional[List['volume_lib.VolumeMount']]) -> None:
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import volume as volume_utils
+        lambda_filesystem = volume_utils.VolumeType.LAMBDA_FILESYSTEM.value
+        for volume_mount in volume_mounts or []:
+            volume_type = volume_mount.volume_config.type
+            if volume_type != lambda_filesystem:
+                raise ValueError(
+                    f'Volume {volume_mount.volume_name!r} has type '
+                    f'{volume_type!r}; only {lambda_filesystem!r} volumes can '
+                    'be mounted on Lambda.')
+            if volume_mount.sub_path:
+                raise ValueError(
+                    f'Volume {volume_mount.volume_name!r}: sub_path is not '
+                    'supported for Lambda filesystems; the whole filesystem '
+                    'is mounted.')
+            if not _LAMBDA_MOUNT_POINT_PATTERN.match(volume_mount.path):
+                raise ValueError(
+                    f'Volume {volume_mount.volume_name!r}: Lambda can only '
+                    'mount filesystems under /home, /data or /lambda/nfs '
+                    f'(e.g. /data/models), not {volume_mount.path!r}.')
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates a volume name against Lambda's filesystem names.
+
+        New volumes get a user hash and a suffix appended on cloud; the full
+        name is checked again when the filesystem is created.
+        """
+        if len(volume_name) > _MAX_FILESYSTEM_NAME_LENGTH:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{_MAX_FILESYSTEM_NAME_LENGTH} characters.')
+        if not volume_name[:1].isalpha():
+            return False, 'Volume name must start with a letter.'
+        return True, None
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

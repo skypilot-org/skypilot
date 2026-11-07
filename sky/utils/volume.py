@@ -37,6 +37,7 @@ class VolumeType(enum.Enum):
     PVC = 'k8s-pvc'
     HOSTPATH = 'k8s-hostpath'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
+    LAMBDA_FILESYSTEM = 'lambda-filesystem'
 
     @classmethod
     def supported_types(cls) -> list:

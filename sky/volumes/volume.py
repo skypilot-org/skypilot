@@ -14,12 +14,14 @@ VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
     volume_lib.VolumeType.HOSTPATH: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
+    volume_lib.VolumeType.LAMBDA_FILESYSTEM: clouds.Lambda(),
 }
 CLOUD_TO_VOLUME_TYPE = {
     clouds.Kubernetes(): [
         volume_lib.VolumeType.PVC, volume_lib.VolumeType.HOSTPATH
     ],
     clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
+    clouds.Lambda(): [volume_lib.VolumeType.LAMBDA_FILESYSTEM],
 }
 
 
@@ -97,6 +99,16 @@ class Volume:
                                        labels=config.get('labels'),
                                        use_existing=config.get('use_existing'),
                                        config=config.get('config', {}))
+
+        if vt == volume_lib.VolumeType.LAMBDA_FILESYSTEM:
+            return LambdaFilesystemVolume(
+                name=config.get('name'),
+                type=vol_type_val,
+                infra=config.get('infra'),
+                size=config.get('size'),
+                labels=config.get('labels'),
+                use_existing=config.get('use_existing'),
+                config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -297,3 +309,28 @@ class RunpodNetworkVolume(Volume):
                              'volumes. Set the zone in the infra field.')
 
         return
+
+
+class LambdaFilesystemVolume(Volume):
+    """Lambda Cloud persistent filesystem.
+
+    Lambda filesystems are regional and have no fixed size: they grow with
+    their contents and are billed by usage.
+    """
+
+    def validate_size(self) -> None:
+        if self.size is not None:
+            raise ValueError('Lambda filesystems have no fixed size; remove '
+                             '`size` from the volume spec.')
+
+    def _validate_config_extra(self) -> None:
+        if not self.region:
+            raise ValueError('A region is required for Lambda filesystems. '
+                             'Set it in the infra field, e.g. '
+                             '`infra: lambda/us-east-1`.')
+        if self.zone:
+            raise ValueError('Lambda Cloud has no zones; set only a region '
+                             'in the infra field.')
+        if self.labels:
+            raise ValueError('Labels are not supported for Lambda '
+                             'filesystems.')
