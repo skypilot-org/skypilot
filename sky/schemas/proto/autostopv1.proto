@@ -48,6 +48,13 @@ message Hook {
   int32 timeout = 3;
 }
 
+// Command the skylet runs on each idle tick: exit 0 means active, exit 1
+// means idle, anything else (or a timeout) counts as active.
+message ActivityCheck {
+  string run = 1;
+  int32 timeout = 2;
+}
+
 // SetAutostopRequest is a wire-compat misnomer: it now carries both
 // the autostop config (idle_minutes / wait_for / down) AND the
 // cluster's lifecycle-hooks list (hooks / clear_hooks). See the
@@ -71,6 +78,10 @@ message SetAutostopRequest {
   // hooks", and a re-launch that drops hooks would leave stale entries
   // in skylet sqlite firing forever.
   bool clear_hooks = 8;
+  // v8+: replace the stored activity check; unset leaves it alone.
+  ActivityCheck activity_check = 9;
+  // v8+: drop the stored activity check.
+  bool clear_activity_check = 10;
 }
 
 message SetAutostopResponse {}
