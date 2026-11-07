@@ -350,13 +350,19 @@ def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
     # Update disk performance tier
     performance_tier = node_config.get('disk_performance_tier', None)
     if performance_tier is not None:
+        # Through the SDK, as the client's own identity: an `az` subprocess
+        # would run as whoever the CLI is logged in as (or no one).
+        compute = azure.azure_mgmt_models('compute')
+        update_disk = _get_azure_sdk_function(compute_client.disks, 'update')
         disks = compute_client.disks.list_by_resource_group(resource_group)
         for disk in disks:
-            name = disk.name
-            # TODO(tian): Investigate if we can use Python SDK to update this.
-            subprocess_utils.run_no_outputs(
-                f'az disk update -n {name} -g {resource_group} '
-                f'--set tier={performance_tier}')
+            # Only this launch's disks: the resource group may be shared.
+            if not disk.name.startswith(f'{cluster_name_on_cloud}-{vm_id}-'):
+                continue
+            poller = update_disk(resource_group, disk.name,
+                                 compute.DiskUpdate(tier=performance_tier))
+            if hasattr(poller, 'result'):
+                poller.result()
 
     # Validation
     filters = {
@@ -622,8 +628,9 @@ def get_cluster_info(
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     resource_group = provider_config['resource_group']
-    subscription_id = provider_config.get('subscription_id',
-                                          azure.get_subscription_id())
+    subscription_id = provider_config.get('subscription_id')
+    if subscription_id is None:
+        subscription_id = azure.get_subscription_id()
     compute_client = azure.get_client('compute', subscription_id)
     network_client = azure.get_client('network', subscription_id)
 
@@ -928,8 +935,11 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
 
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
         try:
+            # Wait for the VNet to go: its subnet holds the NSG, and an NSG
+            # still in use cannot be deleted below (InUseNetworkSecurityGroup),
+            # which would leave it behind in the resource group.
             delete_virtual_networks(resource_group_name=resource_group,
-                                    virtual_network_name=vnet_name)
+                                    virtual_network_name=vnet_name).result()
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete vnet: {}'.format(e))
 
