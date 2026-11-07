@@ -1,5 +1,6 @@
 """Unit tests for sky.utils.locks module."""
 
+from concurrent import futures
 import os
 from unittest import mock
 
@@ -201,7 +202,7 @@ class TestPostgresLock:
     @pytest.mark.parametrize('state_pool_busy', [False, True])
     def test_lock_connections_do_not_starve_state_pool(self, monkeypatch,
                                                        state_pool_busy):
-        """Lock lifetimes and state checkouts must have separate budgets."""
+        """Independent locks can outnumber the state pool's five connections."""
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
         monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI', 'postgresql://test/db')
         monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE', '2')
@@ -210,8 +211,6 @@ class TestPostgresLock:
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
         monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
-        monkeypatch.setattr(locks, '_lock_connection_gate', None)
-        monkeypatch.setattr(locks, '_lock_connection_gate_capacity', None)
         engines = []
         drivers = []
 
@@ -243,20 +242,13 @@ class TestPostgresLock:
             try:
                 if state_pool_busy:
                     held = [state_engine.raw_connection() for _ in range(5)]
-                for index in range(5):
+                for index in range(6):
                     lock = locks.PostgresLock(f'pool_isolation_{index}')
                     lock.acquire(blocking=False)
                     acquired.append(lock)
                 if not state_pool_busy:
                     held.append(state_engine.raw_connection())
                     assert state_engine.pool.checkedout() == 1
-                    with pytest.raises(locks.LockConnectionPoolFull):
-                        locks.PostgresLock('pool_isolation_over_budget'
-                                          ).acquire(blocking=False)
-                    with pytest.raises(locks.LockConnectionPoolFull):
-                        locks.PostgresLock('pool_isolation_timed',
-                                           timeout=0.02,
-                                           poll_interval=0.005).acquire()
                     locks.PostgresLock('pool_isolation_force').force_unlock()
                     assert len(engines) == 2
             finally:
@@ -267,6 +259,50 @@ class TestPostgresLock:
                 for engine in engines:
                     engine.pool.dispose()
         assert all(driver.close.called for driver in drivers)
+
+    def test_nested_acquire_with_many_held_locks(self, monkeypatch,
+                                                 mock_engine):
+        """A nested acquire must progress while unrelated holders remain."""
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_SIZE', '1')
+        monkeypatch.setenv('SKYPILOT_SERVER_DB_CONNECTION_POOL_MAX_OVERFLOW',
+                           '4')
+        monkeypatch.setattr(db_utils, 'get_lock_engine', lambda: mock_engine)
+        connections = []
+
+        def connect():
+            connection = mock.Mock()
+            connection.cursor.return_value.fetchone.return_value = [True]
+            connections.append(connection)
+            return connection
+
+        mock_engine.raw_connection.side_effect = connect
+        held = []
+        executor = futures.ThreadPoolExecutor(max_workers=1)
+
+        def acquire_nested():
+            # Together with the four unrelated holders, this outer lock uses
+            # the old five-slot budget. The inner lock has the default timeout
+            # of None; a process-wide gate would wait forever here.
+            with locks.PostgresLock('nested_outer'):
+                with locks.PostgresLock('nested_inner', poll_interval=0.01):
+                    return True
+
+        try:
+            for index in range(4):
+                lock = locks.PostgresLock(f'unrelated_holder_{index}')
+                lock.acquire(blocking=False)
+                held.append(lock)
+            future = executor.submit(acquire_nested)
+            assert future.result(timeout=5)
+        finally:
+            # Release before joining so a regression fails with TimeoutError
+            # instead of leaving a worker blocked during pytest shutdown.
+            for lock in held:
+                lock.release()
+            executor.shutdown(wait=True)
+
+        assert len(connections) == 6
+        assert all(connection.close.called for connection in connections)
 
     @pytest.mark.parametrize('pooler', [False, True])
     @pytest.mark.parametrize('pool_size', [0, 2])
