@@ -41,16 +41,20 @@ _REGION_MULTIPLIERS = {
 
 # Keep the supported GPU price, memory, and count tables in sync with:
 # https://modal.com/pricing and https://modal.com/docs/guide/gpu.
-# Modal Sandbox + Notebooks pricing is converted from per-second pricing.
-_SANDBOX_CPU_CORE_PRICE_PER_SECOND = 0.00003942
-_SANDBOX_MEMORY_GIB_PRICE_PER_SECOND = 0.00000667
+# Per-second CPU (per core) and memory (per GiB) prices. CPU-only clusters run
+# as non-preemptible Functions, billed at Modal's 3x non-preemptible rate. GPU
+# Functions cannot be non-preemptible and pay the list rate.
+_CPU_CORE_PRICE_PER_SECOND = 0.0000131
+_MEMORY_GIB_PRICE_PER_SECOND = 0.00000222
+_NONPREEMPTIBLE_CPU_CORE_PRICE_PER_SECOND = 0.00003942
+_NONPREEMPTIBLE_MEMORY_GIB_PRICE_PER_SECOND = 0.00000667
 
 _DEFAULT_MODAL_CPU_CORES = 2.0
 _DEFAULT_SKY_VCPUS = 4.0
 _DEFAULT_MEMORY_GIB = 16
 _DEFAULT_MEMORY_CPU_RATIO = _DEFAULT_MEMORY_GIB / _DEFAULT_SKY_VCPUS
 
-# Modal validates these bounds when creating a Function or Sandbox. See:
+# Modal validates these bounds when creating a Function. See:
 # https://modal.com/docs/guide/resources#how-much-can-i-request
 _MIN_MODAL_CPU_CORES = 0.125
 _MAX_MODAL_CPU_CORES = 64.0
@@ -187,10 +191,13 @@ def _base_compute_price_per_hour(modal_cpu: float = _DEFAULT_MODAL_CPU_CORES,
                                  memory_gib: float = _DEFAULT_MEMORY_GIB,
                                  gpu_name: Optional[str] = None,
                                  gpu_count: int = 0) -> float:
-    per_second = (modal_cpu * _SANDBOX_CPU_CORE_PRICE_PER_SECOND +
-                  memory_gib * _SANDBOX_MEMORY_GIB_PRICE_PER_SECOND)
-    if gpu_name is not None:
-        per_second += _GPU_PRICE_PER_SECOND[gpu_name] * gpu_count
+    if gpu_name is None:
+        per_second = (modal_cpu * _NONPREEMPTIBLE_CPU_CORE_PRICE_PER_SECOND +
+                      memory_gib * _NONPREEMPTIBLE_MEMORY_GIB_PRICE_PER_SECOND)
+    else:
+        per_second = (modal_cpu * _CPU_CORE_PRICE_PER_SECOND +
+                      memory_gib * _MEMORY_GIB_PRICE_PER_SECOND +
+                      _GPU_PRICE_PER_SECOND[gpu_name] * gpu_count)
     return per_second * 3600
 
 
@@ -502,7 +509,7 @@ def regions() -> List[cloud.Region]:
 
 def get_modal_args_from_instance_type(
         instance_type: str) -> Tuple[Optional[str], float, int]:
-    """Return Modal Sandbox args: gpu, cpu cores, memory MiB."""
+    """Return Modal Function args: gpu, cpu cores, memory MiB."""
     if not instance_type_exists(instance_type):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')

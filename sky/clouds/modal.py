@@ -27,16 +27,14 @@ _AUTO_REGION = 'auto'
 
 @registry.CLOUD_REGISTRY.register
 class Modal(clouds.Cloud):
-    """Modal Sandbox cloud."""
+    """Modal, with each cluster running as a Modal Function call."""
 
     _REPR = 'Modal'
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
     # yapf: disable
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP:
-            'Stopping Modal Sandboxes is not supported; use down instead.',
-        clouds.CloudImplementationFeatures.MULTI_NODE:
-            'Multi-node Modal clusters are not supported yet.',
+            'Stopping Modal clusters is not supported; use down instead.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             'Disk cloning is not supported on Modal.',
         clouds.CloudImplementationFeatures.IMAGE_ID:
@@ -61,6 +59,8 @@ class Modal(clouds.Cloud):
             'Local disk requests are not supported on Modal.',
     }
     # yapf: enable
+    # Modal multi-node clusters must use every GPU on each node.
+    _MULTI_NODE_GPUS_PER_NODE = 8
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -72,8 +72,16 @@ class Modal(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources, region  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        del region  # unused
+        unsupported = dict(cls._CLOUD_UNSUPPORTED_FEATURES)
+        accelerators = resources.accelerators or {}
+        if (len(accelerators) != 1 or next(iter(accelerators.values())) !=
+                cls._MULTI_NODE_GPUS_PER_NODE):
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'Multi-node Modal clusters need '
+                f'{cls._MULTI_NODE_GPUS_PER_NODE} GPUs per node, e.g. '
+                f'--gpus H100:{cls._MULTI_NODE_GPUS_PER_NODE}.')
+        return unsupported
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -217,8 +225,6 @@ class Modal(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         del cluster_name, dryrun  # unused
-        if num_nodes != 1:
-            raise ValueError('Modal only supports single-node clusters.')
         assert zones is None, 'Modal does not support zones.'
         resources = resources.assert_launchable()
         modal_environment_name = self._get_active_environment_name()
@@ -262,8 +268,8 @@ class Modal(clouds.Cloud):
             'modal_gpu': modal_gpu,
             'modal_cpu': modal_cpu,
             'modal_memory': modal_memory,
+            # Modal's maximum Function timeout.
             'modal_timeout': 24 * 60 * 60,
-            'modal_idle_timeout': None,
             'modal_docker_image': resources.extract_docker_image(),
             'modal_volume_mounts': modal_volume_mounts,
         }

@@ -1,8 +1,9 @@
 cluster_name: {{cluster_name_on_cloud}}
 
-# Modal MVP supports only a single Sandbox, used as the head node.
-max_workers: 0
-upscaling_speed: 0
+# Each node is a container of one Modal Function call. Multi-node clusters use
+# @modal.clustered.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
@@ -28,7 +29,6 @@ available_node_types:
       Cpu: {{modal_cpu}}
       Memory: {{modal_memory}}
       Timeout: {{modal_timeout}}
-      IdleTimeout: {% if modal_idle_timeout is none %}null{% else %}{{modal_idle_timeout}}{% endif %}
       DockerImage: {% if modal_docker_image is none %}null{% else %}"{{modal_docker_image}}"{% endif %}
       ModalVolumes:
 {%- if modal_volume_mounts %}

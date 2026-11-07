@@ -1109,8 +1109,10 @@ Go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambd
 Modal
 ~~~~~
 
-`Modal <https://modal.com/>`__ runs workloads in Modal Sandboxes. SkyPilot's
-Modal support uses a single Sandbox as the SkyPilot cluster head node.
+`Modal <https://modal.com/>`__ runs workloads in Modal Functions. Each SkyPilot
+cluster on Modal is one Modal Function call, with one container per node.
+Multi-node clusters use Modal's `multi-node clusters
+<https://modal.com/docs/guide/multi-node-clusters>`__.
 
 Install the necessary dependencies for Modal.
 
@@ -1184,7 +1186,7 @@ Minimal CPU task:
     echo "Hello from Modal on SkyPilot"
     python -V
 
-Use the standard ``cpus`` and ``memory`` fields to size Modal Sandboxes.
+Use the standard ``cpus`` and ``memory`` fields to size Modal nodes.
 SkyPilot represents each Modal physical core as two vCPUs. Modal currently
 supports 0.25--128 SkyPilot vCPUs and 0.125--336 GiB of memory; SkyPilot uses
 the selected values as both the Modal request and limit.
@@ -1232,20 +1234,26 @@ Autodown is supported with ``--down``:
   sky launch -c modal-auto --infra modal --down --idle-minutes-to-autostop 10 task.yaml
 
 SkyPilot storage mounts in ``MOUNT`` mode are translated to Modal
-``CloudBucketMount`` at Sandbox creation time for S3, Cloudflare R2, and GCS
+``CloudBucketMount`` at cluster launch for S3, Cloudflare R2, and GCS
 buckets. ``MOUNT_CACHED`` is not supported on Modal.
 
 Current limitations:
 
-- Modal support is single-node only.
-- SkyPilot launches a Modal Sandbox with a 24-hour maximum lifetime. If the
-  Sandbox exits, times out, or is terminated from Modal, launch a new SkyPilot
+- Multi-node clusters need GPUs and must use all 8 GPUs of each node, for
+  example ``--gpus H100:8 --num-nodes 2``. Modal limits them to 32 nodes, and
+  your Modal workspace's GPU limit must cover the whole cluster.
+- GPU clusters can be preempted by Modal; CPU-only clusters are not (they are
+  billed at Modal's non-preemptible CPU and memory rate). A preempted cluster is
+  terminated, not restarted: use :ref:`managed jobs <managed-jobs>` to recover
+  long-running work.
+- A cluster lives at most 24 hours (Modal's maximum Function timeout). If it
+  exits, times out, or is terminated from Modal, launch a new SkyPilot
   cluster.
 - ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
   ``sky down``.
 - Managed jobs and SkyServe controllers are not supported on Modal.
 - Modal Volumes do not have a SkyPilot ``size`` setting. Persist writes with
-  ``sync <mount-path>`` before tearing down the Sandbox.
+  ``sync <mount-path>`` before tearing down the cluster.
 - Modal GCS bucket mounts require HMAC credentials in
   ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``.
 - Docker images are supported through public registry image references such as

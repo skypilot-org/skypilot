@@ -2,7 +2,9 @@
 
 import os
 import shlex
-from typing import Any, Dict, List, Optional, Tuple
+import sys
+import time
+from typing import Any, Callable, Dict, List, Optional
 import urllib.parse
 
 from sky.adaptors import aws
@@ -10,24 +12,28 @@ from sky.adaptors import cloudflare
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
 
-APP_NAME = 'skypilot-modal'
 SSH_PORT = 22
 SSH_USER = 'root'
 TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
 TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
 
-_TUNNEL_TIMEOUT_SECONDS = 180
-_IMAGE_PYTHON_VERSION = '3.12'
+# Prefix for the per-cluster Modal App and Dict. Modal object names are at
+# most 64 characters and Modal cluster names at most 60.
+_NAME_PREFIX = 'sky-'
+_NODE_KEY_PREFIX = 'node-'
+_CALL_ID_KEY = 'call_id'
+_NUM_NODES_KEY = 'num_nodes'
+_PREEMPTED_KEY = 'preempted'
+# GPU capacity can take a while to schedule; give up after this long.
+_NODES_READY_TIMEOUT_SECONDS = 15 * 60
+_POLL_INTERVAL_SECONDS = 1
+# The node function is shipped with cloudpickle (`serialized=True`), so the
+# container must run the same Python minor version as this process.
+_IMAGE_PYTHON_VERSION = f'{sys.version_info.major}.{sys.version_info.minor}'
 _IMAGE_SYSTEM_PACKAGES = ('openssh-server', 'sudo', 'rsync', 'curl', 'procps',
                           'patch', 'lsof')
 _GCS_HMAC_ACCESS_KEY_ENV_VAR = 'GOOGLE_ACCESS_KEY_ID'
 _GCS_HMAC_SECRET_KEY_ENV_VAR = 'GOOGLE_ACCESS_KEY_SECRET'
-
-
-def get_app(create_if_missing: bool, environment_name: Optional[str] = None):
-    return modal_adaptor.modal.App.lookup(APP_NAME,
-                                          environment_name=environment_name,
-                                          create_if_missing=create_if_missing)
 
 
 def get_image(docker_image: Optional[str] = None):
@@ -102,7 +108,7 @@ def _get_cloud_bucket_secret(spec: Dict[str, Any]):
 
 def get_modal_volume_mounts(
         volume_specs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build Modal Volume mount objects for Sandbox.create(volumes=...)."""
+    """Build Modal Volume mount objects for the node Function."""
     volumes = {}
     for spec in volume_specs:
         volume = modal_adaptor.modal.Volume.from_name(
@@ -118,7 +124,7 @@ def get_modal_volume_mounts(
 
 def get_cloud_bucket_mounts(
         bucket_specs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build Modal CloudBucketMount objects for Sandbox.create(volumes=...)."""
+    """Build Modal CloudBucketMount objects for the node Function."""
     mounts = {}
     for spec in bucket_specs:
         mounts[spec['Path']] = modal_adaptor.modal.CloudBucketMount(
@@ -132,6 +138,7 @@ def get_cloud_bucket_mounts(
 
 
 def get_ssh_start_command(public_key: str) -> str:
+    """Shell commands that configure sshd for key-based root login."""
     return f"""
 set -eux
 mkdir -p /run/sshd /root/.ssh
@@ -141,54 +148,219 @@ chmod 600 /root/.ssh/authorized_keys
 ssh-keygen -A
 sed -i 's/^#\\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
 sed -i 's/^#\\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-exec /usr/sbin/sshd -D -e -p {SSH_PORT}
 """
 
 
-def get_active_sandboxes_by_name(name: str,
-                                 environment_name: Optional[str] = None
-                                ) -> Dict[str, Any]:
+def _make_node_function() -> Callable[..., None]:
+    """Return the body that every node of a cluster runs.
+
+    It is defined inside a function so that cloudpickle ships it by value:
+    the container does not have SkyPilot installed. It must not reference
+    module globals.
+    """
+
+    def skypilot_node(ssh_setup: str, ssh_port: int, state_name: str,
+                      environment_name: Optional[str], clustered: bool,
+                      user_ports: List[int]) -> None:
+        # pylint: disable=import-outside-toplevel,redefined-outer-name
+        import contextlib
+        import subprocess
+
+        import modal
+        import modal.experimental
+
+        if clustered:
+            info = modal.experimental.get_cluster_info()
+            rank = info.rank
+            ips = list(info.container_ipv4_ips) or list(info.container_ips)
+            internal_ip = ips[rank]
+        else:
+            rank, internal_ip = 0, '127.0.0.1'
+        state = modal.Dict.from_name(state_name,
+                                     environment_name=environment_name)
+        node_key = f'node-{rank}'
+        if state.get(node_key) is not None:
+            # Modal reruns a preempted Function on the same input, in a new
+            # container that has none of the runtime SkyPilot set up. End
+            # the call so SkyPilot sees the cluster as terminated.
+            state['preempted'] = True
+            raise RuntimeError('Modal restarted this node after a preemption.')
+        subprocess.run(['bash', '-c', ssh_setup], check=True)
+        sshd = subprocess.Popen(
+            ['/usr/sbin/sshd', '-D', '-e', '-p',
+             str(ssh_port)])
+        with contextlib.ExitStack() as stack:
+            ssh_tunnel = stack.enter_context(
+                modal.forward(ssh_port, unencrypted=True))
+            port_urls = {}
+            if rank == 0:
+                for port in user_ports:
+                    port_urls[port] = stack.enter_context(
+                        modal.forward(port)).url
+            host, port = ssh_tunnel.tcp_socket
+            state[node_key] = {
+                'ssh_host': host,
+                'ssh_port': port,
+                'internal_ip': internal_ip,
+                'port_urls': port_urls,
+            }
+            returncode = sshd.wait()
+        raise RuntimeError(f'sshd exited with code {returncode}.')
+
+    return skypilot_node
+
+
+def state_name(cluster_name_on_cloud: str) -> str:
+    """Name of the cluster's Modal App and Dict."""
+    return f'{_NAME_PREFIX}{cluster_name_on_cloud}'
+
+
+def _get_state_dict(cluster_name_on_cloud: str,
+                    environment_name: Optional[str],
+                    create_if_missing: bool = False):
+    return modal_adaptor.modal.Dict.from_name(
+        state_name(cluster_name_on_cloud),
+        environment_name=environment_name,
+        create_if_missing=create_if_missing)
+
+
+def _is_not_found(exc: Exception) -> bool:
+    not_found_error = getattr(getattr(modal_adaptor.modal, 'exception', None),
+                              'NotFoundError', None)
+    return not_found_error is not None and isinstance(exc, not_found_error)
+
+
+def delete_state(cluster_name_on_cloud: str,
+                 environment_name: Optional[str]) -> None:
+    modal_adaptor.modal.Dict.objects.delete(state_name(cluster_name_on_cloud),
+                                            allow_missing=True,
+                                            environment_name=environment_name)
+
+
+def get_cluster_state(
+        cluster_name_on_cloud: str,
+        environment_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Return the cluster's saved state, or None if it was never launched.
+
+    The state has `call_id`, `num_nodes`, `preempted` and `nodes`, a dict from
+    rank to the node's SSH tunnel, internal IP and port URLs.
+    """
     try:
-        sandbox = modal_adaptor.modal.Sandbox.from_name(
-            APP_NAME, name, environment_name=environment_name)
+        items = dict(
+            _get_state_dict(cluster_name_on_cloud, environment_name).items())
     except Exception as exc:  # pylint: disable=broad-except
-        not_found_error = getattr(
-            getattr(modal_adaptor.modal, 'exception', None), 'NotFoundError',
-            None)
-        if not_found_error is not None and isinstance(exc, not_found_error):
-            return {}
-        raise RuntimeError(
-            f'Failed to query Modal Sandbox {name!r}: {exc}') from exc
-    if sandbox is None:
-        return {}
-    return {sandbox.object_id: sandbox}
-
-
-def get_head_sandbox(cluster_name_on_cloud: str,
-                     environment_name: Optional[str] = None):
-    sandboxes = get_active_sandboxes_by_name(cluster_name_on_cloud,
-                                             environment_name)
-    if not sandboxes:
+        if _is_not_found(exc):
+            return None
+        raise RuntimeError(f'Failed to query Modal cluster '
+                           f'{cluster_name_on_cloud!r}: {exc}') from exc
+    call_id = items.get(_CALL_ID_KEY)
+    if call_id is None:
         return None
-    return next(iter(sandboxes.values()))
+    nodes = {
+        int(key[len(_NODE_KEY_PREFIX):]): value
+        for key, value in items.items()
+        if isinstance(key, str) and key.startswith(_NODE_KEY_PREFIX)
+    }
+    return {
+        'call_id': call_id,
+        'num_nodes': items.get(_NUM_NODES_KEY, len(nodes)),
+        'preempted': bool(items.get(_PREEMPTED_KEY, False)),
+        'nodes': nodes,
+    }
 
 
-def get_ssh_tunnel(sandbox) -> Tuple[str, int]:
-    tunnels = sandbox.tunnels(timeout=_TUNNEL_TIMEOUT_SECONDS)
-    tunnel = tunnels[SSH_PORT]
-    return tunnel.tcp_socket
+def call_is_running(call_id: str) -> bool:
+    """Whether the cluster's Function call is still running.
+
+    Raises on API errors instead of guessing, so a transient failure cannot
+    make SkyPilot treat a live cluster as terminated.
+    """
+    call = modal_adaptor.modal.FunctionCall.from_id(call_id)
+    graph = call.get_call_graph()
+    if not graph:
+        # Not scheduled yet.
+        return True
+    pending = modal_adaptor.modal.call_graph.InputStatus.PENDING
+    return any(info.status == pending for info in graph)
 
 
-def get_port_tunnels(sandbox, ports: List[int]) -> Dict[int, common.Endpoint]:
-    if not ports:
-        return {}
-    tunnels = sandbox.tunnels(timeout=_TUNNEL_TIMEOUT_SECONDS)
+def cancel_call(call_id: str) -> None:
+    modal_adaptor.modal.FunctionCall.from_id(call_id).cancel(
+        terminate_containers=True)
+
+
+def instance_id(call_id: str, rank: int) -> str:
+    return f'{call_id}-{rank}'
+
+
+def launch_cluster(cluster_name_on_cloud: str, environment_name: Optional[str],
+                   num_nodes: int, public_key: str, user_ports: List[int],
+                   function_kwargs: Dict[str, Any]) -> str:
+    """Start the cluster's Function call and return its ID.
+
+    Each cluster gets its own detached ephemeral App, which Modal stops once
+    the call ends.
+    """
+    modal = modal_adaptor.modal
+    name = state_name(cluster_name_on_cloud)
+    delete_state(cluster_name_on_cloud, environment_name)
+    state = _get_state_dict(cluster_name_on_cloud,
+                            environment_name,
+                            create_if_missing=True)
+    state.hydrate()
+    clustered = num_nodes > 1
+    body = _make_node_function()
+    if clustered:
+        body = modal.clustered(size=num_nodes)(body)
+    app = modal.App(name)
+    function = app.function(
+        name='skypilot-node',
+        serialized=True,
+        # Modal reruns a failed call on fresh containers that SkyPilot did not
+        # set up. Let SkyPilot handle recovery instead.
+        retries=0,
+        **function_kwargs)(body)
+    with app.run(detach=True, environment_name=environment_name):
+        call = function.spawn(get_ssh_start_command(public_key), SSH_PORT, name,
+                              environment_name, clustered, user_ports)
+    state[_NUM_NODES_KEY] = num_nodes
+    state[_CALL_ID_KEY] = call.object_id
+    return call.object_id
+
+
+def wait_for_nodes(cluster_name_on_cloud: str, environment_name: Optional[str],
+                   call_id: str, num_nodes: int) -> Dict[int, Dict[str, Any]]:
+    """Wait until every node has published its SSH tunnel."""
+    call = modal_adaptor.modal.FunctionCall.from_id(call_id)
+    deadline = time.time() + _NODES_READY_TIMEOUT_SECONDS
+    while True:
+        state = get_cluster_state(cluster_name_on_cloud, environment_name)
+        nodes = state['nodes'] if state is not None else {}
+        if len(nodes) >= num_nodes:
+            return nodes
+        if not call_is_running(call_id):
+            try:
+                call.get(timeout=0)
+                reason = 'it returned'
+            except Exception as e:  # pylint: disable=broad-except
+                reason = f'{type(e).__name__}: {e}'
+            raise RuntimeError(f'Modal Function call {call_id} ended before '
+                               f'all nodes were ready ({reason}).')
+        if time.time() > deadline:
+            raise RuntimeError(
+                f'Timed out after {_NODES_READY_TIMEOUT_SECONDS}s waiting for '
+                f'{num_nodes} Modal node(s); {len(nodes)} ready.')
+        time.sleep(_POLL_INTERVAL_SECONDS)
+
+
+def get_port_endpoints(port_urls: Dict[int, str],
+                       ports: List[int]) -> Dict[int, common.Endpoint]:
     endpoints: Dict[int, common.Endpoint] = {}
     for port in ports:
-        tunnel = tunnels.get(port)
-        if tunnel is None:
+        tunnel_url = port_urls.get(port)
+        if tunnel_url is None:
             continue
-        url = urllib.parse.urlparse(tunnel.url)
+        url = urllib.parse.urlparse(tunnel_url)
         host = url.hostname
         if host is None:
             continue
@@ -196,7 +368,3 @@ def get_port_tunnels(sandbox, ports: List[int]) -> Dict[int, common.Endpoint]:
                                                port=url.port,
                                                path=url.path.lstrip('/'))
     return endpoints
-
-
-def sandbox_status(sandbox) -> Optional[int]:
-    return sandbox.poll()
