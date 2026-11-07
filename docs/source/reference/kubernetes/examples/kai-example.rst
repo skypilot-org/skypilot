@@ -15,9 +15,10 @@ Prerequisites
 * A leaf KAI ``Queue`` to submit to. KAI never schedules a ``PodGroup`` in a
   parent queue, so a launch into one waits until it times out.
 * Permission to get, create and delete ``podgroups.scheduling.run.ai``
-  in the namespace SkyPilot launches into. If you set a topology, also
-  permission to get ``topologies.kai.scheduler``, which needs a
-  ``ClusterRole`` because Topologies are cluster-scoped.
+  in the namespace SkyPilot launches into, and to get
+  ``queues.scheduling.run.ai``. Queues are cluster-scoped, so the second
+  needs a ``ClusterRole``, as does getting ``topologies.kai.scheduler`` if you
+  set a topology.
 
 Setting a queue
 ---------------
@@ -97,8 +98,8 @@ To keep a cluster's pods close together in the network, name a KAI
 * ``required_topology_level``: KAI places all of the cluster's pods in one
   domain at that level, and the cluster stays queued until a domain has room.
   KAI does not tell a full domain apart from one too small for the cluster, so
-  a cluster larger than every domain at that level stays queued until its
-  launch times out.
+  a cluster larger than every domain at that level stays queued until you
+  cancel it.
 
 Name a level by its node label or alias. The preferred level must be at or
 below the required one. SkyPilot checks both against the ``Topology`` before
@@ -113,11 +114,14 @@ How a launch works
    labels as the pods, so labels set with
    :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>` apply to
    both.
-2. The launch waits while KAI keeps the cluster queued. If KAI has not
-   scheduled it within
-   :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`, the
-   launch fails over to the next allowed context, if any.
-3. ``sky down`` deletes the cluster's pods and its ``PodGroup``.
+2. While KAI keeps the cluster queued, the launch request waits on the API
+   server without holding a worker. It prints KAI's reason for keeping the
+   cluster queued, and resumes once KAI schedules it.
+3. If the cluster asks for more GPUs than the limit of its queue or a parent
+   queue, asks for more than the quota as a non-preemptible cluster, or the
+   queue does not exist, the launch fails over to the next allowed context,
+   if any. Other resources over a limit keep the launch queued instead.
+4. ``sky down`` deletes the cluster's pods and its ``PodGroup``.
 
 Relaunching onto a running cluster cannot change its queue, priority class,
 preemptibility or topology. Run ``sky down`` first.
@@ -159,8 +163,8 @@ Troubleshooting
 * ``kubectl describe podgroup <name>`` shows KAI's full scheduling conditions.
   The ``PodGroup`` is named like the cluster's pods, without the ``-head``
   suffix.
-* A queue's GPU ``limit`` of ``-1`` is unlimited. An unset limit is 0, so KAI
-  never schedules a GPU cluster in that queue.
+* A queue's GPU ``limit`` of ``-1`` is unlimited. An unset limit is 0, so a
+  GPU launch into that queue fails.
 
 Limitations
 -----------

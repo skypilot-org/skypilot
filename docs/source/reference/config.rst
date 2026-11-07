@@ -2199,8 +2199,13 @@ as well.
 (optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
 :ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
 
-The time KAI keeps a cluster queued counts toward
-:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`.
+A launch handled by an API server request releases its worker while KAI keeps
+the cluster queued, and resumes when KAI schedules its pods. That wait does not
+count toward
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`,
+but the time until KAI first reports on the cluster does.
+A launch outside an API server request waits in the provisioner, and all of
+its wait counts toward the timeout.
 
 .. _config-yaml-kubernetes-kai-queue:
 
