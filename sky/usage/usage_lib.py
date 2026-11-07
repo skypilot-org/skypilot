@@ -856,10 +856,8 @@ def _slurm_capacity_id(cluster: str) -> str:
     return f'slurm/{cluster}'
 
 
-# No physical node carries more accelerators than this (8-16 GPUs, up to 64
-# Neuron devices per host). Serverless virtual-kubelet nodes (e.g. Tencent TKE
-# super nodes, Azure ACI, Alibaba ECI) advertise a placeholder allocatable in
-# the tens of thousands that is not hardware.
+# No physical node carries more accelerators than this. Serverless
+# virtual-kubelet nodes advertise a placeholder allocatable far above it.
 _MAX_PHYSICAL_ACCELERATORS_PER_NODE = 256
 
 
@@ -867,19 +865,13 @@ def _gpu_capacity_from_nodes(
         nodes_info: 'models.KubernetesNodesInfo') -> Dict[str, int]:
     """Reduce a context's node inventory to GPU counts per accelerator type.
 
-    Nodes advertising more accelerators than any physical host can carry are
-    virtual (serverless) nodes and are skipped: their allocatable is a quota
-    placeholder, not installed capacity.
+    Virtual nodes (placeholder allocatable above any physical host) are
+    skipped.
     """
     counts: Dict[str, int] = {}
-    for node_name, node_info in nodes_info.node_info_dict.items():
+    for node_info in nodes_info.node_info_dict.values():
         count = int(node_info.total.get('accelerator_count', 0) or 0)
-        if count <= 0:
-            continue
-        if count > _MAX_PHYSICAL_ACCELERATORS_PER_NODE:
-            logger.debug(f'Heartbeat GPU fleet skipped node {node_name!r}'
-                         f': {count} accelerators exceeds a physical host '
-                         '(virtual node placeholder capacity).')
+        if count <= 0 or count > _MAX_PHYSICAL_ACCELERATORS_PER_NODE:
             continue
         acc_type = str(node_info.accelerator_type or 'gpu')
         counts[acc_type] = counts.get(acc_type, 0) + count
