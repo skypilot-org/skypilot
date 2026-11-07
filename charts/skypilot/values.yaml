@@ -345,6 +345,13 @@ auth:
     # JWT claim to extract identity from (only used when headerFormat is 'jwt').
     # @schema type: [string]
     jwtIdentityClaim: 'sub'
+    # Refuse a request that reaches the API server without an identity, i.e.
+    # without the proxy's header, a service account token, or a loopback
+    # source. By default such a request is served as unauthenticated (admin
+    # scope). Enable this when something other than the proxy can reach the
+    # API server.
+    # @schema type: [boolean]
+    requireIdentity: false
 
 storage:
   # Enable/disable persistent storage
