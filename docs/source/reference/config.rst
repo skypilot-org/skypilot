@@ -273,6 +273,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
     :ref:`disk_encrypted <config-yaml-nebius-disk-encrypted>`: true
+    :ref:`spot_pricing_policy_name <config-yaml-nebius-spot-pricing-policy-name>`: spot-max-{platform}
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
@@ -3114,6 +3115,9 @@ Advanced Nebius configuration (optional).
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
 
+``spot_pricing_policy_name``
+    Per-region override of :ref:`nebius.spot_pricing_policy_name <config-yaml-nebius-spot-pricing-policy-name>` (optional)
+
 ``filesystems``
     List of filesystems to mount on the nodes (optional).
     Each filesystem is a dict with the following keys:
@@ -3214,6 +3218,45 @@ Non-replicated and Network SSD IO M3 boot disks launched by SkyPilot. Network
 SSD boot disks are encrypted by default.
 
 Default: ``false``.
+
+.. _config-yaml-nebius-spot-pricing-policy-name:
+
+``nebius.spot_pricing_policy_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the Nebius spot pricing policy that caps the price of spot VMs (optional).
+
+A Nebius `pricing policy <https://docs.nebius.com/signup-billing/manage-pricing-policy>`_
+belongs to one project (and therefore one region), covers one compute platform
+(e.g. ``gpu-h100-sxm``) and holds a per-GPU hourly max price. Create the
+policies yourself, e.g. one per platform in every project you launch in.
+
+When SkyPilot launches a spot VM (``use_spot: true``), it looks up a policy with
+this name in the project of the region it launches in. ``{platform}`` in the
+name is replaced with the VM's platform, so one setting matches a policy per
+platform:
+
+- If the policy exists and covers the VM's platform, the VM references it and
+  never pays more than the policy's max price. If the policy is blocking new
+  VMs because the spot price is above its max price, SkyPilot treats it like a
+  capacity error and fails over to the next region.
+- If there is no such policy, or it is for a different platform, SkyPilot logs
+  a warning and launches the VM at the current spot price, without a max price.
+
+Can be overridden per region in ``region_configs``. Has no effect on
+on-demand VMs or on VMs that already exist (e.g. on ``sky start``).
+
+Default: not set (spot VMs pay the current spot price, without a max price).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    spot_pricing_policy_name: spot-max-{platform}
+    region_configs:
+      us-central1:
+        spot_pricing_policy_name: us-spot-max-{platform}
 
 .. _config-yaml-nebius-ssh-proxy-command:
 

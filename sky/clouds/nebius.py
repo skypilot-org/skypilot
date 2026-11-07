@@ -379,6 +379,20 @@ class Nebius(clouds.Cloud):
             region=region.name,
             keys=('disk_encrypted',),
             default_value=False)
+        # Pricing policy that caps the spot price of preemptible VMs. The
+        # provisioner resolves the name to a policy in the target project; if
+        # none is found, the VM falls back to price-taking spot pricing.
+        spot_pricing_policy_name: Optional[str] = None
+        if resources.use_spot:
+            policy_name_template = skypilot_config.get_effective_region_config(
+                cloud='nebius',
+                region=region.name,
+                keys=('spot_pricing_policy_name',),
+                default_value=None)
+            if policy_name_template:
+                spot_pricing_policy_name = (
+                    nebius_constants.get_spot_pricing_policy_name(
+                        policy_name_template, platform))
 
         def _get_disk_tier() -> resources_utils.DiskTier:
             logger.debug(f'Getting disk tier for Nebius {resources.disk_tier}.')
@@ -436,6 +450,7 @@ class Nebius(clouds.Cloud):
             'network_tier': resources.network_tier,
             'disk_tier': _get_disk_tier(),
             'disk_encrypted': disk_encrypted,
+            'spot_pricing_policy_name': spot_pricing_policy_name,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group_managed_by_skypilot).lower(),

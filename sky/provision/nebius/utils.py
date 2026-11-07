@@ -181,6 +181,101 @@ def _is_already_exists_error(e: Any) -> bool:
     return 'already_exists' in str(e).lower()
 
 
+def _is_not_found_error(e: Any) -> bool:
+    """True iff the Nebius RequestError is a NOT_FOUND error.
+
+    Same structured-code-first, string-fallback approach as
+    `_is_already_exists_error`.
+    """
+    try:
+        status_code = nebius.status_code()
+        if status_code(e.status.code) == status_code.NOT_FOUND:
+            return True
+    except Exception:  # pylint: disable=broad-except
+        pass
+    msg = str(e).lower()
+    return 'not_found' in msg or 'not found' in msg
+
+
+class SpotPricingPolicyBlockedError(RuntimeError):
+    """The spot pricing policy does not allow new VMs to start right now.
+
+    Raised before any VM is created so the provisioner fails over to the next
+    region, the same as on a capacity error.
+    """
+
+
+def get_spot_pricing_policy_id(project_id: str, policy_name: str,
+                               platform: str) -> Optional[str]:
+    """Resolves a Nebius spot pricing policy for new preemptible VMs.
+
+    A pricing policy (`nebius.billing.v1.PricingPolicy`) belongs to one
+    project and covers one compute platform; it caps the per-GPU hourly spot
+    price of the VMs that reference it.
+
+    Returns:
+        The policy ID, or None if the project has no policy with this name or
+        the policy covers a different platform. In both cases the caller
+        falls back to price-taking spot pricing (`follows_spot_price`).
+
+    Raises:
+        SpotPricingPolicyBlockedError: if the policy exists but does not let
+            new VMs start, e.g. because the market price is above its max
+            price.
+        Other Nebius request errors (e.g. PERMISSION_DENIED) are propagated.
+    """
+    billing = nebius.billing()
+    service = billing.PricingPolicyServiceClient(nebius.sdk())
+    try:
+        policy = nebius.sync_call(
+            service.get_by_name(nebius.nebius_common().GetByNameRequest(
+                parent_id=project_id,
+                name=policy_name,
+            ),
+                                timeout=nebius.READ_TIMEOUT))
+    except nebius.request_error() as e:
+        if not _is_not_found_error(e):
+            raise
+        logger.warning(
+            f'Spot pricing policy {policy_name!r} not found in Nebius project '
+            f'{project_id}. Launching spot VMs without a max price.')
+        return None
+
+    policy_id = policy.metadata.id
+    v1_spec = policy.spec.compute_instance_spec.v1
+    policy_platform = v1_spec.platform if v1_spec is not None else None
+    if policy_platform != platform:
+        logger.warning(
+            f'Spot pricing policy {policy_name!r} ({policy_id}) is for '
+            f'platform {policy_platform!r}, not {platform!r}. Launching spot '
+            'VMs without a max price.')
+        return None
+
+    status = policy.status
+    state_enum = billing.PricingPolicyStatus.State
+    scheduling_enum = billing.PricingPolicyStatus.SchedulingState
+    not_ready_states = (
+        state_enum.STATE_CREATING,
+        state_enum.STATE_UPDATING,
+        state_enum.STATE_DELETING,
+    )
+    if (status.state in not_ready_states or status.scheduling_state
+            == scheduling_enum.SCHEDULING_STATE_BLOCKED):
+        max_price_spec = policy.spec.pricing.max_price_v1
+        max_price = (f'{max_price_spec.max_price} {status.currency}'.strip()
+                     if max_price_spec is not None else 'unknown')
+        msg = (f'Spot pricing policy {policy_name!r} ({policy_id}) in Nebius '
+               f'project {project_id} does not allow new VMs to start '
+               f'(state: {status.state.name}, scheduling state: '
+               f'{status.scheduling_state.name}, max price per GPU-hour: '
+               f'{max_price}). The spot price is likely above the max price.')
+        logger.warning(msg)
+        raise SpotPricingPolicyBlockedError(msg)
+    logger.debug(f'Using spot pricing policy {policy_name!r} ({policy_id}) '
+                 f'for platform {platform} in project {project_id}.')
+    return policy_id
+
+
 def get_or_create_security_group(project_id: str, sg_name: str,
                                  network_id: str) -> str:
     """Returns the SG id, creating the SG (with no rules) if missing.
@@ -562,7 +657,8 @@ def launch(cluster_name_on_cloud: str,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None,
-           security_group_ids: Optional[List[str]] = None) -> str:
+           security_group_ids: Optional[List[str]] = None,
+           spot_pricing_policy_id: Optional[str] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -663,6 +759,18 @@ def launch(cluster_name_on_cloud: str,
                 existing_filesystem=nebius.compute().ExistingFilesystem(
                     id=fs['filesystem_id'])))
 
+    # Pricing model of preemptible VMs (the `pricing_model` oneof): capped by
+    # a spot pricing policy if one was resolved, price-taking otherwise. Only
+    # the chosen member is passed, so the oneof is never set and then cleared.
+    pricing_model_kwargs: Dict[str, Any] = {}
+    if use_spot:
+        if spot_pricing_policy_id is not None:
+            pricing_model_kwargs['spot_pricing_policy'] = (
+                compute.SpotPricingPolicySpec(id=spot_pricing_policy_id))
+        else:
+            pricing_model_kwargs['follows_spot_price'] = (
+                compute.FollowsSpotPriceSpec())
+
     sub_net_id = get_subnet_id(region, project_id)
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     logger.debug(f'Creating instance {instance_name} in project {project_id}.')
@@ -706,8 +814,7 @@ def launch(cluster_name_on_cloud: str,
                     preemptible=nebius.compute().PreemptibleSpec(
                         on_preemption=nebius.compute().PreemptibleSpec.
                         PreemptionPolicy.STOP) if use_spot else None,
-                    follows_spot_price=nebius.compute().FollowsSpotPriceSpec()
-                    if use_spot else None,
+                    **pricing_model_kwargs,
                 ))))
         instance_id = ''
         retry_count = 0
