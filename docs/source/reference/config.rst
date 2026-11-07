@@ -3492,6 +3492,11 @@ Valid daemon names are:
 
 - ``skypilot-status-refresh-daemon``
 - ``skypilot-volume-status-refresh-daemon``
+- ``sky-serve-status-refresh-daemon``
+- ``pool-status-refresh-daemon``
+- ``server-heartbeat-daemon``
+- ``expired-token-cleanup-daemon``
+- ``launch-metrics-daemon``
 
 ``log_level``
     Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
