@@ -388,8 +388,16 @@ class R2CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        ('if aws --version >/dev/null 2>&1; then '
+         'if [ "$(type -t aws)" = function ]; then '
+         'awscli_path=aws; '
+         'else '
+         'awscli_path=$(type -P aws); '
+         'fi; '
+         'else '
+         f'{constants.SKY_UV_PIP_CMD} install awscli && '
+         f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; '
+         'fi'),
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -424,7 +432,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               '"$awscli_path" s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
@@ -441,7 +449,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               '"$awscli_path" s3 '
                                f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
