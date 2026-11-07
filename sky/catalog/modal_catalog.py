@@ -112,6 +112,14 @@ _GPU_COUNTS = {
 }
 
 
+def get_max_gpu_count(accelerator: str) -> Optional[int]:
+    """Most GPUs of this type Modal offers per node; None if unknown."""
+    canonical = _canonical_accelerator(accelerator)
+    if canonical is None:
+        return None
+    return max(_GPU_COUNTS[canonical])
+
+
 def _format_resource_value(value: float) -> str:
     if value.is_integer():
         return str(int(value))

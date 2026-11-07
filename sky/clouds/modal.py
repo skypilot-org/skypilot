@@ -74,14 +74,34 @@ class Modal(clouds.Cloud):
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del region  # unused
         unsupported = dict(cls._CLOUD_UNSUPPORTED_FEATURES)
-        accelerators = resources.accelerators or {}
-        if (len(accelerators) != 1 or next(iter(accelerators.values())) !=
-                cls._MULTI_NODE_GPUS_PER_NODE):
-            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
-                'Multi-node Modal clusters need '
-                f'{cls._MULTI_NODE_GPUS_PER_NODE} GPUs per node, e.g. '
-                f'--gpus H100:{cls._MULTI_NODE_GPUS_PER_NODE}.')
+        reason = cls._multi_node_unsupported_reason(resources.accelerators)
+        if reason is not None:
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = reason
         return unsupported
+
+    @classmethod
+    def _multi_node_unsupported_reason(
+            cls, accelerators: Optional[Dict[str,
+                                             Union[int,
+                                                   float]]]) -> Optional[str]:
+        """Why these accelerators cannot form a multi-node Modal cluster."""
+        per_node = cls._MULTI_NODE_GPUS_PER_NODE
+        if not accelerators:
+            return (f'Multi-node Modal clusters need {per_node} GPUs per node, '
+                    f'e.g. --gpus H100:{per_node}.')
+        name, count = next(iter(accelerators.items()))
+        if count == per_node:
+            return None
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import modal_catalog
+        max_count = modal_catalog.get_max_gpu_count(name)
+        if max_count is not None and max_count < per_node:
+            return (f'{name} cannot form multi-node Modal clusters: they need '
+                    f'{per_node} GPUs per node, and Modal offers at most '
+                    f'{max_count} {name} per node.')
+        return (f'Multi-node Modal clusters need all {per_node} GPUs of each '
+                f'node: use --gpus {name}:{per_node} instead of '
+                f'{name}:{count:g}.')
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

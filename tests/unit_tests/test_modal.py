@@ -285,29 +285,38 @@ def test_modal_unsupported_features():
         for message in unsupported.values())
 
 
-@pytest.mark.parametrize('accelerators,multi_node', [
-    (None, False),
+@pytest.mark.parametrize('accelerators,expected_reason', [
+    (None, 'need 8 GPUs per node, e.g. --gpus H100:8'),
+    ({
+        'T4': 1
+    }, 'use --gpus T4:8 instead of T4:1'),
     ({
         'H100': 4
-    }, False),
+    }, 'use --gpus H100:8 instead of H100:4'),
+    ({
+        'A10': 4
+    }, 'Modal offers at most 4 A10 per node'),
+    ({
+        'RTX-PRO-6000': 1
+    }, 'Modal offers at most 1 RTX-PRO-6000 per node'),
     ({
         'H100': 8
-    }, True),
+    }, None),
     ({
         'B200': 8
-    }, True),
+    }, None),
 ])
-def test_modal_multi_node_needs_full_gpu_nodes(accelerators, multi_node):
+def test_modal_multi_node_needs_full_gpu_nodes(accelerators, expected_reason):
     resources = resources_lib.Resources(cloud=clouds.Modal(),
                                         accelerators=accelerators)
 
     unsupported = _modal_unsupported_features(resources)
 
-    assert (clouds.CloudImplementationFeatures.MULTI_NODE
-            not in unsupported) == multi_node
-    if not multi_node:
-        assert 'H100:8' in unsupported[
-            clouds.CloudImplementationFeatures.MULTI_NODE]
+    reason = unsupported.get(clouds.CloudImplementationFeatures.MULTI_NODE)
+    if expected_reason is None:
+        assert reason is None
+    else:
+        assert expected_reason in reason
 
 
 def test_modal_supports_docker_images_and_open_ports():
