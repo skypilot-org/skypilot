@@ -18,6 +18,26 @@ function getPluginFetch() {
   return typeof window !== 'undefined' ? window.__skyJobsPaginationFetch : null;
 }
 
+/**
+ * Returns rows with task_job_id set on every external row. The jobs page
+ * keys external rows by task_job_id everywhere (row keys, job grouping, the
+ * expanded details row), so a row without one would share the key undefined
+ * with every other such row. The producer sets the field today. This is the
+ * single fallback for a producer that omits it. The key is built from the
+ * cluster and the job id, because a Slurm job id is unique only within its
+ * cluster.
+ */
+export function withExternalRowKeys(rows) {
+  return rows.map((job) =>
+    job.is_external && job.task_job_id == null
+      ? {
+          ...job,
+          task_job_id: `external:${job.external_cluster ?? ''}:${job.external_job_id ?? job.id}`,
+        }
+      : job
+  );
+}
+
 class JobsCacheManager {
   constructor() {
     // Cache for paginated data, keyed by full options (including page, limit, sort)
@@ -357,7 +377,7 @@ class JobsCacheManager {
       };
     }
 
-    const jobs = result.items || result.data || [];
+    const jobs = withExternalRowKeys(result.items || result.data || []);
     const total = result.total || 0;
     const totalNoFilter = result.totalNoFilter || total;
     const totalPages =
