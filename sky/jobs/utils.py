@@ -3340,24 +3340,25 @@ def dump_managed_job_queue(
     # Passed by name: this is called from generated code that pins the
     # arguments it knows about, and the parameter list has outgrown the point
     # where positional order is safe to extend.
-    return message_utils.encode_payload(
-        get_managed_job_queue(skip_finished=skip_finished,
-                              accessible_workspaces=accessible_workspaces,
-                              job_ids=job_ids,
-                              include_tree=include_tree,
-                              workspace_match=workspace_match,
-                              name_match=name_match,
-                              pool_match=pool_match,
-                              infra_match=infra_match,
-                              page=page,
-                              limit=limit,
-                              user_hashes=user_hashes,
-                              statuses=statuses,
-                              fields=fields,
-                              sort_by=sort_by,
-                              sort_order=sort_order,
-                              submitted_after=submitted_after,
-                              submitted_before=submitted_before))
+    return message_utils.encode_payload(get_managed_job_queue(
+        skip_finished=skip_finished,
+        accessible_workspaces=accessible_workspaces,
+        job_ids=job_ids,
+        include_tree=include_tree,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
+        page=page,
+        limit=limit,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before),
+                                        payload_type='managed_job_queue')
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -4103,7 +4104,29 @@ def load_managed_job_queue(
 ) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
         str, int], List[str]]:
     """Load job queue from json string."""
-    result = message_utils.decode_payload(payload)
+    result = None
+    try:
+        result = message_utils.decode_payload(payload,
+                                              payload_type='managed_job_queue')
+    except ValueError:
+        pass
+
+    if result is None:
+        # Backward compatibility for controllers that do not tag the payload
+        # type, or where intermediate progress/status output (such as periodic
+        # catalog refresh) precedes the job table payload.
+        matched = message_utils.decode_all_payloads(payload)
+        for _, candidate in reversed(matched):
+            if isinstance(candidate, dict) and 'jobs' in candidate:
+                result = candidate
+                break
+            if isinstance(candidate, list):
+                result = candidate
+                break
+
+    if result is None:
+        result = message_utils.decode_payload(payload)
+
     result_type = ManagedJobQueueResultType.DICT
     status_counts: Dict[str, int] = {}
     # Absent from a controller that predates the field, which is not an error:
@@ -4115,11 +4138,15 @@ def load_managed_job_queue(
         status_counts = result.get('status_counts', {})
         total_no_filter: int = result.get('total_no_filter', total)
         infra_options = result.get('infra_options', [])
-    else:
+    elif isinstance(result, list):
         jobs = result
         total = len(jobs)
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
+    else:
+        raise ValueError(
+            'Expected job queue payload to be a dict or list, but got '
+            f'{type(result).__name__}: {result!r}')
 
     all_users = global_user_state.get_all_users()
     all_users_map = {user.id: user.name for user in all_users}
