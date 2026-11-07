@@ -535,32 +535,64 @@ def test_start_stream_task_uses_context_preserving_executor(monkeypatch):
     stream_and_get.assert_called_once_with('req-1', relay_rich_status=True)
 
 
-@pytest.mark.asyncio
-async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
-        monkeypatch):
-    """Fix 3: if the carried stream already failed (e.g. a transient
-    transport error while parked) but the request itself is still live on
-    the server, start a fresh stream instead of trusting the stale error -
-    which would otherwise tear down an otherwise-healthy cluster."""
+def _await_launch_request_like_real(*first_effects):
+    """A stand-in for _await_launch_request: the given effects first (a
+    result, or an exception to raise), then, like the real one, the outcome
+    of the stream it is given: a failed stream raises its error at once, and
+    one still running returns (the request succeeds)."""
+    effects = list(first_effects)
+
+    async def fake(request_id, stream_task):  # pylint: disable=unused-argument
+        if effects:
+            effect = effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+        if stream_task.done():
+            stream_task.result()
+        return None
+
+    return mock.AsyncMock(side_effect=fake)
+
+
+def _carried_stream_dies_while_parked(monkeypatch, request_status):
+    """A launch request that parks, and whose carried stream fails during the
+    park (e.g. the API server was briefly unreachable).
+
+    `request_status` is what the server then reports for the request: a
+    status string, or an exception (the status cannot be read).
+    """
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
 
     async def fake_wait_for_parked_request(request_id):
-        # The carried stream dies while parked (e.g. the API server was
-        # briefly unreachable), even though the request itself resumed
-        # successfully.
         executor._stream_futures[0].set_exception(
             RuntimeError('stream transport dropped'))
         return request_id
 
     executor._wait_for_parked_request = mock.AsyncMock(
         side_effect=fake_wait_for_parked_request)
-    executor._await_launch_request = mock.AsyncMock(side_effect=[
-        recovery_strategy._LaunchRequestParked('req-123', 'pending'),
-        None,
-    ])
-    api_status = mock.MagicMock(return_value=[_request_payload('RUNNING')])
+    executor._await_launch_request = _await_launch_request_like_real(
+        recovery_strategy._LaunchRequestParked('req-123', 'pending'))
+    if isinstance(request_status, Exception):
+        api_status = mock.MagicMock(side_effect=request_status)
+    else:
+        api_status = mock.MagicMock(
+            return_value=[_request_payload(request_status)])
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    return executor, patches
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
+        monkeypatch):
+    """The carried stream failed during the park, but the request is still
+    live on the server: start a fresh stream instead of trusting the stale
+    error, which would tear down a healthy cluster. This goes through the same
+    path as any re-attached request's failed stream
+    (_settle_failed_stream)."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, 'RUNNING')
 
     result = await executor._launch(max_retry=1, raise_on_failure=True)
 
@@ -569,48 +601,71 @@ async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
     # sky.launch was not repeated (this is a reattach, not a fresh launch).
     assert patches.sdk_launch.call_count == 1
     assert executor._start_stream_task.call_count == 2
-    assert executor._await_launch_request.await_args_list[1] == mock.call(
-        'req-123', executor._stream_futures[1])
+    assert executor._await_launch_request.await_args_list[1:] == [
+        mock.call('req-123', executor._stream_futures[0]),
+        mock.call('req-123', executor._stream_futures[1]),
+    ]
     executor._cleanup_cluster.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_launch_reattach_surfaces_terminal_request_outcome(monkeypatch):
-    """Fix 3: if the carried stream already failed and the request itself
-    is terminal, surface the request's real outcome (here, its real
-    failure) directly instead of waiting on a stream that will never
-    produce one - and don't bother starting a replacement stream."""
-    executor = _make_launch_executor()
-    patches = _patch_launch_environment(monkeypatch)
-
-    async def fake_wait_for_parked_request(request_id):
-        executor._stream_futures[0].set_exception(
-            RuntimeError('stream transport dropped'))
-        return request_id
-
-    executor._wait_for_parked_request = mock.AsyncMock(
-        side_effect=fake_wait_for_parked_request)
-    executor._await_launch_request = mock.AsyncMock(
-        side_effect=recovery_strategy._LaunchRequestParked(
-            'req-123', 'pending'))
-    api_status = mock.MagicMock(
-        return_value=[_request_payload('FAILED', 'ran out of quota')])
-    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    """The carried stream failed during the park and the request itself
+    failed: its own error is the launch failure, and no replacement stream is
+    started."""
+    executor, patches = _carried_stream_dies_while_parked(monkeypatch, 'FAILED')
     sdk_get = mock.MagicMock(side_effect=ValueError('the real failure'))
     monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
 
     with pytest.raises(exceptions.ManagedJobReachedMaxRetriesError):
         await executor._launch(max_retry=1, raise_on_failure=True)
 
-    # The request's real (terminal) outcome was fetched directly - no
-    # replacement stream, and _await_launch_request was not called again,
-    # since the outcome was already decided.
     sdk_get.assert_called_once_with('req-123')
     assert executor._start_stream_task.call_count == 1
-    assert executor._await_launch_request.await_count == 1
-    # Unlike the parked/vanished paths, a genuine failure tears the
-    # partially-provisioned cluster down.
+    assert patches.sdk_launch.call_count == 1
+    # A genuine failure tears the partially-provisioned cluster down.
     executor._cleanup_cluster.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_after_park_with_succeeded_request_succeeds(
+        monkeypatch):
+    """The carried stream failed during the park and the request succeeded:
+    the cluster is launched. Its result is not fetched, so a failure to fetch
+    it (sdk.get does not retry a 502) cannot be taken for the launch
+    failing."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, 'SUCCEEDED')
+    sdk_get = mock.MagicMock(side_effect=RuntimeError(
+        'Failed to get request req-123: 502 Bad Gateway'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=1, raise_on_failure=True) == 123.45
+
+    sdk_get.assert_not_called()
+    assert executor._start_stream_task.call_count == 1
+    assert patches.sdk_launch.call_count == 1
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_after_park_with_unreadable_status_waits(
+        monkeypatch):
+    """The carried stream failed during the park and the request's status
+    cannot be read: back off without tearing down, then re-attach to the same
+    request rather than launch beside it."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, RuntimeError('502 Server Error: Bad Gateway'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-123'), mock.call('req-123')
+    ]
+    assert patches.sdk_launch.call_count == 1
+    executor._cleanup_cluster.assert_not_called()
+    assert 'launch_retry:launch_lookup_failed' in _codes(
+        patches.set_backoff_pending)
 
 
 @pytest.mark.asyncio
@@ -1072,6 +1127,66 @@ async def test_launch_adopts_another_live_request_instead_of_teardown(
 
 
 @pytest.mark.asyncio
+async def test_launch_retries_the_lookup_before_tearing_down(monkeypatch):
+    """The lookup that decides whether to tear the cluster down after a
+    failed attempt is retried: a transient failure (e.g. a 502 while the API
+    server restarts) must not tear the cluster down beneath a launch request
+    that is still live."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-a', 'RUNNING', created_at=1.0),
+        _launch_request('req-b', 'RUNNING', created_at=5.0),
+    ])
+    executor._list_live_launch_requests = mock.AsyncMock(side_effect=[
+        RuntimeError('502 Server Error: Bad Gateway'),
+        [_launch_request('req-b', 'WAITING', created_at=5.0)],
+        [],
+    ])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('replica died'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_other_launch_is_live_retries_a_failed_lookup(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.pool = None
+    api_status = mock.MagicMock(side_effect=[
+        RuntimeError('timed out'), [_launch_request('req-b', 'WAITING')]
+    ])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._other_launch_is_live() is True
+    assert api_status.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_other_launch_is_live_is_false_if_the_lookup_keeps_failing(
+        monkeypatch):
+    """Then the cluster is torn down as it would be without the check."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.pool = None
+    api_status = mock.MagicMock(side_effect=RuntimeError('server unreachable'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._other_launch_is_live() is False
+    assert (
+        api_status.call_count == recovery_strategy._LIVE_LAUNCH_LOOKUP_ATTEMPTS)
+
+
+@pytest.mark.asyncio
 async def test_launch_cancels_remaining_duplicates_after_adopted_success(
         monkeypatch):
     executor = _make_launch_executor()
@@ -1287,13 +1402,17 @@ async def test_reattached_stream_failure_with_live_request_reattaches(
 @pytest.mark.asyncio
 async def test_reattached_stream_failure_with_succeeded_request_succeeds(
         monkeypatch):
+    """The server reports the request SUCCEEDED: the launch succeeded. Its
+    result is not fetched, so a failure to fetch it (sdk.get does not retry
+    a 502) cannot be taken for the launch failing."""
     executor, patches = _reattached_stream_failure(monkeypatch, 'SUCCEEDED')
-    sdk_get = mock.MagicMock(return_value='launched')
+    sdk_get = mock.MagicMock(side_effect=RuntimeError(
+        'Failed to get request req-old: 502 Bad Gateway'))
     monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
 
     assert await executor._launch(max_retry=None) == 123.45
 
-    sdk_get.assert_called_once_with('req-old')
+    sdk_get.assert_not_called()
     assert executor._await_launch_request.await_count == 1
     executor._cleanup_cluster.assert_not_called()
     patches.sdk_launch.assert_not_called()

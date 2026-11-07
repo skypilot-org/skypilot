@@ -1031,8 +1031,9 @@ class StrategyExecutor:
             False if it has succeeded.
 
         Raises:
-            Exception: The request's own error if it failed, or
-                `stream_error` if the server does not know the request.
+            Exception: The request's own error if it failed (or was
+                cancelled), or `stream_error` if the server does not know the
+                request.
             _LaunchLookupFailed: If the request's status could not be read.
         """
         try:
@@ -1049,8 +1050,12 @@ class StrategyExecutor:
                         f'which is still {request_payload.status}: '
                         're-attaching.')
             return True
-        # Finished: its own outcome decides. This raises the request's error
-        # if it failed.
+        if request_payload.status == requests_lib.RequestStatus.SUCCEEDED.value:
+            # Launched. Its result is not needed, so do not fetch it: that is
+            # one more call, which can fail on a transient error (sdk.get does
+            # not retry) and would be taken for the launch failing.
+            return False
+        # Failed or cancelled: its own error decides. This raises it.
         await asyncio.to_thread(
             sdk.get, typing.cast(server_common.RequestId, request_id))
         return False
@@ -1062,13 +1067,16 @@ class StrategyExecutor:
         the cluster (e.g. a duplicate kept as the fallback of a RUNNING
         request that turned out to be a leftover of a dead server process),
         and the next attempt adopts it instead of tearing the cluster down.
-        If the lookup fails, the answer is False, i.e. the cluster is torn
-        down as it would be without this check.
+        The lookup is retried like the others (see _retry_lookup). Only if it
+        keeps failing is the answer False, i.e. the cluster is torn down as it
+        would be without this check.
         """
         if self.pool is not None:
             return False
         try:
-            live_requests = await self._list_live_launch_requests()
+            live_requests = await self._retry_lookup(
+                self._list_live_launch_requests,
+                f'the live launch requests for cluster {self.cluster_name}')
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to look up the live launch requests for '
                         f'cluster {self.cluster_name}: '
@@ -1592,51 +1600,6 @@ class StrategyExecutor:
                                         # if it has finished since.
                                         stream_task = self._start_stream_task(
                                             request_id)
-                                    elif (stream_task.done() and
-                                          stream_task.exception() is not None):
-                                        # The carried stream already failed -
-                                        # e.g. a transient transport error
-                                        # while the API server was briefly
-                                        # unreachable during the park - even
-                                        # though the request itself may have
-                                        # survived and already resumed.
-                                        # Trusting this stale error would
-                                        # tear down an otherwise healthy
-                                        # cluster, so don't let it propagate
-                                        # below: consume it and check the
-                                        # request's real state instead.
-                                        stream_task.add_done_callback(
-                                            _consume_task_exception)
-                                        request_payload = (
-                                            await self._get_request_payload(
-                                                request_id))
-                                        if (request_payload is not None and
-                                                request_payload.status
-                                                in _LIVE_REQUEST_STATUS_VALUES):
-                                            # Still live server-side - start a
-                                            # fresh stream to finish waiting
-                                            # on it instead of the dead one.
-                                            stream_task = (
-                                                self._start_stream_task(
-                                                    request_id))
-                                        else:
-                                            # Terminal (or unknown to the
-                                            # server): the outcome is already
-                                            # decided. Surface it directly -
-                                            # this raises the request's own
-                                            # exception if it failed - rather
-                                            # than waiting on a stream that
-                                            # will never produce one.
-                                            result: Any = (
-                                                await asyncio.to_thread(
-                                                    sdk.get,
-                                                    typing.cast(
-                                                        server_common.RequestId,
-                                                        request_id)))
-                                            stream_task = (
-                                                asyncio.get_running_loop(
-                                                ).create_future())
-                                            stream_task.set_result(result)
                                 assert stream_task is not None
                                 while True:
                                     try:
@@ -1646,10 +1609,19 @@ class StrategyExecutor:
                                     except _LaunchRequestParked:
                                         raise
                                     except Exception as e:  # pylint: disable=broad-except
-                                        # Only for a request this attempt
-                                        # re-attached to; the stream of a
-                                        # request it submitted keeps the
-                                        # usual failure handling.
+                                        # The stream failed, which is not
+                                        # necessarily the request failing:
+                                        # the request's own status decides
+                                        # (_settle_failed_stream). This also
+                                        # covers a stream carried across a
+                                        # park that failed during the park
+                                        # (e.g. the API server was briefly
+                                        # unreachable): awaiting it raises
+                                        # its error at once. Only for a
+                                        # request this attempt re-attached
+                                        # to; the stream of a request it
+                                        # submitted keeps the usual failure
+                                        # handling.
                                         if reattach_request_id is None:
                                             raise
                                         assert request_id is not None
