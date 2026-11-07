@@ -59,32 +59,27 @@ class QueryHelper:
     @classmethod
     @debug_enabled(logger)
     def query_instances_by_tags(cls, tag_filters, region):
+        """Live instances in the launch compartment carrying `tag_filters`.
 
-        where_clause_tags = ''
-        for tag_key in tag_filters:
-            if where_clause_tags != '':
-                where_clause_tags += ' && '
+        Lists the compartment directly instead of going through Resource
+        Search: search only covers the caller's home tenancy, so it comes
+        back empty when the compartment belongs to another tenancy reached
+        through cross-tenancy policies (a freshly launched head node is
+        then never found and the cluster is left behind), and its index
+        also lags behind new instances.
+        """
+        core_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile(region))
+        instances = oci_adaptor.oci.pagination.list_call_get_all_results(
+            core_client.list_instances,
+            compartment_id=cls.find_compartment(region)).data
 
-            tag_value = tag_filters[tag_key]
-            where_clause_tags += (f'(freeformTags.key = \'{tag_key}\''
-                                  f' && freeformTags.value = \'{tag_value}\')')
-
-        qv_str = (f'query instance resources where {where_clause_tags}'
-                  f' && (lifecycleState != \'TERMINATED\''
-                  f' && lifecycleState != \'TERMINATING\')')
-
-        qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
-            query=qv_str,
-            type='Structured',
-            matching_context_type=oci_adaptor.oci.resource_search.models.
-            SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
-        )
-
-        list_instances_response = oci_adaptor.get_search_client(
-            region, oci_utils.oci_config.get_profile()).search_resources(qv)
-        result_set = list_instances_response.data.items
-
-        return result_set
+        return [
+            inst for inst in instances if inst.lifecycle_state not in (
+                'TERMINATED', 'TERMINATING') and all(
+                    (inst.freeform_tags or {}).get(key) == value
+                    for key, value in tag_filters.items())
+        ]
 
     @classmethod
     @debug_enabled(logger)
@@ -97,23 +92,29 @@ class QueryHelper:
         nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=False)
 
         core_client = oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
 
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
-            inst_id = inst.identifier
+            inst_id = inst.id
             logger.debug(f'Terminating instance {inst_id}')
 
-            try:
-                # Release the NSG reference so that the NSG can be
-                # deleted without waiting the instance being terminated.
-                if nsg_id is not None:
+            if nsg_id is not None:
+                # Release the NSG reference so that the NSG can be deleted
+                # without waiting for the instance to terminate. This is
+                # best effort: the instance is terminated below whether or
+                # not it succeeds, otherwise `sky down` would leave the
+                # instance running (and billed).
+                try:
                     cls.detach_nsg(region, inst, nsg_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to detach NSG {nsg_id} from instance '
+                        f'{inst_id}; terminating it anyway: {str(e)}')
 
-                # Terminate the instance
+            try:
                 core_client.terminate_instance(inst_id)
-
             except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
                 logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
@@ -131,7 +132,7 @@ class QueryHelper:
     def launch_instance(cls, region, launch_config):
         """ To create a new instance """
         return oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile()).launch_instance(
+            region, oci_utils.oci_config.get_profile(region)).launch_instance(
                 launch_instance_details=launch_config)
 
     @classmethod
@@ -139,7 +140,7 @@ class QueryHelper:
     def start_instance(cls, region, instance_id):
         """ To start an existing instance """
         return oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile()).instance_action(
+            region, oci_utils.oci_config.get_profile(region)).instance_action(
                 instance_id=instance_id, action='START')
 
     @classmethod
@@ -147,7 +148,7 @@ class QueryHelper:
     def stop_instance(cls, region, instance_id):
         """ To stop an instance """
         return oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile()).instance_action(
+            region, oci_utils.oci_config.get_profile(region)).instance_action(
                 instance_id=instance_id, action='STOP')
 
     @classmethod
@@ -155,7 +156,7 @@ class QueryHelper:
     def wait_instance_until_status(cls, region, node_id, status):
         """ To wait a instance becoming the specified state """
         compute_client = oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
 
         resp = compute_client.get_instance(instance_id=node_id)
 
@@ -170,14 +171,15 @@ class QueryHelper:
     def get_instance_primary_vnic(cls, region, inst_info):
         """ Get the primary vnic infomation of the instance """
         list_vnic_attachments_response = oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile()).list_vnic_attachments(
+            region,
+            oci_utils.oci_config.get_profile(region)).list_vnic_attachments(
                 availability_domain=inst_info['ad'],
                 compartment_id=inst_info['compartment'],
                 instance_id=inst_info['inst_id'],
             )
         vnic = list_vnic_attachments_response.data[0]
         return oci_adaptor.get_net_client(
-            region, oci_utils.oci_config.get_profile()).get_vnic(
+            region, oci_utils.oci_config.get_profile(region)).get_vnic(
                 vnic_id=vnic.vnic_id).data
 
     @classmethod
@@ -189,7 +191,7 @@ class QueryHelper:
             return
 
         core_client = oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
         try:
             agreements_resp = core_client.get_app_catalog_listing_agreements(
                 listing_id=listing_id, resource_version=resource_version)
@@ -235,10 +237,10 @@ class QueryHelper:
         # Pass-in a profile parameter so that multiple profile in oci
         # config file is supported (2023/06/09).
         root = oci_adaptor.get_oci_config(
-            region, oci_utils.oci_config.get_profile())['tenancy']
+            region, oci_utils.oci_config.get_profile(region))['tenancy']
 
         list_compartments_response = oci_adaptor.get_identity_client(
-            region, oci_utils.oci_config.get_profile()).list_compartments(
+            region, oci_utils.oci_config.get_profile(region)).list_compartments(
                 compartment_id=root,
                 name=oci_utils.oci_config.COMPARTMENT,
                 compartment_id_in_subtree=True,
@@ -268,7 +270,7 @@ class QueryHelper:
 
         # Try to reuse the skypilot_vcn.
         net_client = oci_adaptor.get_net_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
         skypilot_compartment = cls.find_compartment(region)
         list_vcns_response = net_client.list_vcns(
             compartment_id=skypilot_compartment,
@@ -493,7 +495,7 @@ class QueryHelper:
     def find_nsg(cls, region: str, nsg_name: str,
                  create_if_not_exist: bool) -> Optional[str]:
         net_client = oci_adaptor.get_net_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
 
         compartment = cls.find_compartment(region)
 
@@ -563,7 +565,7 @@ class QueryHelper:
             return
 
         net_client = oci_adaptor.get_net_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
 
         nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
             cluster_name=cluster_name)
@@ -575,7 +577,7 @@ class QueryHelper:
             vnic = cls.get_instance_primary_vnic(
                 region=region,
                 inst_info={
-                    'inst_id': inst.identifier,
+                    'inst_id': inst.id,
                     'ad': inst.availability_domain,
                     'compartment': inst.compartment_id,
                 })
@@ -647,14 +649,15 @@ class QueryHelper:
         vnic = cls.get_instance_primary_vnic(
             region=region,
             inst_info={
-                'inst_id': inst.identifier,
+                'inst_id': inst.id,
                 'ad': inst.availability_domain,
                 'compartment': inst.compartment_id,
             })
 
-        # Detatch the NSG before removing it.
-        oci_adaptor.get_net_client(region, oci_utils.oci_config.get_profile(
-        )).update_vnic(
+        # Detach the NSG before removing it.
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile(region))
+        net_client.update_vnic(
             vnic_id=vnic.id,
             update_vnic_details=oci_adaptor.oci.core.models.UpdateVnicDetails(
                 nsg_ids=[], skip_source_dest_check=False),
@@ -665,7 +668,7 @@ class QueryHelper:
     def remove_cluster_nsg(cls, region: str, cluster_name: str) -> None:
         """ Remove NSG of the cluster """
         net_client = oci_adaptor.get_net_client(
-            region, oci_utils.oci_config.get_profile())
+            region, oci_utils.oci_config.get_profile(region))
 
         nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
             cluster_name=cluster_name)
