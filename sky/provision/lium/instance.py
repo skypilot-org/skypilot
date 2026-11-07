@@ -28,10 +28,24 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if config.count > 1:
         raise RuntimeError('Lium supports single-node clusters only.')
 
-    pods = lium_utils.get_cluster_pods(cluster_name_on_cloud)
-    head_pod_id = _head_pod_id(pods)
+    head_pod_id = None
+    for pod_id, pod in lium_utils.get_cluster_pods(
+            cluster_name_on_cloud).items():
+        if lium_utils.POD_STATUS_MAP.get(pod.status.upper(),
+                                         status_lib.ClusterStatus.INIT) in (
+                                             status_lib.ClusterStatus.UP,
+                                             status_lib.ClusterStatus.INIT):
+            head_pod_id = pod_id
+        else:
+            # A failed or stopped pod cannot come back, so it is replaced.
+            logger.info(f'Deleting pod {pod_id} ({pod.status}) of cluster '
+                        f'{cluster_name_on_cloud} to rent a new one.')
+            lium_utils.terminate_pod(pod_id)
     if head_pod_id is not None:
         logger.info(f'Cluster {cluster_name_on_cloud} already has a head pod.')
+        if lium_utils.wait_pod_ready(head_pod_id, POD_READY_TIMEOUT) is None:
+            raise RuntimeError(f'Pod {head_pod_id} did not become ready in '
+                               f'{POD_READY_TIMEOUT}s.')
         return common.ProvisionRecord(provider_name='lium',
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
@@ -49,7 +63,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             f'{instance_type} asks for. The catalog may quote a node that is '
             'now rented; a refreshed catalog names the nodes on offer.')
 
-    pod_name = f'{cluster_name_on_cloud}-head'
+    pod_name = lium_utils.head_pod_name(cluster_name_on_cloud)
     logger.info(f'Renting node {node.id} ({instance_type}) as {pod_name}.')
     pod_id = lium_utils.rent_node(node, pod_name, node_config['PublicKey'])
 

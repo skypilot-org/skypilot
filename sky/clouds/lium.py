@@ -36,6 +36,9 @@ class Lium(clouds.Cloud):
             'Stopping a pod is not supported on Lium.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
             'Multi-node clusters are not supported on Lium.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not supported on Lium: a pod gets a number of '
+             'host ports, not the ports a task names.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are not supported on Lium.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:

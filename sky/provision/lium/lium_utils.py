@@ -34,6 +34,8 @@ API_KEY_ENV_VAR = 'LIUM_API_KEY'
 
 _REQUEST_TIMEOUT = 30
 _POD_POLL_INTERVAL = 10
+# The largest page the /executors listing serves.
+_EXECUTOR_PAGE_SIZE = 1000
 
 # Maps the GPU model names that Lium reports to the accelerator names that
 # SkyPilot uses. A model that is absent here never reaches the catalog, so a
@@ -234,15 +236,8 @@ def find_cheapest_free_node(instance_type: str,
     instance type names.
     """
     shape = parse_instance_type(instance_type)
-    payloads = _request('GET',
-                        '/executors',
-                        params={
-                            'size': 1000,
-                            'gpu_count_gte': shape.accelerator_count,
-                            'gpu_count_lte': shape.accelerator_count,
-                        })
     candidates: List[LiumNode] = []
-    for payload in payloads:
+    for payload in _list_executors(shape.accelerator_count):
         node = _parse_node(payload)
         if node is None:
             continue
@@ -259,6 +254,25 @@ def find_cheapest_free_node(instance_type: str,
     if not candidates:
         return None
     return min(candidates, key=lambda node: node.price_per_hour)
+
+
+def _list_executors(gpu_count: int) -> List[Dict[str, Any]]:
+    """Returns every free node with this many GPUs, page by page."""
+    payloads: List[Dict[str, Any]] = []
+    page = 1
+    while True:
+        rows = _request('GET',
+                        '/executors',
+                        params={
+                            'page': page,
+                            'size': _EXECUTOR_PAGE_SIZE,
+                            'gpu_count_gte': gpu_count,
+                            'gpu_count_lte': gpu_count,
+                        })
+        payloads.extend(rows)
+        if len(rows) < _EXECUTOR_PAGE_SIZE:
+            return payloads
+        page += 1
 
 
 def _default_template_id(node: LiumNode) -> str:
@@ -318,11 +332,20 @@ def _parse_pod(payload: Dict[str, Any]) -> LiumPod:
                    ssh_port=int(port_match.group(1)) if port_match else 22)
 
 
+def head_pod_name(cluster_name_on_cloud: str) -> str:
+    """Returns the name of the one pod of a cluster."""
+    return f'{cluster_name_on_cloud}-head'
+
+
 def get_cluster_pods(cluster_name_on_cloud: str) -> Dict[str, LiumPod]:
-    """Returns the pods of a cluster, keyed by pod id."""
-    prefix = f'{cluster_name_on_cloud}-'
+    """Returns the pods of a cluster, keyed by pod id.
+
+    A cluster is one head pod, so only that exact name matches: a prefix would
+    also catch another cluster whose name starts with this one.
+    """
+    name = head_pod_name(cluster_name_on_cloud)
     pods = [_parse_pod(payload) for payload in _request('GET', '/pods')]
-    return {pod.id: pod for pod in pods if pod.name.startswith(prefix)}
+    return {pod.id: pod for pod in pods if pod.name == name}
 
 
 def terminate_pod(pod_id: str) -> None:

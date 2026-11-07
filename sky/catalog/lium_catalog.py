@@ -31,12 +31,16 @@ _catalog: Optional['pd.DataFrame'] = None
 def _get_df() -> 'pd.DataFrame':
     """Returns the catalog, from the published file or from the live feed."""
     global _catalog
-    if _catalog is None:
-        catalog = _read_published_catalog()
-        if catalog is None:
-            catalog = _build_catalog_from_node_feed()
+    if _catalog is not None:
+        return _catalog
+    catalog = _read_published_catalog()
+    if catalog is None:
+        catalog = _build_catalog_from_node_feed()
+    # An empty catalog means both sources failed: it is not kept, so the next
+    # call tries them again instead of hiding Lium until a restart.
+    if not catalog.empty:
         _catalog = catalog
-    return _catalog
+    return catalog
 
 
 def _read_published_catalog() -> Optional['pd.DataFrame']:
