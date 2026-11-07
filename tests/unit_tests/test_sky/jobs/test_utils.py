@@ -10,6 +10,7 @@ from sky import exceptions
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
+from sky.utils import message_utils
 
 
 class TestClusterHandleNotRequired:
@@ -2663,3 +2664,82 @@ class TestFormatJobTableDynamicMembers:
                                             show_user=False,
                                             return_rows=True)
         assert self._id_task_status(table) == [('70', '-', 'RUNNING')]
+
+
+class TestLoadManagedJobQueue:
+
+    def test_load_managed_job_queue_basic(self):
+        job_dict = {
+            'jobs': [{
+                'job_id': 1,
+                'status': 'RUNNING',
+                'user_hash': None
+            }],
+            'total': 1,
+            'status_counts': {
+                'RUNNING': 1
+            },
+            'total_no_filter': 1,
+            'infra_options': ['gcp']
+        }
+        payload = message_utils.encode_payload(job_dict,
+                                               payload_type='managed_job_queue')
+        jobs, total, res_type, total_no_filter, counts, infra = (
+            jobs_utils.load_managed_job_queue(payload))
+        assert total == 1
+        assert jobs[0]['job_id'] == 1
+        assert res_type == jobs_utils.ManagedJobQueueResultType.DICT
+        assert counts == {'RUNNING': 1}
+        assert infra == ['gcp']
+
+    def test_load_managed_job_queue_preceded_by_status_payloads(self):
+        # Progress/spinner output (such as periodic catalog refresh) emitted
+        # during table generation precedes the job table payload.
+        status_payload1 = message_utils.encode_payload(
+            '<rich_init>Updating gcp catalog: vms.csv (every 7 hours)</rich_init>'
+        )
+        status_payload2 = message_utils.encode_payload(
+            '<rich_start>Updating gcp catalog: vms.csv (every 7 hours)</rich_start>'
+        )
+        job_dict = {
+            'jobs': [{
+                'job_id': 10,
+                'status': 'RUNNING',
+                'user_hash': None
+            }],
+            'total': 1,
+            'status_counts': {
+                'RUNNING': 1
+            },
+            'total_no_filter': 1,
+            'infra_options': ['gcp']
+        }
+        # Both tagged and untagged job table payloads should be resolved cleanly
+        for tagged in (True, False):
+            job_payload = message_utils.encode_payload(
+                job_dict, payload_type='managed_job_queue' if tagged else None)
+            combined = status_payload1 + status_payload2 + job_payload
+            jobs, total, res_type, _, _, _ = jobs_utils.load_managed_job_queue(
+                combined)
+            assert total == 1
+            assert jobs[0]['job_id'] == 10
+            assert res_type == jobs_utils.ManagedJobQueueResultType.DICT
+
+    def test_load_managed_job_queue_legacy_list_payload(self):
+        status_payload = message_utils.encode_payload(
+            '<rich_init>Updating catalog</rich_init>')
+        legacy_list = [{'job_id': 20, 'status': 'PENDING', 'user_hash': None}]
+        job_payload = message_utils.encode_payload(legacy_list)
+        combined = status_payload + job_payload
+        jobs, total, res_type, _, _, _ = jobs_utils.load_managed_job_queue(
+            combined)
+        assert total == 1
+        assert jobs[0]['job_id'] == 20
+        assert res_type == jobs_utils.ManagedJobQueueResultType.LIST
+
+    def test_load_managed_job_queue_invalid_payload_type(self):
+        scalar_payload = message_utils.encode_payload('not a list or dict')
+        with pytest.raises(
+                ValueError,
+                match='Expected job queue payload to be a dict or list'):
+            jobs_utils.load_managed_job_queue(scalar_payload)
