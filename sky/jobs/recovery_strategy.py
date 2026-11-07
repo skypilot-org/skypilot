@@ -144,6 +144,12 @@ _LAUNCH_REQUEST_NAME = (server_constants.REQUEST_NAME_PREFIX +
 # failure is common and says little.
 _LIVE_LAUNCH_LOOKUP_ATTEMPTS = 4
 _LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS = 5
+# A re-attached launch request that is still live gets a new log stream when
+# its stream fails, at once. A stream that fails within this long counts as a
+# quick failure; after this many quick failures in a row (e.g. while the API
+# server replicas restart) the attempt backs off instead of reopening.
+_QUICK_STREAM_FAILURE_SECONDS = 60
+_MAX_QUICK_STREAM_FAILURES = 3
 
 # The blocking sync-SDK log stream of each inner launch request runs in a
 # worker thread. Deliberately NOT asyncio.to_thread's default executor: a
@@ -166,6 +172,7 @@ _KIND_INFRA_UNREACHABLE = 'infra_unreachable'
 _KIND_JOB_SUBMIT_FAILED = 'job_submit_failed'
 _KIND_POOL_NO_CLUSTER = 'pool_no_cluster'
 _KIND_LAUNCH_LOOKUP_FAILED = 'launch_lookup_failed'
+_KIND_LAUNCH_STREAM_FAILED = 'launch_stream_failed'
 
 # Why _wait_until_job_starts_on_cluster gave up. Without these the whole
 # family is one opaque bucket: the loop swallows three different exceptions
@@ -262,6 +269,16 @@ class _LaunchLookupFailed(Exception):
     Not knowing is not the same as "none is live": launching now could put a
     second launch beside a live one, and tearing the cluster down would cancel
     it. The launch attempt backs off and looks again instead.
+    """
+
+
+class _LaunchStreamFailing(Exception):
+    """A live launch request's log stream keeps failing.
+
+    The request is fine (the server reports it live), but each new stream of
+    it fails quickly, e.g. while the API server replicas restart. Reopening
+    at once would keep loading the API server, so the launch attempt backs off
+    and re-attaches later instead.
     """
 
 
@@ -1342,6 +1359,11 @@ class StrategyExecutor:
             await self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
+        # Attempts that backed off without a launch failing (a failed lookup,
+        # or a live request whose stream kept failing): they do not count
+        # toward max_retry. They still count in retry_cnt, which also tells
+        # the next attempt that it is a retry.
+        uncounted_attempts = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         # Request id (and its carried log-stream future) of a launch request
         # that was parked (WAITING) while we were waiting for it, to re-attach
@@ -1601,6 +1623,8 @@ class StrategyExecutor:
                                         stream_task = self._start_stream_task(
                                             request_id)
                                 assert stream_task is not None
+                                stream_started_at = time.monotonic()
+                                quick_stream_failures = 0
                                 while True:
                                     try:
                                         await self._await_launch_request(
@@ -1636,8 +1660,24 @@ class StrategyExecutor:
                                             raise
                                         if not still_live:
                                             break
+                                        stream_seconds = (time.monotonic() -
+                                                          stream_started_at)
+                                        if (stream_seconds <
+                                                _QUICK_STREAM_FAILURE_SECONDS):
+                                            quick_stream_failures += 1
+                                        else:
+                                            quick_stream_failures = 0
+                                        if (quick_stream_failures >=
+                                                _MAX_QUICK_STREAM_FAILURES):
+                                            # Re-attach on the next attempt,
+                                            # after a backoff.
+                                            unsettled_request_id = request_id
+                                            raise _LaunchStreamFailing(
+                                                common_utils.format_exception(
+                                                    e)) from e
                                         stream_task = self._start_stream_task(
                                             request_id)
+                                        stream_started_at = time.monotonic()
                             except asyncio.CancelledError:
                                 if request_id:
                                     await self._cancel_launch_request(request_id
@@ -1716,6 +1756,18 @@ class StrategyExecutor:
                             'Failed to look up the live launch requests for '
                             f'cluster {self.cluster_name}; retrying later: {e}')
                         retry_code = _KIND_LAUNCH_LOOKUP_FAILED
+                        uncounted_attempts += 1
+                        raise exceptions.NoClusterLaunchedError() from e
+                    except _LaunchStreamFailing as e:
+                        # The same, for a live request whose stream keeps
+                        # failing: back off instead of reopening it in a
+                        # tight loop, then re-attach to it.
+                        logger.warning(
+                            'The log stream of a live launch request for '
+                            f'cluster {self.cluster_name} keeps failing; '
+                            f're-attaching later: {e}')
+                        retry_code = _KIND_LAUNCH_STREAM_FAILED
+                        uncounted_attempts += 1
                         raise exceptions.NoClusterLaunchedError() from e
                     except exceptions.PoolDoesNotExistError as e:
                         # The pool was deleted while this job is still bound
@@ -1892,7 +1944,8 @@ class StrategyExecutor:
                     # attempt adopts it.
                     if not await self._other_launch_is_live():
                         await asyncio.to_thread(self._cleanup_cluster)
-                    if max_retry is not None and retry_cnt >= max_retry:
+                    if (max_retry is not None and
+                            retry_cnt - uncounted_attempts >= max_retry):
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
                             with ux_utils.print_exception_no_traceback():

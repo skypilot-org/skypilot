@@ -1466,6 +1466,79 @@ async def test_reattached_stream_failure_with_unreadable_status_waits(
 
 
 @pytest.mark.asyncio
+async def test_reattached_stream_that_keeps_failing_backs_off(monkeypatch):
+    """The request stays live but every new stream of it fails at once (e.g.
+    a 502 while the API server replicas restart): after a few reopens, back
+    off without tearing down instead of reopening in a tight loop, then
+    re-attach to the same request."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-old', 'RUNNING'),
+        _launch_request('req-old', 'RUNNING'),
+    ])
+    stream_error = RuntimeError(
+        '502 Server Error: Bad Gateway for url: /api/stream')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[stream_error] *
+        recovery_strategy._MAX_QUICK_STREAM_FAILURES + [None])
+    executor._get_request_payload = mock.AsyncMock(
+        return_value=_request_payload('RUNNING'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    # The failed streams, then one more on the next attempt, which succeeds.
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old')
+    ] * (recovery_strategy._MAX_QUICK_STREAM_FAILURES + 1)
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:launch_stream_failed']
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failures_spread_out_do_not_back_off(
+        monkeypatch):
+    """A stream that ran for a while before failing is not a quick failure:
+    it is reopened at once however many times it happens."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'RUNNING')
+    monkeypatch.setattr(recovery_strategy, '_QUICK_STREAM_FAILURE_SECONDS', 0)
+    failures = recovery_strategy._MAX_QUICK_STREAM_FAILURES + 2
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('502 Server Error: Bad Gateway')] * failures +
+        [None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_count == failures + 1
+    assert not patches.set_backoff_pending.called
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_lookup_failure_does_not_count_toward_max_retry(
+        monkeypatch):
+    """A lookup failure is not a failed launch attempt: with max_retry=2, a
+    failed lookup and then one failed launch still leave a second launch."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('timed out'), None, None])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('launch failed'), None])
+
+    assert await executor._launch(max_retry=2, raise_on_failure=True) == 123.45
+
+    assert patches.sdk_launch.call_count == 2
+    assert _codes(
+        patches.set_backoff_pending)[0] == ('launch_retry:launch_lookup_failed')
+
+
+@pytest.mark.asyncio
 async def test_submitted_request_stream_failure_keeps_failure_handling(
         monkeypatch):
     """The stream of a request this attempt submitted itself is handled as
