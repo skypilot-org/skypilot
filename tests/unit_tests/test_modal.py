@@ -1,6 +1,7 @@
 """Tests for Modal cloud provider."""
 
 import contextlib
+import csv
 import pathlib
 import subprocess
 import sys
@@ -14,7 +15,9 @@ from sky import exceptions
 from sky import models
 from sky import resources as resources_lib
 from sky.backends import backend_utils
+from sky.catalog import common as catalog_common
 from sky.catalog import modal_catalog
+from sky.catalog.data_fetchers import fetch_modal
 from sky.clouds import modal as modal_cloud
 from sky.data import storage as storage_lib
 from sky.provision import common
@@ -28,6 +31,53 @@ from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import volume as volume_utils
 from sky.volumes import volume as volume_lib
+
+# Per-second prices as listed on modal.com/pricing.
+_MODAL_PRICES = {
+    'B300': 0.001972,
+    'B200': 0.001736,
+    'H200': 0.001261,
+    'H100': 0.001097,
+    'RTX-PRO-6000': 0.000842,
+    'A100-80GB': 0.000694,
+    'A100-40GB': 0.000583,
+    'A100': 0.000583,
+    'L40S': 0.000542,
+    'A10': 0.000306,
+    'L4': 0.000222,
+    'T4': 0.000164,
+    'cpu': 0.0000131,
+    'memory': 0.00000222,
+    'nonpreemptible_cpu': 0.00003942,
+    'nonpreemptible_memory': 0.00000667,
+}
+_MODAL_REGION_MULTIPLIERS = {
+    'auto': 1.0,
+    **{region: 1.15 for region in fetch_modal.BROAD_REGIONS},
+    **{region: 1.75 for region in fetch_modal.NARROW_REGIONS},
+}
+
+
+def _write_modal_catalog(path, prices=None):
+    rows = fetch_modal.create_catalog(prices or _MODAL_PRICES,
+                                      _MODAL_REGION_MULTIPLIERS)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fetch_modal.COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return catalog_common.LazyDataFrame(str(path), lambda: False)
+
+
+@pytest.fixture(scope='module')
+def _modal_catalog_df(tmp_path_factory):
+    path = tmp_path_factory.mktemp('modal_catalog') / 'vms.csv'
+    return _write_modal_catalog(path)
+
+
+@pytest.fixture(autouse=True)
+def _use_modal_catalog(monkeypatch, _modal_catalog_df):
+    """Use a catalog made by the fetcher instead of the hosted one."""
+    monkeypatch.setattr(modal_catalog, '_df', _modal_catalog_df)
 
 
 def _provision_config(node_config,
@@ -1546,3 +1596,120 @@ def test_modal_adaptor_keeps_config_if_reload_internals_change(
     assert lazy_modal.config.config.get('token_id') == 'ak-first'
     path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
     assert lazy_modal.config.config.get('token_id') == 'ak-first'
+
+
+def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):
+    prices = dict(_MODAL_PRICES, H100=0.002, cpu=0.00002)
+    monkeypatch.setattr(modal_catalog, '_df',
+                        _write_modal_catalog(tmp_path / 'vms.csv', prices))
+
+    assert modal_catalog.get_hourly_cost(
+        'modal-h100-1x', region='auto') == (pytest.approx(
+            (2 * 0.00002 + 16 * 0.00000222 + 0.002) * 3600))
+    assert modal_catalog.get_hourly_cost(
+        '32CPU--128GB--H100:2', region='us-west') == pytest.approx(
+            (16 * 0.00002 + 128 * 0.00000222 + 2 * 0.002) * 3600 * 1.75)
+    # CPU-only shapes keep the non-preemptible rates.
+    assert modal_catalog.get_hourly_cost(
+        '16CPU--64GB', region='auto') == pytest.approx(
+            (8 * 0.00003942 + 64 * 0.00000667) * 3600)
+
+
+def test_modal_catalog_gpu_types_and_counts_come_from_catalog(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(fetch_modal, 'GPU_COUNTS', {'H100': (1, 8)})
+    monkeypatch.setattr(modal_catalog, '_df',
+                        _write_modal_catalog(tmp_path / 'vms.csv'))
+
+    assert modal_catalog.get_max_gpu_count('h100') == 8
+    assert modal_catalog.get_max_gpu_count('T4') is None
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'H100', 8) == (['4CPU--16GB--H100:8'], [])
+    assert not modal_catalog.get_instance_type_for_accelerator('H100', 2)[0]
+    assert not modal_catalog.instance_type_exists('4CPU--16GB--T4:1')
+
+
+def _pricing_page(gpus):
+    """Mimics modal.com/pricing: each price is drawn twice, once as
+    screen-reader text and once as aria-hidden animated digits."""
+
+    def price(value):
+        digits = ''.join(f'<span>{c}</span>' for c in value)
+        return (f'$<span class="inline-flex tabular-nums">'
+                f'<span class="sr-only">{value}</span> '
+                f'<span class="inline-flex" aria-hidden="true">{digits}'
+                f'</span></span>')
+
+    rows = ''.join(f'<div><p>Nvidia {name}</p><p>{price(value)} / sec</p>'
+                   '</div>' for name, value in gpus.items())
+    return (f'<html><head><script>var x = "Nvidia T4 $ 9 / sec";</script>'
+            f'</head><body><h2>Resource costs</h2><p>GPU Tasks</p>{rows}'
+            f'<div><p>CPU</p><p>{price("0.0000131")} / core / sec</p>'
+            '<p>Physical core (2 vCPU equivalent)</p><br></div>'
+            f'<div><p>Memory</p><p>{price("0.00000222")} / GiB / sec</p></div>'
+            '<h2>Modal Sandbox pricing</h2><div><p>CPU (non-preemptible)</p>'
+            '<p>Physical core (2 vCPU equivalent)</p>'
+            f'<p>{price("0.00003942")} / core / sec</p></div>'
+            '<div><p>Memory (non-preemptible)</p>'
+            f'<p>{price("0.00000667")} / GiB / sec</p></div></body></html>')
+
+
+_PAGE_GPUS = {
+    'B300': '0.001972',
+    'B200': '0.001736',
+    'H200 SXM': '0.001261',
+    'H100 SXM5': '0.001097',
+    'RTX PRO 6000': '0.000842',
+    'A100, 80 GB': '0.000694',
+    'A100, 40 GB': '0.000583',
+    'L40S': '0.000542',
+    'A10': '0.000306',
+    'L4': '0.000222',
+    'T4': '0.000164',
+}
+
+
+def test_fetch_modal_parses_pricing_page():
+    prices = fetch_modal.parse_pricing_page(
+        _pricing_page(dict(_PAGE_GPUS, **{'X9000': '0.5'})))
+
+    assert prices == _MODAL_PRICES
+
+
+def test_fetch_modal_fails_when_a_gpu_price_is_missing():
+    gpus = dict(_PAGE_GPUS)
+    del gpus['H100 SXM5']
+    with pytest.raises(fetch_modal.ModalPricingError, match='H100'):
+        fetch_modal.parse_pricing_page(_pricing_page(gpus))
+    with pytest.raises(fetch_modal.ModalPricingError, match='GPU Tasks'):
+        fetch_modal.parse_pricing_page('<html><body>Pricing</body></html>')
+
+
+def test_fetch_modal_parses_region_multipliers():
+    page = ('<table><tr><td>Broad (e.g. <code>us</code>)</td><td>1.2x</td>'
+            '</tr><tr><td>Narrow (e.g. <code>us-west</code>)</td>'
+            '<td>1.8x</td></tr></table>')
+
+    multipliers = fetch_modal.parse_region_multipliers(page)
+
+    assert multipliers['auto'] == 1.0
+    assert multipliers['eu'] == 1.2
+    assert multipliers['us-west'] == 1.8
+    with pytest.raises(fetch_modal.ModalPricingError, match='broad'):
+        fetch_modal.parse_region_multipliers('<p>no prices</p>')
+
+
+def test_fetch_modal_catalog_rows():
+    rows = fetch_modal.create_catalog(_MODAL_PRICES, _MODAL_REGION_MULTIPLIERS)
+    by_key = {(row['InstanceType'], row['Region']): row for row in rows}
+
+    assert all(set(row) == set(fetch_modal.COLUMNS) for row in rows)
+    cpu = by_key[('modal-cpu-4x-16gb', 'us')]
+    assert cpu['AcceleratorName'] is None
+    assert cpu['Price'] == pytest.approx(
+        (2 * 0.00003942 + 16 * 0.00000667) * 3600 * 1.15)
+    h100 = by_key[('modal-h100-8x', 'auto')]
+    assert (h100['AcceleratorName'], h100['AcceleratorCount']) == ('H100', 8)
+    assert h100['AcceleratorHourlyPrice'] == pytest.approx(0.001097 * 3600)
+    assert ('modal-a10-8x', 'auto') not in by_key
+    assert ('modal-a100-2x', 'auto') in by_key
