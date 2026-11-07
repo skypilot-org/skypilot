@@ -1,6 +1,9 @@
 """YAML utilities."""
 import io
+import os
+import stat
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
+import uuid
 
 from sky.adaptors import common
 
@@ -129,6 +132,36 @@ def dump_yaml(path: str,
             # when dumping to yaml, an empty dict will go in as {}.
             contents = ''
         f.write(contents)
+
+
+def dump_yaml_atomic(path: str, config: Dict[str, Any]) -> None:
+    """Dumps a YAML file by replacing it: a concurrent reader sees the old or
+    the new contents, never a truncated file."""
+    contents = dump_yaml_str(config)
+    # Replace the resolved path, so a symlinked file keeps its link.
+    real_path = os.path.realpath(path)
+    try:
+        mode: Optional[int] = stat.S_IMODE(os.stat(real_path).st_mode)
+    except FileNotFoundError:
+        mode = None
+    tmp_path = os.path.join(os.path.dirname(real_path),
+                            f'.{uuid.uuid4().hex}.tmp')
+    # 0o666 under the umask, as open(path, 'w') would create a new file.
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    replaced = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            if mode is not None:
+                # Before writing, so the contents are never more readable.
+                os.fchmod(f.fileno(), mode)
+            f.write(contents)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, real_path)
+        replaced = True
+    finally:
+        if not replaced:
+            os.remove(tmp_path)
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
