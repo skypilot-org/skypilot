@@ -10,11 +10,13 @@ from types import SimpleNamespace
 import jinja2
 import pytest
 
+from sky import backends
 from sky import clouds
 from sky import exceptions
 from sky import models
 from sky import resources as resources_lib
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as catalog_common
 from sky.catalog import modal_catalog
 from sky.catalog.data_fetchers import fetch_modal
@@ -104,9 +106,11 @@ def _modal_unsupported_features(resources):
     return clouds.Modal._unsupported_features_for_resources(resources)
 
 
-def _set_modal_config(monkeypatch, config):
-    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
-                        SimpleNamespace(config=SimpleNamespace(config=config)))
+def _set_modal_config(monkeypatch, config, user_config_path='~/.modal.toml'):
+    monkeypatch.setattr(
+        modal_cloud.modal_adaptor, 'modal',
+        SimpleNamespace(config=SimpleNamespace(
+            config=config, user_config_path=user_config_path)))
 
 
 def _set_active_modal_environment(monkeypatch, name='dev'):
@@ -124,10 +128,10 @@ def test_modal_cloud_registration():
 
 def test_modal_dependency_gating():
     assert dependencies.cloud_dependencies['modal'] == [
-        'modal>=1.5.0; python_version>="3.10"',
+        'modal>=1.6.0; python_version>="3.10"',
     ]
     modal_in_all = any(
-        dep.startswith('modal>=1.5.0')
+        dep.startswith('modal>=1.6.0')
         for dep in dependencies.extras_require['all'])
     assert modal_in_all == (sys.version_info >= (3, 10))
 
@@ -464,16 +468,53 @@ def test_modal_user_identity_from_workspace(monkeypatch):
                         Environment=FakeEnvironmentFactory,
                         config_version=lambda: config_version[0]))
 
+    # One identity whose second element matches across environments of the
+    # workspace, like AWS's [IAM user, account].
     assert clouds.Modal.get_user_identities() == [[
-        'Modal workspace openpipe, environment dev'
-    ], ['Modal workspace openpipe']]
+        'Modal workspace openpipe, environment dev', 'Modal workspace openpipe'
+    ]]
+    assert clouds.Modal.get_active_user_identity_str() == (
+        'Modal workspace openpipe, environment dev')
 
     # A token for another workspace bumps the config version, so the cached
     # identity is recomputed.
     FakeWorkspace.name = 'other'
-    assert clouds.Modal.get_user_identities()[1] == ['Modal workspace openpipe']
+    assert clouds.Modal.get_user_identities()[0][1] == (
+        'Modal workspace openpipe')
     config_version[0] += 1
-    assert clouds.Modal.get_user_identities()[1] == ['Modal workspace other']
+    assert clouds.Modal.get_user_identities()[0][1] == 'Modal workspace other'
+
+
+def test_modal_owner_check_allows_other_environment_of_same_workspace(
+        monkeypatch):
+    # pylint: disable=protected-access
+    identities = {
+        'id': [['Modal workspace x, environment dev', 'Modal workspace x']]
+    }
+    monkeypatch.setattr(clouds.Modal, 'get_user_identities',
+                        classmethod(lambda cls: identities['id']))
+    handle = backends.CloudVmRayResourceHandle.__new__(
+        backends.CloudVmRayResourceHandle)
+    handle.launched_resources = resources_lib.Resources(
+        cloud=clouds.Modal(), instance_type='4CPU--16GB')
+    record = {
+        'owner': ['Modal workspace x, environment main', 'Modal workspace x'],
+        'handle': handle,
+    }
+    patched = []
+    monkeypatch.setattr(backend_utils.global_user_state,
+                        'set_owner_identity_for_cluster',
+                        lambda name, identity: patched.append(identity))
+
+    backend_utils._check_owner_identity_with_record('c', record)
+    # The cluster is still manageable; the owner is updated with a warning.
+    assert patched == [identities['id'][0]]
+
+    identities['id'] = [[
+        'Modal workspace y, environment main', 'Modal workspace y'
+    ]]
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError):
+        backend_utils._check_owner_identity_with_record('c', record)
 
 
 def test_modal_credentials_from_env(monkeypatch):
@@ -559,11 +600,27 @@ def test_modal_credential_file_mounts_from_file(monkeypatch, tmp_path):
     credential_file.write_text('[default]\ntoken_id = "token-id"\n')
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    _set_modal_config(monkeypatch, {})
     monkeypatch.setattr(modal_cloud.os.path, 'expanduser',
                         lambda path: str(credential_file))
 
     assert clouds.Modal().get_credential_file_mounts() == {
-        '~/.modal.toml': '~/.modal.toml',
+        '~/.modal.toml': str(credential_file),
+    }
+
+
+def test_modal_credential_file_mounts_follow_modal_config_path(
+        monkeypatch, tmp_path):
+    # MODAL_CONFIG_PATH moves the file; the cluster reads the default path.
+    credential_file = tmp_path / 'secrets' / 'modal.toml'
+    credential_file.parent.mkdir()
+    credential_file.write_text('[default]\ntoken_id = "token-id"\n')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    _set_modal_config(monkeypatch, {}, user_config_path=str(credential_file))
+
+    assert clouds.Modal().get_credential_file_mounts() == {
+        '~/.modal.toml': str(credential_file),
     }
 
 
@@ -1345,6 +1402,15 @@ class _FakeModal:
     class NotFoundError(Exception):
         pass
 
+    class RemoteError(Exception):
+        pass
+
+    class FunctionTimeoutError(Exception):
+        pass
+
+    class OutputExpiredError(Exception):
+        pass
+
     PENDING = 'pending'
     TERMINATED = 'terminated'
 
@@ -1411,15 +1477,26 @@ class _FakeModal:
                 fake.call_status[self.object_id] = fake.TERMINATED
 
             def get(self, timeout=None):
-                del timeout
-                raise RuntimeError('Function call was cancelled')
+                assert timeout == 0
+                status = fake.call_status[self.object_id]
+                if isinstance(status, Exception):
+                    raise status
+                if status in (fake.PENDING, None):
+                    raise TimeoutError()
+                if status == fake.TERMINATED:
+                    raise fake.RemoteError('Function call was cancelled')
+                return status
 
         self.module = SimpleNamespace(
             Dict=FakeDict,
             FunctionCall=FakeCall,
             call_graph=SimpleNamespace(InputStatus=SimpleNamespace(
                 PENDING=self.PENDING)),
-            exception=SimpleNamespace(NotFoundError=self.NotFoundError))
+            exception=SimpleNamespace(
+                NotFoundError=self.NotFoundError,
+                RemoteError=self.RemoteError,
+                FunctionTimeoutError=self.FunctionTimeoutError,
+                OutputExpiredError=self.OutputExpiredError))
 
     def add_cluster(self,
                     name='test-on-cloud',
@@ -1489,12 +1566,22 @@ def test_modal_get_cluster_state_propagates_api_errors(monkeypatch):
         modal_utils.get_cluster_state('test-on-cloud', None)
 
 
-@pytest.mark.parametrize('status,running', [
-    (_FakeModal.PENDING, True),
-    (None, True),
-    (_FakeModal.TERMINATED, False),
-    ('success', False),
-])
+@pytest.mark.parametrize(
+    'status,running',
+    [
+        # Running, or not scheduled yet: no output.
+        (_FakeModal.PENDING, True),
+        (None, True),
+        # Cancelled.
+        (_FakeModal.TERMINATED, False),
+        # The node returned (preemption guard, or sshd exited).
+        ('success', False),
+        # Hit the Function timeout.
+        (_FakeModal.FunctionTimeoutError('24h'), False),
+        # Ended long ago.
+        (_FakeModal.OutputExpiredError(), False),
+        (_FakeModal.NotFoundError('gone'), False),
+    ])
 def test_modal_call_is_running(fake_modal, status, running):
     fake_modal.call_status['fc-1'] = status
 
@@ -1507,6 +1594,143 @@ def test_modal_call_is_running_propagates_api_errors(fake_modal):
 
     with pytest.raises(RuntimeError, match='unavailable'):
         modal_utils.call_is_running('fc-1')
+
+
+def _fake_app(fake_modal, calls):
+
+    class FakeApp:
+
+        def __init__(self, name):
+            calls['app'] = name
+
+        def function(self, **kwargs):
+            del kwargs
+            return lambda body: SimpleNamespace(
+                spawn=lambda *args: SimpleNamespace(object_id='fc-1'))
+
+        @contextlib.contextmanager
+        def run(self, detach, environment_name):
+            del detach, environment_name
+            calls['in_run'] = True
+            try:
+                yield
+            finally:
+                calls['in_run'] = False
+
+    fake_modal.module.App = FakeApp
+    fake_modal.module.clustered = lambda size: (lambda body: body)
+
+
+class _StateProxy:
+    """Wraps the fake state Dict to observe or fail writes."""
+
+    def __init__(self, state, on_set):
+        self._state = state
+        self._on_set = on_set
+
+    def __getattr__(self, name):
+        return getattr(self._state, name)
+
+    def __setitem__(self, key, value):
+        self._on_set(key)
+        self._state[key] = value
+
+
+def test_modal_launch_cluster_records_call_before_leaving_app_run(
+        fake_modal, monkeypatch):
+    calls = {}
+    _fake_app(fake_modal, calls)
+    recorded = {}
+    get_state_dict = modal_utils._get_state_dict  # pylint: disable=protected-access
+
+    def observe(key):
+        recorded[key] = calls['in_run']
+
+    monkeypatch.setattr(
+        modal_utils, '_get_state_dict', lambda *args, **kwargs: _StateProxy(
+            get_state_dict(*args, **kwargs), observe))
+
+    modal_utils.launch_cluster('test-on-cloud',
+                               None,
+                               num_nodes=1,
+                               public_key='k',
+                               user_ports=[],
+                               function_kwargs={})
+
+    assert recorded == {'num_nodes': True, 'call_id': True}
+
+
+def test_modal_launch_cluster_cancels_call_if_recording_fails(
+        fake_modal, monkeypatch):
+    # Otherwise the running call could never be found or terminated.
+    calls = {}
+    _fake_app(fake_modal, calls)
+    get_state_dict = modal_utils._get_state_dict  # pylint: disable=protected-access
+
+    def fail_on_call_id(key):
+        if key == 'call_id':
+            raise RuntimeError('Modal API unavailable')
+
+    monkeypatch.setattr(
+        modal_utils, '_get_state_dict', lambda *args, **kwargs: _StateProxy(
+            get_state_dict(*args, **kwargs), fail_on_call_id))
+
+    with pytest.raises(RuntimeError, match='unavailable'):
+        modal_utils.launch_cluster('test-on-cloud',
+                                   None,
+                                   num_nodes=1,
+                                   public_key='k',
+                                   user_ports=[],
+                                   function_kwargs={})
+
+    assert fake_modal.cancelled == ['fc-1']
+
+
+def test_modal_storage_mounts_must_be_part_of_launch(monkeypatch):
+    # pylint: disable=protected-access
+    cluster_yaml = {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'CloudBucketMounts': [{
+                        'Path': '/root/sky_workdir/data'
+                    }]
+                }
+            }
+        }
+    }
+    monkeypatch.setattr(cloud_vm_ray_backend.global_user_state,
+                        'get_cluster_yaml_dict', lambda path: cluster_yaml)
+    handle = SimpleNamespace(cluster_name='c',
+                             cluster_yaml='/sky/generated/c.yml')
+    check = cloud_vm_ray_backend.CloudVmRayBackend._check_modal_storage_mounts
+
+    # Mounted at launch: fine, whichever spelling of the path.
+    check(handle, {'data': object()})
+    check(handle, {'~/sky_workdir/data': object()})
+
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='/mnt/new cannot be mounted on the running '
+                       "cluster 'c'"):
+        check(handle, {'data': object(), '/mnt/new': object()})
+
+
+def test_modal_node_returns_after_preemption_rerun(monkeypatch):
+    # A node never raises on its own, so call_is_running can treat any
+    # unexpected exception as an API error.
+    state = {'node-0': {'ssh_host': 'h'}}
+    fake_modal = SimpleNamespace(
+        Dict=SimpleNamespace(from_name=lambda name, environment_name: state),
+        experimental=SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'modal', fake_modal)
+    monkeypatch.setitem(sys.modules, 'modal.experimental',
+                        fake_modal.experimental)
+    node = modal_utils._make_node_function()  # pylint: disable=protected-access
+
+    result = node('true', 22, 'sky-c', None, False, [])
+
+    assert 'preemption' in result
+    assert state['preempted'] is True
 
 
 def test_modal_wait_for_nodes(fake_modal, monkeypatch):

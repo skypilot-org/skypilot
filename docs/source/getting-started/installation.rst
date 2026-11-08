@@ -1189,7 +1189,9 @@ Minimal CPU task:
 Use the standard ``cpus`` and ``memory`` fields to size Modal nodes.
 SkyPilot represents each Modal physical core as two vCPUs. Modal currently
 supports 0.25--128 SkyPilot vCPUs and 0.125--336 GiB of memory; SkyPilot uses
-the selected values as both the Modal request and limit.
+the selected values as both the Modal request and limit. Without ``cpus`` and
+``memory``, a node gets 4 vCPUs and 16 GiB, and a GPU node gets 4 vCPUs and
+16 GiB per GPU (``H100:8`` runs on 32 vCPUs and 128 GiB).
 
 GPU task:
 

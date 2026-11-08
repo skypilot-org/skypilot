@@ -170,17 +170,21 @@ sed -i 's/^#\\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/ss
 """
 
 
-def _make_node_function() -> Callable[..., None]:
+def _make_node_function() -> Callable[..., str]:
     """Return the body that every node of a cluster runs.
 
     It is defined inside a function so that cloudpickle ships it by value:
     the container does not have SkyPilot installed. It must not reference
     module globals.
+
+    Once set up, a node returns rather than raises when it is done (sshd
+    exited, or Modal reran it after a preemption), so `call_is_running` can
+    tell an ended call from an API error.
     """
 
     def skypilot_node(ssh_setup: str, ssh_port: int, state_name: str,
                       environment_name: Optional[str], clustered: bool,
-                      user_ports: List[int]) -> None:
+                      user_ports: List[int]) -> str:
         # pylint: disable=import-outside-toplevel,redefined-outer-name
         import contextlib
         import subprocess
@@ -203,7 +207,7 @@ def _make_node_function() -> Callable[..., None]:
             # container that has none of the runtime SkyPilot set up. End
             # the call so SkyPilot sees the cluster as terminated.
             state['preempted'] = True
-            raise RuntimeError('Modal restarted this node after a preemption.')
+            return 'Modal restarted this node after a preemption.'
         subprocess.run(['bash', '-c', ssh_setup], check=True)
         sshd = subprocess.Popen(
             ['/usr/sbin/sshd', '-D', '-e', '-p',
@@ -224,7 +228,7 @@ def _make_node_function() -> Callable[..., None]:
                 'port_urls': port_urls,
             }
             returncode = sshd.wait()
-        raise RuntimeError(f'sshd exited with code {returncode}.')
+        return f'sshd exited with code {returncode}.'
 
     return skypilot_node
 
@@ -291,16 +295,33 @@ def get_cluster_state(
 def call_is_running(call_id: str) -> bool:
     """Whether the cluster's Function call is still running.
 
-    Raises on API errors instead of guessing, so a transient failure cannot
-    make SkyPilot treat a live cluster as terminated.
+    Polls the call's output: a running (or not yet scheduled) call has none.
+    The call graph is not used, because Modal keeps reporting a finished
+    call's input as pending and drops old inputs altogether.
+
+    A node never raises on its own (see `_make_node_function`), so an
+    exception other than the ones listed is an API error. It propagates
+    instead of being guessed at, so a transient failure cannot make SkyPilot
+    treat a live cluster as terminated.
     """
-    call = modal_adaptor.modal.FunctionCall.from_id(call_id)
-    graph = call.get_call_graph()
-    if not graph:
-        # Not scheduled yet.
+    modal = modal_adaptor.modal
+    ended_errors = (
+        # Cancelled, or Modal reported the call as failed.
+        modal.exception.RemoteError,
+        # Hit the Function timeout.
+        modal.exception.FunctionTimeoutError,
+        # Ended long enough ago for Modal to have dropped its output or
+        # the call itself.
+        modal.exception.OutputExpiredError,
+        modal.exception.NotFoundError,
+    )
+    try:
+        modal.FunctionCall.from_id(call_id).get(timeout=0)
+    except TimeoutError:
         return True
-    pending = modal_adaptor.modal.call_graph.InputStatus.PENDING
-    return any(info.status == pending for info in graph)
+    except ended_errors:
+        return False
+    return False
 
 
 def cancel_call(call_id: str) -> None:
@@ -342,8 +363,15 @@ def launch_cluster(cluster_name_on_cloud: str, environment_name: Optional[str],
     with app.run(detach=True, environment_name=environment_name):
         call = function.spawn(get_ssh_start_command(public_key), SSH_PORT, name,
                               environment_name, clustered, user_ports)
-    state[_NUM_NODES_KEY] = num_nodes
-    state[_CALL_ID_KEY] = call.object_id
+        # Record the call before anything else can fail: once recorded,
+        # query_instances and terminate_instances can find it. Otherwise a
+        # running call would be orphaned, billing until its timeout.
+        try:
+            state[_NUM_NODES_KEY] = num_nodes
+            state[_CALL_ID_KEY] = call.object_id
+        except BaseException:
+            cancel_call(call.object_id)
+            raise
     return call.object_id
 
 

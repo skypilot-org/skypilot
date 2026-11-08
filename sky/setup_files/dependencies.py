@@ -276,7 +276,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'mithril': [],  # No dependencies needed for mithril
-    'modal': ['modal>=1.5.0; python_version>="3.10"'],
+    # modal.clustered (multi-node) is exported since 1.6.0.
+    'modal': ['modal>=1.6.0; python_version>="3.10"'],
     'shadeform': [],  # No dependencies needed for shadeform
     # Slurm hostlist expansion is implemented in sky.utils.hostlist_utils.
     'slurm': [],

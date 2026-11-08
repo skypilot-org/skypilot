@@ -360,31 +360,11 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
-class ModalVolumeTable(VolumeTable):
-    """The Modal volume table."""
+class ModalVolumeTable(RunPodVolumeTable):
+    """The Modal volume table: the same columns as RunPod's.
 
-    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
-        """Create the Modal volume table."""
-        # Same columns as the RunPod table; Modal Volumes have no size, so
-        # SIZE shows '-'.
-        if show_all:
-            columns = _BASIC_COLUMNS + ['NAME_ON_CLOUD']
-        else:
-            columns = _BASIC_COLUMNS
-
-        table = log_utils.create_table(columns)
-        return table
-
-    def _add_rows(self,
-                  volumes: List[responses.VolumeRecord],
-                  show_all: bool = False) -> None:
-        """Add rows to the Modal volume table."""
-        for row in volumes:
-            table_row = self._get_row_base_columns(row, show_all)
-            if show_all:
-                table_row.append(row.get('name_on_cloud', ''))
-
-            self.table.add_row(table_row)
+    Modal Volumes have no size, so SIZE shows '-'.
+    """
 
     def format(self) -> str:
         """Format the Modal volume table for display."""

@@ -92,6 +92,8 @@ class Modal(clouds.Cloud):
         name, count = next(iter(accelerators.items()))
         if count == per_node:
             return None
+        # modal_catalog imports sky.clouds, so a top-level import here would
+        # be circular.
         # pylint: disable=import-outside-toplevel
         from sky.catalog import modal_catalog
         max_count = modal_catalog.get_max_gpu_count(name)
@@ -252,6 +254,8 @@ class Modal(clouds.Cloud):
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
+        # Both modules import sky.clouds, so top-level imports here would be
+        # circular.
         # pylint: disable=import-outside-toplevel
         from sky.catalog import modal_catalog
         from sky.provision.modal import modal_utils
@@ -386,9 +390,12 @@ class Modal(clouds.Cloud):
         if (os.environ.get(_TOKEN_ID_ENV_VAR) and
                 os.environ.get(_TOKEN_SECRET_ENV_VAR)):
             return {}
-        credential_file = os.path.expanduser(_CREDENTIAL_FILE)
+        # modal honours MODAL_CONFIG_PATH; the cluster reads the default path.
+        config = getattr(modal_adaptor.modal, 'config', None)
+        credential_file = os.path.expanduser(
+            getattr(config, 'user_config_path', None) or _CREDENTIAL_FILE)
         if os.path.exists(credential_file):
-            return {_CREDENTIAL_FILE: _CREDENTIAL_FILE}
+            return {_CREDENTIAL_FILE: credential_file}
         return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
@@ -429,8 +436,23 @@ class Modal(clouds.Cloud):
             return None
         workspace_identity = f'Modal workspace {identity}'
         environment_name = cls._get_active_environment_name()
-        return [[f'{workspace_identity}, environment {environment_name}'],
-                [workspace_identity]]
+        # Owner checks compare element-wise, so a cluster launched in
+        # another environment of the same workspace still matches on the
+        # second element (with a warning), as for AWS IAM users of one
+        # account. Each cluster stores its own environment, so it stays
+        # manageable after a switch. Another workspace never matches.
+        return [[
+            f'{workspace_identity}, environment {environment_name}',
+            workspace_identity
+        ]]
+
+    @classmethod
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        # The workspace is already part of the first element.
+        identity = cls.get_active_user_identity()
+        if identity is None:
+            return None
+        return identity[0]
 
     @classmethod
     def _get_active_environment_name(cls) -> str:
