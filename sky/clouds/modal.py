@@ -254,6 +254,7 @@ class Modal(clouds.Cloud):
             acc_dict)
         # pylint: disable=import-outside-toplevel
         from sky.catalog import modal_catalog
+        from sky.provision.modal import modal_utils
         modal_gpu, modal_cpu, modal_memory = (
             modal_catalog.get_modal_args_from_instance_type(
                 resources.instance_type))
@@ -272,7 +273,7 @@ class Modal(clouds.Cloud):
                                      f'{volume_config.type!r} for volume '
                                      f'{volume_mount.volume_name!r}.')
                 modal_volume_mounts.append({
-                    'Path': volume_mount.path,
+                    'Path': modal_utils.resolve_mount_path(volume_mount.path),
                     'VolumeNameOnCloud': volume_config.name_on_cloud,
                     'EnvironmentName':
                         volume_config.config.get('environment_name')
@@ -401,8 +402,16 @@ class Modal(clouds.Cloud):
         return catalog.regions(clouds='modal')
 
     @classmethod
-    @annotations.lru_cache(scope='global', maxsize=1)
     def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # Keyed on the config version, so a token for another workspace is
+        # picked up without restarting the process.
+        return cls._get_user_identities(modal_adaptor.modal.config_version())
+
+    @classmethod
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def _get_user_identities(cls,
+                             config_version: int) -> Optional[List[List[str]]]:
+        del config_version  # Only used as the cache key.
         try:
             workspace = modal_adaptor.modal.Workspace.from_context()
             workspace.hydrate()

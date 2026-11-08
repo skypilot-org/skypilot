@@ -28,11 +28,21 @@ class _ModalImport(common.LazyImport):
     def __init__(self):
         super().__init__('modal', import_error_message=_IMPORT_ERROR_MESSAGE)
         self._config_signature: Any = _UNSET
+        self._config_version = 0
         self._config_lock = threading.Lock()
 
     def __getattr__(self, name: str) -> Any:
         self._refresh_config(self.load_module())
         return super().__getattr__(name)
+
+    def config_version(self) -> int:
+        """Bumped whenever a changed Modal config is reloaded.
+
+        Use it as a cache key for anything derived from the credentials,
+        such as the workspace identity.
+        """
+        self._refresh_config(self.load_module())
+        return self._config_version
 
     def _refresh_config(self, module: Any) -> None:
         config = getattr(module, 'config', None)
@@ -49,10 +59,9 @@ class _ModalImport(common.LazyImport):
         with self._config_lock:
             if signature == self._config_signature:
                 return
-            first_access = self._config_signature is _UNSET
-            self._config_signature = signature
-            if first_access:
+            if self._config_signature is _UNSET:
                 # modal read this file when it was imported.
+                self._config_signature = signature
                 return
             # modal has no public reload API. If these internals change, keep
             # the config modal already loaded rather than break every access.
@@ -63,8 +72,14 @@ class _ModalImport(common.LazyImport):
                                    config._config_active_profile())
                 module.Client.set_env_client(None)
             except Exception:  # pylint: disable=broad-except
+                # Leave the signature unchanged so the next access retries.
                 logger.debug('Failed to reload the Modal config.',
                              exc_info=True)
+                return
+            self._config_version += 1
+            # Publish the signature last: other threads skip the lock once it
+            # matches, so they must not see it before the reload is done.
+            self._config_signature = signature
 
 
 modal = _ModalImport()

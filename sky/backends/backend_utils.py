@@ -50,6 +50,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.modal import modal_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -920,7 +921,7 @@ def _get_modal_cloud_bucket_mounts(
         read_only = bool(storage_obj.mount_config and
                          storage_obj.mount_config.read_only)
         bucket_mounts.append({
-            'Path': dst,
+            'Path': modal_utils.resolve_mount_path(dst),
             'StoreType': store_type_value,
             'BucketName': bucket_name,
             'BucketEndpointUrl': endpoint_url,

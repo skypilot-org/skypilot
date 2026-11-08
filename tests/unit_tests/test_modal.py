@@ -424,14 +424,23 @@ def test_modal_user_identity_from_workspace(monkeypatch):
         def from_context():
             return FakeEnvironment()
 
+    config_version = [1000]
     monkeypatch.setattr(
         modal_cloud.modal_adaptor, 'modal',
         SimpleNamespace(Workspace=FakeWorkspaceFactory,
-                        Environment=FakeEnvironmentFactory))
+                        Environment=FakeEnvironmentFactory,
+                        config_version=lambda: config_version[0]))
 
     assert clouds.Modal.get_user_identities() == [[
         'Modal workspace openpipe, environment dev'
     ], ['Modal workspace openpipe']]
+
+    # A token for another workspace bumps the config version, so the cached
+    # identity is recomputed.
+    FakeWorkspace.name = 'other'
+    assert clouds.Modal.get_user_identities()[1] == ['Modal workspace openpipe']
+    config_version[0] += 1
+    assert clouds.Modal.get_user_identities()[1] == ['Modal workspace other']
 
 
 def test_modal_credentials_from_env(monkeypatch):
@@ -655,6 +664,43 @@ def test_modal_volume_mount_inherits_cluster_environment(monkeypatch):
         volume_mounts=[volume_mount])
 
     assert variables['modal_volume_mounts'][0]['EnvironmentName'] == 'dev'
+
+
+def test_modal_volume_mount_paths_are_absolute(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
+    cloud = clouds.Modal()
+    resources = resources_lib.Resources(cloud=cloud,
+                                        instance_type='modal-cpu-4x-16gb')
+    volume_config = models.VolumeConfig(name='cache',
+                                        type='modal-volume',
+                                        cloud='modal',
+                                        region=None,
+                                        zone=None,
+                                        name_on_cloud='cache-on-cloud',
+                                        size=None,
+                                        config={})
+    volume_mount = volume_utils.VolumeMount('~/cache', 'cache', volume_config)
+
+    variables = cloud.make_deploy_resources_variables(
+        resources=resources,
+        cluster_name=resources_utils.ClusterName('test', 'test'),
+        region=clouds.Region('auto'),
+        zones=None,
+        num_nodes=1,
+        volume_mounts=[volume_mount])
+
+    assert variables['modal_volume_mounts'][0]['Path'] == '/root/cache'
+
+
+@pytest.mark.parametrize('path,expected', [
+    ('/data', '/data'),
+    ('~', '/root'),
+    ('~/data', '/root/data'),
+    ('data', '/root/sky_workdir/data'),
+    ('data/sub', '/root/sky_workdir/data/sub'),
+])
+def test_modal_resolve_mount_path(path, expected):
+    assert modal_utils.resolve_mount_path(path) == expected
 
 
 def test_modal_volume_type_validation(monkeypatch):
@@ -1010,6 +1056,101 @@ def test_modal_apply_and_delete_volume(monkeypatch):
     ]
 
 
+def test_modal_volume_apply_records_active_environment(monkeypatch):
+    calls = []
+
+    class FakeVolume:
+
+        object_id = 'vo-123'
+
+        @staticmethod
+        def from_name(name, environment_name=None, create_if_missing=False):
+            calls.append(('from_name', name, environment_name))
+            return FakeVolume()
+
+        def hydrate(self):
+            pass
+
+    class FakeVolumeObjects:
+
+        @staticmethod
+        def delete(name, allow_missing=False, environment_name=None):
+            calls.append(('delete', name, environment_name))
+
+    FakeVolume.objects = FakeVolumeObjects
+    monkeypatch.setattr(modal_volume.modal_adaptor, 'modal',
+                        SimpleNamespace(Volume=FakeVolume))
+    _set_active_modal_environment(monkeypatch, 'dev')
+    config = models.VolumeConfig(name='cache',
+                                 type='modal-volume',
+                                 cloud='modal',
+                                 region=None,
+                                 zone=None,
+                                 name_on_cloud='cache-on-cloud',
+                                 size=None,
+                                 config={})
+
+    applied = modal_volume.apply_volume(config)
+    # Switching environments later must not redirect the delete.
+    _set_active_modal_environment(monkeypatch, 'prod')
+    modal_volume.delete_volume(applied)
+
+    assert applied.config['environment_name'] == 'dev'
+    assert calls == [
+        ('from_name', 'cache-on-cloud', 'dev'),
+        ('delete', 'cache-on-cloud', 'dev'),
+    ]
+
+
+@pytest.mark.parametrize(
+    'volume_environment,mount_environment,used',
+    [
+        ('dev', 'dev', True),
+        ('prod', 'dev', False),
+        # Volumes created before their environment was recorded.
+        (None, 'dev', True),
+    ])
+def test_modal_volume_usedby_matches_environment(monkeypatch,
+                                                 volume_environment,
+                                                 mount_environment, used):
+    cluster_yaml = {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'ModalVolumes': [{
+                        'VolumeNameOnCloud': 'cache-on-cloud',
+                        'EnvironmentName': mount_environment,
+                    }]
+                }
+            }
+        }
+    }
+    handle = SimpleNamespace(
+        launched_resources=SimpleNamespace(cloud=clouds.Modal()),
+        cluster_yaml='/sky/generated/modal-a.yml')
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_clusters',
+                        lambda: [{
+                            'name': 'modal-a',
+                            'handle': handle
+                        }])
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_cluster_yaml_dict',
+                        lambda path: cluster_yaml)
+    volume_config = {}
+    if volume_environment is not None:
+        volume_config['environment_name'] = volume_environment
+    config = models.VolumeConfig(name='cache',
+                                 type='modal-volume',
+                                 cloud='modal',
+                                 region=None,
+                                 zone=None,
+                                 name_on_cloud='cache-on-cloud',
+                                 size=None,
+                                 config=volume_config)
+
+    assert modal_volume.get_volume_usedby(config) == ([], ['modal-a']
+                                                      if used else [])
+
+
 def test_modal_volume_usedby_reads_cluster_yaml_by_path(monkeypatch):
     # Handles store the cluster YAML's path, not its contents.
     yamls = {
@@ -1086,6 +1227,10 @@ def test_modal_cloud_bucket_mount_specs():
 
     storage = FakeStorage()
     specs = backend_utils._get_modal_cloud_bucket_mounts({'/bucket': storage})
+    # Relative destinations live under the remote workdir, as on other clouds.
+    relative_specs = backend_utils._get_modal_cloud_bucket_mounts(
+        {'data': FakeStorage()})
+    assert relative_specs[0]['Path'] == '/root/sky_workdir/data'
 
     assert storage.constructed
     assert specs == [{
@@ -1596,6 +1741,76 @@ def test_modal_adaptor_keeps_config_if_reload_internals_change(
     assert lazy_modal.config.config.get('token_id') == 'ak-first'
     path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
     assert lazy_modal.config.config.get('token_id') == 'ak-first'
+
+
+def _isolated_modal_adaptor(tmp_path, monkeypatch, token_id):
+    pytest.importorskip('modal')
+    from sky.adaptors import modal as modal_adaptor
+    modal_sdk = modal_adaptor.modal.load_module()
+    path = tmp_path / '.modal.toml'
+    path.write_text(f'[default]\ntoken_id = "{token_id}"\nactive = true\n')
+    monkeypatch.setattr(modal_sdk.config, 'user_config_path', str(path))
+    monkeypatch.setattr(modal_sdk.config, '_user_config',
+                        {'default': {
+                            'token_id': token_id,
+                            'active': True
+                        }})
+    monkeypatch.setattr(modal_sdk.config, '_profile', 'default')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_PROFILE', raising=False)
+    # pylint: disable=protected-access
+    return modal_adaptor._ModalImport(), modal_sdk, path
+
+
+def test_modal_adaptor_retries_a_failed_reload(tmp_path, monkeypatch):
+    lazy_modal, modal_sdk, path = _isolated_modal_adaptor(
+        tmp_path, monkeypatch, 'ak-first')
+    assert lazy_modal.config_version() == 0
+    read_user_config = modal_sdk.config._read_user_config
+    failures = [PermissionError('unreadable')]
+
+    def flaky_read():
+        if failures:
+            raise failures.pop()
+        return read_user_config()
+
+    monkeypatch.setattr(modal_sdk.config, '_read_user_config', flaky_read)
+    path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
+
+    # The failed reload keeps the old config and does not mark the file as
+    # loaded, so the next access retries without the file changing again.
+    assert lazy_modal.config.config.get('token_id') == 'ak-first'
+    assert lazy_modal.config_version() == 1
+    assert lazy_modal.config.config.get('token_id') == 'ak-second'
+
+
+def test_modal_adaptor_publishes_new_config_after_reload(tmp_path, monkeypatch):
+    # Threads skip the lock once the signature matches, so the signature must
+    # not change before the new config and client are in place.
+    lazy_modal, modal_sdk, path = _isolated_modal_adaptor(
+        tmp_path, monkeypatch, 'ak-first')
+    assert lazy_modal.config_version() == 0
+    # pylint: disable=protected-access
+    old_signature = lazy_modal._config_signature
+    read_user_config = modal_sdk.config._read_user_config
+    seen = []
+
+    def observed_read():
+        seen.append(lazy_modal._config_signature)
+        return read_user_config()
+
+    def observed_set_env_client(client):
+        seen.append(lazy_modal._config_signature)
+        del client
+
+    monkeypatch.setattr(modal_sdk.config, '_read_user_config', observed_read)
+    monkeypatch.setattr(modal_sdk.Client, 'set_env_client',
+                        observed_set_env_client)
+    path.write_text('[default]\ntoken_id = "ak-second"\nactive = true\n')
+
+    assert lazy_modal.config_version() == 1
+    assert seen == [old_signature, old_signature]
+    assert lazy_modal._config_signature != old_signature
 
 
 def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):

@@ -1,6 +1,6 @@
 """Modal Volume provisioning."""
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import global_user_state
@@ -20,6 +20,12 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     name_on_cloud = config.name_on_cloud
     assert name_on_cloud is not None
     environment_name = _environment_name(config)
+    if environment_name is None:
+        # Record the active environment, so later deletes and mounts target
+        # this volume even after the active environment changes.
+        # pylint: disable=protected-access
+        environment_name = clouds.Modal._get_active_environment_name()
+        config.config['environment_name'] = environment_name
     volume = modal_adaptor.modal.Volume.from_name(
         name_on_cloud,
         environment_name=environment_name,
@@ -42,8 +48,9 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
-def _cluster_uses_volume(cluster_record: Dict[str, Any],
-                         volume_name_on_cloud: str) -> bool:
+def _cluster_uses_volume(cluster_record: Dict[str,
+                                              Any], volume_name_on_cloud: str,
+                         environment_name: Optional[str]) -> bool:
     handle = cluster_record.get('handle')
     if handle is None:
         return False
@@ -64,7 +71,13 @@ def _cluster_uses_volume(cluster_record: Dict[str, Any],
                                         {}).get('ray_head_default',
                                                 {}).get('node_config', {}))
     for volume_mount in node_config.get('ModalVolumes', []):
-        if volume_mount.get('VolumeNameOnCloud') == volume_name_on_cloud:
+        if volume_mount.get('VolumeNameOnCloud') != volume_name_on_cloud:
+            continue
+        # Modal Volume names are per environment. Volumes created before
+        # their environment was recorded match on name alone.
+        mount_environment = volume_mount.get('EnvironmentName')
+        if (environment_name is None or mount_environment is None or
+                mount_environment == environment_name):
             return True
     return False
 
@@ -76,7 +89,8 @@ def get_volume_usedby(
     assert volume_name_on_cloud is not None
     cluster_names = []
     for cluster_record in global_user_state.get_clusters():
-        if _cluster_uses_volume(cluster_record, volume_name_on_cloud):
+        if _cluster_uses_volume(cluster_record, volume_name_on_cloud,
+                                _environment_name(config)):
             cluster_name = cluster_record.get('name')
             if cluster_name:
                 cluster_names.append(cluster_name)

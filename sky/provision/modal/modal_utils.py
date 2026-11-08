@@ -11,9 +11,12 @@ from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
+from sky.skylet import constants
 
 SSH_PORT = 22
 SSH_USER = 'root'
+# Containers run as root.
+_HOME_DIR = '/root'
 TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
 TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
 
@@ -104,6 +107,22 @@ def _get_cloud_bucket_secret(spec: Dict[str, Any]):
         return _get_gcs_hmac_secret()
     raise RuntimeError(f'Unsupported Modal CloudBucketMount store type: '
                        f'{store_type}')
+
+
+def resolve_mount_path(path: str) -> str:
+    """Absolute container path for a SkyPilot mount destination.
+
+    Modal needs absolute mount paths. SkyPilot also allows `~/...` and, for
+    storage mounts, paths relative to the remote workdir.
+    """
+    if path.startswith('/'):
+        return path
+    if path == '~' or path.startswith('~/'):
+        return _HOME_DIR + path[1:]
+    workdir = constants.SKY_REMOTE_WORKDIR
+    if workdir.startswith('~/'):
+        workdir = _HOME_DIR + workdir[1:]
+    return f'{workdir}/{path}'
 
 
 def get_modal_volume_mounts(
