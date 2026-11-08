@@ -2105,6 +2105,7 @@ setup_commands:
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
     mkdir -p ~/.ssh; touch ~/.ssh/config;
+    [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
