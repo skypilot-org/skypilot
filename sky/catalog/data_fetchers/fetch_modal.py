@@ -12,8 +12,9 @@ per-hour rates used to price them, already scaled for the row's region:
 CpuCoreHourlyPrice (per Modal core, which is 2 vCPUs), MemoryGiBHourlyPrice
 and AcceleratorHourlyPrice (per GPU). CPU-only rows use Modal's
 non-preemptible rates, since SkyPilot runs CPU-only clusters non-preemptible.
-The rows themselves are fixed shapes with 4 vCPUs and 16 GiB, used when no
-CPU or memory is requested.
+The rows themselves are the shapes used when no CPU or memory is requested:
+4 vCPUs and 16 GiB for CPU-only, and, as on Kubernetes, 4 vCPUs and 16 GiB
+per GPU.
 
 Usage (from the catalog directory, e.g. ~/.sky/catalogs/v8):
     python -m sky.catalog.data_fetchers.fetch_modal
@@ -96,9 +97,12 @@ GPU_COUNTS = {
     'T4': (1, 2, 4, 8),
 }
 
-# Fixed shapes used when no CPU or memory is requested.
+# Shapes used when no CPU or memory is requested. GPU shapes scale with the
+# GPU count, as on Kubernetes. Keep in sync with modal_catalog.py.
 DEFAULT_VCPUS = 4
 DEFAULT_MEMORY_GIB = 16
+DEFAULT_VCPUS_PER_GPU = 4
+DEFAULT_MEMORY_GIB_PER_VCPU = 4
 CPU_INSTANCE_TYPE = 'modal-cpu-4x-16gb'
 
 COLUMNS = [
@@ -255,23 +259,26 @@ def create_catalog(prices: Dict[str, float],
                    region_multipliers: Dict[str, float]) -> List[Dict]:
     """Catalog rows (see the module docstring) from parsed prices."""
     rows = []
-    cores = DEFAULT_VCPUS / 2
 
     def add_rows(instance_type: str, gpu: Optional[Tuple[str, int]],
                  cpu_rate: float, memory_rate: float, gpu_rate: float) -> None:
+        gpu_count = gpu[1] if gpu else 0
+        vcpus = DEFAULT_VCPUS_PER_GPU * gpu_count if gpu else DEFAULT_VCPUS
+        memory_gib = (vcpus * DEFAULT_MEMORY_GIB_PER_VCPU
+                      if gpu else DEFAULT_MEMORY_GIB)
+        cores = vcpus / 2
         for region, multiplier in region_multipliers.items():
             cpu_hourly = cpu_rate * 3600 * multiplier
             memory_hourly = memory_rate * 3600 * multiplier
             gpu_hourly = gpu_rate * 3600 * multiplier
-            gpu_count = gpu[1] if gpu else 0
             rows.append({
                 'InstanceType': instance_type,
                 'AcceleratorName': gpu[0] if gpu else None,
                 'AcceleratorCount': float(gpu_count) if gpu else None,
-                'vCPUs': float(DEFAULT_VCPUS),
-                'MemoryGiB': float(DEFAULT_MEMORY_GIB),
+                'vCPUs': float(vcpus),
+                'MemoryGiB': float(memory_gib),
                 'Price': round(
-                    cores * cpu_hourly + DEFAULT_MEMORY_GIB * memory_hourly +
+                    cores * cpu_hourly + memory_gib * memory_hourly +
                     gpu_count * gpu_hourly, 8),
                 'SpotPrice': None,
                 'Region': region,

@@ -27,6 +27,9 @@ _df = common.read_catalog('modal/vms.csv',
 _DEFAULT_SKY_VCPUS = 4.0
 _DEFAULT_MEMORY_GIB = 16
 _DEFAULT_MEMORY_CPU_RATIO = _DEFAULT_MEMORY_GIB / _DEFAULT_SKY_VCPUS
+# Without a CPU request, GPU containers get 4 vCPUs per GPU, as on Kubernetes
+# (memory follows at _DEFAULT_MEMORY_CPU_RATIO).
+_DEFAULT_SKY_VCPUS_PER_GPU = 4
 
 # Modal validates these bounds when creating a Function. See:
 # https://modal.com/docs/guide/resources#how-much-can-i-request
@@ -305,6 +308,8 @@ def get_instance_type_for_accelerator(
             region=region,
             zone=None,
             max_hourly_cost=max_hourly_cost)
+    if cpus is None:
+        cpus = str(_DEFAULT_SKY_VCPUS_PER_GPU * acc_count)
     try:
         base_instance = _resources_from_requests(cpus, memory)
         instance = ModalInstanceType(base_instance.vcpus,

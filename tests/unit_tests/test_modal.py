@@ -159,13 +159,14 @@ def test_modal_catalog_regions_and_prices():
 def test_modal_catalog_gpu_to_sandbox_args():
     assert modal_catalog.get_modal_args_from_instance_type(
         'modal-cpu-4x-16gb') == (None, 2.0, 16 * 1024)
+    # GPU shapes have 4 vCPUs (2 Modal cores) and 16 GiB per GPU.
     assert modal_catalog.get_modal_args_from_instance_type(
-        'modal-a100-80gb-2x') == ('A100-80GB:2', 2.0, 16 * 1024)
+        'modal-a100-80gb-2x') == ('A100-80GB:2', 4.0, 32 * 1024)
     for count in (1, 2, 4, 8):
         instance_type = f'modal-b300-{count}x'
         gpu_arg = 'B300' if count == 1 else f'B300:{count}'
         assert modal_catalog.get_modal_args_from_instance_type(
-            instance_type) == (gpu_arg, 2.0, 16 * 1024)
+            instance_type) == (gpu_arg, 2.0 * count, 16 * 1024 * count)
         assert modal_catalog.get_accelerators_from_instance_type(
             instance_type) == {
                 'B300': count
@@ -238,6 +239,38 @@ def test_modal_dynamic_gpu_instance_type():
                            2 * 0.001097) * 3600
     assert modal_catalog.get_hourly_cost(
         instance_type, region='us') == pytest.approx(expected_auto_price * 1.15)
+
+
+@pytest.mark.parametrize(
+    'acc_count,cpus,memory,expected',
+    [
+        # As on Kubernetes: 4 vCPUs per GPU, and 4 GiB per vCPU.
+        (1, None, None, '4CPU--16GB--T4:1'),
+        (2, None, None, '8CPU--32GB--T4:2'),
+        (8, None, None, '32CPU--128GB--T4:8'),
+        (8, '8', None, '8CPU--32GB--T4:8'),
+        (8, None, '64', '32CPU--64GB--T4:8'),
+        (8, '2', '8', '2CPU--8GB--T4:8'),
+    ])
+def test_modal_gpu_host_scales_with_gpu_count(acc_count, cpus, memory,
+                                              expected):
+    instance_types, _ = modal_catalog.get_instance_type_for_accelerator(
+        'T4', acc_count, cpus=cpus, memory=memory)
+
+    assert instance_types == [expected]
+
+
+def test_modal_catalog_lists_scaled_gpu_shapes():
+    """`sky gpus list` shows the shape and price a launch would pick."""
+    listing = modal_catalog.list_accelerators(gpus_only=True,
+                                              name_filter='^H100$',
+                                              region_filter='^auto$',
+                                              quantity_filter=8)['H100'][0]
+    launched, _ = modal_catalog.get_instance_type_for_accelerator('H100', 8)
+
+    assert (listing.cpu_count, listing.memory) == (32, 128)
+    assert listing.price == pytest.approx(
+        modal_catalog.get_hourly_cost(launched[0], region='auto'))
 
 
 def test_modal_dynamic_resources_are_feasible():
@@ -1839,7 +1872,7 @@ def test_modal_catalog_gpu_types_and_counts_come_from_catalog(
     assert modal_catalog.get_max_gpu_count('h100') == 8
     assert modal_catalog.get_max_gpu_count('T4') is None
     assert modal_catalog.get_instance_type_for_accelerator(
-        'H100', 8) == (['4CPU--16GB--H100:8'], [])
+        'H100', 8) == (['32CPU--128GB--H100:8'], [])
     assert not modal_catalog.get_instance_type_for_accelerator('H100', 2)[0]
     assert not modal_catalog.instance_type_exists('4CPU--16GB--T4:1')
 
@@ -1925,6 +1958,10 @@ def test_fetch_modal_catalog_rows():
         (2 * 0.00003942 + 16 * 0.00000667) * 3600 * 1.15)
     h100 = by_key[('modal-h100-8x', 'auto')]
     assert (h100['AcceleratorName'], h100['AcceleratorCount']) == ('H100', 8)
+    assert (h100['vCPUs'], h100['MemoryGiB']) == (32, 128)
+    assert h100['Price'] == pytest.approx(
+        (16 * 0.0000131 + 128 * 0.00000222 + 8 * 0.001097) * 3600)
+    assert (cpu['vCPUs'], cpu['MemoryGiB']) == (4, 16)
     assert h100['AcceleratorHourlyPrice'] == pytest.approx(0.001097 * 3600)
     assert ('modal-a10-8x', 'auto') not in by_key
     assert ('modal-a100-2x', 'auto') in by_key
