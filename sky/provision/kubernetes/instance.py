@@ -3844,6 +3844,16 @@ def _as_sentence(text: str) -> str:
     return text if text.endswith(('.', '!', '?')) else f'{text}.'
 
 
+# How a KAI eviction reads after 'Pod(s)', by its evictor action; KAI's own
+# message follows. Any other action reads 'evicted by KAI Scheduler'.
+_KAI_EVICTION_WORDING: Dict[Optional[str], str] = {
+    'preempt': 'preempted by KAI Scheduler',
+    # KAI reclaims only from queues other than the reclaimer's.
+    'reclaim': 'reclaimed by KAI Scheduler for another queue',
+    'consolidation': 'evicted by KAI Scheduler for consolidation',
+}
+
+
 def get_cluster_termination_cause(
         provider_config: Dict[str, Any], pod_nodes: Dict[str, Optional[str]], *,
         tolerations: List[Dict[str, Any]],
@@ -3853,8 +3863,9 @@ def get_cluster_termination_cause(
     For pods that are gone (all of a cluster's, or some). Worded actor
     first, because a table cell shows only the start of it. Combines the pods'
     own deletion events (see kubernetes_utils.pod_deletion_event) with the
-    current state of the nodes they ran on. ``pod_nodes`` maps each pod to
-    the node it ran on.
+    current state of the nodes they ran on, then, on KAI, the evictions KAI
+    recorded on the cluster's PodGroup. ``pod_nodes`` maps each pod to the
+    node it ran on.
     """
     context = kubernetes_utils.get_execution_context_from_config(
         provider_config)
@@ -3891,9 +3902,17 @@ def get_cluster_termination_cause(
             elif node.taints:
                 sentences.append(f'Node {name} has NoExecute taint '
                                  f'{", ".join(node.taints)}')
-        if not sentences:
+        if sentences:
+            return f'{"; ".join(sentences)}; pods lost.'
+        if not kai.uses_kai(provider_config):
             return None
-        return f'{"; ".join(sentences)}; pods lost.'
+        # KAI leaves only 'Killing' on the pods it deletes.
+        eviction = kai.find_eviction(context, namespace, list(pod_nodes), since)
+        if eviction is None:
+            return None
+        wording = _KAI_EVICTION_WORDING.get(eviction.action,
+                                            'evicted by KAI Scheduler')
+        return _as_sentence(f'{pods} {wording}: {eviction.message}')
 
     # Explain the event by the node its pod ran on: another node of the
     # cluster, tainted or recovered, did not remove that pod.
