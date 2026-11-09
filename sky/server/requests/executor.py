@@ -21,6 +21,8 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import dataclasses
+import enum
 import functools
 import inspect
 import multiprocessing
@@ -123,9 +125,6 @@ _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 # How often a request running in coroutine checks whether it was cancelled.
 _COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS = 0.5
 
-# Names of requests that run in the request thread executor of the API server
-# process that receives them, instead of being queued for a worker process.
-_IN_PROCESS_REQUEST_NAMES: Set[str] = set()
 # Keeps in-process request tasks alive until they finish.
 _in_process_tasks: Set[asyncio.Task] = set()
 # Per server process; keeps most of the request thread executor for log
@@ -133,27 +132,84 @@ _in_process_tasks: Set[asyncio.Task] = set()
 _MAX_IN_PROCESS_REQUESTS = 16
 
 
-def register_in_process_request(request_name: str) -> None:
-    """Runs requests with this name in the API server process.
+class ExecutionMode(enum.Enum):
+    """How the API server process that schedules a request executes it."""
+    # Write the request row and queue the request for a worker process.
+    QUEUE = 'queue'
+    # Write the request row and run the request in this process's request
+    # thread executor; queue it when this process is at capacity.
+    IN_PROCESS = 'in_process'
+    # The execution policy handled the request; no request row is written.
+    HANDLED = 'handled'
 
-    A registered request skips the request queue and runs in the request
-    thread executor of the server process that receives it; it falls back to
-    the queue when that process already runs _MAX_IN_PROCESS_REQUESTS
-    in-process requests or the executor has no free thread. Clients still get a
-    request ID and fetch the result with /api/get. Only register short,
-    read-only requests that are safe to run concurrently with other requests
-    in one process: no process-global state, and helper threads must carry
-    the request context (see context_utils.ContextPropagatingThreadPool).
 
-    Must be called in every API server process that schedules the request,
-    e.g. from a plugin's install().
+@dataclasses.dataclass
+class RequestToSchedule:
+    """A request that is about to be scheduled.
 
-    Args:
-        request_name: The request name passed to schedule_request_async,
-            without the 'sky.' prefix.
+    request_body is already stamped with the caller's identity. An execution
+    policy may replace func, e.g. to wrap the entrypoint; the replacement is
+    what runs and what the request row records.
     """
-    _IN_PROCESS_REQUEST_NAMES.add(server_constants.REQUEST_NAME_PREFIX +
-                                  request_name)
+    request_id: str
+    # With the 'sky.' prefix.
+    request_name: str
+    request_body: payloads.RequestBody
+    func: Callable[..., Any]
+    schedule_type: api_requests.ScheduleType
+    request_cluster_name: Optional[str]
+    ignore_return_value: bool
+
+
+ExecutionPolicy = Callable[[RequestToSchedule], Awaitable[ExecutionMode]]
+
+_execution_policy: Optional[ExecutionPolicy] = None
+
+
+def set_execution_policy(policy: Optional[ExecutionPolicy]) -> None:
+    """Sets how this API server process executes the requests it schedules.
+
+    schedule_request_async awaits the policy in the context of the HTTP
+    request, before the request row is written, for every request that has no
+    precondition and is not retryable. Exceptions raised by the policy
+    propagate to the caller. Without a policy, every request is queued.
+
+    Must be called in every API server process that schedules requests, e.g.
+    from a plugin's install().
+    """
+    global _execution_policy
+    _execution_policy = policy
+
+
+async def run_request_inline(request: RequestToSchedule,
+                             executor: concurrent.futures.Executor) -> Any:
+    """Runs a request's entrypoint in a thread of executor.
+
+    The entrypoint runs under the request's env and config overrides, as an
+    in-process request does, but nothing is recorded: no request row and no
+    log file. Cancelling the caller cancels the request's context, which the
+    entrypoint observes at its next cancellation check.
+
+    Returns:
+        The entrypoint's return value.
+
+    Raises:
+        Exception: whatever the entrypoint raises.
+    """
+    # A task of its own keeps the request's context out of the caller's.
+    return await asyncio.create_task(_run_request_inline(request, executor))
+
+
+async def _run_request_inline(request: RequestToSchedule,
+                              executor: concurrent.futures.Executor) -> Any:
+    ctx = context.initialize()
+    try:
+        return await context_utils.to_thread_with_executor(
+            executor, _execute_with_config_override, request.func,
+            request.request_body, request.request_id, request.request_name,
+            **request.request_body.to_kwargs())
+    finally:
+        ctx.cancel()
 
 
 def _has_in_process_capacity() -> bool:
@@ -1528,6 +1584,19 @@ async def prepare_request_async(
 ) -> api_requests.Request:
     """Prepare a request for execution."""
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    return await _create_request_async(request_id, request_name, request_body,
+                                       func, request_cluster_name,
+                                       schedule_type, user_id)
+
+
+async def _create_request_async(request_id: str,
+                                request_name: request_names.RequestName,
+                                request_body: payloads.RequestBody,
+                                func: Callable[..., Any],
+                                request_cluster_name: Optional[str],
+                                schedule_type: api_requests.ScheduleType,
+                                user_id: str) -> api_requests.Request:
+    """Writes the row and log file of a request whose body is stamped."""
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
@@ -1562,7 +1631,10 @@ async def schedule_request_async(
         precondition: Optional[preconditions.Precondition] = None,
         retryable: bool = False,
         auth_user: Optional[models.User] = None) -> None:
-    """Enqueue a request to the request queue.
+    """Schedule a request for execution.
+
+    The request is queued for a worker process unless the execution policy
+    (see set_execution_policy) runs it in this process.
 
     Args:
         request_id: ID of the request.
@@ -1582,16 +1654,31 @@ async def schedule_request_async(
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = await prepare_request_async(request_id,
-                                               request_name,
-                                               request_body,
-                                               func,
+    user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    mode = ExecutionMode.QUEUE
+    if (_execution_policy is not None and precondition is None and
+            not retryable):
+        request = RequestToSchedule(
+            request_id=request_id,
+            request_name=server_constants.REQUEST_NAME_PREFIX + request_name,
+            request_body=request_body,
+            func=func,
+            schedule_type=schedule_type,
+            request_cluster_name=request_cluster_name,
+            ignore_return_value=ignore_return_value)
+        mode = await _execution_policy(request)
+        if mode == ExecutionMode.HANDLED:
+            return
+        func = request.func
+    request_task = await _create_request_async(request_id, request_name,
+                                               request_body, func,
                                                request_cluster_name,
-                                               schedule_type,
-                                               is_skypilot_system,
-                                               auth_user=auth_user)
-    await schedule_prepared_request(request_task, ignore_return_value,
-                                    precondition, retryable)
+                                               schedule_type, user_id)
+    await schedule_prepared_request(request_task,
+                                    ignore_return_value,
+                                    precondition,
+                                    retryable,
+                                    in_process=mode == ExecutionMode.IN_PROCESS)
 
 
 async def schedule_internal_daemon_async(
@@ -1630,7 +1717,8 @@ async def schedule_prepared_request(request_task: api_requests.Request,
                                     ignore_return_value: bool = False,
                                     precondition: Optional[
                                         preconditions.Precondition] = None,
-                                    retryable: bool = False) -> None:
+                                    retryable: bool = False,
+                                    in_process: bool = False) -> None:
     """Enqueue a request to the request queue
 
     Args:
@@ -1642,6 +1730,9 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             The precondition is waited asynchronously and does not block the
             caller.
         retryable: Whether the request should be retried if it fails.
+        in_process: Run the request in this process's request thread executor
+            instead of a worker process, unless the process is at capacity.
+            Ignored for a request with a precondition or that is retryable.
     """
 
     async def enqueue():
@@ -1673,8 +1764,7 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             precondition.wait_async(on_condition_met=enqueue))
         preconditions.background_tasks.add(task)
         task.add_done_callback(preconditions.background_tasks.discard)
-    elif (not retryable and request_task.name in _IN_PROCESS_REQUEST_NAMES and
-          _has_in_process_capacity()):
+    elif in_process and not retryable and _has_in_process_capacity():
         task = asyncio.create_task(
             _execute_request_coroutine(request_task,
                                        ignore_return_value=ignore_return_value,
