@@ -49,23 +49,30 @@ class TaskCodeGen:
             import pathlib
             import selectors
             import shlex
+            import stat as stat_lib
             import subprocess
             import sys
             import tempfile
             import textwrap
+            import threading
             import time
-            from typing import Dict, List, Optional, Tuple, Union
+            from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+
+            import psutil
             """))
 
     def _add_skylet_imports(self) -> None:
         """Add SkyPilot skylet imports."""
         self._code.append(
             textwrap.dedent("""\
+            from sky import sky_logging
             from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
+
+            logger = sky_logging.init_logger(__name__)
             """))
 
     def _add_logging_functions(self) -> None:
@@ -78,6 +85,15 @@ class TaskCodeGen:
             inspect.getsource(log_lib._get_context),  # pylint: disable=protected-access
             inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
+            ('_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS = '
+             f'{log_lib._ESCAPED_WRITER_CHECK_INTERVAL_SECONDS}'),  # pylint: disable=protected-access
+            ('_ESCAPED_WRITER_GRACE_SECONDS = '
+             f'{log_lib._ESCAPED_WRITER_GRACE_SECONDS}'),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._process_sessions),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._pipe_writers),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._fds_hidden),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._command_exited),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._start_escaped_writer_reaper),  # pylint: disable=protected-access
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.add_ray_env_vars),
