@@ -456,15 +456,6 @@ def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
     return None
 
 
-def raise_if_known_unreachable(context: Optional[str]) -> None:
-    """Raise KubeAPIUnreachableError if `context` is known to be unreachable.
-    """
-    reason = known_unreachable_reason(context)
-    if reason is not None:
-        raise exceptions.KubeAPIUnreachableError(
-            f'Kubernetes context {context!r} is unreachable: {reason}')
-
-
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -492,7 +483,15 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
 
-            raise_if_known_unreachable(context)
+            if _CONTEXT_UNREACHABLE_CHECKS:
+                # A call without a context reaches the current one.
+                target = (context if context is not None else
+                          get_current_kube_config_context_name())
+                reason = known_unreachable_reason(target)
+                if reason is not None:
+                    raise exceptions.KubeAPIUnreachableError(
+                        f'Kubernetes context {target!r} is unreachable: '
+                        f'{reason}')
 
             for attempt in range(max_retries):
                 try:

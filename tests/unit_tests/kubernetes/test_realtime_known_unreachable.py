@@ -4,7 +4,6 @@ from unittest import mock
 import pytest
 
 from sky import core
-from sky import exceptions
 from sky import models
 from sky.provision.kubernetes import utils as kubernetes_utils
 
@@ -33,9 +32,22 @@ def realtime_catalog(monkeypatch):
 
 
 def test_requested_unreachable_context_raises_its_reason(realtime_catalog):
-    with pytest.raises(exceptions.KubeAPIUnreachableError,
+    with pytest.raises(ValueError,
                        match="'down' is unreachable: proxy is down"):
         core.realtime_kubernetes_gpu_availability(context='down')
+    assert realtime_catalog == []
+
+
+def test_all_contexts_unreachable_raises_their_reasons(realtime_catalog):
+    with mock.patch.object(core.clouds.Kubernetes,
+                           'existing_allowed_contexts',
+                           return_value=['down']), \
+            mock.patch.object(core.clouds.SSH,
+                              'existing_allowed_contexts',
+                              return_value=[]):
+        with pytest.raises(ValueError,
+                           match="'down' is unreachable: proxy is down"):
+            core.realtime_kubernetes_gpu_availability()
     assert realtime_catalog == []
 
 

@@ -73,6 +73,18 @@ def test_known_unreachable_context_fails_at_once(unreachable_checks):
     mock_sleep.assert_not_called()
 
 
+def test_call_without_context_checks_the_current_one(unreachable_checks,
+                                                     monkeypatch):
+    utils.register_context_unreachable_check(_proxy_down)
+    monkeypatch.setattr(utils, 'get_current_kube_config_context_name',
+                        lambda: 'down')
+    list_things, calls = _api_call_recorder()
+    with pytest.raises(exceptions.KubeAPIUnreachableError,
+                       match="'down' is unreachable: proxy is down"):
+        list_things(context=None)
+    assert calls == []
+
+
 def test_other_contexts_are_still_retried(unreachable_checks):
     utils.register_context_unreachable_check(_proxy_down)
     list_things, calls = _api_call_recorder()
