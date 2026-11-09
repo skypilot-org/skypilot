@@ -1711,7 +1711,8 @@ class PermissionService:
             # Invalidate cached permission entries after the policy is
             # persisted so other processes re-compute permissions on next
             # check.
-            self.invalidate_workspace_permission_cache(workspace_name)
+            self._invalidate_after_write(
+                self.invalidate_workspace_permission_cache, workspace_name)
 
 
 @contextlib.contextmanager

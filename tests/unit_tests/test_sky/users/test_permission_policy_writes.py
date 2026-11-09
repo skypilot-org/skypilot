@@ -393,8 +393,10 @@ def test_delete_user_keeps_the_record(service, engine):
     assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
 
 
-@pytest.mark.parametrize(
-    'write', ['delete_user', 'delete_user_and_record', 'add_workspace_policy'])
+@pytest.mark.parametrize('write', [
+    'delete_user', 'delete_user_and_record', 'add_workspace_policy',
+    'remove_workspace_policy'
+])
 def test_a_failed_cache_clear_does_not_fail_a_committed_write(
         service, engine, write):
     """A raise after the commit would report a done write as failed, and a
@@ -409,6 +411,10 @@ def test_a_failed_cache_clear_does_not_fail_a_committed_write(
     if write == 'add_workspace_policy':
         service.add_workspace_policy('ws', ['bob'])
         assert _members(engine, 'ws') == {'alice', 'bob'}
+        service.invalidate_workspace_permission_cache.assert_called_with('ws')
+    elif write == 'remove_workspace_policy':
+        service.remove_workspace_policy('ws')
+        assert _members(engine, 'ws') == set()
         service.invalidate_workspace_permission_cache.assert_called_with('ws')
     else:
         getattr(service, write)('bob')

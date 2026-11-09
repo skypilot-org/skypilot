@@ -670,8 +670,6 @@ def user_batch_update(request: fastapi.Request,
                     locked.append(user_id)
                 except Exception as e:  # pylint: disable=broad-except
                     failed.append({'user_id': user_id, 'error': str(e)})
-            if not locked:
-                continue
             try:
                 permission.permission_service.update_roles(
                     {user_id: role for user_id in locked})
@@ -895,11 +893,11 @@ def user_export() -> Dict[str, Any]:
 
 
 @contextlib.contextmanager
-def _user_lock(
-        user_id: str,
-        timeout: float = USER_LOCK_TIMEOUT_SECONDS
-) -> Generator[None, None, None]:
+def _user_lock(user_id: str,
+               timeout: Optional[float] = None) -> Generator[None, None, None]:
     """Context manager for user lock."""
+    if timeout is None:
+        timeout = USER_LOCK_TIMEOUT_SECONDS
     try:
         with filelock.FileLock(USER_LOCK_PATH.format(user_id=user_id), timeout):
             yield

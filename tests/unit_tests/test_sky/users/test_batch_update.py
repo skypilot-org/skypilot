@@ -1,6 +1,8 @@
 """Unit tests for /users/batch_update and the admin demotion check."""
 
 import contextlib
+import time
+import types
 from unittest import mock
 
 import fastapi
@@ -415,7 +417,8 @@ def test_lock_waits_in_a_chunk_share_one_budget(monkeypatch, admin_request):
     filelock waits forever on a negative timeout."""
     monkeypatch.setattr(server, '_BATCH_UPDATE_CHUNK_SIZE', 4)
     now = [0.0]
-    monkeypatch.setattr(server.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(server, 'time',
+                        types.SimpleNamespace(monotonic=lambda: now[0]))
     timeouts = []
 
     @contextlib.contextmanager
@@ -441,3 +444,15 @@ def test_a_held_user_lock_fails_only_that_user(monkeypatch, admin_request,
     assert writes == [['u1', 'u3']]
     assert result['succeeded'] == ['u1', 'u3']
     assert [f['user_id'] for f in result['failed']] == ['u2']
+
+
+def test_user_lock_uses_the_timeout_it_is_given(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, 'USER_LOCK_PATH',
+                        str(tmp_path / '.{user_id}.lock'))
+    monkeypatch.setattr(server, 'USER_LOCK_TIMEOUT_SECONDS', 30)
+    with filelock.FileLock(str(tmp_path / '.u2.lock')):
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='timeout'):
+            with server._user_lock('u2', 0):
+                pass
+    assert time.monotonic() - started < 5
