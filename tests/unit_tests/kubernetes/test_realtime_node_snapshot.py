@@ -212,6 +212,12 @@ _CUSTOM_KEY_PODS = [
 
 _CPU_NODES = [_node('cpu-1'), _node('cpu-2', ip='10.0.0.2')]
 
+# A GPU label left on a node whose device plugin no longer advertises GPUs.
+_GPU_LABEL_ONLY_NODES = [
+    _node('stale-label',
+          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'}),
+]
+
 _TOLERATION = [{
     'key': 'team',
     'operator': 'Equal',
@@ -226,6 +232,7 @@ _CLUSTERS = {
     'amd': (_AMD_NODES, _AMD_PODS),
     'custom-key': (_CUSTOM_KEY_NODES, _CUSTOM_KEY_PODS),
     'cpu-only': (_CPU_NODES, []),
+    'gpu-label-only': (_GPU_LABEL_ONLY_NODES, []),
 }
 
 
