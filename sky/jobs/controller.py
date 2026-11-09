@@ -1696,20 +1696,37 @@ class JobController:
                     force_transit_to_recovering = False
                     continue
 
+            cluster_event_reason = (runtime_recovery.reason
+                                    if runtime_recovery is not None else None)
+            # A terminal status without its end time means the worker's job
+            # record disappeared or changed between probes. Treat it like a
+            # preemption and use the normal recovery path below.
+            end_time = None
+            if (job_status == job_lib.JobStatus.SUCCEEDED or job_status
+                    in job_lib.JobStatus.user_code_failure_states() or
+                    job_status == job_lib.JobStatus.FAILED_DRIVER):
+                try:
+                    end_time = await asyncio.to_thread(
+                        managed_job_utils.try_to_get_job_end_time,
+                        self._backend, cluster_name, job_id_on_pool_cluster)
+                except managed_job_utils.JobEndTimeUnavailableError as e:
+                    status_logger.reset()
+                    cluster_event_reason = str(e)
+                    logger.info(f'{e}. Starting recovery.')
+                    job_status = None
+                    transient_job_check_error_reason = None
+
             # Handle success
             if job_status == job_lib.JobStatus.SUCCEEDED:
+                assert end_time is not None
                 logger.info(f'Task {task_id} succeeded! '
                             'Getting end time and cleaning up')
-                success_end_time = await asyncio.to_thread(
-                    managed_job_utils.try_to_get_job_end_time, self._backend,
-                    cluster_name, job_id_on_pool_cluster)
-
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 await managed_job_state.set_succeeded_async(
                     self._job_id,
                     task_id,
-                    end_time=success_end_time,
+                    end_time=end_time,
                     callback_func=callback_func)
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
@@ -1821,8 +1838,6 @@ class JobController:
                 continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
-            cluster_event_reason = (runtime_recovery.reason
-                                    if runtime_recovery is not None else None)
             # Set when recovery is triggered by the user job exiting non-zero
             # (cluster still UP), so the RECOVERING job event can say what
             # actually happened instead of the generic preemption copy.
@@ -1907,9 +1922,7 @@ class JobController:
                     # The user code has probably crashed, fail immediately.
                     logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await asyncio.to_thread(
-                        managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name, job_id_on_pool_cluster)
+                    assert end_time is not None
                     logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
