@@ -271,7 +271,7 @@ def _start_escaped_writer_reaper(
 
     def _reap() -> None:
         escaped_since = None
-        signaled: Set[int] = set()
+        warned: Set[int] = set()
         while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
             if not _command_exited(proc):
                 continue
@@ -290,19 +290,19 @@ def _start_escaped_writer_reaper(
                     _ESCAPED_WRITER_GRACE_SECONDS):
                 continue
             holders = []
-            unsignaled = [p for p in sessions if p not in signaled]
-            for pid in _pipe_writers(pipe_links, unsignaled):
-                signaled.add(pid)
+            for pid in _pipe_writers(pipe_links, sessions):
                 try:
                     holder = psutil.Process(pid)
                     cmdline = ' '.join(holder.cmdline())[:200]
                     holder.terminate()
                 except psutil.Error:
                     continue
-                logger.warning(
-                    f'Terminating process {pid} ({cmdline!r}): it left the '
-                    f'session of command {proc.pid}, which exited, and still '
-                    'holds its output open.')
+                if pid not in warned:
+                    warned.add(pid)
+                    logger.warning(
+                        f'Terminating process {pid} ({cmdline!r}): it left '
+                        f'the session of command {proc.pid}, which exited, '
+                        'and still holds its output open.')
                 holders.append(holder)
             _, alive = psutil.wait_procs(holders, timeout=10)
             for holder in alive:
@@ -310,7 +310,7 @@ def _start_escaped_writer_reaper(
                     holder.kill()
                 except psutil.Error:
                     continue
-            # Rescan only once per grace period if a holder survives.
+            # Retry surviving holders only once per grace period.
             escaped_since = time.monotonic()
 
     threading.Thread(target=_reap, daemon=True).start()

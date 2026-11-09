@@ -193,6 +193,27 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
             psutil.pid_exists(escaped_pid) and
             psutil.Process(escaped_pid).status() != psutil.STATUS_ZOMBIE)
 
+    def test_retries_escaped_process_after_failed_signal(self):
+        terminate = psutil.Process.terminate
+        calls = []
+
+        def flaky_terminate(holder):
+            calls.append(holder.pid)
+            if len(calls) == 1:
+                raise psutil.AccessDenied(holder.pid)
+            terminate(holder)
+
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(psutil.Process, 'terminate',
+                                  flaky_terminate):
+            returncode = log_lib.run_with_log(
+                'setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertEqual(len(calls), 2)
+
     def test_timeout_does_not_fail_command_that_exited(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f, \
                 mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 8):
