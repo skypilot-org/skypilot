@@ -842,6 +842,8 @@ def override_request_env_and_config(
     # did not already have.
     from_loopback = getattr(request_body, 'from_loopback', None) is not False
     original_env = os.environ.copy()
+    # Auth already holds the user's row and role; see stamp_request_body.
+    authenticated = getattr(request_body, 'authenticated', False)
     try:
         if is_daemon:
             # The SkyPilot system user is already upserted at scheduling
@@ -878,9 +880,10 @@ def override_request_env_and_config(
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                 name=request_body.env_vars[constants.USER_ENV_VAR])
-            _, user = global_user_state.add_or_update_user(user,
-                                                           return_user=True)
-            _seed_role_if_missing(user.id)
+            if not authenticated:
+                _, user = global_user_state.add_or_update_user(user,
+                                                               return_user=True)
+                _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -936,6 +939,9 @@ def override_request_env_and_config(
                              workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
+                    if authenticated:
+                        # The resolver reads the preferred workspace.
+                        user = global_user_state.get_user(user.id) or user
                     resolution = workspaces_core.resolve_workspace_for_user(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
@@ -1463,7 +1469,10 @@ def stamp_request_body(request_body: payloads.RequestBody,
         # Set user identity for executors.
         request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
         request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+        # The middleware that set `auth_user` ensured its users row and role.
+        request_body.authenticated = True
     else:
+        request_body.authenticated = False
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')

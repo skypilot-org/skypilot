@@ -2850,3 +2850,88 @@ async def test_in_process_request_cancelled_during_claim(
     cancelled = requests_lib.get_request('in-process-claim-cancel')
     assert cancelled is not None
     assert cancelled.status == requests_lib.RequestStatus.CANCELLED
+
+
+@pytest.fixture()
+def counted_user_upsert(stub_override_request_env_deps, monkeypatch):
+    """Counts users-table upserts and role seeds of the override."""
+    upserts = []
+
+    def fake_add_or_update_user(user, return_user=False, **kwargs):
+        del kwargs
+        upserts.append(user.id)
+        return (True, user) if return_user else True
+
+    monkeypatch.setattr('sky.global_user_state.add_or_update_user',
+                        fake_add_or_update_user)
+    monkeypatch.setattr(executor, '_seed_role_if_missing', mock.Mock())
+    return upserts
+
+
+def _run_override_as_user(authenticated: bool) -> None:
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'user-1',
+        constants.USER_ENV_VAR: 'alice',
+    },
+                                authenticated=authenticated)
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.status'):
+        pass
+
+
+def test_authenticated_request_skips_user_upsert(counted_user_upsert):
+    _run_override_as_user(authenticated=True)
+    assert not counted_user_upsert
+    executor._seed_role_if_missing.assert_not_called()
+
+
+def test_unauthenticated_request_upserts_user(counted_user_upsert):
+    _run_override_as_user(authenticated=False)
+    assert counted_user_upsert == ['user-1']
+    executor._seed_role_if_missing.assert_called_once_with('user-1')
+
+
+def test_authenticated_request_reads_user_for_resolver(counted_user_upsert,
+                                                       monkeypatch):
+    monkeypatch.setattr(executor, '_should_apply_workspace_resolver',
+                        lambda *args: True)
+    resolved_for = []
+
+    def fake_resolve(user, action):
+        del action
+        resolved_for.append(user.preferred_workspace)
+        return mock.Mock(workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
+                         source='explicit')
+
+    monkeypatch.setattr('sky.workspaces.core.resolve_workspace_for_user',
+                        fake_resolve)
+    monkeypatch.setattr(
+        'sky.global_user_state.get_user',
+        mock.Mock(return_value=models.User(
+            id='user-1', name='alice', preferred_workspace='ws-2')))
+
+    _run_override_as_user(authenticated=True)
+
+    assert resolved_for == ['ws-2']
+    assert not counted_user_upsert
+
+
+def test_stamp_sets_authenticated_from_auth_user():
+    """A client cannot claim to be authenticated."""
+    body = payloads.RequestBody(env_vars={
+        constants.USER_ID_ENV_VAR: 'abcd1234',
+        constants.USER_ENV_VAR: 'client-user',
+    },
+                                authenticated=True)
+    executor.stamp_request_body(body, auth_user=None)
+    assert body.authenticated is False
+
+    executor.stamp_request_body(body,
+                                auth_user=models.User(id='abcd1234',
+                                                      name='alice'))
+    assert body.authenticated is True
+
+
+def test_to_kwargs_drops_authenticated():
+    body = payloads.RequestBody(env_vars={}, authenticated=True)
+    assert 'authenticated' not in body.to_kwargs()

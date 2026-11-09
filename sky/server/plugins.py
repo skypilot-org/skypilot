@@ -349,6 +349,10 @@ class BasePlugin(abc.ABC):
 
         Only for that ordering need. Everything else belongs in `install`.
 
+        A middleware that sets `request.state.auth_user` must first ensure the
+        user's row in the users table and its role: requests from an
+        authenticated user run without upserting either.
+
         Raising here aborts the load, exactly as raising from `install` does:
         plugins are infrastructure, and a half-installed one is not something
         to serve requests with. "Second pass" does not mean optional.
