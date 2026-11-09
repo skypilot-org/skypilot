@@ -23,7 +23,6 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
 
@@ -310,13 +309,6 @@ def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
         else:
             synced._e.load_policy()
         state.loaded = current
-
-
-# KV cache constants for workspace permission checks.
-_WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
-_WORKSPACE_PERM_CACHE_KEY_SEP = ':'
-# Long TTL as safety net; primary freshness is explicit invalidation on update.
-_WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
 
 
 class PermissionService:
@@ -643,18 +635,7 @@ class PermissionService:
             # in-memory model, which may predate another worker's write, and
             # would then add a *second* role for a user who already has one.
             self._load_policy_no_lock()
-            if self._add_user_if_not_exists_no_lock(user_id, role):
-                # As in `update_role`: a first role can grant workspace access
-                # that was denied and cached while the user had none. Clear
-                # after the write so a reader cannot re-cache the old answer.
-                # The role is already saved, so a failed clear must not fail
-                # the caller; a stale entry expires with the cache TTL.
-                try:
-                    self.invalidate_user_permission_cache(user_id)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        'Failed to clear cached workspace permissions for '
-                        f'user {user_id}: {common_utils.format_exception(e)}')
+            self._add_user_if_not_exists_no_lock(user_id, role)
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
@@ -681,9 +662,7 @@ class PermissionService:
         """
         with _policy_lock():
             with self._policy_transaction() as rows:
-                removed = self._delete_user_policy(rows, user_id)
-            if removed:
-                self.invalidate_user_permission_cache(user_id)
+                self._delete_user_policy(rows, user_id)
 
     def delete_user_and_record(self, user_id: str) -> None:
         """Like `delete_user`, and deletes the user record in the same write.
@@ -698,19 +677,16 @@ class PermissionService:
                     sqlalchemy.delete(users).where(users.c.id == user_id))
                 # Policy last: each policy statement locks the version row until
                 # commit, so taking it after the user row keeps one lock order.
-                removed = self._delete_user_policy(rows, user_id)
-            if removed:
-                self.invalidate_user_permission_cache(user_id)
+                self._delete_user_policy(rows, user_id)
 
     @staticmethod
-    def _delete_user_policy(rows: _PolicyRows, user_id: str) -> int:
-        removed = rows.delete_where('g', rows.c.v0 == user_id)
+    def _delete_user_policy(rows: _PolicyRows, user_id: str) -> None:
+        rows.delete_where('g', rows.c.v0 == user_id)
         # Private-workspace membership is a `p` row (user, workspace, '*').
         # Role names also sit at field 0 of `p` rows (the blocklist rules), so
         # match the '*' action as well: taking out a role's whole blocklist
         # would leave that role unrestricted.
-        return removed + rows.delete_where('p', rows.c.v0 == user_id, rows.c.v2
-                                           == '*')
+        rows.delete_where('p', rows.c.v0 == user_id, rows.c.v2 == '*')
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Replace every role held by a user with `new_role`."""
@@ -736,22 +712,6 @@ class PermissionService:
                     rows.delete_where('g', rows.c.v0.in_(changed))
                 rows.insert('g',
                             [(user_id, roles[user_id]) for user_id in changed])
-            # Always invalidate a change: even a first role assignment can
-            # grant workspace access that was previously denied and cached.
-            for user_id in changed:
-                self._invalidate_after_write(
-                    self.invalidate_user_permission_cache, user_id)
-
-    @staticmethod
-    def _invalidate_after_write(invalidate, key: str) -> None:
-        """Clears a cache after a committed write. The write stands, so a
-        failure must not fail the caller or skip the other keys; a stale entry
-        expires with the cache TTL."""
-        try:
-            invalidate(key)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to clear cached workspace permissions for '
-                           f'{key}: {common_utils.format_exception(e)}')
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get the roles directly assigned to a user.
@@ -1358,7 +1318,7 @@ class PermissionService:
             self._load_policy_no_lock()
         except Exception as e:  # pylint: disable=broad-except
             # The write is committed and has moved the version, so the next
-            # read reloads anyway; the caller must still clear its caches.
+            # read reloads anyway.
             logger.warning('Failed to reload the policy after a write: '
                            f'{common_utils.format_exception(e)}')
 
@@ -1366,28 +1326,6 @@ class PermissionService:
         """Load policy from storage with lock."""
         with _policy_lock():
             self._load_policy_no_lock()
-
-    def _workspace_perm_cache_key(self, workspace_name: str,
-                                  user_id: str) -> str:
-        """Build a KV cache key for a workspace permission entry."""
-        return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
-                f'{workspace_name}'
-                f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
-                f'{user_id}')
-
-    def invalidate_workspace_permission_cache(self,
-                                              workspace_name: str) -> None:
-        """Invalidate all cached permission entries for a workspace."""
-        prefix = (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
-                  f'{workspace_name}'
-                  f'{_WORKSPACE_PERM_CACHE_KEY_SEP}')
-        kv_cache.delete_cache_entries_by_prefix(prefix)
-
-    def invalidate_user_permission_cache(self, user_id: str) -> None:
-        """Invalidate all cached permission entries for a user."""
-        kv_cache.delete_cache_entries_by_prefix_suffix(
-            prefix=_WORKSPACE_PERM_CACHE_PREFIX,
-            suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
 
     def check_workspace_permission(
             self,
@@ -1399,9 +1337,8 @@ class PermissionService:
         This method checks if a user has permission to access a specific
         workspace. Membership (write) is granted by the member '*' policy
         (a direct grant for private workspaces, the ('*', ws, '*') wildcard for
-        public ones) and its result is cached in a DB-backed KV cache so all
-        server/executor processes share one view. Read-only visibility is not
-        cached -- see the 'read' branch below.
+        public ones). Read-only visibility is evaluated from config -- see the
+        'read' branch below.
 
         Args:
             action: 'write' (default) checks membership -- write and read are
@@ -1416,8 +1353,8 @@ class PermissionService:
             return True
 
         # Member/write access (admin or the member '*' grant). This is the
-        # cached, casbin-backed part; it is action-agnostic (the '*' grant
-        # covers both read and write).
+        # casbin-backed part; it is action-agnostic (the '*' grant covers both
+        # read and write).
         if self._check_member_permission(user_id, workspace_name):
             return True
 
@@ -1425,7 +1362,7 @@ class PermissionService:
         # (per-workspace read_access, falling back to the org-wide
         # workspace_config.read_access) rather than a materialized casbin
         # grant, so a change takes effect on the next request without a policy
-        # re-sync or cache invalidation. Never cached.
+        # re-sync.
         if (action == workspace_constants.WORKSPACE_ACTION_READ and
                 workspaces_utils.is_read_only_workspace(workspace_name)):
             return True
@@ -1437,15 +1374,9 @@ class PermissionService:
         """Whether the user is a member of (can write) the workspace.
 
         Admin, or the casbin member '*' grant (which also covers public
-        workspaces via the ('*', ws, '*') policy). Result is cached in the
-        DB-backed KV cache so all server/executor processes share one view and
-        the casbin enforce is off the hot path.
+        workspaces via the ('*', ws, '*') policy). Not cached:
+        `get_user_roles` reloads the policy when another process changed it.
         """
-        cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
-        cached = kv_cache.get_cache_entry(cache_key)
-        if cached is not None:
-            return cached == '1'
-
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
             result = True
@@ -1458,15 +1389,6 @@ class PermissionService:
 
         logger.debug(f'Workspace member check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
-
-        # Cache the result; failures are non-critical.
-        try:
-            kv_cache.add_or_update_cache_entry(
-                cache_key, '1' if result else '0',
-                time.time() + _WORKSPACE_PERM_CACHE_TTL_SECONDS)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to cache workspace permission: {e}')
-
         return result
 
     def check_service_account_token_permission(self, user_id: str,
@@ -1523,9 +1445,6 @@ class PermissionService:
                 rows.insert('p', [(user, workspace_name, '*')
                                   for user in dict.fromkeys(users)
                                   if user not in members])
-            # Invalidate stale cached denials (e.g. from checks between a
-            # workspace deletion and its re-creation with the same name).
-            self.invalidate_workspace_permission_cache(workspace_name)
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -1579,10 +1498,6 @@ class PermissionService:
                            if user not in current.get(workspace_name, ())]
                 rows.delete('p', stale)
                 rows.insert('p', missing)
-            # After the commit, so a reader cannot re-cache the old answer.
-            for workspace_name in sorted({rule[1] for rule in stale + missing}):
-                self._invalidate_after_write(
-                    self.invalidate_workspace_permission_cache, workspace_name)
 
     def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
         """Grant a newly-created user any workspace access owed by config.
@@ -1654,7 +1569,6 @@ class PermissionService:
         if not _matching_workspaces():
             return
 
-        added: List[str] = []
         try:
             with skypilot_config.get_skypilot_config_lock(
                     POLICY_UPDATE_LOCK_TIMEOUT_SECONDS, shared_lock=True):
@@ -1690,9 +1604,6 @@ class PermissionService:
                 f'Timed out acquiring the config lock; skipping the '
                 f'workspace policy re-sync for user {user_id}. It will be '
                 'retried on their next workspace resolution.')
-            return
-        if added:
-            self.invalidate_user_permission_cache(user_id)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
@@ -1704,10 +1615,6 @@ class PermissionService:
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
-            # Invalidate cached permission entries after the policy is
-            # persisted so other processes re-compute permissions on next
-            # check.
-            self.invalidate_workspace_permission_cache(workspace_name)
 
 
 @contextlib.contextmanager

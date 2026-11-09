@@ -36,7 +36,6 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 from sky.workspaces import core as workspaces_core
 
 _TASK = 'run: echo hi\n'
@@ -137,9 +136,6 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(locks, 'SKY_LOCKS_DIR', str(tmp_path / 'locks'))
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),

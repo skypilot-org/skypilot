@@ -88,8 +88,7 @@ def permission_service(tmp_path, monkeypatch):
 
     Mirrors the setup in ``test_permission_concurrency`` but additionally
     forces the server-side code path (so the workspace check actually
-    enforces instead of short-circuiting to ``True``) and isolates the
-    DB-backed permission cache so results aren't cached across assertions.
+    enforces instead of short-circuiting to ``True``).
     """
     # Reset the global enforcer singleton; monkeypatch restores the
     # original value at teardown even if setup below raises.
@@ -97,17 +96,6 @@ def permission_service(tmp_path, monkeypatch):
     # check_workspace_permission / get_accessible_workspace_names only
     # enforce when running on the API server.
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
-    # Bypass the DB-backed permission cache: always miss, no-op writes, so
-    # each assertion re-computes against the live policy.
-    monkeypatch.setattr(permission.kv_cache, 'get_cache_entry',
-                        lambda *a, **k: None)
-    monkeypatch.setattr(permission.kv_cache, 'add_or_update_cache_entry',
-                        lambda *a, **k: None)
-    monkeypatch.setattr(permission.kv_cache, 'delete_cache_entries_by_prefix',
-                        lambda *a, **k: None)
-    monkeypatch.setattr(permission.kv_cache,
-                        'delete_cache_entries_by_prefix_suffix',
-                        lambda *a, **k: None)
 
     db_path = str(tmp_path / 'test_casbin.db')
     engine = sqlalchemy.create_engine(f'sqlite:///{db_path}',

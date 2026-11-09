@@ -66,9 +66,6 @@ def service(engine, monkeypatch):
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
     monkeypatch.setattr(permission, '_enforcer_instance', None)
     monkeypatch.setattr(permission.rbac, 'get_default_role', lambda: 'user')
-    for name in ('invalidate_user_permission_cache',
-                 'invalidate_workspace_permission_cache'):
-        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
     service = permission.PermissionService()
     service._lazy_initialize()
     return service
@@ -178,13 +175,11 @@ def test_member_update_commits_once_and_keeps_staying_members(service, engine):
 
 def test_unchanged_members_write_nothing(service, engine):
     service.update_workspace_policy('ws', ['alice', 'bob'])
-    service.invalidate_workspace_permission_cache.reset_mock()
 
     with _policy_commits(engine) as counts:
         service.update_workspace_policy('ws', ['bob', 'alice'])
 
     assert counts['commits'] == 0
-    service.invalidate_workspace_permission_cache.assert_not_called()
 
 
 def test_member_sync_leaves_other_rows_alone(service, engine):
@@ -229,16 +224,11 @@ def test_batch_role_update_commits_once(service, engine):
     users = [f'u{i}' for i in range(50)]
     service.update_roles({user: 'user' for user in users})
 
-    service.invalidate_user_permission_cache.reset_mock()
     with _policy_commits(engine) as counts:
         service.update_roles({user: 'viewer' for user in users})
 
     assert counts['commits'] == 1
     assert _rows(engine, 'g') == {(user, 'viewer') for user in users}
-    assert {
-        call.args[0]
-        for call in service.invalidate_user_permission_cache.call_args_list
-    } == set(users)
 
 
 def test_add_workspace_policy_adds_only_missing_members(service, engine):
@@ -259,9 +249,6 @@ def test_writes_land_in_the_enforcers_own_database(tmp_path, monkeypatch):
     monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
                         mock.Mock(side_effect=AssertionError('wrong database')))
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
-    for name in ('invalidate_user_permission_cache',
-                 'invalidate_workspace_permission_cache'):
-        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
 
     service.update_role('alice', 'user')
     service.update_workspace_policy('ws', ['alice'])
@@ -271,17 +258,30 @@ def test_writes_land_in_the_enforcers_own_database(tmp_path, monkeypatch):
     assert _members(engine, 'ws') == {'alice'}
 
 
-def test_cache_is_cleared_when_the_reload_after_a_write_fails(
-        service, engine, monkeypatch):
+def test_a_failed_reload_after_a_write_keeps_the_write(service, engine,
+                                                       monkeypatch):
     service.update_workspace_policy('ws', ['alice'])
-    service.invalidate_workspace_permission_cache.reset_mock()
     monkeypatch.setattr(service, '_load_policy_no_lock',
                         mock.Mock(side_effect=RuntimeError('reload failed')))
 
     service.update_workspace_policy('ws', ['bob'])
 
     assert _members(engine, 'ws') == {'bob'}
-    service.invalidate_workspace_permission_cache.assert_called_once_with('ws')
+
+
+def test_member_check_sees_a_write_made_elsewhere(service, engine, monkeypatch):
+    # Another process, an older replica or manual SQL: nothing in this
+    # process is told about the write.
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    assert not service.check_workspace_permission('alice', 'ws')
+
+    _insert(engine, 'p', ('alice', 'ws', '*'))
+    assert service.check_workspace_permission('alice', 'ws')
+
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text('DELETE FROM casbin_rule WHERE v0 = \'alice\''))
+    assert not service.check_workspace_permission('alice', 'ws')
 
 
 def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):

@@ -344,108 +344,9 @@ class TestPermissionService:
         assert writes.count == 0
         assert _stored(policy_engine, 'g') == [('user1', 'admin')]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_invalidates_cache_after_the_write(
-            self, mock_policy_lock, mock_kv_cache, policy_engine):
-        """The cache must not be cleared before the new role is persisted.
-
-        Clearing first opens a window where a reader repopulates it from the
-        old role and the entry survives the update.
-        """
-        _insert(policy_engine, 'g', ('user1', 'user'))
-        # What another process reads at the moment the cache is cleared.
-        seen_at_invalidation = []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            lambda *a, **kw: seen_at_invalidation.append(
-                _stored(policy_engine, 'g')))
-        service = _service_over(policy_engine)
-
-        service.update_role('user1', 'admin')
-
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-        assert seen_at_invalidation == [[('user1', 'admin')]]
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_no_existing_role_still_invalidates(
-            self, mock_policy_lock, mock_kv_cache, policy_engine):
-        """Test that update_role invalidates even when user had no prior role.
-
-        A first role assignment can grant workspace access that was previously
-        denied and cached as '0', so we must always invalidate.
-        """
-        service = _service_over(policy_engine)
-
-        service.update_role('user1', 'user')
-
-        assert _stored(policy_engine, 'g') == [('user1', 'user')]
-        # Cache must be invalidated even for first role assignment
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_invalidates_cache_after_the_write(
-            self, mock_policy_lock, mock_kv_cache):
-        """Seeding a role-less user clears their cached workspace denials.
-
-        A user checked while role-less may have a cached '0' for a workspace
-        that their new role grants; it must not outlive the seed.
-        """
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        call_order = []
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_enforcer.add_grouping_policy.side_effect = (
-            lambda *a: call_order.append('add_grouping_policy'))
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            lambda *a, **kw: call_order.append('invalidate'))
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.add_user_if_not_exists('user1')
-
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-        assert call_order == ['add_grouping_policy', 'invalidate']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_survives_cache_clear_failure(
-            self, mock_policy_lock, mock_kv_cache):
-        """The role is saved even if clearing the cache then fails."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            RuntimeError('cache db unavailable'))
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.add_user_if_not_exists('user1')
-
-        mock_enforcer.add_grouping_policy.assert_called_once()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_keeps_cache_for_existing_role(
-            self, mock_policy_lock, mock_kv_cache):
-        """No role written, nothing to invalidate."""
+    def test_add_user_if_not_exists_keeps_existing_role(self, mock_policy_lock):
+        """A user who already has a role gets no new one."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -459,7 +360,6 @@ class TestPermissionService:
         service.add_user_if_not_exists('user1')
 
         mock_enforcer.add_grouping_policy.assert_not_called()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     def test_get_user_roles(self):
         """Test getting user roles."""
@@ -612,61 +512,6 @@ class TestPermissionService:
         mock_enforcer.enforce.assert_called_once_with('user1', 'test-workspace',
                                                       '*')
 
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_hit_allowed(self, mock_kv_cache):
-        """Test cache hit returning allowed ('1') skips enforcer."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        mock_kv_cache.get_cache_entry.return_value = '1'
-
-        mock_enforcer = mock.Mock()
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is True
-        # Enforcer should NOT be called on cache hit
-        mock_enforcer.enforce.assert_not_called()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_hit_denied(self, mock_kv_cache):
-        """Test cache hit returning denied ('0') skips enforcer."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        mock_kv_cache.get_cache_entry.return_value = '0'
-
-        mock_enforcer = mock.Mock()
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is False
-        mock_enforcer.enforce.assert_not_called()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_write_failure(
-            self, mock_kv_cache):
-        """Test that permission is still returned when cache write fails."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        # Cache miss
-        mock_kv_cache.get_cache_entry.return_value = None
-        # Cache write raises
-        mock_kv_cache.add_or_update_cache_entry.side_effect = RuntimeError(
-            'db locked')
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.enforce.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service.get_user_roles = mock.Mock(return_value=['user'])
-
-        # Should still return the correct result despite cache write failure
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is True
-        mock_enforcer.enforce.assert_called_once()
-
     @mock.patch('sky.users.permission._policy_lock')
     def test_add_workspace_policy(self, mock_policy_lock, policy_engine):
         """Test adding workspace policy."""
@@ -679,28 +524,9 @@ class TestPermissionService:
             ('user2', 'test-workspace', '*'),
         ]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_add_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                    mock_kv_cache,
-                                                    policy_engine):
-        """Test that add_workspace_policy invalidates stale cached denials."""
-        service = _service_over(policy_engine)
-
-        service.add_workspace_policy('test-workspace', ['user1', 'user2'])
-
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                       mock_kv_cache,
-                                                       policy_engine):
-        """Test that update_workspace_policy invalidates permission cache."""
+    def test_update_workspace_policy(self, mock_policy_lock, policy_engine):
+        """Test that update_workspace_policy replaces the members."""
         _insert(policy_engine, 'p', ('user0', 'test-workspace', '*'))
         service = _service_over(policy_engine)
 
@@ -710,17 +536,10 @@ class TestPermissionService:
             ('user1', 'test-workspace', '*'),
             ('user2', 'test-workspace', '*'),
         ]
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_remove_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                       mock_kv_cache):
-        """Test that remove_workspace_policy invalidates permission cache."""
+    def test_remove_workspace_policy(self, mock_policy_lock):
+        """Test that remove_workspace_policy removes the workspace's policy."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -734,11 +553,6 @@ class TestPermissionService:
         # Verify enforcer policy removal
         mock_enforcer.remove_filtered_policy.assert_called_once_with(
             1, 'test-workspace')
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
 
     @mock.patch('sky.users.permission.locks.get_lock')
     def test_policy_lock_context_manager(self, mock_get_lock):
@@ -774,8 +588,7 @@ class TestPermissionService:
         assert 'Failed to update policy due to a timeout' in str(exc_info.value)
         assert 'casbin policy lock' in str(exc_info.value)
 
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_delete_user_with_role(self, mock_kv_cache, policy_engine):
+    def test_delete_user_with_role(self, policy_engine):
         """Test deleting a user who has a role."""
         _add_user_row(policy_engine, 'user1')
         _add_user_row(policy_engine, 'user2')
@@ -788,14 +601,8 @@ class TestPermissionService:
         # The record and the role go; the other user's stay.
         assert _user_ids(policy_engine) == ['user2']
         assert _stored(policy_engine, 'g') == [('user2', 'user')]
-        # Verify cache invalidation
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
 
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_delete_user_without_role(self, mock_kv_cache, policy_engine):
+    def test_delete_user_without_role(self, policy_engine):
         """Test deleting a user who has no roles."""
         _add_user_row(policy_engine, 'user2')
         service = _service_over(policy_engine)
@@ -804,8 +611,6 @@ class TestPermissionService:
             service.delete_user_and_record('user2')
 
         assert _user_ids(policy_engine) == []
-        # No policy removed, so nothing to invalidate.
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
@@ -1141,32 +946,6 @@ class TestPermissionService:
             ('*', 'default', '*'),
         ])
 
-    def test_cache_key_format(self):
-        """Test that cache keys use the expected prefix and separator."""
-        service = permission.PermissionService()
-        service.enforcer = mock.Mock()
-
-        key = service._workspace_perm_cache_key('my-workspace', 'user123')
-        # Only the action-agnostic member result is cached, so the key has no
-        # action dimension: perm:ws:<workspace>:<user>. It keeps the
-        # by-workspace prefix and by-user suffix so invalidation still matches.
-        assert key == 'perm:ws:my-workspace:user123'
-        assert key.startswith('perm:ws:my-workspace:')  # prefix invalidation
-        assert key.endswith(':user123')  # suffix invalidation
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_same_role_no_invalidation(self, mock_policy_lock,
-                                                   mock_kv_cache,
-                                                   policy_engine):
-        """Test that update_role does not invalidate when role is unchanged."""
-        _insert(policy_engine, 'g', ('user1', 'admin'))
-        service = _service_over(policy_engine)
-
-        service.update_role('user1', 'admin')
-
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
-
     def test_sa_token_permission_viewer_denied_for_own(self):
         """Viewers cannot manage even their own SA tokens."""
         service = permission.PermissionService()
@@ -1467,13 +1246,14 @@ class TestResyncWorkspacePoliciesForNewUser:
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_username_gets_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_new_user_matched_by_username_gets_policy(self, mock_get_users,
+                                                      mock_get_nested,
+                                                      mock_policy_lock,
+                                                      mock_config_lock,
+                                                      mock_reload):
         """A pre-login allowed_users entry (username) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1498,21 +1278,17 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         assert self._grants() == [('u-alice', 'private-ws', '*')]
-        # The user's cached (stale) denial must be invalidated.
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'u-alice' in call_kwargs['suffix']
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_user_id_gets_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_new_user_matched_by_user_id_gets_policy(self, mock_get_users,
+                                                     mock_get_nested,
+                                                     mock_policy_lock,
+                                                     mock_config_lock,
+                                                     mock_reload):
         """A pre-login allowed_users entry (user_id) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1535,14 +1311,12 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         assert self._grants() == [('u-alice', 'private-ws', '*')]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_user_not_in_any_allowed_users_gets_no_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache):
-        """A user listed in no workspace gets no policy and no save/invalidate."""
+            self, mock_get_users, mock_get_nested, mock_policy_lock):
+        """A user listed in no workspace gets no policy."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -1562,14 +1336,12 @@ class TestResyncWorkspacePoliciesForNewUser:
         service.resync_workspace_policies_for_new_user('u-bob')
 
         assert self._grants() == []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_public_workspace_is_skipped(self, mock_get_users, mock_get_nested,
-                                         mock_policy_lock, mock_kv_cache):
+                                         mock_policy_lock):
         """Only private workspaces are re-synced; public ones are ignored."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1593,14 +1365,15 @@ class TestResyncWorkspacePoliciesForNewUser:
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_idempotent_when_policy_already_exists(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
-        """If the policy already exists, no save or cache invalidation."""
+    def test_idempotent_when_policy_already_exists(self, mock_get_users,
+                                                   mock_get_nested,
+                                                   mock_policy_lock,
+                                                   mock_config_lock,
+                                                   mock_reload):
+        """If the policy already exists, no duplicate is written."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -1623,18 +1396,17 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         assert self._grants() == [('u-alice', 'private-ws', '*')]
-        # Nothing changed, so no invalidation.
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_no_grant_when_user_removed_before_lock(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_no_grant_when_user_removed_before_lock(self, mock_get_users,
+                                                    mock_get_nested,
+                                                    mock_policy_lock,
+                                                    mock_config_lock,
+                                                    mock_reload):
         """An admin removal that lands before the lock must win.
 
         The pre-lock match is only an early-exit optimization; matches are
@@ -1674,18 +1446,15 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_reload.assert_called_once()
         assert mock_get_nested.call_count == 2
         assert self._grants() == []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_config_lock_timeout_skips_grant(self, mock_get_users,
                                              mock_get_nested, mock_policy_lock,
-                                             mock_kv_cache, mock_config_lock,
-                                             mock_reload):
+                                             mock_config_lock, mock_reload):
         """A config-lock timeout skips the grant instead of using stale
         config (the zero-accessible resolver retry picks it up later)."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
@@ -1708,17 +1477,17 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_policy_lock.assert_not_called()
         mock_reload.assert_not_called()
         assert self._grants() == []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_config_lock_acquired_before_policy_lock(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_config_lock_acquired_before_policy_lock(self, mock_get_users,
+                                                     mock_get_nested,
+                                                     mock_policy_lock,
+                                                     mock_config_lock,
+                                                     mock_reload):
         """Lock order must match update_workspace: config lock, THEN policy
         lock — the reverse order deadlocks against a concurrent workspace
         update (AB-BA)."""
@@ -1746,7 +1515,7 @@ class TestResyncWorkspacePoliciesForNewUser:
 
         assert order == ['config', 'policy']
         mock_reload.assert_called_once()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
+        assert self._grants() == [('u-alice', 'private-ws', '*')]
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
@@ -1798,29 +1567,21 @@ class TestWorkspaceReadOnlyAccess:
         return service, mock_enforcer
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_read_allows_live_readonly_workspace(self, mock_kv_cache,
-                                                 mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_read_allows_live_readonly_workspace(self, mock_is_ro):
         mock_is_ro.return_value = True  # config says ws is read-only
         service, _ = self._service(member=False)  # non-member
         assert service.check_workspace_permission('u1', 'ws-ro',
                                                   action='read') is True
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_read_denies_non_readonly_workspace(self, mock_kv_cache,
-                                                mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_read_denies_non_readonly_workspace(self, mock_is_ro):
         mock_is_ro.return_value = False  # config says not read-only
         service, _ = self._service(member=False)
         assert service.check_workspace_permission(
             'u1', 'ws-priv', action='read') is False
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_write_ignores_readonly(self, mock_kv_cache, mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_write_ignores_readonly(self, mock_is_ro):
         mock_is_ro.return_value = True  # even though ws is read-only
         service, _ = self._service(member=False)
         # A non-member write is denied regardless of read-only visibility...
@@ -1830,33 +1591,12 @@ class TestWorkspaceReadOnlyAccess:
         mock_is_ro.assert_not_called()
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_member_allowed_without_consulting_readonly(self, mock_kv_cache,
-                                                        mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_member_allowed_without_consulting_readonly(self, mock_is_ro):
         service, _ = self._service(member=True)  # member
         assert service.check_workspace_permission('u1', 'ws', 'read') is True
         assert service.check_workspace_permission('u1', 'ws', 'write') is True
         # A member short-circuits before the read-only branch.
         mock_is_ro.assert_not_called()
-
-    @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_member_cache_key_is_action_agnostic(self, mock_kv_cache,
-                                                 mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
-        mock_is_ro.return_value = True
-        service, _ = self._service(member=False)
-        service.check_workspace_permission('u1', 'ws-ro', action='read')
-        service.check_workspace_permission('u1', 'ws-ro', action='write')
-        keys = [
-            c.args[0]
-            for c in mock_kv_cache.add_or_update_cache_entry.call_args_list
-        ]
-        # Only the (action-agnostic) member result is cached, under one key.
-        assert keys, 'member result should be cached'
-        assert len(set(keys)) == 1
-        assert all(':read:' not in k and ':write:' not in k for k in keys)
 
     @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
     def test_get_accessible_read_includes_live_readonly_write_excludes(
@@ -1913,8 +1653,7 @@ class TestWorkspaceReadOnlyAccess:
 
     def test_add_workspace_policy_only_member_grants(self, policy_engine):
         service = _service_over(policy_engine)
-        with mock.patch('sky.users.permission._policy_lock'), \
-             mock.patch('sky.users.permission.kv_cache'):
+        with mock.patch('sky.users.permission._policy_lock'):
             service.add_workspace_policy('ws', ['u1', 'u2'])
         # Only the member grants; no materialized read-only wildcard.
         assert _stored(policy_engine, 'p') == [('u1', 'ws', '*'),
@@ -1929,11 +1668,7 @@ def two_workers(policy_engine):
     is invisible to the other until it reloads. Two enforcers over one SQLite
     file reproduce that exactly, without needing two processes.
     """
-    with mock.patch('sky.users.permission._policy_lock'), \
-         mock.patch.object(permission.PermissionService,
-                           'invalidate_user_permission_cache'), \
-         mock.patch.object(permission.PermissionService,
-                           'invalidate_workspace_permission_cache'):
+    with mock.patch('sky.users.permission._policy_lock'):
         yield _service_over(policy_engine), _service_over(policy_engine)
 
 
