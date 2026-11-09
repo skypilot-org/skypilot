@@ -162,10 +162,11 @@ def _list_accelerators(
     snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(
         context, kubernetes_utils.get_node_snapshot_label_keys(context))
                 if realtime else None)
+    snapshot_inputs = (kubernetes_utils.read_node_snapshot(context, snapshot)
+                       if snapshot is not None else None)
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-    if snapshot is not None:
-        nodes, gpu_resource_key, allocated_qty_by_node = (
-            kubernetes_utils.read_node_snapshot(context, snapshot))
+    if snapshot_inputs is not None:
+        nodes, gpu_resource_key, allocated_qty_by_node = snapshot_inputs
     else:
         # Verify that the credentials are still valid.
         if not kubernetes_utils.check_credentials(context,
@@ -198,7 +199,7 @@ def _list_accelerators(
 
     # Only fetch pods if we have accelerator nodes and realtime is requested
     error_on_get_allocated_gpu_qty_by_node = False
-    if snapshot is None and realtime and has_accelerator_nodes:
+    if snapshot_inputs is None and realtime and has_accelerator_nodes:
         # Get the allocated GPU quantity by each node
         try:
             allocated_qty_by_node = (

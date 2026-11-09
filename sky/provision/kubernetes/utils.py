@@ -2809,20 +2809,26 @@ def get_allocated_gpu_qty_by_node(
 
 def read_node_snapshot(
     context: str, snapshot: plugin_extensions.KubernetesNodeSnapshot
-) -> Tuple[List[V1Node], str, Dict[str, int]]:
+) -> Optional[Tuple[List[V1Node], str, Dict[str, int]]]:
     """Reads the accelerator availability inputs from a node snapshot.
 
     Returns:
         The same values as get_kubernetes_nodes(), get_gpu_resource_key() and
         get_allocated_gpu_qty_by_node() for the context, computed from the
-        snapshot without calling the Kubernetes API.
+        snapshot without calling the Kubernetes API, or None if the snapshot
+        is malformed.
     """
-    nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
-    gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
-    allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
-        (V1Pod.from_dict(pod) for pod in snapshot.pods),
-        context,
-        gpu_resource_key=gpu_resource_key)
+    try:
+        nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
+        gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
+        allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(pod) for pod in snapshot.pods),
+            context,
+            gpu_resource_key=gpu_resource_key)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Ignoring a malformed node snapshot for context '
+                       f'{context}: {common_utils.format_exception(e)}')
+        return None
     return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
             allocated_qty_by_node)
 

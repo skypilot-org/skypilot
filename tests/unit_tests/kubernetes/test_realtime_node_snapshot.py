@@ -410,7 +410,23 @@ def _failing(context, label_keys):
     raise RuntimeError(f'cache for {context} unavailable')
 
 
-@pytest.mark.parametrize('provider', [_unserved, _failing])
+def _malformed(context, label_keys):
+    del context, label_keys
+    return plugin_extensions.KubernetesNodeSnapshot(nodes=[{
+        'metadata': {
+            'name': 'no-status'
+        }
+    }],
+                                                    pods=[])
+
+
+def _not_a_snapshot(context, label_keys):
+    del context, label_keys
+    return {'nodes': [], 'pods': []}
+
+
+@pytest.mark.parametrize('provider',
+                         [_unserved, _failing, _malformed, _not_a_snapshot])
 def test_unserved_context_falls_back_to_api(monkeypatch, cluster_env, provider):
     nodes, pods = _CLUSTERS['gfd']
     expected = _list_realtime(monkeypatch, _CoreApi(nodes, pods))
