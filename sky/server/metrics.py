@@ -33,6 +33,7 @@ from sky.server import loop_stall
 from sky.server import middleware_utils
 from sky.skylet import runtime_utils
 from sky.utils import annotations
+from sky.utils import asyncio_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import perf_utils
@@ -2009,7 +2010,7 @@ async def gpu_metrics() -> fastapi.Response:
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
-            asyncio.wait_for(
+            asyncio_utils.wait_for(
                 metrics_utils.get_metrics_for_context(context, stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
             )) for context, stats in zip(remote_contexts, stats_list)
@@ -2030,7 +2031,7 @@ async def gpu_metrics() -> fastapi.Response:
     ]
     tasks += [
         asyncio.create_task(
-            asyncio.wait_for(
+            asyncio_utils.wait_for(
                 metrics_utils.get_metrics_for_slurm_cluster(
                     name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
@@ -2070,7 +2071,7 @@ async def endpoint_metrics() -> fastapi.Response:
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
-            asyncio.wait_for(
+            asyncio_utils.wait_for(
                 metrics_utils.get_endpoint_metrics_for_context(context,
                                                                stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
