@@ -2024,8 +2024,15 @@ _SLURM_USERNAME_MAP_SCHEMA = {
     },
     'additionalProperties': {
         'type': 'string',
-        'pattern': '^[a-z_][a-z0-9_.+-]*$'
+        # Keep in sync with sky/provision/slurm/utils.py:SLURM_USER_REGEX.
+        'pattern': '^[a-z_][a-z0-9_.+-]*(@[a-z0-9][a-z0-9.-]*)?$'
     }
+}
+
+# How to derive the Unix account of a user without a username_map entry.
+_SLURM_USERNAME_FROM_EMAIL_SCHEMA = {
+    'type': 'string',
+    'case_insensitive_enum': ['local_part', 'full_email'],
 }
 
 
@@ -2393,6 +2400,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
+                'username_from_email': _SLURM_USERNAME_FROM_EMAIL_SCHEMA,
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'quota': _SLURM_QUOTA_SCHEMA,
@@ -2442,6 +2450,7 @@ def get_config_schema():
                                 'type': 'boolean',
                             },
                             'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
+                            'username_from_email': _SLURM_USERNAME_FROM_EMAIL_SCHEMA,  # pylint: disable=line-too-long
                             # The Prometheus this cluster's GPU metrics are
                             # federated from.
                             'prometheus': {

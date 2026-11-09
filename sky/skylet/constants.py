@@ -759,6 +759,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
     ('slurm', 'username_map'),
+    ('slurm', 'username_from_email'),
 ]
 
 # Also skipped when the request did not come from loopback: which
