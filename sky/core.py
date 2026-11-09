@@ -1879,6 +1879,10 @@ def realtime_kubernetes_gpu_availability(
         if reason is not None:
             unreachable[ctx] = reason
     context_list = [ctx for ctx in context_list if ctx not in unreachable]
+    if unreachable:
+        skipped = ', '.join(
+            f'{ctx!r} ({reason})' for ctx, reason in unreachable.items())
+        logger.debug(f'Skipping unreachable Kubernetes contexts: {skipped}')
     if not context_list and unreachable:
         raise ValueError(' '.join(
             f'Kubernetes context {ctx!r} is unreachable: {reason}.'

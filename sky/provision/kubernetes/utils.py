@@ -431,6 +431,9 @@ _CONTEXT_UNREACHABLE_CHECKS: List[ContextUnreachableCheck] = []
 def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
     """Register a check that names contexts known to be unreachable.
 
+    The check runs before every `_retry_on_error`-wrapped call on a named
+    context, so it must be cheap and must not block (no network calls).
+
     Idempotent, so a module that registers on import keeps one registration
     across the several process contexts that may import it.
     """

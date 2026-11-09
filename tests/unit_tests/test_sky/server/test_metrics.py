@@ -2228,9 +2228,8 @@ def _histogram_count(histogram):
 def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
     """A context a registered check names is neither federated nor probed for
     being the local cluster."""
-    from sky.provision.kubernetes import utils as kubernetes_utils
     monkeypatch.setattr(
-        kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS',
+        metrics.kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS',
         [lambda context: 'proxy is down' if context == 'down' else None])
     monkeypatch.setattr(metrics.skypilot_config, 'reload_config', lambda: None)
     monkeypatch.setattr(metrics.core, 'get_all_contexts',
