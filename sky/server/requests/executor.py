@@ -139,7 +139,8 @@ class ExecutionMode(enum.Enum):
     # Write the request row and run the request in this process's request
     # thread executor; queue it when this process is at capacity.
     IN_PROCESS = 'in_process'
-    # The execution policy handled the request; no request row is written.
+    # The execution policy handled the request and answers the client; no
+    # request row is written, so its request ID cannot be fetched.
     HANDLED = 'handled'
 
 
