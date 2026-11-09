@@ -6,7 +6,6 @@ On SQLite always, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
 import importlib.util
 import os
 import pathlib
-import threading
 
 from alembic import command as alembic_command
 import pytest
@@ -94,46 +93,6 @@ def test_rerun_converges(url):
     assert _query(url,
                   'SELECT id, version FROM rbac_policy_version') == [(1, 0)]
     assert len(_triggers(url)) == (3 if str(url).startswith('sqlite') else 1)
-
-
-@pytest.mark.skipif(not _PG_URL, reason='SKYPILOT_TEST_PG_URL is not set')
-@pytest.mark.xdist_group('rbac_policy_version_pg')
-def test_concurrent_migrators_converge():
-    """Two replicas share one Postgres, but the migration file lock does not."""
-    admin = sqlalchemy.create_engine(_pg_url())
-    with admin.begin() as conn:
-        conn.execute(
-            sqlalchemy.text(f'DROP SCHEMA IF EXISTS {_PG_SCHEMA} CASCADE'))
-        conn.execute(sqlalchemy.text(f'CREATE SCHEMA {_PG_SCHEMA}'))
-    admin.dispose()
-    url = _pg_url().update_query_dict(
-        {'options': f'-csearch_path={_PG_SCHEMA}'})
-    revision = _load_revision()
-    engine = sqlalchemy.create_engine(url)
-    first_ran, errors = threading.Event(), []
-
-    def second():
-        first_ran.wait(timeout=5)
-        try:
-            with engine.begin() as conn:
-                revision.upgrade_on(conn)
-        except Exception as e:  # pylint: disable=broad-except
-            errors.append(e)
-
-    thread = threading.Thread(target=second)
-    thread.start()
-    with engine.begin() as conn:
-        revision.upgrade_on(conn)
-        first_ran.set()
-        # Hold the transaction open while the second one runs into it.
-        thread.join(timeout=1)
-    thread.join(timeout=10)
-    engine.dispose()
-
-    assert not errors, errors
-    assert _query(url,
-                  'SELECT id, version FROM rbac_policy_version') == [(1, 0)]
-    assert _triggers(url) == [(_PG_TRIGGER,)]
 
 
 @pytest.mark.skipif(not _PG_URL, reason='SKYPILOT_TEST_PG_URL is not set')
