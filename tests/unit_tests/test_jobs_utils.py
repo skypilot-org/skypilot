@@ -146,6 +146,68 @@ async def test_get_job_status_returns_error_reason_on_failure(
     assert mock_logger.info.call_count == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('hops', range(6))
+@mock.patch('sky.jobs.utils.logger')
+async def test_get_job_status_keeps_a_cancel_that_lands_as_the_fetch_completes(
+        mock_logger, hops):
+    """Cancelling a loop that polls get_job_status stops it.
+
+    The controller cancels a managed job by cancelling the task that polls
+    get_job_status. The fetch thread queues the cancel to run `hops`
+    event-loop iterations after it returns; 1 to 3 hops land it as the fetch
+    completes, where asyncio.wait_for on Python 3.9 to 3.11 loses it and the
+    job keeps running.
+    """
+    del mock_logger  # Only silences the status loglines.
+    loop = asyncio.get_running_loop()
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    task = None
+    fetches = 0
+    cancel_sent = asyncio.Event()
+
+    def cancel_after(remaining):
+        if remaining:
+            loop.call_soon(cancel_after, remaining - 1)
+        else:
+            task.cancel()
+            cancel_sent.set()
+
+    def fetch_status(*args, **kwargs):
+        del args, kwargs
+        nonlocal fetches
+        fetches += 1
+        if fetches == 2:
+            loop.call_soon_threadsafe(cancel_after, hops)
+        return {1: job_lib.JobStatus.RUNNING}
+
+    mock_backend.get_job_status = fetch_status
+
+    async def poll_loop():
+        while True:
+            await asyncio.sleep(0.001)
+            await utils.get_job_status(backend=mock_backend,
+                                       cluster_name='test-cluster',
+                                       job_id=1,
+                                       handle=mock_handle)
+
+    task = asyncio.ensure_future(poll_loop())
+    # Two seconds from the cancel, however slow the runner is to get there.
+    await asyncio.wait({asyncio.ensure_future(cancel_sent.wait()), task},
+                       return_when=asyncio.FIRST_COMPLETED)
+    assert cancel_sent.is_set(), task
+    done, _ = await asyncio.wait({task}, timeout=2)
+    if task not in done:
+        while not task.done():
+            task.cancel()
+            await asyncio.wait({task}, timeout=0.1)
+        pytest.fail(f'The polling loop kept running after task.cancel() '
+                    f'({fetches} fetches).')
+    assert task.cancelled()
+
+
 def _info_messages(mock_logger):
     """The messages passed to logger.info(), in order."""
     return [call.args[0] for call in mock_logger.info.call_args_list]
