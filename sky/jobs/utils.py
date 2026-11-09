@@ -3539,8 +3539,8 @@ def _format_job_details(
     who requested a cancellation / what a launch is waiting on / which jobs it
     depends on are still running.
 
-    ``launch_limit`` is set when the job's user is at the per-user launch limit
-    (see managed_job_state.get_waiting_job_async)."""
+    ``launch_limit`` is set when the per-user launch limit holds the job back
+    (see managed_job_state.get_held_job_ids)."""
     if cancel_reason:
         # Surface who asked for the cancellation, and under which API
         # request, e.g. 'Cancellation requested by user alice (request ID:
@@ -3829,7 +3829,7 @@ def get_managed_job_queue(
 
     highest_blocking_priority = constants.MIN_PRIORITY
     max_launching_jobs_per_user = get_max_launching_jobs_per_user()
-    users_at_launch_limit: Set[str] = set()
+    held_job_ids: Set[int] = set()
     if not fields or 'details' in fields:
         # Figure out what the highest priority blocking job is. We need to know
         # in order to determine if other jobs are blocked by a higher priority
@@ -3838,9 +3838,8 @@ def get_managed_job_queue(
             managed_job_state.get_managed_jobs_highest_priority(
                 max_launching_jobs_per_user=max_launching_jobs_per_user))
         if max_launching_jobs_per_user is not None:
-            users_at_launch_limit = (
-                managed_job_state.get_users_at_launch_limit(
-                    max_launching_jobs_per_user))
+            held_job_ids = managed_job_state.get_held_job_ids(
+                max_launching_jobs_per_user)
 
     jobs_with_handle = []
     for job in jobs:
@@ -3983,8 +3982,7 @@ def get_managed_job_queue(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
                 launch_limit=(max_launching_jobs_per_user
-                              if job.get('user_hash') in users_at_launch_limit
-                              else None),
+                              if job['job_id'] in held_job_ids else None),
                 recovery_reason=recovery_reasons.get(job['job_id']),
                 pending_reason=pending_reasons.get(job['job_id']),
                 cancel_reason=cancel_reasons.get(job['job_id']),

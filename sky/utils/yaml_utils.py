@@ -61,28 +61,25 @@ def check_no_duplicate_keys(yaml_str: str) -> None:
             walk(node)
 
 
-def safe_load(stream) -> Any:
+def _get_safe_loader() -> Any:
     global _c_extension_unavailable
-    if _c_extension_unavailable:
-        return yaml.load(stream, Loader=yaml.SafeLoader)
-
-    try:
-        return yaml.load(stream, Loader=yaml.CSafeLoader)
-    except AttributeError:
+    if not _c_extension_unavailable:
+        # LazyImport returns a non-callable submodule proxy for missing
+        # attributes, so catching AttributeError does not detect a missing
+        # C extension. Select the loader before parsing (load_all is lazy).
+        loader = getattr(yaml, 'CSafeLoader', None)
+        if callable(loader):
+            return loader
         _c_extension_unavailable = True
-        return yaml.load(stream, Loader=yaml.SafeLoader)
+    return yaml.SafeLoader
+
+
+def safe_load(stream) -> Any:
+    return yaml.load(stream, Loader=_get_safe_loader())
 
 
 def safe_load_all(stream) -> Any:
-    global _c_extension_unavailable
-    if _c_extension_unavailable:
-        return yaml.load_all(stream, Loader=yaml.SafeLoader)
-
-    try:
-        return yaml.load_all(stream, Loader=yaml.CSafeLoader)
-    except AttributeError:
-        _c_extension_unavailable = True
-        return yaml.load_all(stream, Loader=yaml.SafeLoader)
+    return yaml.load_all(stream, Loader=_get_safe_loader())
 
 
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:

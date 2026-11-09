@@ -15,8 +15,8 @@ import subprocess
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import ijson
 
@@ -30,6 +30,7 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
@@ -292,6 +293,8 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
+# Phases of the pods whose requests count as allocated on their node.
+_ALLOCATING_POD_PHASES = ('Running', 'Pending')
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
@@ -370,38 +373,50 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
-def _is_cloudflare_403_error(exception: Exception) -> bool:
-    """Check if an exception is a transient CloudFlare 403 error.
+# Kept under their old names: callers inside and outside this repo use them.
+# The definitions live in api_errors, with the other API-error classifiers.
+_is_cloudflare_403_error = api_errors.is_cloudflare_403
+is_transient_api_error = api_errors.is_transient
 
-    CloudFlare proxy 403 errors with CF-specific headers are transient and
-    should be retried, unlike real RBAC 403 errors.
 
-    Args:
-        exception: The exception to check
+# Checks for contexts whose API server is known to be unreachable, e.g. one
+# reached through a proxy hop that is known to be down. Each is called with a
+# context name and returns why that context is unreachable, or None. Calls
+# wrapped by `_retry_on_error` on such a context fail at once instead of
+# retrying with backoff. Empty by default -- nothing in core registers one.
+ContextUnreachableCheck = Callable[[Optional[str]], Optional[str]]
+_CONTEXT_UNREACHABLE_CHECKS: List[ContextUnreachableCheck] = []
 
-    Returns:
-        True if this is a CloudFlare 403 error that should be retried
+
+def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
+    """Register a check that names contexts known to be unreachable.
+
+    The check runs before every `_retry_on_error`-wrapped call on a named
+    context, so it must be cheap and must not block (no network calls).
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
     """
-    if not isinstance(exception, kubernetes.api_exception()):
-        return False
+    if check not in _CONTEXT_UNREACHABLE_CHECKS:
+        _CONTEXT_UNREACHABLE_CHECKS.append(check)
 
-    # Only check for 403 errors
-    if exception.status != 403:
-        return False
 
-    # Check for CloudFlare-specific headers
-    headers = exception.headers if hasattr(exception, 'headers') else {}
-    if not headers:
-        return False
+def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
+    """Why `context` is known to be unreachable, or None.
 
-    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    for k, v in headers.items():
-        if 'cf-ray' in k.lower():
-            return True
-        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            return True
-
-    return False
+    Never raises: a check that fails is skipped, as if it were not
+    registered.
+    """
+    for check in _CONTEXT_UNREACHABLE_CHECKS:
+        try:
+            reason = check(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Context unreachable check failed for '
+                         f'{context!r}: {e}')
+            continue
+        if reason:
+            return reason
+    return None
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -430,6 +445,15 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
+
+            # Only a named context: which API server a call without one
+            # reaches depends on the function and on in-cluster config loading.
+            if context is not None:
+                reason = known_unreachable_reason(context)
+                if reason is not None:
+                    raise exceptions.KubeAPIUnreachableError(
+                        f'Kubernetes context {context!r} is unreachable: '
+                        f'{reason}')
 
             for attempt in range(max_retries):
                 try:
@@ -1015,9 +1039,19 @@ def detect_gpu_label_formatter(
         Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
              labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
+    return detect_gpu_label_formatter_from_nodes(
+        get_kubernetes_nodes(context=context))
+
+
+def detect_gpu_label_formatter_from_nodes(
+    nodes: List['V1Node']
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
+    """Detects the GPU label formatter for a cluster with the given nodes.
+
+    See detect_gpu_label_formatter() for the return values.
+    """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -2113,6 +2147,21 @@ def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
     return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
 
 
+def disruption_reason(reason: str, message: str, pod: Any) -> str:
+    """A pod's DisruptionTarget condition, with the node it was on.
+
+    The condition says how the pod was disrupted (taint manager, eviction API,
+    scheduler preemption) but not where; the node is what a user checks next.
+    """
+    text = f'Disrupted: {reason}'
+    if message:
+        text += f' ({message})'
+    node = getattr(getattr(pod, 'spec', None), 'node_name', None)
+    if isinstance(node, str) and node:
+        text += f' on node {node}'
+    return text
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2134,10 +2183,7 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
                     summary += f' ({message})'
                 return summary
             if condition.type == 'DisruptionTarget':
-                summary = f'Disrupted: {reason}'
-                if message:
-                    summary += f' ({message})'
-                return summary
+                return disruption_reason(reason, message, pod)
 
     # Pod-level kubelet reason (e.g. 'Evicted' for ephemeral-storage / disk /
     # memory pressure, 'Preempted', 'Shutdown'). This is the authoritative
@@ -2336,7 +2382,7 @@ def event_last_observed(event: Any) -> Optional[float]:
 # the paths where when the launch started is the only bound available. It is
 # deliberately small, because anything larger reaches back into the previous
 # pod.
-_POD_EVENT_CLOCK_SKEW_SECONDS = 60
+POD_EVENT_CLOCK_SKEW_SECONDS = 60
 
 # Pod-event reasons that name *why* a pod was deleted, mapped to
 # (decisiveness, how the reason is reported). The events are ranked by
@@ -2380,8 +2426,8 @@ _POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
 _POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
 
 
-def _events_since(events: List[Any],
-                  since: Optional[datetime.datetime]) -> List[Any]:
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
     """The events that can be evidence about the pod that exists now.
 
     Events the API server left without a usable timestamp are kept: not
@@ -2390,7 +2436,7 @@ def _events_since(events: List[Any],
     """
     if since is None:
         return events
-    cutoff = since.timestamp() - _POD_EVENT_CLOCK_SKEW_SECONDS
+    cutoff = since.timestamp() - POD_EVENT_CLOCK_SKEW_SECONDS
     kept = []
     for event in events:
         observed_at = event_last_observed(event)
@@ -2418,18 +2464,42 @@ def reason_from_pod_events(
     held the same pod name before it. ``events`` are expected newest-first,
     which is what decides between two events of equal rank.
     """
+    event = pod_deletion_event(events, since)
+    if event is None:
+        return None
+    reported_as = _POD_DELETION_EVENT_REASONS[event.reason][1]
+    message = (event.message or '').strip()
+    return f'{reported_as}: {message}' if message else reported_as
+
+
+def is_cancelled_taint_eviction(reason: Optional[str],
+                                message: Optional[str]) -> bool:
+    """A taint eviction that did not happen.
+
+    The taint manager emits it when the taint is lifted before the pod's
+    tolerationSeconds run out, or when something else deletes the pod first.
+    """
+    return (reason == 'TaintManagerEviction' and
+            (message or '').startswith('Cancelling deletion'))
+
+
+def pod_deletion_event(events: List[Any],
+                       since: Optional[datetime.datetime] = None) -> Any:
+    """The event that best names why a pod was deleted, or None.
+
+    The event behind ``reason_from_pod_events``, for callers that word the
+    cause themselves.
+    """
     best_rank = 0
-    best_reason: Optional[str] = None
-    for event in _events_since(events, since):
-        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
-        if ranked is None:
+    best_event = None
+    for event in events_since(events, since):
+        if is_cancelled_taint_eviction(event.reason, event.message):
             continue
-        rank, reported_as = ranked
-        if rank > best_rank:
-            best_rank = rank
-            message = (event.message or '').strip()
-            best_reason = f'{reported_as}: {message}' if message else reported_as
-    return best_reason
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is not None and ranked[0] > best_rank:
+            best_rank = ranked[0]
+            best_event = event
+    return best_event
 
 
 def last_pod_event_context(
@@ -2443,7 +2513,7 @@ def last_pod_event_context(
     for what they are -- the last thing said about it -- and the caller still
     says plainly that no cause could be derived.
     """
-    for event in _events_since(events, since):
+    for event in events_since(events, since):
         # Events arrive newest-first.
         if (event.type == 'Warning' or
                 event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
@@ -2459,6 +2529,22 @@ def _with_failure_hint(message: str, reason: str) -> str:
     if hint is not None:
         message += f'\nHint: {hint}'
     return message
+
+
+def _kai_eviction_reason(context: Optional[str], namespace: str, pod_name: str,
+                         pod: Optional[Any]) -> Optional[str]:
+    """Why KAI evicted the pod, or None; ``pod`` is its object, if it exists."""
+    # In-function import: kai imports this module.
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import kai
+    if pod is None:
+        return kai.eviction_reason(context, namespace, pod_name, since=None)
+    if kai.POD_GROUP_ANNOTATION not in (pod.metadata.annotations or {}):
+        return None
+    return kai.eviction_reason(context,
+                               namespace,
+                               pod_name,
+                               since=pod.metadata.creation_timestamp)
 
 
 def _diagnose_deleted_pod(context: Optional[str], namespace: str,
@@ -2481,6 +2567,8 @@ def _diagnose_deleted_pod(context: Optional[str], namespace: str,
     except Exception:  # pylint: disable=broad-except
         return None
     reason = reason_from_pod_events(events)
+    if reason is None:
+        reason = _kai_eviction_reason(context, namespace, pod_name, pod=None)
     if reason is None:
         # A pod that is merely absent is not news: every `sky down` leaves
         # one, and the caller asks about all of them.
@@ -2557,6 +2645,11 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
         return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
+    # Checked first: a pod KAI is deleting may not show as terminated yet, and
+    # once it does, the exit status KAI caused reads as the workload failing.
+    eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
+    if eviction is not None:
+        return f'Pod {pod_name} terminated: {eviction}.'
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
@@ -2632,7 +2725,7 @@ def get_allocated_resources_by_node(
     if context is None:
         context = get_current_kube_config_context_name()
     non_included_pod_statuses = POD_STATUSES.copy()
-    status_filters = ['Running', 'Pending']
+    status_filters = list(_ALLOCATING_POD_PHASES)
     if status_filters is not None:
         non_included_pod_statuses -= set(status_filters)
         field_selector = ','.join(
@@ -2645,51 +2738,65 @@ def get_allocated_resources_by_node(
         _preload_content=False,
         field_selector=field_selector)
     try:
-        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-        allocated_cpu_memory_by_node: Dict[str, Tuple[
-            float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
-        for item_dict in ijson.items(response,
-                                     'items.item',
-                                     buf_size=IJSON_BUFFER_SIZE):
-            pod = V1Pod.from_dict(item_dict)
-            if should_exclude_pod_from_gpu_allocation(pod):
-                logger.debug(
-                    f'Excluding pod {pod.metadata.name} from resource count '
-                    f'calculations on node {pod.spec.node_name}')
-                continue
-            if not pod.spec.node_name:
-                continue
-
-            # Iterate over all the containers in the pod and sum the resources
-            pod_allocated_qty = 0
-            pod_allocated_cpu = 0.0
-            pod_allocated_memory_gb = 0.0
-            for container in pod.spec.containers:
-                if container.resources.requests:
-                    requests = container.resources.requests
-                    # Parse GPU
-                    pod_allocated_qty += get_node_accelerator_count(
-                        context, requests)
-                    # Parse CPU
-                    if 'cpu' in requests:
-                        pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
-                            requests['cpu'])
-                    # Parse memory
-                    if 'memory' in requests:
-                        pod_allocated_memory_gb += parse_memory_resource(
-                            requests['memory'], unit='G')
-
-            if pod_allocated_qty > 0:
-                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
-            if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
-                current_cpu, current_memory = allocated_cpu_memory_by_node[
-                    pod.spec.node_name]
-                allocated_cpu_memory_by_node[pod.spec.node_name] = (
-                    current_cpu + pod_allocated_cpu,
-                    current_memory + pod_allocated_memory_gb)
-        return allocated_qty_by_node, allocated_cpu_memory_by_node
+        return _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)), context)
     finally:
         response.release_conn()
+
+
+def _sum_allocated_resources_by_node(
+    pods: Iterable[V1Pod],
+    context: Optional[str],
+    gpu_resource_key: Optional[str] = None,
+) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
+    """Sums the accelerators, CPU and memory that Running and Pending pods
+    request on each node.
+
+    See get_allocated_resources_by_node() for the return values.
+    """
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    allocated_cpu_memory_by_node: Dict[str, Tuple[
+        float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
+    for pod in pods:
+        if pod.status.phase not in _ALLOCATING_POD_PHASES:
+            continue
+        if should_exclude_pod_from_gpu_allocation(pod):
+            logger.debug(
+                f'Excluding pod {pod.metadata.name} from resource count '
+                f'calculations on node {pod.spec.node_name}')
+            continue
+        if not pod.spec.node_name:
+            continue
+
+        # Iterate over all the containers in the pod and sum the resources
+        pod_allocated_qty = 0
+        pod_allocated_cpu = 0.0
+        pod_allocated_memory_gb = 0.0
+        for container in pod.spec.containers:
+            if container.resources.requests:
+                requests = container.resources.requests
+                # Parse GPU
+                pod_allocated_qty += get_node_accelerator_count(
+                    context, requests, gpu_resource_key=gpu_resource_key)
+                # Parse CPU
+                if 'cpu' in requests:
+                    pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
+                        requests['cpu'])
+                # Parse memory
+                if 'memory' in requests:
+                    pod_allocated_memory_gb += parse_memory_resource(
+                        requests['memory'], unit='G')
+
+        if pod_allocated_qty > 0:
+            allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
+            current_cpu, current_memory = allocated_cpu_memory_by_node[
+                pod.spec.node_name]
+            allocated_cpu_memory_by_node[pod.spec.node_name] = (
+                current_cpu + pod_allocated_cpu,
+                current_memory + pod_allocated_memory_gb)
+    return allocated_qty_by_node, allocated_cpu_memory_by_node
 
 
 @_retry_on_error(resource_type='pod')
@@ -2705,6 +2812,51 @@ def get_allocated_gpu_qty_by_node(
     """
     allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
     return allocated_qty_by_node
+
+
+def read_node_snapshot(
+    context: str, snapshot: plugin_extensions.KubernetesNodeSnapshot
+) -> Optional[Tuple[List[V1Node], str, Dict[str, int]]]:
+    """Reads the accelerator availability inputs from a node snapshot.
+
+    Returns:
+        The same values as get_kubernetes_nodes(), get_gpu_resource_key() and
+        get_allocated_gpu_qty_by_node() for the context, computed from the
+        snapshot without calling the Kubernetes API, or None if the snapshot
+        is malformed.
+    """
+    try:
+        nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
+        gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
+        allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(pod) for pod in snapshot.pods),
+            context,
+            gpu_resource_key=gpu_resource_key)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Ignoring a malformed node snapshot for context '
+                       f'{context}: {common_utils.format_exception(e)}')
+        return None
+    return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
+            allocated_qty_by_node)
+
+
+def get_node_snapshot_label_keys(context: str) -> List[str]:
+    """Returns the node label keys that accelerator availability reads.
+
+    These are the GPU label formatters' keys, the GKE TPU keys that
+    is_multi_host_tpu() reads, and the allowed_nodes label_selector keys.
+    Formatters match label keys exactly, so nodes with only these labels give
+    the same result as the full node objects.
+    """
+    keys = {
+        key for formatter in LABEL_FORMATTER_REGISTRY
+        for key in formatter.get_label_keys()
+    }
+    keys.update((GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+                 GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY))
+    allowed_nodes = get_allowed_nodes_config(context) or {}
+    keys.update(allowed_nodes.get('label_selector') or {})
+    return sorted(keys)
 
 
 def adjust_resources_to_allocatable(
@@ -2892,6 +3044,8 @@ def check_instance_fits(
                 get_accelerator_label_key_values(context, acc_type, acc_count))
             if gpu_label_values is None:
                 gpu_label_values = []
+        except exceptions.KubeAPIUnreachableError:
+            raise
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -3816,9 +3970,6 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    We should not cache the result of this function as the admin policy may
-    update the contexts.
-
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
@@ -3851,20 +4002,6 @@ _cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
 _cluster_uid_cache_lock = threading.Lock()
 
 
-def _kubeconfig_fingerprint() -> Tuple[Any, ...]:
-    """Changes whenever a file on KUBECONFIG is written, replaced or removed."""
-    fingerprint: List[Tuple[Any, ...]] = []
-    for path in get_kubeconfig_paths():
-        if not path:
-            continue
-        try:
-            st = os.stat(path)
-            fingerprint.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
-        except OSError:
-            fingerprint.append((path, None))
-    return tuple(fingerprint)
-
-
 def read_cluster_uid(core, timeout: float) -> Optional[str]:
     """Reads the kube-system namespace UID through the given CoreV1Api."""
     namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
@@ -3884,7 +4021,7 @@ def get_cluster_uid(context: Optional[str],
     another cluster.
     """
     now = time.monotonic()
-    fingerprint = _kubeconfig_fingerprint()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
     if use_cache:
         with _cluster_uid_cache_lock:
             cached = _cluster_uid_cache.get(context)
@@ -5612,7 +5749,8 @@ def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
 
 
 def get_node_accelerator_count(context: Optional[str],
-                               attribute_dict: dict) -> int:
+                               attribute_dict: dict,
+                               gpu_resource_key: Optional[str] = None) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -5622,12 +5760,15 @@ def get_node_accelerator_count(context: Optional[str],
     Args:
         attribute_dict: Containing resource information from a node, such as
             allocatable or requested resources.
+        gpu_resource_key: The context's GPU resource key. Defaults to
+            get_gpu_resource_key(context).
 
     Returns:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key(context)
+    gpu_resource_name = (gpu_resource_key if gpu_resource_key is not None else
+                         get_gpu_resource_key(context))
     # A node is expected to advertise at most one accelerator family (GPU, TPU,
     # or Neuron). Rather than assert on external cluster state (which would crash
     # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
@@ -5858,9 +5999,19 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
+def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
+    """Picks the GPU resource key from the capacity keys of all nodes.
+
+    The CUSTOM_GPU_RESOURCE_KEY environment variable overrides the pick.
+    """
+    detected = next(
+        (gpu_key for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values()
+         if gpu_key in capacity_keys), SUPPORTED_GPU_RESOURCE_KEYS['nvidia'])
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=detected)
+
+
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
         response = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
@@ -5874,15 +6025,25 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
                     supported_gpu_keys.intersection(capacity.keys()))
                 if len(capacity_keys) == len(supported_gpu_keys):
                     break
-            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-                if gpu_key in capacity_keys:
-                    return gpu_key
+            return _select_gpu_resource_key(capacity_keys)
         finally:
             response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
-    return gpu_resource_key
+    return _select_gpu_resource_key(set())
+
+
+def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
+    """Gets the GPU resource key for a cluster with the given nodes.
+
+    Same as get_gpu_resource_key(), for all nodes of the cluster, before
+    allowed_nodes filtering.
+    """
+    capacity_keys: Set[str] = set()
+    for node in nodes:
+        capacity_keys.update(node.status.capacity.keys())
+    return _select_gpu_resource_key(capacity_keys)
 
 
 @annotations.lru_cache(scope='request')
@@ -5896,8 +6057,7 @@ def get_gpu_resource_key(context: Optional[str] = None) -> str:
     Returns:
         str: The selected GPU resource name.
     """
-    gpu_resource_key = _gpu_resource_key_helper(context)
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
+    return _gpu_resource_key_helper(context)
 
 
 def get_kubeconfig_paths() -> List[str]:

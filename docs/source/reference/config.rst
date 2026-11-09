@@ -56,6 +56,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         down: false  # use with caution!
       :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
       :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
+      :ref:`stream_task_logs_to_controller_log <config-yaml-jobs-controller-stream-task-logs-to-controller-log>`: true
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -101,6 +102,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`kai <config-yaml-kubernetes-kai>`:
+      :ref:`queue <config-yaml-kubernetes-kai-queue>`: team-queue
+      :ref:`preemptibility <config-yaml-kubernetes-kai-preemptibility>`: preemptible
+      :ref:`topology <config-yaml-kubernetes-kai-topology>`: fabric
+      :ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`: leaf
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
@@ -280,6 +286,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`allow_impersonation <config-yaml-rbac-allow-impersonation>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -664,6 +671,32 @@ Example:
     controller:
       # Disable task logs GC (keep all logs indefinitely)
       task_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-stream-task-logs-to-controller-log:
+
+``jobs.controller.stream_task_logs_to_controller_log``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether the jobs controller copies a finished task's log into the controller
+log (optional).
+
+When a task finishes, the controller downloads the task log from the job
+cluster and, by default, also prints it into the controller log. Set to
+``false`` to skip that copy: ``sky jobs logs <job_id>`` and the dashboard
+still serve the downloaded task log, while ``sky jobs logs --controller``
+shows only controller events. This avoids storing each task log twice when
+logs are retained long-term.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      stream_task_logs_to_controller_log: false
 
 
 .. _config-yaml-allowed-clouds:
@@ -1985,8 +2018,8 @@ If unset, the default is chosen based on the launch: ``10`` seconds for a
 single node, scaled up by ``0.2`` seconds per additional node (capped at
 ``60`` seconds); ``1200`` seconds (capped at ``2400``) when GCP DWS flex
 start is used; ``180`` seconds (capped at ``240``) when a ``ReadWriteMany``
-PVC must be provisioned; and 24 hours when a Kueue local queue is
-configured.
+PVC must be provisioned; and 24 hours when a Kueue local queue or a KAI
+queue is configured.
 
 Default: ``10``–``60`` seconds (see above).
 
@@ -2156,6 +2189,65 @@ jobs that set
 :ref:`job.wait_for_scheduling_timeout <yaml-spec-job-wait-for-scheduling-timeout>`,
 which bounds their wait instead. Set the field explicitly to bound their wait
 as well.
+
+.. _config-yaml-kubernetes-kai:
+
+``kubernetes.kai``
+~~~~~~~~~~~~~~~~~~
+
+`KAI Scheduler <https://github.com/kai-scheduler/KAI-Scheduler>`_ configuration
+(optional). See :ref:`kubernetes-example-kai`. Cannot be combined with
+:ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`.
+
+The time KAI keeps a cluster queued counts toward
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`.
+
+.. _config-yaml-kubernetes-kai-queue:
+
+``kubernetes.kai.queue``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Queue`` to submit clusters to. A queue set for a context in
+a workspace always wins over a task's ``config.kubernetes.kai.queue``;
+elsewhere, which one wins depends on where this one is set. See
+:ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-preemptibility:
+
+``kubernetes.kai.preemptibility``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``preemptible`` or ``non-preemptible`` (optional). If not set, KAI derives it
+from the cluster's priority: below 100 is preemptible.
+
+.. _config-yaml-kubernetes-kai-topology:
+
+``kubernetes.kai.topology``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the KAI ``Topology`` to place the cluster's pods in (optional). Set it
+with :ref:`required_topology_level <config-yaml-kubernetes-kai-required-topology-level>`,
+:ref:`preferred_topology_level <config-yaml-kubernetes-kai-preferred-topology-level>`,
+or both. See :ref:`kubernetes-example-kai`.
+
+.. _config-yaml-kubernetes-kai-required-topology-level:
+
+``kubernetes.kai.required_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias (optional). All of the
+cluster's pods must land in one domain at this level, and the cluster stays
+queued until one has room, including when no domain at this level is large
+enough.
+
+.. _config-yaml-kubernetes-kai-preferred-topology-level:
+
+``kubernetes.kai.preferred_topology_level``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A level of the ``Topology``, by node label or alias, at or below the required
+level (optional). KAI places the pods in one domain at this level if it can,
+and otherwise in one at the lowest broader level that has room.
 
 .. _config-yaml-kubernetes-dws:
 
@@ -3382,6 +3474,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-allow-impersonation:
+
+``rbac.allow_impersonation``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether admin service accounts may act on behalf of other users (optional).
+Default: ``false``.
+
+When ``true``, a request authenticated with the token of a service account
+whose role is ``admin`` can set the ``X-SkyPilot-Impersonate-User`` header
+(``sky.impersonate()`` in the Python SDK, ``SKYPILOT_IMPERSONATE_USER`` for
+the CLI) to run as an existing user. The user owns what the request creates,
+and the API server logs the service account behind each such request.
+Impersonated requests cannot change users or service account tokens.
+
+.. code-block:: yaml
+
+  rbac:
+    allow_impersonation: true
 
 .. _config-yaml-db:
 

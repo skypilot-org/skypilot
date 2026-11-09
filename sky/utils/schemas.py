@@ -1750,6 +1750,30 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     },
 }
 
+_KAI_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'queue': {
+            'type': 'string',
+        },
+        'preemptibility': {
+            'type': 'string',
+            'enum': ['preemptible', 'non-preemptible'],
+        },
+        'topology': {
+            'type': 'string',
+        },
+        'required_topology_level': {
+            'type': 'string',
+        },
+        'preferred_topology_level': {
+            'type': 'string',
+        },
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     # Per context because the constraint it satisfies is per cluster: the
     # range has to sit outside the node's ephemeral port pool, and that
@@ -1863,6 +1887,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'kai': _KAI_SCHEMA,
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
     # when both are set. Permissive so plugins can layer their own
     # sub-fields under `quota` without requiring per-key OSS schema
@@ -2041,6 +2066,9 @@ def get_config_schema():
                     },
                     'task_logs_gc_retention_hours': {
                         'type': 'integer',
+                    },
+                    'stream_task_logs_to_controller_log': {
+                        'type': 'boolean',
                     },
                 },
             },
@@ -2746,6 +2774,11 @@ def get_config_schema():
             'restrict_config_to_admins': {
                 'type': 'boolean',
             },
+            # When true, admin service accounts may act as other users through
+            # the impersonation header. Defaults to false.
+            'allow_impersonation': {
+                'type': 'boolean',
+            },
             # Per-role permission overrides. Schema is intentionally
             # permissive (additionalProperties: True on
             # `permissions`) because admin/user use `blocklist`
@@ -2910,6 +2943,7 @@ def get_config_schema():
                                 },
                             },
                         },
+                        'kai': _KAI_SCHEMA,
                         'quota': {
                             'type': 'object',
                             'required': [],
@@ -2953,6 +2987,7 @@ def get_config_schema():
                                             },
                                         },
                                     },
+                                    'kai': _KAI_SCHEMA,
                                     'quota': {
                                         'type': 'object',
                                         'required': [],

@@ -394,6 +394,36 @@ function SlurmNodesCell({ nodes }) {
   );
 }
 
+/**
+ * Orders contexts for the infrastructure table: contexts with data first,
+ * then contexts whose fetch failed, then contexts still loading. The sort is
+ * stable, so each group keeps the incoming (alphabetical) order.
+ *
+ * `isContextLoading(context)` overrides the loading check; by default a
+ * context is loading until it appears in `loadedContexts`. A failed context
+ * is also in `loadedContexts`, so the error check comes first.
+ */
+export function sortContextsByLoadState(
+  contexts,
+  {
+    contextErrors = {},
+    loadedContexts = new Set(),
+    isContextLoading = null,
+  } = {}
+) {
+  const rank = (context) => {
+    if (contextErrors[context]) return 1;
+    const loading = isContextLoading
+      ? isContextLoading(context)
+      : !loadedContexts.has(context);
+    return loading ? 2 : 0;
+  };
+  return contexts
+    .map((context, index) => ({ context, index, rank: rank(context) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ context }) => context);
+}
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -434,6 +464,21 @@ export function InfrastructureSection({
   const safeInactive = React.useMemo(
     () => inactiveContexts || [],
     [inactiveContexts]
+  );
+
+  // Row order: contexts with data first, then contexts whose fetch failed,
+  // then contexts still loading. Within each group the incoming order is
+  // kept. A slow or unreachable context would otherwise sit in the middle of
+  // the list with a spinner or an error while usable rows wait below it.
+  const orderedContexts = React.useMemo(
+    () =>
+      sortContextsByLoadState(safeContexts, {
+        contextErrors,
+        loadedContexts,
+        // SSH loads all pools at once, so there is no per-pool loading state.
+        isContextLoading: isSSH ? () => isLoading : null,
+      }),
+    [safeContexts, contextErrors, loadedContexts, isSSH, isLoading]
   );
 
   const contextDisplayName = useCallback(
@@ -590,16 +635,6 @@ export function InfrastructureSection({
     );
   }
 
-  // Determine if table should show refreshing state
-  // For K8s/Slurm: show during loading or when contexts haven't all loaded
-  // For SSH: only show during loading
-  const isTableRefreshing =
-    !isInitialLoad &&
-    (isLoading ||
-      (!isSSH &&
-        safeContexts.length > 0 &&
-        !safeContexts.every((c) => loadedContexts.has(c))));
-
   // Show table if we have contexts to display, even if some data is still
   // loading. Inactive rows count: a section whose only contexts are
   // not-enabled ones still has something to show (and an action to offer).
@@ -632,11 +667,12 @@ export function InfrastructureSection({
           {/* Desktop: unified full-width table. No inner vertical scroll —
               per-type sub-rows make row count = contexts x GPU types, so a
               fixed max-height would clip rows mid-way. */}
-          <div
-            className={`hidden md:block overflow-x-auto rounded-md border shadow-sm bg-card ${
-              isTableRefreshing ? 'infra-table-refreshing' : ''
-            }`}
-          >
+          {/* No glass overlay while refreshing: every row already shows its
+              own loading placeholders (and loading rows sort to the bottom),
+              and the page header shows the Loading spinner. Blurring the
+              whole table on Refresh / Cmd+R hid readable data for the
+              length of the sky check plus the slowest context. */}
+          <div className="hidden md:block overflow-x-auto rounded-md border shadow-sm bg-card">
             <table className="min-w-full text-sm">
               <thead className="bg-surface-subtle sticky top-0 z-10">
                 <tr>
@@ -685,7 +721,7 @@ export function InfrastructureSection({
                 </tr>
               </thead>
               <tbody className="bg-surface divide-y divide-line">
-                {safeContexts.map((context) => {
+                {orderedContexts.map((context) => {
                   const {
                     nodes,
                     typeRows,
@@ -1064,7 +1100,7 @@ export function InfrastructureSection({
 
           {/* Mobile: one card per context (the table doesn't fit narrow screens) */}
           <div className="md:hidden space-y-3">
-            {safeContexts.map((context) => {
+            {orderedContexts.map((context) => {
               const {
                 nodes,
                 typeRows,

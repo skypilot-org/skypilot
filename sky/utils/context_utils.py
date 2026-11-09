@@ -244,3 +244,17 @@ def to_thread_with_executor(executor: Optional[concurrent.futures.Executor],
     func_call: Callable[..., T] = functools.partial(pyctx.run, func, *args,
                                                     **kwargs)
     return loop.run_in_executor(executor, func_call)
+
+
+class ContextPropagatingThreadPool(concurrent.futures.ThreadPoolExecutor):
+    """A ThreadPoolExecutor that runs each task in the submitter's context.
+
+    A request running in a thread of the API server process carries its env,
+    config and user in context variables; a plain ThreadPoolExecutor runs
+    tasks without them, so helper threads would see the server's own env and
+    config instead.
+    """
+
+    def submit(self, fn, /, *args, **kwargs):  # type: ignore[override]
+        pyctx = contextvars.copy_context()
+        return super().submit(pyctx.run, fn, *args, **kwargs)
