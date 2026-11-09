@@ -17,6 +17,7 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
@@ -1047,17 +1048,8 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 @timeline.event
 def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
+    """See api_errors.is_transport_error."""
+    return api_errors.is_transport_error(e)
 
 
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
@@ -2121,7 +2113,9 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
 # (e.g. its controller is restarting) fails every pod create with a 500, and
 # such outages are often intermittent.
 _WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
-_WEBHOOK_UNAVAILABLE_PATTERN = re.compile(r'failed calling webhook "([^"]+)"')
+# Kept under its old name for callers outside this module.
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
 
 
 def _create_namespaced_pod_retrying_webhook_errors(
@@ -2140,16 +2134,10 @@ def _create_namespaced_pod_retrying_webhook_errors(
             return kubernetes.core_api(context).create_namespaced_pod(
                 namespace, pod_spec)
         except kubernetes.api_exception() as e:
-            if e.status != 500:
+            webhook = api_errors.unavailable_webhook(e)
+            if webhook is None:
                 raise
-            try:
-                error_message = json.loads(e.body).get('message', '')
-            except json.JSONDecodeError:
-                error_message = str(e.body)
-            match = _WEBHOOK_UNAVAILABLE_PATTERN.search(error_message)
-            if match is None:
-                raise
-            webhook = match.group(1)
+            error_message = api_errors.status_message(e)
             # The last sleep is cut short so a final attempt lands on the
             # deadline.
             sleep_seconds = min(backoff.current_backoff(),
@@ -2170,30 +2158,8 @@ def _create_namespaced_pod_retrying_webhook_errors(
             time.sleep(sleep_seconds)
 
 
-def _invalid_pod_spec_message(e: Any) -> Optional[str]:
-    """Returns the API server's message if it rejected the pod as invalid.
-
-    A 422 response with reason `Invalid` is the API server's own validation
-    of the manifest (a duplicate volume name, a malformed field value, ...).
-    It depends only on the manifest and the API server's version, so the same
-    pod spec is rejected the same way on every attempt: no amount of waiting
-    for capacity will get it created. Rejections by an admission webhook are
-    not included: a webhook can decide on state other than the manifest.
-
-    Returns None for any other error.
-    """
-    if getattr(e, 'status', None) != 422:
-        return None
-    try:
-        body = json.loads(e.body)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(body, dict) or body.get('reason') != 'Invalid':
-        return None
-    message = str(body.get('message', ''))
-    if 'admission webhook' in message:
-        return None
-    return message
+# Kept under its old name for callers outside this module.
+_invalid_pod_spec_message = api_errors.invalid_pod_spec_message
 
 
 @timeline.event
