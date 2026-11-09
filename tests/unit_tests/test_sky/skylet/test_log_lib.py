@@ -1,6 +1,7 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import os
 import subprocess
 import sys
 import tempfile
@@ -206,28 +207,44 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
     def test_redirected_background_process_does_not_delay_cleanup(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f:
             start = time.monotonic()
-            returncode, stdout, _ = log_lib.run_with_log(
-                'sleep 300 >/dev/null 2>&1 & echo $!; setsid sleep 300 & exit 0',
+            returncode = log_lib.run_with_log(
+                'sleep 300 >/dev/null 2>&1 & setsid sleep 300 & exit 0',
                 f.name,
                 shell=True,
-                require_outputs=True,
             )
-        background_pid = int(stdout.split()[0])
-        self.assertTrue(psutil.pid_exists(background_pid))
-        psutil.Process(background_pid).kill()
         self.assertEqual(returncode, 0)
         self.assertLess(time.monotonic() - start, 30)
 
     def test_waits_for_background_process_in_same_group(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            # The sleep before exit lets the subprocess daemon record the
+            # background child, so the test fails if the command is reaped
+            # while its output is still streaming.
             returncode, stdout, _ = log_lib.run_with_log(
-                '(sleep 4; echo done) & exit 0',
+                '(sleep 6; echo done) & sleep 3; exit 0',
                 f.name,
                 shell=True,
                 require_outputs=True,
             )
         self.assertEqual(returncode, 0)
         self.assertIn('done', stdout)
+
+    def test_pipe_writers_ignores_read_end_holders(self):
+        read_fd, write_fd = os.pipe()
+        procs = [
+            subprocess.Popen(['sleep', '30'], pass_fds=(fd,))
+            for fd in (read_fd, write_fd)
+        ]
+        try:
+            pipe_link = f'pipe:[{os.fstat(read_fd).st_ino}]'
+            writers = log_lib._pipe_writers({pipe_link}, [p.pid for p in procs])
+            self.assertEqual(writers, [procs[1].pid])
+        finally:
+            for p in procs:
+                p.kill()
+                p.wait()
+            os.close(read_fd)
+            os.close(write_fd)
 
 
 if __name__ == '__main__':

@@ -12,6 +12,7 @@ import re
 import select
 import shlex
 import signal
+import stat as stat_lib
 import subprocess
 import sys
 import tempfile
@@ -47,8 +48,9 @@ SKY_LOG_TAILING_GAP_SECONDS = 0.2
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
 _ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
 _ESCAPED_WRITER_CHECK_INTERVAL_SECONDS = 1
-# How long the output pipe may stay open after the command and its whole
-# process group are gone, before the remaining writers are terminated.
+# How long the output pipe may stay open after the command exits while no
+# process in its process group holds it, before the remaining writers are
+# terminated.
 _ESCAPED_WRITER_GRACE_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
@@ -170,32 +172,60 @@ def process_subprocess_stream(proc, stdout_stream_handler,
     return stdout, stderr
 
 
-def _pipe_holders(pipe_links: Set[str]) -> Dict[int, int]:
-    """Maps PIDs, other than this process, with any of the pipes open to
-    their process group IDs."""
-    holders: Dict[int, int] = {}
+def _process_groups() -> Dict[int, int]:
+    """Maps PIDs, other than this process, to their process group IDs."""
+    groups: Dict[int, int] = {}
     own_pid = os.getpid()
     for entry in os.listdir('/proc'):
         if not entry.isdigit() or int(entry) == own_pid:
             continue
-        fd_dir = f'/proc/{entry}/fd'
+        try:
+            with open(f'/proc/{entry}/stat', 'rb') as f:
+                stat = f.read()
+        except OSError:
+            continue
+        # stat is "<pid> (<comm>) <state> <ppid> <pgrp> ..."; comm can
+        # contain spaces and ')', so split after the last ')'.
+        groups[int(entry)] = int(stat[stat.rfind(b')') + 2:].split()[2])
+    return groups
+
+
+def _pipe_writers(pipe_links: Set[str], pids: Iterable[int]) -> List[int]:
+    """Returns the PIDs that hold the write end of any of the pipes."""
+    writers = []
+    for pid in pids:
+        fd_dir = f'/proc/{pid}/fd'
         try:
             fds = os.listdir(fd_dir)
         except OSError:
             continue
         for fd in fds:
+            path = f'{fd_dir}/{fd}'
             try:
-                if os.readlink(f'{fd_dir}/{fd}') not in pipe_links:
-                    continue
-                with open(f'/proc/{entry}/stat', 'rb') as f:
-                    stat = f.read()
+                # The mode of a /proc/<pid>/fd link is the fd's access mode.
+                if (os.readlink(path) in pipe_links and
+                        os.lstat(path).st_mode & stat_lib.S_IWUSR):
+                    writers.append(pid)
+                    break
             except OSError:
                 continue
-            # stat is "<pid> (<comm>) <state> <ppid> <pgrp> ..."; comm can
-            # contain spaces and ')', so split after the last ')'.
-            holders[int(entry)] = int(stat[stat.rfind(b')') + 2:].split()[2])
-            break
-    return holders
+    return writers
+
+
+def _command_exited(proc: subprocess.Popen) -> bool:
+    """Returns whether the command exited, without reaping it.
+
+    The command must stay unreaped while its output streams: the subprocess
+    daemon treats a reaped command as gone and kills its remaining children.
+    """
+    if proc.returncode is not None:
+        return True
+    try:
+        return os.waitid(os.P_PID, proc.pid,
+                         os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except ChildProcessError:
+        # Already reaped by another thread.
+        return True
 
 
 def _start_escaped_writer_reaper(
@@ -232,10 +262,11 @@ def _start_escaped_writer_reaper(
     def _reap() -> None:
         escaped_since = None
         while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
-            if proc.poll() is None:
+            if not _command_exited(proc):
                 continue
-            holders = _pipe_holders(pipe_links)
-            if proc.pid in holders.values():
+            groups = _process_groups()
+            group_members = [p for p, g in groups.items() if g == proc.pid]
+            if _pipe_writers(pipe_links, group_members):
                 escaped_since = None
                 output_escaped.clear()
                 continue
@@ -245,16 +276,20 @@ def _start_escaped_writer_reaper(
             if (time.monotonic() - escaped_since <
                     _ESCAPED_WRITER_GRACE_SECONDS):
                 continue
-            for pid in holders:
+            holders = []
+            for pid in _pipe_writers(pipe_links, groups):
                 try:
                     holder = psutil.Process(pid)
                     cmdline = ' '.join(holder.cmdline())[:200]
+                    holder.terminate()
                 except psutil.Error:
                     continue
                 logger.warning(
                     f'Terminating process {pid} ({cmdline!r}): it left the '
-                    f'process group of command {proc.pid}, which exited with '
-                    f'code {proc.returncode}, and still holds its output open.')
+                    f'process group of command {proc.pid}, which exited, '
+                    'and still holds its output open.')
+                holders.append(holder)
+            for holder in holders:
                 subprocess_utils.kill_process_with_grace_period(holder)
 
     threading.Thread(target=_reap, daemon=True).start()
