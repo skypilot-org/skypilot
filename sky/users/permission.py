@@ -683,7 +683,8 @@ class PermissionService:
             with self._policy_transaction() as rows:
                 removed = self._delete_user_policy(rows, user_id)
             if removed:
-                self.invalidate_user_permission_cache(user_id)
+                self._invalidate_after_write(
+                    self.invalidate_user_permission_cache, user_id)
 
     def delete_user_and_record(self, user_id: str) -> None:
         """Like `delete_user`, and deletes the user record in the same write.
@@ -700,7 +701,8 @@ class PermissionService:
                 # commit, so taking it after the user row keeps one lock order.
                 removed = self._delete_user_policy(rows, user_id)
             if removed:
-                self.invalidate_user_permission_cache(user_id)
+                self._invalidate_after_write(
+                    self.invalidate_user_permission_cache, user_id)
 
     @staticmethod
     def _delete_user_policy(rows: _PolicyRows, user_id: str) -> int:
@@ -1525,7 +1527,8 @@ class PermissionService:
                                   if user not in members])
             # Invalidate stale cached denials (e.g. from checks between a
             # workspace deletion and its re-creation with the same name).
-            self.invalidate_workspace_permission_cache(workspace_name)
+            self._invalidate_after_write(
+                self.invalidate_workspace_permission_cache, workspace_name)
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -1692,7 +1695,8 @@ class PermissionService:
                 'retried on their next workspace resolution.')
             return
         if added:
-            self.invalidate_user_permission_cache(user_id)
+            self._invalidate_after_write(self.invalidate_user_permission_cache,
+                                         user_id)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""

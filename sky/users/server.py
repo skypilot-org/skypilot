@@ -35,6 +35,9 @@ logger = sky_logging.init_logger(__name__)
 # Filelocks for the user management.
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
+# Users whose locks /users/batch_update holds and writes at once. Bounds the
+# lock files open together and the users a stalled chunk blocks.
+_BATCH_UPDATE_CHUNK_SIZE = 50
 
 # Built-in user identities that the server seeds at startup. They must not
 # be deletable or have their role changed via the user-management API.
@@ -650,17 +653,25 @@ def user_batch_update(request: fastapi.Request,
             logger.exception(f'Failed to update role for user {user_id}')
             failed.append({'user_id': user_id, 'error': str(e)})
 
-    if to_update:
+    # Sorted, so two batches cannot each hold a lock the other is waiting for.
+    targets = sorted(set(to_update))
+    for start in range(0, len(targets), _BATCH_UPDATE_CHUNK_SIZE):
+        chunk = targets[start:start + _BATCH_UPDATE_CHUNK_SIZE]
+        # One wait budget per chunk: contended locks must not each wait the
+        # full timeout while the chunk holds the locks it already took.
+        deadline = time.monotonic() + USER_LOCK_TIMEOUT_SECONDS
         with contextlib.ExitStack() as stack:
             locked = []
-            # Sorted, so two batches cannot each hold a lock the other is
-            # waiting for.
-            for user_id in sorted(set(to_update)):
+            for user_id in chunk:
+                # filelock waits forever on a negative timeout.
+                timeout = max(0.0, deadline - time.monotonic())
                 try:
-                    stack.enter_context(_user_lock(user_id))
+                    stack.enter_context(_user_lock(user_id, timeout))
                     locked.append(user_id)
                 except Exception as e:  # pylint: disable=broad-except
                     failed.append({'user_id': user_id, 'error': str(e)})
+            if not locked:
+                continue
             try:
                 permission.permission_service.update_roles(
                     {user_id: role for user_id in locked})
@@ -884,11 +895,13 @@ def user_export() -> Dict[str, Any]:
 
 
 @contextlib.contextmanager
-def _user_lock(user_id: str) -> Generator[None, None, None]:
+def _user_lock(
+        user_id: str,
+        timeout: float = USER_LOCK_TIMEOUT_SECONDS
+) -> Generator[None, None, None]:
     """Context manager for user lock."""
     try:
-        with filelock.FileLock(USER_LOCK_PATH.format(user_id=user_id),
-                               USER_LOCK_TIMEOUT_SECONDS):
+        with filelock.FileLock(USER_LOCK_PATH.format(user_id=user_id), timeout):
             yield
     except filelock.Timeout as e:
         raise RuntimeError(f'Failed to update user due to a timeout '

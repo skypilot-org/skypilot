@@ -284,8 +284,14 @@ def test_cache_is_cleared_when_the_reload_after_a_write_fails(
     service.invalidate_workspace_permission_cache.assert_called_once_with('ws')
 
 
-def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
+@pytest.mark.parametrize('cache_fails', [False, True])
+def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch,
+                                                cache_fails):
     service.add_workspace_policy('ws-a', ['alice'])
+    if cache_fails:
+        # The grant is committed; a failed clear must not fail the caller.
+        service.invalidate_user_permission_cache.side_effect = RuntimeError(
+            'cache down')
     workspaces = {
         name: {
             'private': True,
@@ -385,6 +391,30 @@ def test_delete_user_keeps_the_record(service, engine):
     service.delete_user('bob')
     assert _user_row_exists(engine, 'bob')
     assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
+
+
+@pytest.mark.parametrize(
+    'write', ['delete_user', 'delete_user_and_record', 'add_workspace_policy'])
+def test_a_failed_cache_clear_does_not_fail_a_committed_write(
+        service, engine, write):
+    """A raise after the commit would report a done write as failed, and a
+    retry of a delete then finds no user."""
+    _add_user_row(engine, 'bob')
+    service.update_role('bob', 'user')
+    service.add_workspace_policy('ws', ['alice'])
+    for name in ('invalidate_user_permission_cache',
+                 'invalidate_workspace_permission_cache'):
+        getattr(service, name).side_effect = RuntimeError('cache down')
+
+    if write == 'add_workspace_policy':
+        service.add_workspace_policy('ws', ['bob'])
+        assert _members(engine, 'ws') == {'alice', 'bob'}
+        service.invalidate_workspace_permission_cache.assert_called_with('ws')
+    else:
+        getattr(service, write)('bob')
+        assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
+        assert _user_row_exists(engine, 'bob') == (write == 'delete_user')
+        service.invalidate_user_permission_cache.assert_called_with('bob')
 
 
 def test_delete_user_and_record_is_one_transaction(service, engine):
