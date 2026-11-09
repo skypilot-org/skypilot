@@ -116,7 +116,7 @@ class TestVerdaClientInstanceCreation:
             'location_code': 'FIN-03',
             'is_spot': False,
             'contract': 'PAY_AS_YOU_GO',
-            'image': 'ubuntu-24.04-cuda-12.8-open-docker',
+            'image': '26.04.cuda13.4.docker',
             'description': 'Created by SkyPilot',
             'ssh_key_ids': ['ssh-key-1'],
             'os_volume': {
@@ -212,7 +212,7 @@ class TestVerdaClientInstanceCreation:
             'location_code': 'FIN-03',
             'is_spot': True,
             'contract': 'SPOT',
-            'image': 'ubuntu-24.04-cuda-12.8-open-docker',
+            'image': '26.04.cuda13.4.docker',
             'description': 'Created by SkyPilot',
             'ssh_key_ids': ['ssh-key-1'],
             'os_volume': {
@@ -280,7 +280,7 @@ class TestVerdaClientInstanceCreation:
             'location_code': 'FIN-03',
             'is_spot': False,
             'contract': 'PAY_AS_YOU_GO',
-            'image': 'ubuntu-24.04-cuda-12.8-open-docker',
+            'image': '26.04.cuda13.4.docker',
             'description': 'Created by SkyPilot',
             'ssh_key_ids': ['ssh-key-1'],
             'os_volume': {
