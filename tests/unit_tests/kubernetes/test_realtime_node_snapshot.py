@@ -1,4 +1,5 @@
 """Tests for realtime GPU availability read from a node snapshot."""
+import functools
 import io
 import json
 from typing import Any, Callable, Dict, List, Optional
@@ -21,7 +22,7 @@ def _node(name: str,
           taints: Optional[List[Dict[str, str]]] = None,
           ip: str = '10.0.0.1') -> Dict[str, Any]:
     capacity = {'cpu': '8', 'memory': '32Gi', **(capacity or {})}
-    allocatable = allocatable if allocatable is not None else capacity
+    allocatable = {**capacity, **(allocatable or {})}
     return {
         'metadata': {
             'name': name,
@@ -33,11 +34,7 @@ def _node(name: str,
         },
         'status': {
             'capacity': capacity,
-            'allocatable': {
-                'cpu': '8',
-                'memory': '32Gi',
-                **allocatable
-            },
+            'allocatable': allocatable,
             'addresses': [{
                 'type': 'InternalIP',
                 'address': ip
@@ -104,49 +101,27 @@ class _CoreApi:
         pods = [p for p in self.pods if p['status']['phase'] not in excluded]
         return _Response(json.dumps({'items': pods}).encode())
 
-    def list_namespaced_pod(self, *args, **kwargs):
-        del args, kwargs
-        self.calls.append('list_namespaced_pod')
-        raise AssertionError('check_credentials is patched in these tests')
 
+_h100 = functools.partial(
+    _node,
+    labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
+    capacity={'nvidia.com/gpu': '8'})
 
 # H100 nodes labeled by GPU Feature Discovery, in every scheduling state.
 _GFD_NODES = [
-    _node('h100-free',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
-          ip='10.0.0.1'),
-    _node('h100-busy',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
-          ip='10.0.0.2'),
-    _node('h100-degraded',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
-          allocatable={'nvidia.com/gpu': '6'},
-          ip='10.0.0.3'),
-    _node('h100-cordoned',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
-          unschedulable=True,
-          ip='10.0.0.4'),
-    _node('h100-not-ready',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
-          ready=False,
-          ip='10.0.0.5'),
-    _node('h100-tainted',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
+    _h100('h100-free', ip='10.0.0.1'),
+    _h100('h100-busy', ip='10.0.0.2'),
+    _h100('h100-degraded', allocatable={'nvidia.com/gpu': '6'}, ip='10.0.0.3'),
+    _h100('h100-cordoned', unschedulable=True, ip='10.0.0.4'),
+    _h100('h100-not-ready', ready=False, ip='10.0.0.5'),
+    _h100('h100-tainted',
           taints=[{
               'key': 'team',
               'value': 'research',
               'effect': 'NoSchedule'
           }],
           ip='10.0.0.6'),
-    _node('h100-control-plane',
-          labels={'nvidia.com/gpu.product': 'NVIDIA-H100-80GB-HBM3'},
-          capacity={'nvidia.com/gpu': '8'},
+    _h100('h100-control-plane',
           taints=[{
               'key': 'node-role.kubernetes.io/control-plane',
               'effect': 'NoSchedule'
@@ -272,21 +247,25 @@ def cluster_env(monkeypatch):
     return configure
 
 
-def _list_realtime(
-        monkeypatch,
-        core_api: _CoreApi,
-        provider: Optional[Callable[
-            [str], Optional[plugin_extensions.KubernetesNodeSnapshot]]] = None,
-        name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None):
+_Provider = Callable[[str], Optional[plugin_extensions.KubernetesNodeSnapshot]]
+
+
+def _serve(monkeypatch, core_api: _CoreApi,
+           provider: Optional[_Provider]) -> None:
+    """Starts a request served by core_api and the snapshot provider."""
     annotations.clear_request_level_cache()
     monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
                         lambda context=None: core_api)
-    if provider is None:
-        monkeypatch.setattr(plugin_extensions.NodeInfoSource,
-                            '_snapshot_provider_func', None)
-    else:
-        plugin_extensions.NodeInfoSource.register_snapshot(provider)
+    monkeypatch.setattr(plugin_extensions.NodeInfoSource,
+                        '_snapshot_provider_func', provider)
+
+
+def _list_realtime(monkeypatch,
+                   core_api: _CoreApi,
+                   provider: Optional[_Provider] = None,
+                   name_filter: Optional[str] = None,
+                   quantity_filter: Optional[int] = None):
+    _serve(monkeypatch, core_api, provider)
     qtys, capacity, available = kubernetes_catalog.list_accelerators_realtime(
         gpus_only=True,
         name_filter=name_filter,
@@ -399,11 +378,8 @@ def test_unserved_context_falls_back_to_api(monkeypatch, cluster_env, provider):
 def test_non_realtime_listing_ignores_snapshot(monkeypatch, cluster_env):
     nodes, pods = _CLUSTERS['gfd']
     api = _CoreApi(nodes, pods)
-    annotations.clear_request_level_cache()
-    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
-                        lambda context=None: api)
     snapshot = plugin_extensions.KubernetesNodeSnapshot(nodes=[], pods=[])
-    plugin_extensions.NodeInfoSource.register_snapshot(lambda context: snapshot)
+    _serve(monkeypatch, api, lambda context: snapshot)
     qtys = kubernetes_catalog.list_accelerators(gpus_only=True,
                                                 name_filter=None,
                                                 region_filter=_CONTEXT,

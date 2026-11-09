@@ -292,6 +292,8 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
+# Phases of the pods whose requests count as allocated on their node.
+_ALLOCATING_POD_PHASES = ('Running', 'Pending')
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
@@ -2716,7 +2718,7 @@ def get_allocated_resources_by_node(
     if context is None:
         context = get_current_kube_config_context_name()
     non_included_pod_statuses = POD_STATUSES.copy()
-    status_filters = ['Running', 'Pending']
+    status_filters = list(_ALLOCATING_POD_PHASES)
     if status_filters is not None:
         non_included_pod_statuses -= set(status_filters)
         field_selector = ','.join(
@@ -2741,7 +2743,8 @@ def _sum_allocated_resources_by_node(
     context: Optional[str],
     gpu_resource_key: Optional[str] = None,
 ) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
-    """Sums the accelerators, CPU and memory that pods request on each node.
+    """Sums the accelerators, CPU and memory that Running and Pending pods
+    request on each node.
 
     See get_allocated_resources_by_node() for the return values.
     """
@@ -2749,6 +2752,8 @@ def _sum_allocated_resources_by_node(
     allocated_cpu_memory_by_node: Dict[str, Tuple[
         float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
     for pod in pods:
+        if pod.status.phase not in _ALLOCATING_POD_PHASES:
+            continue
         if should_exclude_pod_from_gpu_allocation(pod):
             logger.debug(
                 f'Excluding pod {pod.metadata.name} from resource count '
@@ -2814,11 +2819,10 @@ def read_node_snapshot(
     """
     nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
     gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
-    pods = (V1Pod.from_dict(pod)
-            for pod in snapshot.pods
-            if pod.get('status', {}).get('phase') in ('Running', 'Pending'))
     allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
-        pods, context, gpu_resource_key=gpu_resource_key)
+        (V1Pod.from_dict(pod) for pod in snapshot.pods),
+        context,
+        gpu_resource_key=gpu_resource_key)
     return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
             allocated_qty_by_node)
 
@@ -5964,16 +5968,18 @@ def process_skypilot_pods(
 
 
 def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
-    """Picks the GPU resource key from the capacity keys of all nodes."""
-    for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-        if gpu_key in capacity_keys:
-            return gpu_key
-    return SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
+    """Picks the GPU resource key from the capacity keys of all nodes.
+
+    The CUSTOM_GPU_RESOURCE_KEY environment variable overrides the pick.
+    """
+    detected = next(
+        (gpu_key for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values()
+         if gpu_key in capacity_keys), SUPPORTED_GPU_RESOURCE_KEYS['nvidia'])
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=detected)
 
 
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
         response = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
@@ -5993,7 +5999,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
-    return gpu_resource_key
+    return _select_gpu_resource_key(set())
 
 
 def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
@@ -6005,8 +6011,7 @@ def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
     capacity_keys: Set[str] = set()
     for node in nodes:
         capacity_keys.update(node.status.capacity.keys())
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY',
-                     default=_select_gpu_resource_key(capacity_keys))
+    return _select_gpu_resource_key(capacity_keys)
 
 
 @annotations.lru_cache(scope='request')
@@ -6020,8 +6025,7 @@ def get_gpu_resource_key(context: Optional[str] = None) -> str:
     Returns:
         str: The selected GPU resource name.
     """
-    gpu_resource_key = _gpu_resource_key_helper(context)
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
+    return _gpu_resource_key_helper(context)
 
 
 def get_kubeconfig_paths() -> List[str]:

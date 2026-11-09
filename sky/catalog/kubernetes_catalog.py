@@ -161,17 +161,10 @@ def _list_accelerators(
 
     snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(context)
                 if realtime else None)
-    gpu_resource_key: Optional[str] = None
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-    error_on_get_allocated_gpu_qty_by_node = False
     if snapshot is not None:
-        nodes, gpu_resource_key, snapshot_allocated_qty_by_node = (
+        nodes, gpu_resource_key, allocated_qty_by_node = (
             kubernetes_utils.read_node_snapshot(context, snapshot))
-        allocated_qty_by_node.update(snapshot_allocated_qty_by_node)
-        lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
-        if not lf:
-            return {}, {}, {}
-        keys = lf.get_label_keys()
     else:
         # Verify that the credentials are still valid.
         if not kubernetes_utils.check_credentials(context,
@@ -182,42 +175,44 @@ def _list_accelerators(
         if not has_gpu:
             return {}, {}, {}
 
-        lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
-        if not lf:
-            return {}, {}, {}
-
-        keys = lf.get_label_keys()
         nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
 
-        # Check if any nodes have accelerators before fetching pods
-        has_accelerator_nodes = False
-        for node in nodes:
-            for key in keys:
-                if key in node.metadata.labels:
-                    has_accelerator_nodes = True
-                    break
-            if has_accelerator_nodes:
-                break
-
-        # Only fetch pods if we have accelerator nodes and realtime is requested
-        if realtime and has_accelerator_nodes:
-            # Get the allocated GPU quantity by each node
-            try:
-                allocated_qty_by_node = (
-                    kubernetes_utils.get_allocated_gpu_qty_by_node(
-                        context=context))
-            except kubernetes.api_exception() as e:
-                if e.status == 403:
-                    logger.warning(
-                        'Failed to get pods in the Kubernetes cluster '
-                        '(forbidden). Please check if your account has '
-                        'necessary permissions to list pods. Realtime GPU '
-                        'availability information may be incorrect.')
-                    error_on_get_allocated_gpu_qty_by_node = True
-                else:
-                    raise
+    lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
+    if not lf:
+        return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
+    keys = lf.get_label_keys()
+
+    # Check if any nodes have accelerators before fetching pods
+    has_accelerator_nodes = False
+    for node in nodes:
+        for key in keys:
+            if key in node.metadata.labels:
+                has_accelerator_nodes = True
+                break
+        if has_accelerator_nodes:
+            break
+
+    # Only fetch pods if we have accelerator nodes and realtime is requested
+    error_on_get_allocated_gpu_qty_by_node = False
+    if snapshot is None and realtime and has_accelerator_nodes:
+        # Get the allocated GPU quantity by each node
+        try:
+            allocated_qty_by_node = (
+                kubernetes_utils.get_allocated_gpu_qty_by_node(context=context))
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                logger.warning(
+                    'Failed to get pods in the Kubernetes cluster '
+                    '(forbidden). Please check if your account has '
+                    'necessary permissions to list pods. Realtime GPU '
+                    'availability information may be incorrect.')
+                error_on_get_allocated_gpu_qty_by_node = True
+            else:
+                raise
+
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
