@@ -1577,36 +1577,26 @@ async def test_resume_launch_reattaches_to_live_request(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('recovery', [False, True])
-async def test_resume_launch_launches_onto_never_up_cluster(
-        monkeypatch, recovery):
-    """No live launch request, but nothing can have been submitted to a
-    cluster that never came up: launch onto it, without a teardown."""
-    executor = _make_launch_executor()
-    patches = _patch_launch_environment(monkeypatch)
-    executor.reattach_launch = mock.AsyncMock(return_value=None)
-    executor._await_launch_request = mock.AsyncMock(return_value=None)
-    _set_cluster_record(monkeypatch, {'cluster_ever_up': False})
-
-    assert await executor.resume_launch(recovery=recovery) == 123.45
-
-    patches.sdk_launch.assert_called_once()
-    executor._cleanup_cluster.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('record', [{'cluster_ever_up': True}, None])
-async def test_resume_launch_leaves_other_clusters_to_recovery(
-        monkeypatch, record):
-    """A cluster that came up may hold a half-submitted job, and a missing
-    one has nothing to keep: both are recovered as usual."""
+@pytest.mark.parametrize('record', [{
+    'cluster_ever_up': False
+}, {
+    'cluster_ever_up': True
+}, None])
+async def test_resume_launch_without_a_live_request_leaves_the_task_to_recovery(
+        monkeypatch, recovery, record):
+    """With no live launch request, the task is recovered as usual, whether
+    it was STARTING or RECOVERING, and even when its cluster never came up:
+    resume_launch neither launches nor tears down."""
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
     executor.reattach_launch = mock.AsyncMock(return_value=None)
     _set_cluster_record(monkeypatch, record)
 
-    assert await executor.resume_launch(recovery=False) is None
+    assert await executor.resume_launch(recovery=recovery) is None
 
+    executor.reattach_launch.assert_awaited_once_with(recovery)
     patches.sdk_launch.assert_not_called()
+    executor._cleanup_cluster.assert_not_called()
 
 
 @pytest.mark.asyncio

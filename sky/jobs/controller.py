@@ -1159,10 +1159,9 @@ class JobController:
                 managed_job_state.ManagedJobStatus.RECOVERING):
             # The previous controller (or attempt) stopped while the task was
             # launching. Its launch request may still be live on the API
-            # server (running, or parked waiting to resume), or its cluster
-            # may never have come up: continue that launch rather than let
-            # forced recovery tear the cluster down and launch again (see
-            # StrategyExecutor.resume_launch).
+            # server (running, or parked waiting to resume): re-attach to it
+            # rather than let forced recovery tear the cluster down and launch
+            # again (see StrategyExecutor.resume_launch).
             await self._count_in_full()
             resumed_at = await self._strategy_executor.resume_launch(recovery=(
                 task_status == managed_job_state.ManagedJobStatus.RECOVERING))
