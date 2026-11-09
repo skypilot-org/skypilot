@@ -4604,3 +4604,71 @@ def test_debug_dump_log_writes_provision_records_once(tmp_path):
         log_name = next(
             n for n in zf.namelist() if n.endswith('debug_dump.log'))
         assert zf.read(log_name).decode().count('dump-marker-6414') == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests for _share_of_budget and _order_requests_for_dump
+# ---------------------------------------------------------------------------
+class TestShareOfBudget:
+
+    def test_no_deadline(self):
+        assert debug_utils._share_of_budget(None, 0.5) is None
+
+    def test_half_of_remaining(self):
+        now = time.monotonic()
+        share = debug_utils._share_of_budget(now + 100, 0.5)
+        assert now + 49 <= share <= now + 51
+
+    def test_passed_deadline_stays_passed(self):
+        share = debug_utils._share_of_budget(time.monotonic() - 10, 0.5)
+        assert debug_utils._deadline_exceeded(share)
+
+
+class TestOrderRequestsForDump:
+
+    @staticmethod
+    def _row(request_id, status, finished_at):
+        return SimpleNamespace(request_id=request_id,
+                               status=status,
+                               finished_at=finished_at)
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_explicit_failed_running_then_newest(self, mock_get_tasks):
+        status = debug_utils.requests_lib.RequestStatus
+        mock_get_tasks.return_value = [
+            self._row('old-ok', status.SUCCEEDED, 100.0),
+            self._row('new-ok', status.SUCCEEDED, 300.0),
+            self._row('failed', status.FAILED, 50.0),
+            self._row('cancelled', status.CANCELLED, 60.0),
+            self._row('running', status.RUNNING, None),
+        ]
+        ids = {
+            'old-ok', 'new-ok', 'failed', 'cancelled', 'running', 'asked',
+            'no-row'
+        }
+
+        order = debug_utils._order_requests_for_dump(ids, ['asked', 'asked'])
+
+        assert order[0] == 'asked'
+        assert set(order[1:3]) == {'failed', 'cancelled'}
+        assert order[3:] == ['running', 'new-ok', 'old-ok', 'no-row']
+        task_filter = mock_get_tasks.call_args[0][0]
+        assert 'asked' not in task_filter.request_ids
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_queries_in_chunks(self, mock_get_tasks):
+        mock_get_tasks.return_value = []
+        ids = {f'req-{i:05d}' for i in range(2500)}
+
+        order = debug_utils._order_requests_for_dump(ids, [])
+
+        assert mock_get_tasks.call_count == 3
+        assert sorted(order) == sorted(ids)
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                side_effect=RuntimeError('db down'))
+    def test_lookup_failure_keeps_every_id(self, _mock_get_tasks):
+        order = debug_utils._order_requests_for_dump({'b', 'a', 'asked'},
+                                                     ['asked'])
+
+        assert order == ['asked', 'a', 'b']

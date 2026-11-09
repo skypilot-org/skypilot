@@ -14,8 +14,8 @@ import re
 import shutil
 import time
 import traceback
-from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict,
-                    TypeVar)
+from typing import (Any, Callable, Collection, Dict, List, Optional, Set, Tuple,
+                    TypedDict, TypeVar)
 import zipfile
 
 import sky
@@ -1059,9 +1059,70 @@ def _copy_request_log_file(request_id: str, request_dir: str,
 # section. Clamped further by the overall deadline via _bounded_timeout.
 _REQUEST_LOG_COPY_TIMEOUT = 30
 
+# Share of the remaining budget the request_ids section may use. A recent-
+# activity dump on a busy server can select tens of thousands of requests at
+# ~50ms each; without a share, copying them uses the whole deadline and every
+# later section (clusters, managed_jobs, kubernetes_contexts) is skipped.
+_REQUESTS_BUDGET_SHARE = 0.5
+
+# Request IDs per metadata query when ordering requests for the dump.
+_ORDER_QUERY_CHUNK = 1000
+
+
+def _share_of_budget(deadline: Optional[float],
+                     share: float) -> Optional[float]:
+    """Return a deadline ``share`` of the way from now to ``deadline``.
+
+    ``deadline`` is absolute ``time.monotonic()``. Returns None when
+    ``deadline`` is None, and a passed deadline (now or earlier) when the
+    budget is already gone.
+    """
+    if deadline is None:
+        return None
+    now = time.monotonic()
+    return now + max(0.0, deadline - now) * share
+
+
+def _order_requests_for_dump(request_ids: Set[str],
+                             explicit_ids: Collection[str]) -> List[str]:
+    """Order request IDs so the most useful are copied first.
+
+    Order: IDs the caller asked for explicitly, then FAILED and CANCELLED
+    requests, then requests still in progress, then the rest newest first.
+    Under a deadline the request section stops partway, so this decides which
+    requests a partial dump keeps. If the metadata lookup fails, explicit IDs
+    still come first and the rest follow in sorted order.
+    """
+    explicit = [r for r in dict.fromkeys(explicit_ids) if r in request_ids]
+    rest = request_ids.difference(explicit)
+    rank: Dict[str, Tuple[int, float]] = {}
+    try:
+        ids = sorted(rest)
+        for i in range(0, len(ids), _ORDER_QUERY_CHUNK):
+            for request in requests_lib.get_request_tasks(
+                    requests_lib.RequestTaskFilter(
+                        request_ids=ids[i:i + _ORDER_QUERY_CHUNK],
+                        fields=['request_id', 'status', 'finished_at'])):
+                failed = request.status in (
+                    requests_lib.RequestStatus.FAILED,
+                    requests_lib.RequestStatus.CANCELLED)
+                if failed:
+                    group = 0
+                elif request.finished_at is None:
+                    group = 1
+                else:
+                    group = 2
+                rank[request.request_id] = (group,
+                                            -(request.finished_at or 0.0))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to order requests for the dump: {e}')
+        rank = {}
+    # IDs with no metadata row (e.g. system daemons) sort after the rest.
+    return explicit + sorted(rest, key=lambda r: rank.get(r, (3, 0.0)) + (r,))
+
 
 def _dump_request_id_info(
-        request_ids: Set[str],
+        request_ids: Collection[str],
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None,
         deadline: Optional[float] = None,
@@ -2307,12 +2368,13 @@ def _build_debug_dump(
     sections: List[Tuple[str, Callable[[], None]]] = [
         ('server_info', lambda: _dump_server_info(
             dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
-        ('request_ids',
-         lambda: _dump_request_id_info(debug_dump_context['request_ids'],
-                                       dump_dir,
-                                       errors=errors,
-                                       deadline=deadline,
-                                       orphans=orphans)),
+        ('request_ids', lambda: _dump_request_id_info(
+            _order_requests_for_dump(debug_dump_context['request_ids'],
+                                     requested.get('request_ids') or []),
+            dump_dir,
+            errors=errors,
+            deadline=_share_of_budget(deadline, _REQUESTS_BUDGET_SHARE),
+            orphans=orphans)),
         ('clusters',
          lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
                                     dump_dir,
