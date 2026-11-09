@@ -22,6 +22,7 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILE = '~/.modal.toml'
 _TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
 _TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
+_CONFIG_PATH_ENV_VAR = 'MODAL_CONFIG_PATH'
 _AUTO_REGION = 'auto'
 
 
@@ -390,10 +391,12 @@ class Modal(clouds.Cloud):
         if (os.environ.get(_TOKEN_ID_ENV_VAR) and
                 os.environ.get(_TOKEN_SECRET_ENV_VAR)):
             return {}
-        # modal honours MODAL_CONFIG_PATH; the cluster reads the default path.
-        config = getattr(modal_adaptor.modal, 'config', None)
+        # modal resolves its config file the same way (MODAL_CONFIG_PATH, else
+        # ~/.modal.toml); the cluster reads the default path. Resolved here
+        # without importing modal: this runs for every enabled cloud at
+        # launch, also where skypilot[modal] is not installed.
         credential_file = os.path.expanduser(
-            getattr(config, 'user_config_path', None) or _CREDENTIAL_FILE)
+            os.environ.get(_CONFIG_PATH_ENV_VAR) or _CREDENTIAL_FILE)
         if os.path.exists(credential_file):
             return {_CREDENTIAL_FILE: credential_file}
         return {}

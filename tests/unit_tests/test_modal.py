@@ -106,11 +106,16 @@ def _modal_unsupported_features(resources):
     return clouds.Modal._unsupported_features_for_resources(resources)
 
 
-def _set_modal_config(monkeypatch, config, user_config_path='~/.modal.toml'):
-    monkeypatch.setattr(
-        modal_cloud.modal_adaptor, 'modal',
-        SimpleNamespace(config=SimpleNamespace(
-            config=config, user_config_path=user_config_path)))
+def _set_modal_config(monkeypatch, config):
+    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
+                        SimpleNamespace(config=SimpleNamespace(config=config)))
+
+
+class _NoSdk:
+    """Stands in for the modal SDK where importing it must not happen."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f'modal SDK imported via {name!r}')
 
 
 def _set_active_modal_environment(monkeypatch, name='dev'):
@@ -600,7 +605,10 @@ def test_modal_credential_file_mounts_from_file(monkeypatch, tmp_path):
     credential_file.write_text('[default]\ntoken_id = "token-id"\n')
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
-    _set_modal_config(monkeypatch, {})
+    monkeypatch.delenv('MODAL_CONFIG_PATH', raising=False)
+    # Runs for every enabled cloud at launch, so it must work without the
+    # modal SDK installed.
+    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal', _NoSdk())
     monkeypatch.setattr(modal_cloud.os.path, 'expanduser',
                         lambda path: str(credential_file))
 
@@ -617,7 +625,8 @@ def test_modal_credential_file_mounts_follow_modal_config_path(
     credential_file.write_text('[default]\ntoken_id = "token-id"\n')
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
-    _set_modal_config(monkeypatch, {}, user_config_path=str(credential_file))
+    monkeypatch.setenv('MODAL_CONFIG_PATH', str(credential_file))
+    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal', _NoSdk())
 
     assert clouds.Modal().get_credential_file_mounts() == {
         '~/.modal.toml': str(credential_file),
