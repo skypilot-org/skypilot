@@ -483,19 +483,13 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
 
-            if _CONTEXT_UNREACHABLE_CHECKS:
-                # Without a context, the adaptor reaches the in-cluster API
-                # server when it can, else the kubeconfig's current context.
-                if context is not None:
-                    target = context
-                elif is_incluster_config_available():
-                    target = kubernetes.in_cluster_context_name()
-                else:
-                    target = get_current_kube_config_context_name()
-                reason = known_unreachable_reason(target)
+            # Only a named context: which API server a call without one
+            # reaches depends on the function and on in-cluster config loading.
+            if context is not None:
+                reason = known_unreachable_reason(context)
                 if reason is not None:
                     raise exceptions.KubeAPIUnreachableError(
-                        f'Kubernetes context {target!r} is unreachable: '
+                        f'Kubernetes context {context!r} is unreachable: '
                         f'{reason}')
 
             for attempt in range(max_retries):
