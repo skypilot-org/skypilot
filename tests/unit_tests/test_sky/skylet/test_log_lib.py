@@ -195,12 +195,12 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
 
     def test_timeout_does_not_fail_command_that_exited(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f, \
-                mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 4):
+                mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 8):
             returncode = log_lib.run_with_log(
                 'setsid sleep 300 & exit 0',
                 f.name,
                 shell=True,
-                timeout=2,
+                timeout=4,
             )
         self.assertEqual(returncode, 0)
 

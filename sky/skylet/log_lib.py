@@ -180,13 +180,9 @@ def _process_groups() -> Dict[int, int]:
         if not entry.isdigit() or int(entry) == own_pid:
             continue
         try:
-            with open(f'/proc/{entry}/stat', 'rb') as f:
-                stat = f.read()
+            groups[int(entry)] = os.getpgid(int(entry))
         except OSError:
             continue
-        # stat is "<pid> (<comm>) <state> <ppid> <pgrp> ..."; comm can
-        # contain spaces and ')', so split after the last ')'.
-        groups[int(entry)] = int(stat[stat.rfind(b')') + 2:].split()[2])
     return groups
 
 
@@ -215,7 +211,7 @@ def _pipe_writers(pipe_links: Set[str], pids: Iterable[int]) -> List[int]:
 def _command_exited(proc: subprocess.Popen) -> bool:
     """Returns whether the command exited, without reaping it.
 
-    The command must stay unreaped while its output streams: the subprocess
+    The command must stay unreaped while its output streams. The subprocess
     daemon treats a reaped command as gone and kills its remaining children.
     """
     if proc.returncode is not None:
@@ -289,8 +285,12 @@ def _start_escaped_writer_reaper(
                     f'process group of command {proc.pid}, which exited, '
                     'and still holds its output open.')
                 holders.append(holder)
-            for holder in holders:
-                subprocess_utils.kill_process_with_grace_period(holder)
+            _, alive = psutil.wait_procs(holders, timeout=10)
+            for holder in alive:
+                try:
+                    holder.kill()
+                except psutil.Error:
+                    continue
 
     threading.Thread(target=_reap, daemon=True).start()
     return stop, output_escaped
