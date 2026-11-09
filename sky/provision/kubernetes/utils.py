@@ -378,7 +378,6 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
 _is_cloudflare_403_error = api_errors.is_cloudflare_403
 is_transient_api_error = api_errors.is_transient
 
-
 # Checks for contexts whose API server is known to be unreachable, e.g. one
 # reached through a proxy hop that is known to be down. Each is called with a
 # context name and returns why that context is unreachable, or None. Calls
