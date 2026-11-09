@@ -257,6 +257,7 @@ def _start_escaped_writer_reaper(
 
     def _reap() -> None:
         escaped_since = None
+        signaled: Set[int] = set()
         while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
             if not _command_exited(proc):
                 continue
@@ -273,7 +274,9 @@ def _start_escaped_writer_reaper(
                     _ESCAPED_WRITER_GRACE_SECONDS):
                 continue
             holders = []
-            for pid in _pipe_writers(pipe_links, groups):
+            unsignaled = [p for p in groups if p not in signaled]
+            for pid in _pipe_writers(pipe_links, unsignaled):
+                signaled.add(pid)
                 try:
                     holder = psutil.Process(pid)
                     cmdline = ' '.join(holder.cmdline())[:200]
