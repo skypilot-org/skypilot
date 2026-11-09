@@ -23,6 +23,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
+from sky.utils.db import kv_cache
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
 
@@ -147,6 +148,23 @@ def _system_role(user_id: str) -> Optional[str]:
     whatever the policy holds -- and without a reload.
     """
     return _system_user_roles().get(user_id)
+
+
+# TODO(hailong): Remove in the release after this one. Older servers cache
+# workspace member checks under this prefix for an hour and rely on writers
+# to clear them, so a rolling update or a rollback would otherwise serve them
+# stale entries.
+_LEGACY_MEMBER_CACHE_PREFIX = 'perm:ws:'
+
+
+def _clear_legacy_member_cache() -> None:
+    """Drops every member check an older server cached. After a commit: the
+    write stands, so a failure only logs."""
+    try:
+        kv_cache.delete_cache_entries_by_prefix(_LEGACY_MEMBER_CACHE_PREFIX)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to clear member checks cached by older '
+                       f'servers: {common_utils.format_exception(e)}')
 
 
 _enforcer_instance: Optional['PermissionService'] = None
@@ -532,6 +550,7 @@ class PermissionService:
             # lock unless refreshed.
             self._load_policy_no_lock()
             enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
+            _clear_legacy_member_cache()
             logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
@@ -650,6 +669,7 @@ class PermissionService:
         if not user_roles:
             enforcer.add_grouping_policy(user_id, role or
                                          rbac.get_default_role())
+            _clear_legacy_member_cache()
             return True
         return False
 
@@ -1314,6 +1334,7 @@ class PermissionService:
         # pylint: enable=protected-access
         with engine.begin() as conn:
             yield _PolicyRows(conn, table)
+        _clear_legacy_member_cache()
         try:
             self._load_policy_no_lock()
         except Exception as e:  # pylint: disable=broad-except
@@ -1375,7 +1396,8 @@ class PermissionService:
 
         Admin, or the casbin member '*' grant (which also covers public
         workspaces via the ('*', ws, '*') policy). Not cached:
-        `get_user_roles` reloads the policy when another process changed it.
+        `get_user_roles` reloads the policy when another process changed it,
+        except for the server's own identities, which skip the reload.
         """
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
@@ -1615,6 +1637,7 @@ class PermissionService:
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
+            _clear_legacy_member_cache()
 
 
 @contextlib.contextmanager

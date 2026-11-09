@@ -387,6 +387,50 @@ def test_delete_user_keeps_the_record(service, engine):
     assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
 
 
+_LEGACY_CACHE_WRITES = {
+    'update_workspace_policy': lambda service: service.update_workspace_policy(
+        'ws', ['bob']),
+    'add_workspace_policy': lambda service: service.add_workspace_policy(
+        'ws', ['bob']),
+    'remove_workspace_policy': lambda service: service.remove_workspace_policy(
+        'ws'),
+    'update_role': lambda service: service.update_role('alice', 'admin'),
+    'add_user_if_not_exists': lambda service: service.add_user_if_not_exists(
+        'carol'),
+    'delete_user': lambda service: service.delete_user('alice'),
+    'delete_user_and_record': lambda service: service.delete_user_and_record(
+        'alice'),
+}
+
+
+@pytest.mark.parametrize('write', sorted(_LEGACY_CACHE_WRITES))
+@pytest.mark.parametrize('clear_fails', [False, True])
+def test_every_policy_write_clears_older_servers_member_cache(
+        service, engine, monkeypatch, write, clear_fails):
+    """Older servers trust a cached member check for an hour; during a rolling
+    update or after a rollback only this clear keeps them current. A failed
+    clear must not fail the committed write."""
+    _add_user_row(engine, 'alice')
+    service.update_role('alice', 'user')
+    service.add_workspace_policy('ws', ['alice'])
+    versions = []
+
+    def clear(prefix):
+        versions.append((prefix, _rows(engine, 'g') | _rows(engine, 'p')))
+        if clear_fails:
+            raise RuntimeError('cache down')
+
+    monkeypatch.setattr(permission.kv_cache, 'delete_cache_entries_by_prefix',
+                        clear)
+    before = _rows(engine, 'g') | _rows(engine, 'p')
+    _LEGACY_CACHE_WRITES[write](service)
+    after = _rows(engine, 'g') | _rows(engine, 'p')
+
+    assert after != before
+    # After the commit: the clear saw the written rows.
+    assert versions and versions[-1] == ('perm:ws:', after)
+
+
 def test_delete_user_and_record_is_one_transaction(service, engine):
     _add_user_row(engine, 'bob')
     service.update_role('bob', 'admin')
