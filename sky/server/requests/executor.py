@@ -155,6 +155,8 @@ class RequestToSchedule:
     # With the 'sky.' prefix.
     request_name: str
     request_body: payloads.RequestBody
+    # The user the request runs as.
+    user_id: str
     func: Callable[..., Any]
     schedule_type: api_requests.ScheduleType
     request_cluster_name: Optional[str]
@@ -181,23 +183,21 @@ def set_execution_policy(policy: Optional[ExecutionPolicy]) -> None:
     _execution_policy = policy
 
 
-async def run_request_inline(request: RequestToSchedule,
-                             executor: concurrent.futures.Executor) -> Any:
+def run_request_inline(
+        request: RequestToSchedule,
+        executor: concurrent.futures.Executor) -> 'asyncio.Task[Any]':
     """Runs a request's entrypoint in a thread of executor.
 
     The entrypoint runs under the request's env and config overrides, as an
     in-process request does, but nothing is recorded: no request row and no
-    log file. Cancelling the caller cancels the request's context, which the
-    entrypoint observes at its next cancellation check.
+    log file. Cancelling the returned task cancels the request's context,
+    which the entrypoint observes at its next cancellation check.
 
     Returns:
-        The entrypoint's return value.
-
-    Raises:
-        Exception: whatever the entrypoint raises.
+        A task with the entrypoint's return value, or what it raised.
     """
     # A task of its own keeps the request's context out of the caller's.
-    return await asyncio.create_task(_run_request_inline(request, executor))
+    return asyncio.create_task(_run_request_inline(request, executor))
 
 
 async def _run_request_inline(request: RequestToSchedule,
@@ -1662,6 +1662,7 @@ async def schedule_request_async(
             request_id=request_id,
             request_name=server_constants.REQUEST_NAME_PREFIX + request_name,
             request_body=request_body,
+            user_id=user_id,
             func=func,
             schedule_type=schedule_type,
             request_cluster_name=request_cluster_name,

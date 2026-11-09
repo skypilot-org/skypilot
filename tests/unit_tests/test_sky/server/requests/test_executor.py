@@ -2590,18 +2590,20 @@ def _in_process_entrypoint(value: str):
     return {'value': value, 'user': os.environ.get(constants.USER_ID_ENV_VAR)}
 
 
-async def _prepare_in_process(request_id: str,
-                              name: str = 'test.in_process',
-                              func=_in_process_entrypoint):
+def _in_process_body() -> _InProcessBody:
     loopback.set_request_from_loopback(True)
+    return _InProcessBody(value='v',
+                          env_vars={
+                              constants.USER_ID_ENV_VAR: 'user-1',
+                              constants.USER_ENV_VAR: 'user-1',
+                          })
+
+
+async def _prepare_in_process(request_id: str, func=_in_process_entrypoint):
     return await executor.prepare_request_async(
         request_id=request_id,
-        request_name=name,
-        request_body=_InProcessBody(value='v',
-                                    env_vars={
-                                        constants.USER_ID_ENV_VAR: 'user-1',
-                                        constants.USER_ENV_VAR: 'user-1',
-                                    }),
+        request_name='test.in_process',
+        request_body=_in_process_body(),
         func=func,
         schedule_type=requests_lib.ScheduleType.SHORT)
 
@@ -2857,17 +2859,13 @@ async def test_in_process_request_cancelled_during_claim(
 def _request_to_schedule(
         request_id: str,
         func=_in_process_entrypoint) -> executor.RequestToSchedule:
-    loopback.set_request_from_loopback(True)
-    body = _InProcessBody(value='v',
-                          env_vars={
-                              constants.USER_ID_ENV_VAR: 'user-1',
-                              constants.USER_ENV_VAR: 'user-1',
-                          })
-    executor.stamp_request_body(body, auth_user=None)
+    body = _in_process_body()
+    user_id = executor.stamp_request_body(body, auth_user=None)
     return executor.RequestToSchedule(
         request_id=request_id,
         request_name='sky.test.in_process',
         request_body=body,
+        user_id=user_id,
         func=func,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=None,
@@ -2876,15 +2874,10 @@ def _request_to_schedule(
 
 async def _schedule_with_policy(request_id: str, policy, **kwargs) -> None:
     executor.set_execution_policy(policy)
-    loopback.set_request_from_loopback(True)
     await executor.schedule_request_async(
         request_id=request_id,
         request_name='test.in_process',
-        request_body=_InProcessBody(value='v',
-                                    env_vars={
-                                        constants.USER_ID_ENV_VAR: 'user-1',
-                                        constants.USER_ENV_VAR: 'user-1',
-                                    }),
+        request_body=_in_process_body(),
         func=_in_process_entrypoint,
         schedule_type=requests_lib.ScheduleType.SHORT,
         **kwargs)
@@ -2898,6 +2891,7 @@ async def test_policy_handled_request_writes_no_row(in_process_env):
 
     async def policy(request):
         assert request.request_name == 'sky.test.in_process'
+        assert request.user_id == 'user-1'
         assert request.request_body.authenticated is False
         results.append(await executor.run_request_inline(request, pool))
         return executor.ExecutionMode.HANDLED
@@ -3030,10 +3024,8 @@ async def test_run_request_inline_cancel_cancels_context(in_process_env):
     INLINE_CANCEL_OBSERVED.clear()
     caller_ctx = context.get()
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    task = asyncio.create_task(
-        executor.run_request_inline(
-            _request_to_schedule('inline-cancel', _cancellable_entrypoint),
-            pool))
+    task = executor.run_request_inline(
+        _request_to_schedule('inline-cancel', _cancellable_entrypoint), pool)
     assert await asyncio.get_running_loop().run_in_executor(
         None, ENTRYPOINT_STARTED.wait, 5)
 

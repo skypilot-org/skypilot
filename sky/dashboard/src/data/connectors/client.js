@@ -93,39 +93,35 @@ async function waitForPlugins() {
   return pluginsReadyPromise;
 }
 
-// Returns the result of the request that `response` scheduled, read from
-// /api/get by the request ID in the response headers.
-export async function getRequestResult(path, response) {
-  // Check if initial request succeeded
-  if (!response.ok) {
-    const msg = `Initial API request ${path} failed with status ${response.status}`;
-    throw new Error(msg);
-  }
-
-  // Handle X-Skypilot-Request-ID for API requests
-  const id = response.headers.get('X-Skypilot-Request-ID');
-
-  // Handle empty request ID
-  if (!id) {
-    const msg = `No request ID received from server for ${path}`;
-    throw new Error(msg);
-  }
-
-  const baseUrl = window.location.origin;
-  const fetchedData = await fetch(
-    `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`,
-    { headers: withVersionHeader({}) }
-  );
-
-  // Handle all error status codes (4xx, 5xx, etc.)
+// Returns the result carried by an /api/get response.
+export async function readRequestResult(path, fetchedData) {
   if (!fetchedData.ok) {
     const errorMessage = await getErrorMessageFromResponse(fetchedData);
     const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
     throw new Error(msg);
   }
-
   const data = await fetchedData.json();
   return data.return_value ? JSON.parse(data.return_value) : [];
+}
+
+// Returns the result of the request that `response` scheduled, read from
+// /api/get by the request ID in the response headers.
+export async function getRequestResult(path, response) {
+  if (!response.ok) {
+    const msg = `Initial API request ${path} failed with status ${response.status}`;
+    throw new Error(msg);
+  }
+  const id = response.headers.get('X-Skypilot-Request-ID');
+  if (!id) {
+    const msg = `No request ID received from server for ${path}`;
+    throw new Error(msg);
+  }
+  const baseUrl = window.location.origin;
+  const fetchedData = await fetch(
+    `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`,
+    { headers: withVersionHeader({}) }
+  );
+  return readRequestResult(path, fetchedData);
 }
 
 export const apiClient = {
@@ -164,7 +160,7 @@ export const apiClient = {
     });
   },
   fetch: async (path, body, method = 'POST') => {
-    // Call the server API and get the result via /api/get, the API must return a request ID
+    // Call the server API and get the result of the request it schedules
     try {
       await waitForPlugins();
       // A plugin may take over how the result is obtained; it gets the same
@@ -173,6 +169,7 @@ export const apiClient = {
         return await window.__skyApiFetch(path, body, method, {
           fetchImmediate: apiClient.fetchImmediate,
           getRequestResult,
+          readRequestResult,
         });
       }
       const response = await apiClient.fetchImmediate(path, body, method);

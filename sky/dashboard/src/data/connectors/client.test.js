@@ -1,4 +1,8 @@
-import { apiClient, getRequestResult } from '@/data/connectors/client';
+import {
+  apiClient,
+  getRequestResult,
+  readRequestResult,
+} from '@/data/connectors/client';
 
 function jsonResponse(data, { status = 200, headers = {} } = {}) {
   return {
@@ -55,6 +59,7 @@ describe('apiClient.fetch', () => {
       {
         fetchImmediate: apiClient.fetchImmediate,
         getRequestResult,
+        readRequestResult,
       }
     );
     expect(global.fetch).not.toHaveBeenCalled();
