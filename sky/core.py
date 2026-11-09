@@ -1871,7 +1871,12 @@ def realtime_kubernetes_gpu_availability(
             context_list = ssh_contexts
         else:
             context_list = kubernetes_contexts
+        context_list = [
+            ctx for ctx in context_list
+            if kubernetes_utils.known_unreachable_reason(ctx) is None
+        ]
     else:
+        kubernetes_utils.raise_if_known_unreachable(context)
         context_list = [context]
 
     def _realtime_kubernetes_gpu_availability_single(

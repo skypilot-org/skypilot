@@ -438,11 +438,11 @@ def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
         _CONTEXT_UNREACHABLE_CHECKS.append(check)
 
 
-def _known_unreachable_reason(context: Optional[str]) -> Optional[str]:
+def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
     """Why `context` is known to be unreachable, or None.
 
-    Never raises: a check that fails is skipped, and the call is attempted as
-    if it were not registered.
+    Never raises: a check that fails is skipped, as if it were not
+    registered.
     """
     for check in _CONTEXT_UNREACHABLE_CHECKS:
         try:
@@ -454,6 +454,15 @@ def _known_unreachable_reason(context: Optional[str]) -> Optional[str]:
         if reason:
             return reason
     return None
+
+
+def raise_if_known_unreachable(context: Optional[str]) -> None:
+    """Raise KubeAPIUnreachableError if `context` is known to be unreachable.
+    """
+    reason = known_unreachable_reason(context)
+    if reason is not None:
+        raise exceptions.KubeAPIUnreachableError(
+            f'Kubernetes context {context!r} is unreachable: {reason}')
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -483,11 +492,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
 
-            unreachable_reason = _known_unreachable_reason(context)
-            if unreachable_reason is not None:
-                raise exceptions.KubeAPIUnreachableError(
-                    f'Kubernetes context {context!r} is unreachable: '
-                    f'{unreachable_reason}')
+            raise_if_known_unreachable(context)
 
             for attempt in range(max_retries):
                 try:
