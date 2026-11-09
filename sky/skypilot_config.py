@@ -151,9 +151,9 @@ class ConfigContext:
         # the client's layer was merged in. Settings the client must not
         # weaken are read from here.
         self.server_config: Optional[config_utils.Config] = None
-        # Number of the server config load that set `config`, see
-        # `_swap_in_server_config`.
-        self.loaded_seq = 0
+        # Generation of the server config cache entry `config` came from,
+        # see `_swap_in_server_config`.
+        self.loaded_generation = 0
 
 
 # The global loaded config.
@@ -245,7 +245,8 @@ def _get_config_context() -> ConfigContext:
             config_path=_global_config_context.config_path,
             config_overridden=_global_config_context.config_overridden,
         )
-        ctx.config_context.loaded_seq = _global_config_context.loaded_seq
+        ctx.config_context.loaded_generation = (
+            _global_config_context.loaded_generation)
     return ctx.config_context
 
 
@@ -1009,13 +1010,18 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
                                        create_table_fn=_create_table)
 
 # The last server config load: (fingerprint, config, db URL popped from the
-# file). Replaced by one assignment, so a lock-free reader never pairs a new
-# fingerprint with an old config.
+# file, generation). Replaced by one assignment, so a lock-free reader never
+# pairs a new fingerprint with an old config.
 _server_config_cache: Optional[Tuple[Tuple[Optional[str], Optional[str],
                                            Optional[str], Optional[str], bool],
-                                     config_utils.Config, Optional[str]]] = None
-# Numbers server config loads in the order they start reading their sources.
-_server_config_load_seq = itertools.count(1)
+                                     config_utils.Config, Optional[str],
+                                     int]] = None
+# Numbers cache entries in the order they are published. A full load that
+# holds the config lock reads and publishes with writers locked out, so a later
+# entry holds data at least as new. A load without it can publish older data
+# under a later number; the next reload replaces that entry, whose fingerprint
+# no longer matches the sources.
+_server_config_generations = itertools.count(1)
 _server_config_swap_lock = threading.Lock()
 
 
@@ -1026,19 +1032,19 @@ def _read_config_yaml_value() -> Optional[str]:
     return row.value if row else None
 
 
-def _swap_in_server_config(seq: int, config: config_utils.Config,
+def _swap_in_server_config(generation: int, config: config_utils.Config,
                            path: Optional[str]) -> None:
-    """Sets the loaded config unless a later load already set this context's.
+    """Sets the loaded config unless this context holds a later cache entry's.
 
     The reuse path reads its sources without the config lock, so a writer can
-    commit and a later load swap in the new config before this one swaps.
+    commit and another load swap in the new config before this one swaps.
+    The caller holds `_server_config_swap_lock`.
     """
-    with _server_config_swap_lock:
-        config_context = _get_config_context()
-        if seq > config_context.loaded_seq:
-            config_context.config = config
-            _set_loaded_config_path(path)
-            config_context.loaded_seq = seq
+    config_context = _get_config_context()
+    if generation >= config_context.loaded_generation:
+        config_context.config = config
+        _set_loaded_config_path(path)
+        config_context.loaded_generation = generation
 
 
 def _reload_config_as_server(cached_only: bool = False) -> bool:
@@ -1049,9 +1055,6 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
         Whether the config was loaded.
     """
     global _server_config_cache
-    # Numbered before any source is read: a load that read older data never
-    # outranks one that started after it.
-    seq = next(_server_config_load_seq)
     # Build the new config fully, then swap it in with a single
     # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
     # `get_nested` reads without the config lock (hot path), so a transient
@@ -1071,7 +1074,7 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
 
     cache = _server_config_cache
     if cache is not None and cache[0][:2] == (server_config_path, file_hash):
-        fingerprint, cached_config, file_db_url = cache
+        fingerprint, cached_config, file_db_url, generation = cache
         if file_db_url:
             # Executors restore os.environ after each request, which can drop
             # the URL the first parse of this file set.
@@ -1080,8 +1083,9 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
         db_value = _read_config_yaml_value() if db_url else None
         if (server_config_path, file_hash, db_url, db_value,
                 strict) == fingerprint:
-            _swap_in_server_config(seq, copy.deepcopy(cached_config),
-                                   server_config_path)
+            config = copy.deepcopy(cached_config)
+            with _server_config_swap_lock:
+                _swap_in_server_config(generation, config, server_config_path)
             return True
     if cached_only:
         return False
@@ -1111,10 +1115,13 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
-    _server_config_cache = ((server_config_path, file_hash, db_url, db_value,
-                             strict), server_config, file_db_url)
-    _swap_in_server_config(seq, copy.deepcopy(server_config),
-                           server_config_path)
+    config = copy.deepcopy(server_config)
+    with _server_config_swap_lock:
+        generation = next(_server_config_generations)
+        _server_config_cache = ((server_config_path, file_hash, db_url,
+                                 db_value, strict), server_config, file_db_url,
+                                generation)
+        _swap_in_server_config(generation, config, server_config_path)
     return True
 
 

@@ -3031,6 +3031,61 @@ def test_a_load_in_another_context_does_not_skip_this_ones(
     assert seen['label'] == 'b'
 
 
+def test_a_load_that_read_newer_data_is_not_outranked(server_config_file,
+                                                      monkeypatch):
+    """A full load that starts first but reads the source after it changed
+    must win over a reuse that read the old source."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    started = threading.Event()
+    release = threading.Event()
+    real_resolve = skypilot_config._resolve_server_config_path
+
+    def pausing_resolve():
+        if threading.current_thread().name == 'loader':
+            started.set()
+            release.wait(10)
+        return real_resolve()
+
+    monkeypatch.setattr(skypilot_config, '_resolve_server_config_path',
+                        pausing_resolve)
+    loader = threading.Thread(target=skypilot_config.reload_config,
+                              name='loader')
+    loader.start()
+    assert started.wait(10)
+    skypilot_config.safe_reload_config()
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    release.set()
+    loader.join(10)
+    assert not loader.is_alive()
+    assert _label() == 'b'
+
+
+def test_a_context_created_at_the_swap_starts_from_the_global_one(
+        server_config_file, monkeypatch):
+    """A request context first touched by a stale swap inherits the global
+    config's age, so the stale config does not replace it."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    matched, release = _pause_copy_of_label(monkeypatch, 'a')
+    seen = {}
+
+    @context.contextual
+    def reuse():
+        skypilot_config.safe_reload_config()
+        seen['label'] = _label()
+
+    reuser = threading.Thread(target=reuse, name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    skypilot_config.reload_config()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert seen['label'] == 'b'
+
+
 def test_sync_handler_refresh_clears_request_caches_when_unchanged(
         server_config_file):
     _, counts = server_config_file
