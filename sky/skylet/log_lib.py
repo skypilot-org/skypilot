@@ -49,7 +49,7 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 _ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
 _ESCAPED_WRITER_CHECK_INTERVAL_SECONDS = 1
 # How long the output pipe may stay open after the command exits while no
-# process in its process group holds it, before the remaining writers are
+# process in its session holds it, before the remaining writers are
 # terminated.
 _ESCAPED_WRITER_GRACE_SECONDS = 30
 
@@ -172,18 +172,18 @@ def process_subprocess_stream(proc, stdout_stream_handler,
     return stdout, stderr
 
 
-def _process_groups() -> Dict[int, int]:
-    """Maps PIDs, other than this process, to their process group IDs."""
-    groups: Dict[int, int] = {}
+def _process_sessions() -> Dict[int, int]:
+    """Maps PIDs, other than this process, to their session IDs."""
+    sessions: Dict[int, int] = {}
     own_pid = os.getpid()
     for entry in os.listdir('/proc'):
         if not entry.isdigit() or int(entry) == own_pid:
             continue
         try:
-            groups[int(entry)] = os.getpgid(int(entry))
+            sessions[int(entry)] = os.getsid(int(entry))
         except OSError:
             continue
-    return groups
+    return sessions
 
 
 def _pipe_writers(pipe_links: Set[str], pids: Iterable[int]) -> List[int]:
@@ -229,24 +229,24 @@ def _start_escaped_writer_reaper(
     """Unblocks output streaming when processes outlive the command.
 
     Streaming reads the command's stdout/stderr until EOF. A process that
-    leaves the command's process group (e.g. via setsid) and keeps the pipe
-    open blocks the read after the command exits, so the exit code is never
+    leaves the command's session (e.g. via setsid) and keeps the pipe open
+    blocks the read after the command exits, so the exit code is never
     returned. Once the command has exited and, for
     _ESCAPED_WRITER_GRACE_SECONDS, the pipe has been held only by processes
-    outside the command's process group, those processes are terminated.
-    While a process in the command's process group holds the pipe (e.g. a
-    `cmd &` background job), streaming waits for it as before. Linux only; on
-    other platforms this is a no-op.
+    outside the command's session, those processes are terminated. While a
+    process in the command's session holds the pipe (e.g. a `cmd &`
+    background job, including one in its own process group), streaming waits
+    for it as before. Linux only; on other platforms this is a no-op.
 
     Args:
         proc: The command, started with start_new_session=True so its PID
-            is its process group ID.
+            is its session ID.
 
     Returns:
         A tuple of two events: one the caller sets once streaming finishes,
         to stop the reaper; and one the reaper sets once the command has
-        exited and only processes outside its process group hold the pipe,
-        so a timeout no longer applies to the command.
+        exited and only processes outside its session hold the pipe, so a
+        timeout no longer applies to the command.
     """
     stop = threading.Event()
     output_escaped = threading.Event()
@@ -261,9 +261,9 @@ def _start_escaped_writer_reaper(
         while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
             if not _command_exited(proc):
                 continue
-            groups = _process_groups()
-            group_members = [p for p, g in groups.items() if g == proc.pid]
-            if _pipe_writers(pipe_links, group_members):
+            sessions = _process_sessions()
+            members = [p for p, s in sessions.items() if s == proc.pid]
+            if _pipe_writers(pipe_links, members):
                 escaped_since = None
                 output_escaped.clear()
                 continue
@@ -274,7 +274,7 @@ def _start_escaped_writer_reaper(
                     _ESCAPED_WRITER_GRACE_SECONDS):
                 continue
             holders = []
-            unsignaled = [p for p in groups if p not in signaled]
+            unsignaled = [p for p in sessions if p not in signaled]
             for pid in _pipe_writers(pipe_links, unsignaled):
                 signaled.add(pid)
                 try:
@@ -285,8 +285,8 @@ def _start_escaped_writer_reaper(
                     continue
                 logger.warning(
                     f'Terminating process {pid} ({cmdline!r}): it left the '
-                    f'process group of command {proc.pid}, which exited, '
-                    'and still holds its output open.')
+                    f'session of command {proc.pid}, which exited, and still '
+                    'holds its output open.')
                 holders.append(holder)
             _, alive = psutil.wait_procs(holders, timeout=10)
             for holder in alive:

@@ -215,7 +215,20 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
         self.assertEqual(returncode, 0)
         self.assertLess(time.monotonic() - start, 30)
 
-    def test_waits_for_background_process_in_same_group(self):
+    def test_waits_for_background_process_in_own_group(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            # GNU timeout moves itself to a new process group but stays in
+            # the command's session.
+            returncode, stdout, _ = log_lib.run_with_log(
+                "timeout 60 bash -c 'sleep 4; echo done' & exit 0",
+                f.name,
+                shell=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertIn('done', stdout)
+
+    def test_waits_for_background_process_in_same_session(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f:
             # The sleep before exit lets the subprocess daemon record the
             # background child, so the test fails if the command is reaped
