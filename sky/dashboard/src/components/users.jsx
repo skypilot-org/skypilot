@@ -3782,7 +3782,7 @@ function ServiceAccountTokensView({
             <div className="grid gap-2">
               <label
                 htmlFor="edit-sa-role-select"
-                className="text-sm font-medium text-gray-700"
+                className="text-sm font-medium text-content"
               >
                 Role
               </label>
@@ -3813,7 +3813,7 @@ function ServiceAccountTokensView({
               />
             )}
             {accessError && (
-              <p className="text-sm text-red-600">{accessError}</p>
+              <p className="text-sm text-red-fg">{accessError}</p>
             )}
           </div>
           <DialogFooter>
@@ -3825,7 +3825,7 @@ function ServiceAccountTokensView({
               Cancel
             </button>
             <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-solid text-white hover:bg-sky-solid-hover h-10 px-4 py-2"
               onClick={handleSaveAccess}
               disabled={
                 savingAccess ||
