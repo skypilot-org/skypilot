@@ -190,16 +190,19 @@ def test_unchanged_members_write_nothing(service, engine):
 def test_member_sync_leaves_other_rows_alone(service, engine):
     _insert(engine, 'p', ('user', '/workspaces/ws', 'POST'),
             ('alice', 'other', '*'))
-    service.sync_workspace_members({'ws': ['bob']}, removed=['gone'])
+    service.sync_workspace_members({'ws': ['bob']})
     assert _rows(engine, 'p') == {('user', '/workspaces/ws', 'POST'),
                                   ('alice', 'other', '*'), ('bob', 'ws', '*')}
 
 
-def test_removed_workspace_loses_its_members(service, engine):
-    service.sync_workspace_members({'ws': ['alice'], 'gone': ['bob', '*']})
-    service.sync_workspace_members({'ws': ['alice']}, removed=['gone'])
-    assert _members(engine, 'gone') == set()
-    assert _members(engine, 'ws') == {'alice'}
+def test_full_sync_removes_members_of_unconfigured_workspaces(service, engine):
+    _insert(engine, 'p', ('alice', 'gone', '*'), ('*', 'gone', '*'),
+            ('user', '/admin/*', '*'), ('carol', 'unresolved', '*'))
+    service.sync_workspace_members({'ws': ['bob']},
+                                   all_workspaces=['ws', 'unresolved'])
+    # A role's blocklist rule and an unresolved configured workspace stay.
+    assert _rows(engine, 'p') == {('bob', 'ws', '*'), ('user', '/admin/*', '*'),
+                                  ('carol', 'unresolved', '*')}
 
 
 def test_role_change_commits_once_and_never_leaves_no_role(service, engine):
@@ -534,3 +537,24 @@ def test_unresolvable_changed_workspace_fails_before_saving(store, engine):
 
     assert store['workspaces']['x'] == _private('alice')
     assert _members(engine, 'x') == {'alice'}
+
+
+def test_retried_save_removes_members_of_a_deleted_workspace(
+        store, service, engine, monkeypatch):
+    core.update_config(
+        {'workspaces': {
+            'old': _private('alice'),
+            'ws': _private('bob')
+        }})
+    new_config = {'workspaces': {'ws': _private('bob')}}
+    sync = service.sync_workspace_members
+    monkeypatch.setattr(service, 'sync_workspace_members',
+                        mock.Mock(side_effect=RuntimeError('lock timeout')))
+    with pytest.raises(RuntimeError):
+        core.update_config(new_config)
+    assert _members(engine, 'old') == {'alice'}
+
+    monkeypatch.setattr(service, 'sync_workspace_members', sync)
+    core.update_config(copy.deepcopy(new_config))
+    assert _members(engine, 'old') == set()
+    assert _members(engine, 'ws') == {'bob'}

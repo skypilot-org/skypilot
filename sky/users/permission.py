@@ -1540,23 +1540,33 @@ class PermissionService:
         self.sync_workspace_members({workspace_name: users})
 
     def sync_workspace_members(
-        self, members: Dict[str,
-                            List[str]], removed: Iterable[str] = ()) -> None:
+            self,
+            members: Dict[str, List[str]],
+            all_workspaces: Optional[Iterable[str]] = None) -> None:
         """Make each workspace's members exactly `members[ws]`, in one write.
 
-        Workspaces in `removed` lose all their members. A member who stays is
-        never removed, even for a moment, and nothing is written when every
-        set already matches.
+        With `all_workspaces`, every configured workspace, the members of any
+        workspace outside it are removed as well. A member who stays is never
+        removed, even for a moment, and nothing is written when every set
+        already matches.
         """
-        removed = set(removed) - set(members)
-        names = sorted(set(members) | removed)
-        if not names:
+        known = (None if all_workspaces is None else set(all_workspaces) |
+                 set(members))
+        if not members and known is None:
             return
         with _policy_lock():
             with self._policy_transaction() as rows:
+                where = [rows.c.v2 == '*']
+                if known is None:
+                    where.append(rows.c.v1.in_(sorted(members)))
                 current: Dict[str, Set[str]] = {}
-                for user, workspace_name, _ in rows.select(
-                        'p', rows.c.v1.in_(names), rows.c.v2 == '*'):
+                for user, workspace_name, _ in rows.select('p', *where):
+                    if workspace_name not in members and (
+                            known is None or workspace_name in known or
+                            user in _SUPPORTED_ROLES):
+                        # Left as is: a configured workspace whose members
+                        # were not resolved, or a role's blocklist rule.
+                        continue
                     current.setdefault(workspace_name, set()).add(user)
                 stale = [
                     (user, workspace_name, '*')

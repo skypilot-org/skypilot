@@ -1072,7 +1072,6 @@ def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
                 # Check names against the store as of now, not the pre-lock
                 # read, so a concurrent create can't slip a duplicate in.
                 _check_workspace_names_unique(stored, workspaces)
-            removed = [name for name in stored if name not in workspaces]
             workspaces.setdefault(constants.SKYPILOT_DEFAULT_WORKSPACE, {})
             resolver = user_resolver.UserResolver()
             members: Dict[str, List[str]] = {}
@@ -1089,8 +1088,10 @@ def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
             if config is not None:
                 skypilot_config.update_api_server_config_no_lock(
                     config_utils.Config.from_dict(config))
+            # Every configured workspace, so the members of one this save (or
+            # an earlier, failed one) deleted are removed too.
             permission.permission_service.sync_workspace_members(
-                members, removed)
+                members, all_workspaces=workspaces)
     except locks.LockTimeout as e:
         raise RuntimeError(
             'Failed to update configuration due to a timeout '
