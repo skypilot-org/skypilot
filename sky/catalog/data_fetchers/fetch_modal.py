@@ -1,20 +1,23 @@
-"""Fetch Modal prices and write the Modal catalog (modal/vms.csv).
+"""Fetch Modal prices and write the Modal pricing table (modal/pricing.csv).
 
 Modal has no pricing API. Prices come from https://modal.com/pricing and the
 region multipliers from https://modal.com/docs/guide/region-selection. GPU
-memory, GPU counts per container and region names are not on those pages, so
-they are kept below; keep them in sync with https://modal.com/docs/guide/gpu
-and the region list on the region-selection page.
+memory, the maximum GPU count per container and region names are not on those
+pages, so they are kept below; keep them in sync with
+https://modal.com/docs/guide/gpu and the region list on the region-selection
+page.
 
-Modal sizes CPU and memory per container, so SkyPilot builds Modal instance
-types on the fly (e.g. `32CPU--128GB--H100:2`). Each row therefore carries the
-per-hour rates used to price them, already scaled for the row's region:
-CpuCoreHourlyPrice (per Modal core, which is 2 vCPUs), MemoryGiBHourlyPrice
-and AcceleratorHourlyPrice (per GPU). CPU-only rows use Modal's
-non-preemptible rates, since SkyPilot runs CPU-only clusters non-preemptible.
-The rows themselves are the shapes used when no CPU or memory is requested:
-4 vCPUs and 16 GiB for CPU-only, and, as on Kubernetes, 4 vCPUs and 16 GiB
-per GPU.
+Modal sizes CPU and memory per container, so there are no instance types to
+list. Like Kubernetes, SkyPilot builds them on the fly (e.g.
+`32CPU--128GB--H100:2`) and prices them from this table, which has one row per
+resource and region, already scaled for the region:
+- `cpu-core`: per Modal physical core (2 vCPUs) and hour
+- `memory-gib`: per GiB and hour
+- one row per GPU type (SkyPilot name): per GPU and hour, with the maximum
+  count per container (`MaxCount`) and the GPU memory (`GpuMemoryGiB`)
+`HourlyPrice` is Modal's list (preemptible) rate. CPU and memory also have a
+`NonPreemptibleHourlyPrice`, which CPU-only clusters pay because SkyPilot
+runs them non-preemptible.
 
 Usage (from the catalog directory, e.g. ~/.sky/catalogs/v8):
     python -m sky.catalog.data_fetchers.fetch_modal
@@ -26,7 +29,7 @@ import html.parser
 import os
 import re
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 
@@ -82,42 +85,35 @@ GPU_MEMORY_GIB = {
     'T4': 16,
 }
 
-GPU_COUNTS = {
-    'B300': (1, 2, 4, 8),
-    'B200': (1, 2, 4, 8),
-    'H200': (1, 2, 4, 8),
-    'H100': (1, 2, 4, 8),
-    'RTX-PRO-6000': (1,),
-    'A100-80GB': (1, 2, 4, 8),
-    'A100-40GB': (1, 2, 4, 8),
-    'A100': (1, 2, 4, 8),
-    'L40S': (1, 2, 4, 8),
-    'A10': (1, 2, 4),
-    'L4': (1, 2, 4, 8),
-    'T4': (1, 2, 4, 8),
+# Most GPUs of a type per container; any count up to it may be requested.
+# https://modal.com/docs/guide/gpu lists up to 8 for these types and up to 4
+# for A10; RTX PRO 6000 is not in that list, so it stays at 1.
+GPU_MAX_COUNTS = {
+    'B300': 8,
+    'B200': 8,
+    'H200': 8,
+    'H100': 8,
+    'RTX-PRO-6000': 1,
+    'A100-80GB': 8,
+    'A100-40GB': 8,
+    'A100': 8,
+    'L40S': 8,
+    'A10': 4,
+    'L4': 8,
+    'T4': 8,
 }
 
-# Shapes used when no CPU or memory is requested. GPU shapes scale with the
-# GPU count, as on Kubernetes. Keep in sync with modal_catalog.py.
-DEFAULT_VCPUS = 4
-DEFAULT_MEMORY_GIB = 16
-DEFAULT_VCPUS_PER_GPU = 4
-DEFAULT_MEMORY_GIB_PER_VCPU = 4
-CPU_INSTANCE_TYPE = 'modal-cpu-4x-16gb'
+# Keep in sync with modal_catalog.py.
+CPU_RESOURCE = 'cpu-core'
+MEMORY_RESOURCE = 'memory-gib'
 
 COLUMNS = [
-    'InstanceType',
-    'AcceleratorName',
-    'AcceleratorCount',
-    'vCPUs',
-    'MemoryGiB',
-    'Price',
-    'SpotPrice',
+    'Resource',
     'Region',
-    'GpuInfo',
-    'CpuCoreHourlyPrice',
-    'MemoryGiBHourlyPrice',
-    'AcceleratorHourlyPrice',
+    'HourlyPrice',
+    'NonPreemptibleHourlyPrice',
+    'MaxCount',
+    'GpuMemoryGiB',
 ]
 
 _PRICE = r'\$\s*([0-9]*\.?[0-9]+)'
@@ -201,11 +197,11 @@ def parse_pricing_page(page_html: str) -> Dict[str, float]:
         modal_name, price = match.group(1).strip(), float(match.group(2))
         if modal_name not in GPU_NAMES:
             print(f'Skipping unknown Modal GPU {modal_name!r}: add it to '
-                  'GPU_NAMES, GPU_MEMORY_GIB and GPU_COUNTS.')
+                  'GPU_NAMES, GPU_MEMORY_GIB and GPU_MAX_COUNTS.')
             continue
         for name in GPU_NAMES[modal_name]:
             prices[name] = price
-    missing = sorted(set(GPU_COUNTS) - set(prices))
+    missing = sorted(set(GPU_MAX_COUNTS) - set(prices))
     if missing:
         raise ModalPricingError(
             f'No price for {", ".join(missing)} on {PRICING_URL}.')
@@ -240,61 +236,48 @@ def parse_region_multipliers(page_html: str) -> Dict[str, float]:
     }
 
 
-def _gpu_info(gpu_name: str, gpu_count: int) -> str:
-    gpu_memory_mib = GPU_MEMORY_GIB[gpu_name] * 1024
-    return repr({
-        'Gpus': [{
-            'Name': gpu_name,
-            'Manufacturer': 'NVIDIA',
-            'Count': gpu_count,
-            'MemoryInfo': {
-                'SizeInMiB': gpu_memory_mib,
-            },
-        }],
-        'TotalGpuMemoryInMiB': gpu_memory_mib * gpu_count,
-    })
+def _row(resource: str,
+         region: str,
+         multiplier: float,
+         per_second: float,
+         nonpreemptible_per_second: Optional[float] = None,
+         max_count: Optional[int] = None,
+         gpu_memory_gib: Optional[int] = None) -> Dict:
+
+    def hourly(price: float) -> float:
+        return round(price * 3600 * multiplier, 8)
+
+    return {
+        'Resource': resource,
+        'Region': region,
+        'HourlyPrice': hourly(per_second),
+        'NonPreemptibleHourlyPrice':
+            (hourly(nonpreemptible_per_second)
+             if nonpreemptible_per_second is not None else None),
+        'MaxCount': max_count,
+        'GpuMemoryGiB': gpu_memory_gib,
+    }
 
 
 def create_catalog(prices: Dict[str, float],
                    region_multipliers: Dict[str, float]) -> List[Dict]:
-    """Catalog rows (see the module docstring) from parsed prices."""
+    """Pricing rows (see the module docstring) from parsed per-second prices."""
     rows = []
-
-    def add_rows(instance_type: str, gpu: Optional[Tuple[str, int]],
-                 cpu_rate: float, memory_rate: float, gpu_rate: float) -> None:
-        gpu_count = gpu[1] if gpu else 0
-        vcpus = DEFAULT_VCPUS_PER_GPU * gpu_count if gpu else DEFAULT_VCPUS
-        memory_gib = (vcpus * DEFAULT_MEMORY_GIB_PER_VCPU
-                      if gpu else DEFAULT_MEMORY_GIB)
-        cores = vcpus / 2
-        for region, multiplier in region_multipliers.items():
-            cpu_hourly = cpu_rate * 3600 * multiplier
-            memory_hourly = memory_rate * 3600 * multiplier
-            gpu_hourly = gpu_rate * 3600 * multiplier
-            rows.append({
-                'InstanceType': instance_type,
-                'AcceleratorName': gpu[0] if gpu else None,
-                'AcceleratorCount': float(gpu_count) if gpu else None,
-                'vCPUs': float(vcpus),
-                'MemoryGiB': float(memory_gib),
-                'Price': round(
-                    cores * cpu_hourly + memory_gib * memory_hourly +
-                    gpu_count * gpu_hourly, 8),
-                'SpotPrice': None,
-                'Region': region,
-                'GpuInfo': _gpu_info(*gpu) if gpu else None,
-                'CpuCoreHourlyPrice': round(cpu_hourly, 8),
-                'MemoryGiBHourlyPrice': round(memory_hourly, 8),
-                'AcceleratorHourlyPrice': round(gpu_hourly, 8) if gpu else None,
-            })
-
-    add_rows(CPU_INSTANCE_TYPE, None, prices['nonpreemptible_cpu'],
-             prices['nonpreemptible_memory'], 0.0)
-    for gpu_name, counts in GPU_COUNTS.items():
-        for gpu_count in counts:
-            add_rows(f'modal-{gpu_name.lower()}-{gpu_count}x',
-                     (gpu_name, gpu_count), prices['cpu'], prices['memory'],
-                     prices[gpu_name])
+    for region, multiplier in region_multipliers.items():
+        rows.append(
+            _row(CPU_RESOURCE, region, multiplier, prices['cpu'],
+                 prices['nonpreemptible_cpu']))
+        rows.append(
+            _row(MEMORY_RESOURCE, region, multiplier, prices['memory'],
+                 prices['nonpreemptible_memory']))
+        rows.extend(
+            _row(gpu_name,
+                 region,
+                 multiplier,
+                 prices[gpu_name],
+                 max_count=max_count,
+                 gpu_memory_gib=GPU_MEMORY_GIB[gpu_name])
+            for gpu_name, max_count in GPU_MAX_COUNTS.items())
     return rows
 
 
@@ -309,7 +292,7 @@ def _get(url: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',
-                        default=os.path.join('modal', 'vms.csv'),
+                        default=os.path.join('modal', 'pricing.csv'),
                         help='Where to write the catalog.')
     args = parser.parse_args()
 
@@ -322,7 +305,7 @@ def main() -> int:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
-    print(f'Wrote {len(rows)} Modal catalog rows to {args.output}.')
+    print(f'Wrote {len(rows)} Modal pricing rows to {args.output}.')
     return 0
 
 
