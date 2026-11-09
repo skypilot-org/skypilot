@@ -24,6 +24,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import schemas
 from sky.utils import yaml_utils
@@ -2957,23 +2958,32 @@ def test_server_config_cache_is_private(server_config_file):
     assert _label() == 'a'
 
 
+def _pause_copy_of_label(monkeypatch, label: str):
+    """Pauses the 'reuser' thread when it copies the config with `label`: the
+    reuse path, after it matched the cache and before it swaps."""
+    matched = threading.Event()
+    release = threading.Event()
+    real_deepcopy = copy.deepcopy
+
+    def pausing_deepcopy(value, *args, **kwargs):
+        if (threading.current_thread().name == 'reuser' and
+                isinstance(value, config_utils.Config) and
+                value.get('aws', {}).get('labels', {}).get('k') == label):
+            matched.set()
+            release.wait(10)
+        return real_deepcopy(value, *args, **kwargs)
+
+    monkeypatch.setattr(copy, 'deepcopy', pausing_deepcopy)
+    return matched, release
+
+
 def test_a_reused_config_never_replaces_a_newer_load(server_config_file,
                                                      monkeypatch):
     """The reuse path matches its sources without the config lock. A writer
     and a full load that finish before it swaps must not be undone."""
     path, _ = server_config_file
     skypilot_config.reload_config()
-    matched = threading.Event()
-    release = threading.Event()
-    real_deepcopy = copy.deepcopy
-
-    def pausing_deepcopy(value, *args, **kwargs):
-        if threading.current_thread().name == 'reuser':
-            matched.set()
-            release.wait(10)
-        return real_deepcopy(value, *args, **kwargs)
-
-    monkeypatch.setattr(copy, 'deepcopy', pausing_deepcopy)
+    matched, release = _pause_copy_of_label(monkeypatch, 'a')
     reuser = threading.Thread(target=skypilot_config.safe_reload_config,
                               name='reuser')
     reuser.start()
@@ -2984,6 +2994,41 @@ def test_a_reused_config_never_replaces_a_newer_load(server_config_file,
     reuser.join(10)
     assert not reuser.is_alive()
     assert _label() == 'b'
+
+
+def test_a_load_in_another_context_does_not_skip_this_ones(
+        server_config_file, monkeypatch):
+    """Request contexts hold their own loaded config: a newer load in one
+    context must not stop another from swapping in what it matched."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+
+    @context.contextual
+    def load_in_another_context():
+        skypilot_config.safe_reload_config()
+
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    load_in_another_context()
+    assert _label() == 'a'
+
+    matched, release = _pause_copy_of_label(monkeypatch, 'b')
+    seen = {}
+
+    @context.contextual
+    def reuse():
+        _label()  # This context starts from the global config.
+        skypilot_config.safe_reload_config()
+        seen['label'] = _label()
+
+    reuser = threading.Thread(target=reuse, name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: c\n')
+    load_in_another_context()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert seen['label'] == 'b'
 
 
 def test_sync_handler_refresh_clears_request_caches_when_unchanged(

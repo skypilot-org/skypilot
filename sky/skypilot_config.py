@@ -52,6 +52,7 @@ import contextlib
 import copy
 import errno
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -150,6 +151,9 @@ class ConfigContext:
         # the client's layer was merged in. Settings the client must not
         # weaken are read from here.
         self.server_config: Optional[config_utils.Config] = None
+        # Number of the server config load that set `config`, see
+        # `_swap_in_server_config`.
+        self.loaded_seq = 0
 
 
 # The global loaded config.
@@ -241,6 +245,7 @@ def _get_config_context() -> ConfigContext:
             config_path=_global_config_context.config_path,
             config_overridden=_global_config_context.config_overridden,
         )
+        ctx.config_context.loaded_seq = _global_config_context.loaded_seq
     return ctx.config_context
 
 
@@ -1009,9 +1014,8 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
 _server_config_cache: Optional[Tuple[Tuple[Optional[str], Optional[str],
                                            Optional[str], Optional[str], bool],
                                      config_utils.Config, Optional[str]]] = None
-# Orders the swaps of `_reload_config_as_server`: the reuse path checks its
-# sources without the config lock, so a writer can commit and a full load can
-# swap in the result before the reuse path swaps in the config it matched.
+# Numbers server config loads in the order they start reading their sources.
+_server_config_load_seq = itertools.count(1)
 _server_config_swap_lock = threading.Lock()
 
 
@@ -1022,6 +1026,21 @@ def _read_config_yaml_value() -> Optional[str]:
     return row.value if row else None
 
 
+def _swap_in_server_config(seq: int, config: config_utils.Config,
+                           path: Optional[str]) -> None:
+    """Sets the loaded config unless a later load already set this context's.
+
+    The reuse path reads its sources without the config lock, so a writer can
+    commit and a later load swap in the new config before this one swaps.
+    """
+    with _server_config_swap_lock:
+        config_context = _get_config_context()
+        if seq > config_context.loaded_seq:
+            config_context.config = config
+            _set_loaded_config_path(path)
+            config_context.loaded_seq = seq
+
+
 def _reload_config_as_server(cached_only: bool = False) -> bool:
     """Loads the server config, reusing the last load if its source is
     unchanged. With `cached_only`, only that reuse is tried.
@@ -1030,6 +1049,9 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
         Whether the config was loaded.
     """
     global _server_config_cache
+    # Numbered before any source is read: a load that read older data never
+    # outranks one that started after it.
+    seq = next(_server_config_load_seq)
     # Build the new config fully, then swap it in with a single
     # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
     # `get_nested` reads without the config lock (hot path), so a transient
@@ -1058,13 +1080,8 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
         db_value = _read_config_yaml_value() if db_url else None
         if (server_config_path, file_hash, db_url, db_value,
                 strict) == fingerprint:
-            config = copy.deepcopy(cached_config)
-            with _server_config_swap_lock:
-                # A full load since the check above has swapped in a config
-                # at least as new as the one matched here.
-                if _server_config_cache is cache:
-                    _set_loaded_config(config)
-                    _set_loaded_config_path(server_config_path)
+            _swap_in_server_config(seq, copy.deepcopy(cached_config),
+                                   server_config_path)
             return True
     if cached_only:
         return False
@@ -1094,12 +1111,10 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
-    config = copy.deepcopy(server_config)
-    with _server_config_swap_lock:
-        _server_config_cache = ((server_config_path, file_hash, db_url,
-                                 db_value, strict), server_config, file_db_url)
-        _set_loaded_config(config)
-        _set_loaded_config_path(server_config_path)
+    _server_config_cache = ((server_config_path, file_hash, db_url, db_value,
+                             strict), server_config, file_db_url)
+    _swap_in_server_config(seq, copy.deepcopy(server_config),
+                           server_config_path)
     return True
 
 

@@ -109,6 +109,18 @@ def test_dump_yaml_atomic_through_a_symlink_keeps_the_link_and_mode(tmp_path):
     assert os.listdir(target_dir) == ['config.yaml']
 
 
+def test_dump_yaml_atomic_keeps_mode_bits_the_umask_strips(tmp_path):
+    path = tmp_path / 'config.yaml'
+    path.write_text('old: 1\n')
+    os.chmod(path, 0o664)
+    umask = os.umask(0o022)
+    try:
+        yaml_utils.dump_yaml_atomic(str(path), {'new': 2})
+    finally:
+        os.umask(umask)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o664
+
+
 def test_dump_yaml_atomic_new_file_gets_the_default_mode(tmp_path):
     umask = os.umask(0o027)
     try:
