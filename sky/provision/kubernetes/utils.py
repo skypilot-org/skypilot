@@ -421,6 +421,46 @@ def is_transient_api_error(exception: Optional[BaseException]) -> bool:
     return False
 
 
+# Checks for contexts whose API server is known to be unreachable, e.g. one
+# reached through a proxy hop that is known to be down. Each is called with a
+# context name and returns why that context is unreachable, or None. Calls
+# wrapped by `_retry_on_error` on such a context fail at once instead of
+# retrying with backoff. Empty by default -- nothing in core registers one.
+ContextUnreachableCheck = Callable[[Optional[str]], Optional[str]]
+_CONTEXT_UNREACHABLE_CHECKS: List[ContextUnreachableCheck] = []
+
+
+def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
+    """Register a check that names contexts known to be unreachable.
+
+    The check runs before every `_retry_on_error`-wrapped call on a named
+    context, so it must be cheap and must not block (no network calls).
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
+    """
+    if check not in _CONTEXT_UNREACHABLE_CHECKS:
+        _CONTEXT_UNREACHABLE_CHECKS.append(check)
+
+
+def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
+    """Why `context` is known to be unreachable, or None.
+
+    Never raises: a check that fails is skipped, as if it were not
+    registered.
+    """
+    for check in _CONTEXT_UNREACHABLE_CHECKS:
+        try:
+            reason = check(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Context unreachable check failed for '
+                         f'{context!r}: {e}')
+            continue
+        if reason:
+            return reason
+    return None
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -447,6 +487,15 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
+
+            # Only a named context: which API server a call without one
+            # reaches depends on the function and on in-cluster config loading.
+            if context is not None:
+                reason = known_unreachable_reason(context)
+                if reason is not None:
+                    raise exceptions.KubeAPIUnreachableError(
+                        f'Kubernetes context {context!r} is unreachable: '
+                        f'{reason}')
 
             for attempt in range(max_retries):
                 try:

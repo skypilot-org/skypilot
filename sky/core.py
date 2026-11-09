@@ -1873,6 +1873,20 @@ def realtime_kubernetes_gpu_availability(
             context_list = kubernetes_contexts
     else:
         context_list = [context]
+    unreachable: Dict[Optional[str], str] = {}
+    for ctx in context_list:
+        reason = kubernetes_utils.known_unreachable_reason(ctx)
+        if reason is not None:
+            unreachable[ctx] = reason
+    context_list = [ctx for ctx in context_list if ctx not in unreachable]
+    if unreachable:
+        skipped = ', '.join(
+            f'{ctx!r} ({reason})' for ctx, reason in unreachable.items())
+        logger.debug(f'Skipping unreachable Kubernetes contexts: {skipped}')
+    if not context_list and unreachable:
+        raise ValueError(' '.join(
+            f'Kubernetes context {ctx!r} is unreachable: {reason}.'
+            for ctx, reason in unreachable.items()))
 
     def _realtime_kubernetes_gpu_availability_single(
         context: Optional[str] = None,
