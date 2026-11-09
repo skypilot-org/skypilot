@@ -748,9 +748,9 @@ export function InfrastructureSection({
                     if (!typeEntry) {
                       return (
                         <>
-                          <td className="p-3 text-content-faint">-</td>
-                          <td className="p-3 text-content-faint">-</td>
-                          <td className="p-3 text-content-faint">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
+                          <td className="p-3 text-content-tertiary">-</td>
                         </>
                       );
                     }
@@ -838,7 +838,7 @@ export function InfrastructureSection({
                         rowSpan={summaryRowCount}
                       >
                         {!isExpandable ? (
-                          <span className="text-content-faint">-</span>
+                          <span className="text-content-tertiary">-</span>
                         ) : (
                           <button
                             className="inline-flex items-center gap-1 text-content-tertiary hover:text-content"
@@ -1031,7 +1031,7 @@ export function InfrastructureSection({
                           content={row.note || 'Not enabled for compute'}
                           className="text-sm text-muted-foreground"
                         >
-                          <span className="px-1.5 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium cursor-help">
+                          <span className="px-1.5 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium cursor-help">
                             Not enabled
                           </span>
                         </NonCapitalizedTooltip>
@@ -1042,7 +1042,10 @@ export function InfrastructureSection({
                         of these, so a dash in each. */}
                     {Array.from({ length: isSlurm ? 5 : 6 }).map(
                       (_, cellIndex) => (
-                        <td key={cellIndex} className="p-3 text-content-faint">
+                        <td
+                          key={cellIndex}
+                          className="p-3 text-content-tertiary"
+                        >
                           -
                         </td>
                       )
@@ -1219,7 +1222,7 @@ export function InfrastructureSection({
                     >
                       {row.name}
                     </span>
-                    <span className="px-1.5 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium flex-shrink-0">
+                    <span className="px-1.5 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium flex-shrink-0">
                       Not enabled
                     </span>
                   </div>
@@ -2513,7 +2516,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   const StatusDisplay = ({ pool }) => {
     if (!pool.isDeployed) {
       return (
-        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
           Not Deployed
         </span>
       );
@@ -2531,7 +2534,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
     const status = poolStatuses[pool.name];
     if (!status) {
       return (
-        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
           Unknown
         </span>
       );
@@ -2626,7 +2629,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       {pool.clusters}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -2641,7 +2644,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       {pool.jobs}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -3974,14 +3977,14 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <NonCapitalizedTooltip content="Storage-only infrastructure does not run clusters">
-                              <span className="px-1.5 py-0.5 text-content-faint text-xs font-medium cursor-help">
+                              <span className="px-1.5 py-0.5 text-content-tertiary text-xs font-medium cursor-help">
                                 —
                               </span>
                             </NonCapitalizedTooltip>
                           ) : clusterDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                               {clusterCount ?? 0}
                             </span>
                           )}
@@ -3989,14 +3992,14 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <NonCapitalizedTooltip content="Storage-only infrastructure does not run managed jobs">
-                              <span className="px-1.5 py-0.5 text-content-faint text-xs font-medium cursor-help">
+                              <span className="px-1.5 py-0.5 text-content-tertiary text-xs font-medium cursor-help">
                                 —
                               </span>
                             </NonCapitalizedTooltip>
                           ) : sshAndKubeJobsDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                               {jobCount ?? 0}
                             </span>
                           )}

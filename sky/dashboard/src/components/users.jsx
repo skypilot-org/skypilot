@@ -2636,7 +2636,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.gpuCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2644,7 +2644,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             user.gpuCount > 0
                               ? 'bg-purple-tint-strong text-purple-fg'
-                              : 'bg-surface-muted text-content-tertiary'
+                              : 'bg-surface-muted text-content-secondary'
                           }`}
                           title={`Total GPUs: ${user.gpuCount}`}
                         >
@@ -2654,7 +2654,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.clusterCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2663,7 +2663,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.clusterCount > 0
                               ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -2673,7 +2673,7 @@ function UsersTable({
                     </TableCell>
                     <TableCell>
                       {user.jobCount === -1 ? (
-                        <span className="px-2 py-0.5 bg-surface-muted text-content-tertiary rounded text-xs font-medium">
+                        <span className="px-2 py-0.5 bg-surface-muted text-content-secondary rounded text-xs font-medium">
                           <CircularProgress size={12} />
                         </span>
                       ) : (
@@ -2682,7 +2682,7 @@ function UsersTable({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             user.jobCount > 0
                               ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                         >
@@ -3352,7 +3352,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.clusterCount > 0
                               ? 'bg-blue-tint-strong text-blue-fg hover:bg-blue-line hover:text-blue-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3374,7 +3374,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                             token.jobCount > 0
                               ? 'bg-green-tint-strong text-green-fg hover:bg-green-line hover:text-green-fg-strong'
-                              : 'bg-surface-muted text-content-tertiary hover:bg-surface-strong hover:text-content'
+                              : 'bg-surface-muted text-content-secondary hover:bg-surface-strong hover:text-content'
                           }`}
                           title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                         >
@@ -3395,7 +3395,7 @@ function ServiceAccountTokensView({
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
                             token.gpuCount > 0
                               ? 'bg-purple-tint-strong text-purple-fg'
-                              : 'bg-surface-muted text-content-tertiary'
+                              : 'bg-surface-muted text-content-secondary'
                           }`}
                           title={`Total GPUs: ${token.gpuCount}`}
                         >
