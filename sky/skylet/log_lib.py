@@ -170,19 +170,10 @@ def process_subprocess_stream(proc, stdout_stream_handler,
     return stdout, stderr
 
 
-def _process_group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
-    return True
-
-
-def _pipe_holder_pids(pipe_links: Set[str]) -> List[int]:
-    """Returns PIDs, other than this process, with any of the pipes open."""
-    holders = []
+def _pipe_holders(pipe_links: Set[str]) -> Dict[int, int]:
+    """Maps PIDs, other than this process, with any of the pipes open to
+    their process group IDs."""
+    holders: Dict[int, int] = {}
     own_pid = os.getpid()
     for entry in os.listdir('/proc'):
         if not entry.isdigit() or int(entry) == own_pid:
@@ -194,24 +185,31 @@ def _pipe_holder_pids(pipe_links: Set[str]) -> List[int]:
             continue
         for fd in fds:
             try:
-                if os.readlink(f'{fd_dir}/{fd}') in pipe_links:
-                    holders.append(int(entry))
-                    break
+                if os.readlink(f'{fd_dir}/{fd}') not in pipe_links:
+                    continue
+                with open(f'/proc/{entry}/stat', 'rb') as f:
+                    stat = f.read()
             except OSError:
                 continue
+            # stat is "<pid> (<comm>) <state> <ppid> <pgrp> ..."; comm can
+            # contain spaces and ')', so split after the last ')'.
+            holders[int(entry)] = int(stat[stat.rfind(b')') + 2:].split()[2])
+            break
     return holders
 
 
-def _start_escaped_writer_reaper(proc: subprocess.Popen) -> threading.Event:
+def _start_escaped_writer_reaper(
+        proc: subprocess.Popen) -> Tuple[threading.Event, threading.Event]:
     """Unblocks output streaming when processes outlive the command.
 
     Streaming reads the command's stdout/stderr until EOF. A process that
     leaves the command's process group (e.g. via setsid) and keeps the pipe
     open blocks the read after the command exits, so the exit code is never
-    returned. Once the command has exited, its process group is empty, and
-    the pipe is still open after _ESCAPED_WRITER_GRACE_SECONDS, the processes
-    holding the pipe are terminated. Background processes that stay in the
-    command's process group keep the pipe open as before. Linux only; on
+    returned. Once the command has exited and, for
+    _ESCAPED_WRITER_GRACE_SECONDS, the pipe has been held only by processes
+    outside the command's process group, those processes are terminated.
+    While a process in the command's process group holds the pipe (e.g. a
+    `cmd &` background job), streaming waits for it as before. Linux only; on
     other platforms this is a no-op.
 
     Args:
@@ -219,26 +217,35 @@ def _start_escaped_writer_reaper(proc: subprocess.Popen) -> threading.Event:
             is its process group ID.
 
     Returns:
-        An event the caller sets once streaming finishes, to stop the reaper.
+        A tuple of two events: one the caller sets once streaming finishes,
+        to stop the reaper; and one the reaper sets once the command has
+        exited and only processes outside its process group hold the pipe,
+        so a timeout no longer applies to the command.
     """
     stop = threading.Event()
+    output_escaped = threading.Event()
     if not sys.platform.startswith('linux'):
-        return stop
+        return stop, output_escaped
     streams = [s for s in (proc.stdout, proc.stderr) if s is not None]
     pipe_links = {f'pipe:[{os.fstat(s.fileno()).st_ino}]' for s in streams}
 
     def _reap() -> None:
-        group_empty_since = None
+        escaped_since = None
         while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
-            if proc.poll() is None or _process_group_alive(proc.pid):
-                group_empty_since = None
+            if proc.poll() is None:
                 continue
-            if group_empty_since is None:
-                group_empty_since = time.monotonic()
-            if (time.monotonic() - group_empty_since <
+            holders = _pipe_holders(pipe_links)
+            if proc.pid in holders.values():
+                escaped_since = None
+                output_escaped.clear()
+                continue
+            if escaped_since is None:
+                escaped_since = time.monotonic()
+                output_escaped.set()
+            if (time.monotonic() - escaped_since <
                     _ESCAPED_WRITER_GRACE_SECONDS):
                 continue
-            for pid in _pipe_holder_pids(pipe_links):
+            for pid in holders:
                 try:
                     holder = psutil.Process(pid)
                     cmdline = ' '.join(holder.cmdline())[:200]
@@ -251,7 +258,7 @@ def _start_escaped_writer_reaper(proc: subprocess.Popen) -> threading.Event:
                 subprocess_utils.kill_process_with_grace_period(holder)
 
     threading.Thread(target=_reap, daemon=True).start()
-    return stop
+    return stop, output_escaped
 
 
 def run_with_log(
@@ -391,16 +398,18 @@ def run_with_log(
 
             def _timeout_handler():
                 nonlocal timeout_triggered
+                if output_escaped is not None and output_escaped.is_set():
+                    return
                 timeout_triggered = True
                 subprocess_utils.kill_children_processes(proc.pid)
+
+            reaper_stop = output_escaped = None
+            if proc.stdout is not None:
+                reaper_stop, output_escaped = _start_escaped_writer_reaper(proc)
 
             if timeout is not None:
                 timer = threading.Timer(timeout, _timeout_handler)
                 timer.start()
-
-            reaper_stop = None
-            if proc.stdout is not None:
-                reaper_stop = _start_escaped_writer_reaper(proc)
 
             try:
                 if ctx is not None:

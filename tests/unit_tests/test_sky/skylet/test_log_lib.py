@@ -192,6 +192,32 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
             psutil.pid_exists(escaped_pid) and
             psutil.Process(escaped_pid).status() != psutil.STATUS_ZOMBIE)
 
+    def test_timeout_does_not_fail_command_that_exited(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 4):
+            returncode = log_lib.run_with_log(
+                'setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+                timeout=2,
+            )
+        self.assertEqual(returncode, 0)
+
+    def test_redirected_background_process_does_not_delay_cleanup(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode, stdout, _ = log_lib.run_with_log(
+                'sleep 300 >/dev/null 2>&1 & echo $!; setsid sleep 300 & exit 0',
+                f.name,
+                shell=True,
+                require_outputs=True,
+            )
+        background_pid = int(stdout.split()[0])
+        self.assertTrue(psutil.pid_exists(background_pid))
+        psutil.Process(background_pid).kill()
+        self.assertEqual(returncode, 0)
+        self.assertLess(time.monotonic() - start, 30)
+
     def test_waits_for_background_process_in_same_group(self):
         with tempfile.NamedTemporaryFile(suffix='.log') as f:
             returncode, stdout, _ = log_lib.run_with_log(
