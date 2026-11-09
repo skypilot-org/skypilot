@@ -242,6 +242,19 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
         self.assertEqual(returncode, 0)
         self.assertIn('done', stdout)
 
+    @unittest.skipIf(os.geteuid() == 0, 'Root can read every fd.')
+    def test_timeout_applies_while_unreadable_member_holds_output(self):
+        # PR_SET_DUMPABLE=0 makes /proc/<pid>/fd unreadable to the same
+        # non-root user, as for a background `sudo cmd &`.
+        hidden_writer = ('python3 -c "import ctypes, time; '
+                         'ctypes.CDLL(None).prctl(4, 0); time.sleep(6)"')
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                log_lib.run_with_log(f'{hidden_writer} & exit 0',
+                                     f.name,
+                                     shell=True,
+                                     timeout=3)
+
     def test_pipe_writers_ignores_read_end_holders(self):
         read_fd, write_fd = os.pipe()
         procs = [

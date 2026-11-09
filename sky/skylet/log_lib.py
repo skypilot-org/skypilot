@@ -208,6 +208,20 @@ def _pipe_writers(pipe_links: Set[str], pids: Iterable[int]) -> List[int]:
     return writers
 
 
+def _fds_hidden(pid: int) -> bool:
+    """Returns whether a live process's fds cannot be read, e.g. under sudo.
+
+    Zombies are excluded: their fd directories are unreadable too, but they
+    hold no fds.
+    """
+    if os.access(f'/proc/{pid}/fd', os.R_OK):
+        return False
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False
+
+
 def _command_exited(proc: subprocess.Popen) -> bool:
     """Returns whether the command exited, without reaping it.
 
@@ -263,7 +277,9 @@ def _start_escaped_writer_reaper(
                 continue
             sessions = _process_sessions()
             members = [p for p, s in sessions.items() if s == proc.pid]
-            if _pipe_writers(pipe_links, members):
+            # A member whose fds cannot be read may hold the pipe.
+            if (_pipe_writers(pipe_links, members) or
+                    any(_fds_hidden(p) for p in members)):
                 escaped_since = None
                 output_escaped.clear()
                 continue
@@ -294,6 +310,8 @@ def _start_escaped_writer_reaper(
                     holder.kill()
                 except psutil.Error:
                     continue
+            # Rescan only once per grace period if a holder survives.
+            escaped_since = time.monotonic()
 
     threading.Thread(target=_reap, daemon=True).start()
     return stop, output_escaped
