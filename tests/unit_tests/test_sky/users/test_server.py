@@ -636,11 +636,10 @@ class TestUsersEndpoints:
             exc_info.value.detail)
 
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.delete_user')
-    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user_and_record'
+               )
     @pytest.mark.asyncio
-    async def test_user_delete_success(self, mock_delete_user_role,
-                                       mock_delete_user, mock_get_user,
+    async def test_user_delete_success(self, mock_delete_user, mock_get_user,
                                        mock_request):
         """Test successful POST /users/delete endpoint."""
         # Setup
@@ -655,8 +654,8 @@ class TestUsersEndpoints:
         # Verify
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
+        # Removes the record together with the role and grants.
         mock_delete_user.assert_called_once_with('test_user')
-        mock_delete_user_role.assert_called_once_with('test_user')
 
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
@@ -920,7 +919,8 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.global_user_state.delete_user')
-    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user_and_record'
+               )
     @pytest.mark.asyncio
     async def test_user_delete_forbidden_internal_users(self,
                                                         mock_delete_user_role,

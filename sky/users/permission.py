@@ -6,7 +6,7 @@ import os
 import queue
 import threading
 import time
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Set, Tuple
 
 import casbin
 from casbin import util as casbin_util
@@ -171,6 +171,57 @@ _POLICY_VERSION_PG_QUERY = sqlalchemy.text(
 _POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
     'SELECT version FROM rbac_policy_version WHERE id = 1')
 
+# Fields per rule: `g` is (user, role), `p` is (subject, object, action).
+_RULE_WIDTH = {'g': 2, 'p': 3}
+
+
+class _PolicyRows:
+    """Reads and writes policy rows on one connection, inside its transaction.
+
+    Multi-row writes go to the adapter's table directly: the adapter commits
+    every row on its own, and its batch calls either do the same or match the
+    wrong rows.
+    """
+
+    def __init__(self, conn: sqlalchemy.engine.Connection,
+                 table: sqlalchemy.Table):
+        self.conn = conn
+        self.c = table.c
+        self._table = table
+
+    def _fields(self, ptype: str) -> List[sqlalchemy.Column]:
+        return [self.c[f'v{i}'] for i in range(_RULE_WIDTH[ptype])]
+
+    def select(self, ptype: str,
+               *where: sqlalchemy.ColumnElement) -> List[Tuple[str, ...]]:
+        rows = self.conn.execute(
+            sqlalchemy.select(*self._fields(ptype)).where(
+                self.c.ptype == ptype, *where))
+        return [tuple(row) for row in rows]
+
+    def delete_where(self, ptype: str, *where: sqlalchemy.ColumnElement) -> int:
+        return self.conn.execute(
+            sqlalchemy.delete(self._table).where(self.c.ptype == ptype,
+                                                 *where)).rowcount
+
+    def delete(self, ptype: str, rules: Iterable[Tuple[str, ...]]) -> None:
+        """Deletes every stored copy of each rule."""
+        params = [{f'f{i}': v for i, v in enumerate(rule)} for rule in rules]
+        if params:
+            self.conn.execute(
+                sqlalchemy.delete(self._table).where(
+                    self.c.ptype == ptype,
+                    *(field == sqlalchemy.bindparam(f'f{i}')
+                      for i, field in enumerate(self._fields(ptype)))), params)
+
+    def insert(self, ptype: str, rules: Iterable[Tuple[str, ...]]) -> None:
+        rows = [{
+            'ptype': ptype,
+            **{f'v{i}': v for i, v in enumerate(rule)}
+        } for rule in rules]
+        if rows:
+            self.conn.execute(sqlalchemy.insert(self._table), rows)
+
 
 class _PolicyVersion:
     """The stored policy version an enforcer last loaded, and how to read it.
@@ -251,8 +302,8 @@ def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
         state.loaded = current
         return
     with synced._wl:
-        # Local writes commit under this lock, so one that landed on the old
-        # model during the build has moved the version; then load in place.
+        # A write that committed during the build has moved the version;
+        # then load in place.
         current = state.read()
         if current is not None and current == version:
             synced._e = fresh
@@ -385,6 +436,18 @@ class PermissionService:
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
 
+    def _plugin_rbac_rules_complete(self) -> bool:
+        """Whether every configured plugin's RBAC rules were read."""
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            return server_plugins.plugin_rbac_rules_complete()
+        except ImportError:
+            # No plugins outside the server, so none are missing.
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
     def _get_plugin_viewer_allowlist(self) -> List[dict]:
         """Get viewer-allowlist entries from loaded plugins.
 
@@ -473,9 +536,8 @@ class PermissionService:
                             password=password,
                             user_type=models.UserType.BASIC.value))
             enforcer = self._ensure_enforcer()
-            # Same reason as `_maybe_initialize_policies`: the mutator below
-            # decides against this model, which predates the lock unless
-            # refreshed.
+            # The mutator below decides against this model, which predates the
+            # lock unless refreshed.
             self._load_policy_no_lock()
             enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
             logger.info(f'Basic auth user {username} initialized')
@@ -487,24 +549,13 @@ class PermissionService:
         """
         logger.debug(f'Initializing policies in process: {os.getpid()}')
 
-        # The model was loaded by the enforcer's constructor, before the lock
-        # was acquired -- and waiting for it can take seconds. Anything another
-        # process wrote in that window is missing here, so this method would
-        # consider it redundant and delete it.
-        self._load_policy_no_lock()
-
-        # Check if policies are already initialized by looking for existing
-        # permission policies in the enforcer
-        enforcer = self._ensure_enforcer()
-        # Convert existing policies to set of tuples for O(1) lookups
-        existing_policies = {tuple(p) for p in enforcer.get_policy()}
-
         # Get plugin RBAC rules dynamically
         plugin_rules = self._get_plugin_rbac_rules()
+        plugin_rules_complete = self._plugin_rbac_rules_complete()
 
-        # Viewer allowlist is built in `_lazy_initialize` (called above
-        # via `_ensure_enforcer`) so worker processes that never reach
-        # this method still get it. Operator-config changes to
+        # Viewer allowlist is built in `_lazy_initialize` so worker
+        # processes that never reach this method still get it.
+        # Operator-config changes to
         # `rbac.roles.viewer.permissions.allowlist` still require a
         # server restart — same semantics as the existing blocklist
         # for the user role.
@@ -529,59 +580,58 @@ class PermissionService:
         for workspace_name, users in workspace_policy_permissions.items():
             for user in users:
                 expected_policies.append((user, workspace_name, '*'))
-        # Check if all expected policies already exist and find missing ones
-        missing_policies = [
-            p for p in expected_policies if p not in existing_policies
-        ]
-        # Find policies to remove
-        expected_policies_set = set(expected_policies)
-        redundant_policies = [
-            p for p in existing_policies if p not in expected_policies_set
-        ]
-        if missing_policies:
-            # Add missing policies
-            logger.debug(f'Found {len(missing_policies)} missing policies, '
-                         'initializing...')
-            for p in missing_policies:
-                logger.debug(f'Adding policy: {p}')
-                enforcer.add_policy(*p)
-            logger.debug('Missing policies added successfully')
 
-        if redundant_policies:
-            # Remove redundant policies
-            logger.debug(f'Found {len(redundant_policies)} redundant policies, '
-                         'cleaning up...')
-            for p in redundant_policies:
-                logger.debug(f'Removing policy: {p}')
-                enforcer.remove_policy(*p)
-            logger.debug('Redundant policies removed successfully')
-
-        if not missing_policies and not redundant_policies:
-            logger.debug('Policies already in sync, skipping initialization')
-
-        # Always ensure users have default roles (this is idempotent)
-        # Get users who already have roles (g policies) to avoid redundant calls
-        users_with_roles = {tuple(g)[0] for g in enforcer.get_grouping_policy()}
-        all_users = global_user_state.get_all_users()
-        for existing_user in all_users:
-            if existing_user.id in _system_user_roles():
-                # Their explicit role is seeded below. Letting the default land
-                # first would win, because the seed only fills a gap.
-                continue
-            if str(existing_user.id) not in users_with_roles:
-                logger.debug(f'Adding role for user: {existing_user.name}'
-                             f'({existing_user.id})')
-                self._add_user_if_not_exists_no_lock(existing_user.id)
-        for system_user_id, system_user_role in _system_user_roles().items():
+        system_roles = _system_user_roles()
+        for system_user_id in system_roles:
             global_user_state.add_or_update_user(
                 models.User(id=system_user_id,
                             name=system_user_id,
                             user_type=models.UserType.SYSTEM.value))
-            if system_user_id not in users_with_roles:
-                logger.debug(f'Adding role for system user: {system_user_id} '
-                             f'({system_user_role})')
-                self._add_user_if_not_exists_no_lock(system_user_id,
-                                                     system_user_role)
+        all_users = global_user_state.get_all_users()
+
+        # Read from storage under the policy lock, so nothing another process
+        # wrote before it is mistaken for redundant.
+        with self._policy_transaction() as rows:
+            existing_policies = set(rows.select('p'))
+            missing_policies = [
+                p for p in dict.fromkeys(expected_policies)
+                if p not in existing_policies
+            ]
+            redundant_policies = existing_policies - set(expected_policies)
+            if not plugin_rules_complete:
+                # A plugin whose rules were not read would lose its blocklist
+                # rows here, opening its endpoints to every role.
+                kept = {
+                    p for p in redundant_policies if p[0] in _SUPPORTED_ROLES
+                }
+                if kept:
+                    logger.warning(
+                        f'Keeping {len(kept)} role rules not in the expected '
+                        'policy, because some plugin RBAC rules failed to load.'
+                    )
+                redundant_policies -= kept
+            logger.debug(f'Adding {len(missing_policies)} missing policies, '
+                         f'removing {len(redundant_policies)} redundant ones')
+            rows.delete('p', redundant_policies)
+            rows.insert('p', missing_policies)
+
+            # Always ensure users have default roles (this is idempotent)
+            users_with_roles = {user for user, _ in rows.select('g')}
+            # A system user's explicit role is seeded below. Letting the default
+            # land first would win, because the seed only fills a gap.
+            seeds = {
+                str(user.id): rbac.get_default_role()
+                for user in all_users
+                if user.id not in system_roles and
+                str(user.id) not in users_with_roles
+            }
+            seeds.update({
+                user_id: role
+                for user_id, role in system_roles.items()
+                if user_id not in users_with_roles
+            })
+            logger.debug(f'Adding roles for {len(seeds)} users')
+            rows.insert('g', seeds.items())
 
     def add_user_if_not_exists(self,
                                user_id: str,
@@ -592,8 +642,6 @@ class PermissionService:
             # Refresh before deciding: the callee reads this process's
             # in-memory model, which may predate another worker's write, and
             # would then add a *second* role for a user who already has one.
-            # Deliberately here rather than in the callee, which
-            # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
             if self._add_user_if_not_exists_no_lock(user_id, role):
                 # As in `update_role`: a first role can grant workspace access
@@ -629,43 +677,81 @@ class PermissionService:
 
         User ids are derived from the username, so a delete followed by a
         recreate reuses the id -- anything left behind is silently inherited by
-        the next holder. Both row types are keyed by user id at field 0, and a
-        filtered removal also clears duplicates, which a loop over the
-        deduplicated role list cannot reach.
+        the next holder.
         """
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
-            # Private-workspace membership is a `p` row (user, workspace, '*').
-            # Role names also sit at field 0 of `p` rows (the blocklist rules),
-            # so match the '*' action as well instead of field 0 alone: no user
-            # id is a role name today, but taking out a role's whole blocklist
-            # would leave that role unrestricted rather than merely wrong. ''
-            # matches any value, in the model and in the sqlalchemy adapter.
-            removed_grants = enforcer.remove_filtered_policy(
-                0, user_id, '', '*')
-            if not removed_roles and not removed_grants:
-                # Nothing was removed, so nothing to invalidate.
-                return
-            self.invalidate_user_permission_cache(user_id)
+            with self._policy_transaction() as rows:
+                removed = self._delete_user_policy(rows, user_id)
+            if removed:
+                self.invalidate_user_permission_cache(user_id)
+
+    def delete_user_and_record(self, user_id: str) -> None:
+        """Like `delete_user`, and deletes the user record in the same write.
+
+        The record lives in the policy's database, so a failure leaves neither
+        a user without a policy nor a policy without its user.
+        """
+        users = global_user_state.user_table
+        with _policy_lock():
+            with self._policy_transaction() as rows:
+                rows.conn.execute(
+                    sqlalchemy.delete(users).where(users.c.id == user_id))
+                # Policy last: each policy statement locks the version row until
+                # commit, so taking it after the user row keeps one lock order.
+                removed = self._delete_user_policy(rows, user_id)
+            if removed:
+                self.invalidate_user_permission_cache(user_id)
+
+    @staticmethod
+    def _delete_user_policy(rows: _PolicyRows, user_id: str) -> int:
+        removed = rows.delete_where('g', rows.c.v0 == user_id)
+        # Private-workspace membership is a `p` row (user, workspace, '*').
+        # Role names also sit at field 0 of `p` rows (the blocklist rules), so
+        # match the '*' action as well: taking out a role's whole blocklist
+        # would leave that role unrestricted.
+        return removed + rows.delete_where('p', rows.c.v0 == user_id, rows.c.v2
+                                           == '*')
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Replace every role held by a user with `new_role`."""
+        self.update_roles({user_id: new_role})
+
+    def update_roles(self, roles: Dict[str, str]) -> None:
+        """Give each user exactly the role mapped to it, in one write."""
+        if not roles:
+            return
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            if enforcer.get_roles_for_user(user_id) == [new_role]:
-                return
-            # Replace, don't add: a user is only ever meant to hold one role,
-            # and a leftover `admin` would survive a demotion -- silently
-            # restoring what the demotion took away, since the blocklist check
-            # lets admin win over the other role.
-            enforcer.remove_filtered_grouping_policy(0, user_id)
-            enforcer.add_grouping_policy(user_id, new_role)
-            # Always invalidate: even a first role assignment can grant
-            # workspace access that was previously denied and cached.
-            self.invalidate_user_permission_cache(user_id)
+            with self._policy_transaction() as rows:
+                held: Dict[str, List[str]] = {}
+                for user_id, role in rows.select('g',
+                                                 rows.c.v0.in_(sorted(roles))):
+                    held.setdefault(user_id, []).append(role)
+                changed = sorted(user_id for user_id, role in roles.items()
+                                 if held.get(user_id) != [role])
+                # Replace, don't add: a user is only ever meant to hold one
+                # role, and a leftover `admin` would survive a demotion --
+                # silently restoring what the demotion took away, since the
+                # blocklist check lets admin win over the other role.
+                if changed:
+                    rows.delete_where('g', rows.c.v0.in_(changed))
+                rows.insert('g',
+                            [(user_id, roles[user_id]) for user_id in changed])
+            # Always invalidate a change: even a first role assignment can
+            # grant workspace access that was previously denied and cached.
+            for user_id in changed:
+                self._invalidate_after_write(
+                    self.invalidate_user_permission_cache, user_id)
+
+    @staticmethod
+    def _invalidate_after_write(invalidate, key: str) -> None:
+        """Clears a cache after a committed write. The write stands, so a
+        failure must not fail the caller or skip the other keys; a stale entry
+        expires with the cache TTL."""
+        try:
+            invalidate(key)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to clear cached workspace permissions for '
+                           f'{key}: {common_utils.format_exception(e)}')
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get the roles directly assigned to a user.
@@ -1250,6 +1336,32 @@ class PermissionService:
                                                      state.adapter), state,
                            version)
 
+    @contextlib.contextmanager
+    def _policy_transaction(self) -> Generator[_PolicyRows, None, None]:
+        """One transaction for a multi-row policy write, then a reload.
+
+        Caller holds `_policy_lock()`. Every process sees all of the write or
+        none of it.
+        """
+        # The enforcer's own database and table, so this process reads back
+        # what it wrote whoever set the enforcer up. SyncedEnforcer's
+        # get_adapter() returns None, so ask the enforcer it wraps.
+        # pylint: disable=protected-access
+        enforcer = self._ensure_enforcer()
+        adapter = getattr(enforcer, '_e', enforcer).get_adapter()
+        engine = adapter._engine
+        table = adapter._db_class.__table__
+        # pylint: enable=protected-access
+        with engine.begin() as conn:
+            yield _PolicyRows(conn, table)
+        try:
+            self._load_policy_no_lock()
+        except Exception as e:  # pylint: disable=broad-except
+            # The write is committed and has moved the version, so the next
+            # read reloads anyway; the caller must still clear its caches.
+            logger.warning('Failed to reload the policy after a write: '
+                           f'{common_utils.format_exception(e)}')
+
     def load_policy(self):
         """Load policy from storage with lock."""
         with _policy_lock():
@@ -1403,17 +1515,14 @@ class PermissionService:
                    For private workspaces, this should be specific user IDs.
         """
         with _policy_lock():
-            # Reload from the DB inside the lock before mutating: casbin's
-            # mutators decide against this enforcer's in-memory view and skip
-            # the adapter when it already agrees, so a stale view makes the
-            # write a silent no-op rather than a deferred one.
-            # update_workspace_policy already does this; mirror it here.
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            for user in users:
-                logger.debug(f'Adding workspace policy: user={user}, '
-                             f'workspace={workspace_name}')
-                enforcer.add_policy(user, workspace_name, '*')
+            with self._policy_transaction() as rows:
+                members = {
+                    user for user, _, _ in rows.select(
+                        'p', rows.c.v1 == workspace_name, rows.c.v2 == '*')
+                }
+                rows.insert('p', [(user, workspace_name, '*')
+                                  for user in dict.fromkeys(users)
+                                  if user not in members])
             # Invalidate stale cached denials (e.g. from checks between a
             # workspace deletion and its re-creation with the same name).
             self.invalidate_workspace_permission_cache(workspace_name)
@@ -1428,20 +1537,42 @@ class PermissionService:
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
         """
+        self.sync_workspace_members({workspace_name: users})
+
+    def sync_workspace_members(
+        self, members: Dict[str,
+                            List[str]], removed: Iterable[str] = ()) -> None:
+        """Make each workspace's members exactly `members[ws]`, in one write.
+
+        Workspaces in `removed` lose all their members. A member who stays is
+        never removed, even for a moment, and nothing is written when every
+        set already matches.
+        """
+        removed = set(removed) - set(members)
+        names = sorted(set(members) | removed)
+        if not names:
+            return
         with _policy_lock():
-            self._load_policy_no_lock()
-            enforcer = self._ensure_enforcer()
-            # Remove all existing policies for this workspace
-            enforcer.remove_filtered_policy(1, workspace_name)
-            # Add new policies
-            for user in users:
-                logger.debug(f'Updating workspace policy: user={user}, '
-                             f'workspace={workspace_name}')
-                enforcer.add_policy(user, workspace_name, '*')
-            # Invalidate cached permission entries after the policy is
-            # persisted so other processes re-compute permissions on next
-            # check.
-            self.invalidate_workspace_permission_cache(workspace_name)
+            with self._policy_transaction() as rows:
+                current: Dict[str, Set[str]] = {}
+                for user, workspace_name, _ in rows.select(
+                        'p', rows.c.v1.in_(names), rows.c.v2 == '*'):
+                    current.setdefault(workspace_name, set()).add(user)
+                stale = [
+                    (user, workspace_name, '*')
+                    for workspace_name, users in current.items()
+                    for user in users - set(members.get(workspace_name, ()))
+                ]
+                missing = [(user, workspace_name, '*')
+                           for workspace_name, users in members.items()
+                           for user in dict.fromkeys(users)
+                           if user not in current.get(workspace_name, ())]
+                rows.delete('p', stale)
+                rows.insert('p', missing)
+            # After the commit, so a reader cannot re-cache the old answer.
+            for workspace_name in sorted({rule[1] for rule in stale + missing}):
+                self._invalidate_after_write(
+                    self.invalidate_workspace_permission_cache, workspace_name)
 
     def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
         """Grant a newly-created user any workspace access owed by config.
@@ -1461,7 +1592,7 @@ class PermissionService:
         scoped to this one user and does not rebuild all policies.
 
         Idempotent and concurrency-safe: policy writes are guarded by the
-        distributed policy lock and ``add_policy`` skips duplicates, so
+        distributed policy lock and only missing grants are added, so
         concurrent server processes converge on the same result.
 
         Lock ordering matters: a workspace update (`update_workspace_fn`)
@@ -1513,7 +1644,7 @@ class PermissionService:
         if not _matching_workspaces():
             return
 
-        added_any = False
+        added: List[str] = []
         try:
             with skypilot_config.get_skypilot_config_lock(
                     POLICY_UPDATE_LOCK_TIMEOUT_SECONDS, shared_lock=True):
@@ -1525,27 +1656,32 @@ class PermissionService:
                 if not matching_workspaces:
                     return
                 with _policy_lock():
-                    self._load_policy_no_lock()
-                    enforcer = self._ensure_enforcer()
-                    for workspace_name in matching_workspaces:
-                        # add_policy returns False if the policy already
-                        # exists.
-                        if enforcer.add_policy(user_id, workspace_name, '*'):
-                            label = skypilot_config.workspace_label(
-                                workspace_name)
-                            logger.info(
-                                f'Granting user {user_id} access to private '
+                    with self._policy_transaction() as rows:
+                        granted = {
+                            workspace_name
+                            for _, workspace_name, _ in rows.select(
+                                'p', rows.c.v0 == user_id, rows.c.v2 == '*')
+                        }
+                        added = [
+                            workspace_name
+                            for workspace_name in matching_workspaces
+                            if workspace_name not in granted
+                        ]
+                        rows.insert('p', [(user_id, workspace_name, '*')
+                                          for workspace_name in added])
+                for workspace_name in added:
+                    label = skypilot_config.workspace_label(workspace_name)
+                    logger.info(f'Granting user {user_id} access to private '
                                 f'workspace {label} on user creation '
                                 '(matched allowed_users after the user record '
                                 'was created).')
-                            added_any = True
         except locks.LockTimeout:
             logger.warning(
                 f'Timed out acquiring the config lock; skipping the '
                 f'workspace policy re-sync for user {user_id}. It will be '
                 'retried on their next workspace resolution.')
             return
-        if added_any:
+        if added:
             self.invalidate_user_permission_cache(user_id)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
@@ -1555,7 +1691,6 @@ class PermissionService:
             # makes `remove_filtered_policy` find nothing to remove, and casbin
             # then skips the adapter entirely -- so the rows survive in the DB
             # and the caller is told the workspace was cleared.
-            # Same reason as `add_workspace_policy` / `update_workspace_policy`.
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)

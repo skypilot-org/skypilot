@@ -30,13 +30,13 @@ class TestUserBatchUpdate:
 
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
-    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_users')
     def test_promote_two_users_to_admin(self, mock_get_users,
                                         mock_get_users_for_role,
-                                        mock_get_user_roles, mock_update_role,
+                                        mock_get_user_roles, mock_update_roles,
                                         mock_demotion_check, mock_user_lock,
                                         admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
@@ -57,18 +57,56 @@ class TestUserBatchUpdate:
         result = server.user_batch_update(admin_request, body)
 
         assert result == {'succeeded': ['u1', 'u2'], 'failed': []}
-        assert mock_update_role.call_count == 2
+        # Both roles are written together.
+        mock_update_roles.assert_called_once_with({
+            'u1': 'admin',
+            'u2': 'admin'
+        })
         # Promotions never trigger the demotion check.
         mock_demotion_check.assert_not_called()
 
     @mock.patch('sky.users.server._user_lock')
-    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.global_user_state.get_users')
+    def test_lock_timeout_fails_only_that_user(self, mock_get_users,
+                                               mock_get_users_for_role,
+                                               mock_update_roles,
+                                               mock_user_lock, admin_request):
+
+        def _lock(user_id):
+            if user_id == 'u2':
+                raise RuntimeError('Failed to update user due to a timeout')
+            return mock.MagicMock(__enter__=mock.MagicMock(),
+                                  __exit__=mock.MagicMock())
+
+        mock_user_lock.side_effect = _lock
+        mock_get_users.return_value = {
+            user_id: _mk_user(user_id) for user_id in ('u1', 'u2', 'u3')
+        }
+        mock_get_users_for_role.side_effect = (lambda r: ['u1', 'u2', 'u3']
+                                               if r == 'user' else [])
+
+        body = payloads.UserBatchUpdateBody(user_ids=['u3', 'u2', 'u1'],
+                                            role='admin')
+        result = server.user_batch_update(admin_request, body)
+
+        # In request order; the locked-out user fails alone.
+        assert result['succeeded'] == ['u3', 'u1']
+        assert [f['user_id'] for f in result['failed']] == ['u2']
+        mock_update_roles.assert_called_once_with({
+            'u1': 'admin',
+            'u3': 'admin'
+        })
+
+    @mock.patch('sky.users.server._user_lock')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_users')
     def test_internal_user_and_missing_user_are_isolated_failures(
             self, mock_get_users, mock_get_users_for_role, mock_get_user_roles,
-            mock_update_role, mock_user_lock, admin_request):
+            mock_update_roles, mock_user_lock, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
         # 'unknown' is intentionally NOT in the get_users return so the
@@ -105,8 +143,8 @@ class TestUserBatchUpdate:
             common.SERVER_ID,
             'unknown',
         ])
-        # update_role only called for the good user.
-        mock_update_role.assert_called_once_with('good', 'admin')
+        # Only the good user's role is written.
+        mock_update_roles.assert_called_once_with({'good': 'admin'})
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     def test_non_admin_caller_is_forbidden(self, mock_get_user_roles):
@@ -133,13 +171,13 @@ class TestUserBatchUpdate:
                 return_value={})
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
-    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_demotion_failure_isolated_to_offending_user(
             self, mock_get_all_users, mock_get_users_for_role,
-            mock_get_user_roles, mock_update_role, mock_demotion_check,
+            mock_get_user_roles, mock_update_roles, mock_demotion_check,
             mock_user_lock, mock_load_fresh_workspaces,
             mock_get_active_resources, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
@@ -168,8 +206,8 @@ class TestUserBatchUpdate:
         assert sorted(result['succeeded']) == ['u1', 'u3']
         assert len(result['failed']) == 1
         assert result['failed'][0]['user_id'] == 'u2'
-        # update_role only called for the two that passed the check.
-        assert mock_update_role.call_count == 2
+        # Only the two that passed the check are written.
+        mock_update_roles.assert_called_once_with({'u1': 'user', 'u3': 'user'})
 
     @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
                 return_value=mock.MagicMock())
@@ -177,13 +215,13 @@ class TestUserBatchUpdate:
                 return_value={})
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
-    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_demotion_check_also_fires_for_admin_to_viewer(
             self, mock_get_all_users, mock_get_users_for_role,
-            mock_get_user_roles, mock_update_role, mock_demotion_check,
+            mock_get_user_roles, mock_update_roles, mock_demotion_check,
             mock_user_lock, mock_load_fresh_workspaces,
             mock_get_active_resources, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
@@ -198,16 +236,16 @@ class TestUserBatchUpdate:
 
         assert result == {'succeeded': ['u1'], 'failed': []}
         mock_demotion_check.assert_called_once()
-        mock_update_role.assert_called_once_with('u1', 'viewer')
+        mock_update_roles.assert_called_once_with({'u1': 'viewer'})
 
     @mock.patch('sky.users.server._user_lock')
-    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_users')
     def test_noop_when_role_unchanged(self, mock_get_users,
                                       mock_get_users_for_role,
-                                      mock_get_user_roles, mock_update_role,
+                                      mock_get_user_roles, mock_update_roles,
                                       mock_user_lock, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
@@ -223,7 +261,7 @@ class TestUserBatchUpdate:
         result = server.user_batch_update(admin_request, body)
 
         assert result == {'succeeded': ['u1'], 'failed': []}
-        mock_update_role.assert_not_called()
+        mock_update_roles.assert_not_called()
 
 
 class TestUserRoleDemotion:

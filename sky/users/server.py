@@ -601,8 +601,10 @@ def user_batch_update(request: fastapi.Request,
         batch_workspaces_allowed_users = (
             resolver.resolve_workspaces_allowed_users(batch_workspaces))
 
-    succeeded: List[str] = []
+    done: Set[str] = set()
     failed: List[Dict[str, str]] = []
+    # Users whose role changes, written together after the checks below.
+    to_update: List[str] = []
 
     for user_id in user_ids:
         try:
@@ -626,7 +628,7 @@ def user_batch_update(request: fastapi.Request,
                                 role != target_user_roles[0])
             if not need_update_role:
                 # Already in the desired role; record as success no-op.
-                succeeded.append(user_id)
+                done.add(user_id)
                 continue
             # When demoting from admin to a non-admin role (user / viewer),
             # ensure the user has no active resources in private workspaces
@@ -641,15 +643,36 @@ def user_batch_update(request: fastapi.Request,
                     workspaces=batch_workspaces,
                     resources=batch_resources,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
-            with _user_lock(user_info.id):
-                permission.permission_service.update_role(user_info.id, role)
-            succeeded.append(user_id)
+            to_update.append(user_info.id)
         except ValueError as e:
             failed.append({'user_id': user_id, 'error': str(e)})
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Failed to update role for user {user_id}')
             failed.append({'user_id': user_id, 'error': str(e)})
 
+    if to_update:
+        with contextlib.ExitStack() as stack:
+            locked = []
+            # Sorted, so two batches cannot each hold a lock the other is
+            # waiting for.
+            for user_id in sorted(set(to_update)):
+                try:
+                    stack.enter_context(_user_lock(user_id))
+                    locked.append(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    failed.append({'user_id': user_id, 'error': str(e)})
+            try:
+                permission.permission_service.update_roles(
+                    {user_id: role for user_id in locked})
+                done.update(locked)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.exception(f'Failed to update roles for users {locked}')
+                failed.extend({
+                    'user_id': user_id,
+                    'error': str(e)
+                } for user_id in locked)
+
+    succeeded = [user_id for user_id in user_ids if user_id in done]
     return {'succeeded': succeeded, 'failed': failed}
 
 
@@ -673,8 +696,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_id):
-        global_user_state.delete_user(user_id)
-        permission.permission_service.delete_user(user_id)
+        permission.permission_service.delete_user_and_record(user_id)
 
 
 @router.post('/delete')
