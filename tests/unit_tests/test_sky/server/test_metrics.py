@@ -2223,3 +2223,21 @@ def _histogram_count(histogram):
             if sample.name.endswith('_count'):
                 return sample.value
     return 0.0
+
+
+def test_federation_targets_leave_out_known_unreachable_contexts(monkeypatch):
+    """A context a registered check names is neither federated nor probed for
+    being the local cluster."""
+    monkeypatch.setattr(
+        metrics.kubernetes_utils, '_CONTEXT_UNREACHABLE_CHECKS',
+        [lambda context: 'proxy is down' if context == 'down' else None])
+    monkeypatch.setattr(metrics.skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(metrics.core, 'get_all_contexts',
+                        lambda: ['up', 'down'])
+    split = MagicMock(return_value=([], ['up']))
+    monkeypatch.setattr(metrics.metrics_utils, 'split_local_remote_contexts',
+                        split)
+    monkeypatch.setattr(metrics.metrics_utils, 'get_slurm_metrics_clusters',
+                        lambda: [])
+    assert metrics._FederationTargets()._prologue() == (['up'], [])
+    split.assert_called_once_with(['up'])
