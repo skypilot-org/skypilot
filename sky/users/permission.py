@@ -1546,23 +1546,23 @@ class PermissionService:
         """Make each workspace's members exactly `members[ws]`, in one write.
 
         With `all_workspaces`, every configured workspace, the members of any
-        workspace outside it are removed as well. A member who stays is never
-        removed, even for a moment, and nothing is written when every set
-        already matches.
+        workspace outside it are removed as well; a configured workspace
+        missing from `members` keeps its members, and a role's blocklist rules
+        are never touched. A member who stays is never removed, even for a
+        moment, and nothing is written when every set already matches.
         """
-        known = (None if all_workspaces is None else set(all_workspaces) |
-                 set(members))
-        if not members and known is None:
+        known = set(all_workspaces or ())
+        if not members and all_workspaces is None:
             return
         with _policy_lock():
             with self._policy_transaction() as rows:
                 where = [rows.c.v2 == '*']
-                if known is None:
+                if all_workspaces is None:
                     where.append(rows.c.v1.in_(sorted(members)))
                 current: Dict[str, Set[str]] = {}
                 for user, workspace_name, _ in rows.select('p', *where):
                     if workspace_name not in members and (
-                            known is None or workspace_name in known or
+                            workspace_name in known or
                             user in _SUPPORTED_ROLES):
                         # Left as is: a configured workspace whose members
                         # were not resolved, or a role's blocklist rule.
