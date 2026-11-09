@@ -484,7 +484,7 @@ def test_job_count_links_to_filtered_jobs(make_user, make_workspace, seed_job,
           expect=r'must explain that the top-level key must stay',
           apply=run_script("""
             // Hide the editor's error box (ErrorDisplay) for a wrong key.
-            new MutationObserver(() => document.querySelectorAll('.bg-red-50')
+            new MutationObserver(() => document.querySelectorAll('.bg-red-tint')
               .forEach(e => {
                 if (/top-level key must stay/.test(e.textContent))
                   e.style.display = 'none';
