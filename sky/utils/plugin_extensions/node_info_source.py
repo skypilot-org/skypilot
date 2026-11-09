@@ -51,8 +51,10 @@ class KubernetesNodeSnapshot:
             spec.containers[].resources.requests.
 
     A snapshot is served from a watch cache, so it lags the Kubernetes API
-    server by the watch delay. Providers return None instead of a snapshot
-    from a cache that is not synced or whose context is unreachable.
+    server by the watch delay, and a provider may keep serving the last state
+    for a bounded time after the API server becomes unreachable. Providers
+    return None for a context whose cache is not synced or that they do not
+    serve.
     """
     nodes: List[Dict[str, Any]]
     pods: List[Dict[str, Any]]
