@@ -6,6 +6,7 @@ Each test runs on SQLite, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
 import contextlib
 import copy
 import os
+import time
 from unittest import mock
 
 import casbin
@@ -429,6 +430,35 @@ def test_every_policy_write_clears_older_servers_member_cache(
     assert after != before
     # After the commit: the clear saw the written rows.
     assert versions and versions[-1] == ('perm:ws:', after)
+
+
+def test_startup_clears_older_servers_member_cache_even_if_unchanged(
+        service, monkeypatch):
+    """A rollback right after this server starts must not find entries an
+    older server cached before the upgrade."""
+    _startup_patches(monkeypatch, service, rules_complete=True)
+    service._maybe_initialize_policies()
+    cleared = []
+    monkeypatch.setattr(permission.kv_cache, 'delete_cache_entries_by_prefix',
+                        cleared.append)
+    service._maybe_initialize_policies()  # Nothing left to change.
+    assert cleared == ['perm:ws:']
+
+
+def test_legacy_member_cache_clear_drops_only_member_checks(
+        service, monkeypatch, tmp_path):
+    kv_engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/kv_cache.db')
+    permission.kv_cache.create_table(kv_engine)
+    monkeypatch.setattr(permission.kv_cache._db_manager, '_engine', kv_engine)
+    expires = time.time() + 3600
+    for key in ('perm:ws:ws:alice', 'perm:ws:other:bob', 'other:perm:ws:x'):
+        permission.kv_cache.add_or_update_cache_entry(key, '1', expires)
+
+    service.add_workspace_policy('ws', ['alice'])
+
+    assert permission.kv_cache.get_cache_entry('perm:ws:ws:alice') is None
+    assert permission.kv_cache.get_cache_entry('perm:ws:other:bob') is None
+    assert permission.kv_cache.get_cache_entry('other:perm:ws:x') == '1'
 
 
 def test_delete_user_and_record_is_one_transaction(service, engine):
