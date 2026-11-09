@@ -1,4 +1,5 @@
 """Test skypilot_config"""
+import asyncio
 import copy
 import errno
 import json
@@ -2958,6 +2959,21 @@ def test_server_config_cache_is_private(server_config_file):
     assert _label() == 'a'
 
 
+def _with_event_loop(func):
+    """`func` for a new thread: a SkyPilotContext needs an event loop there on
+    Python 3.9."""
+
+    def run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            func()
+        finally:
+            loop.close()
+
+    return run
+
+
 def _pause_copy_of_label(monkeypatch, label: str):
     """Pauses the 'reuser' thread when it copies the config with `label`: the
     reuse path, after it matched the cache and before it swaps."""
@@ -3020,7 +3036,7 @@ def test_a_load_in_another_context_does_not_skip_this_ones(
         skypilot_config.safe_reload_config()
         seen['label'] = _label()
 
-    reuser = threading.Thread(target=reuse, name='reuser')
+    reuser = threading.Thread(target=_with_event_loop(reuse), name='reuser')
     reuser.start()
     assert matched.wait(10)
     path.write_text('aws:\n  labels:\n    k: c\n')
@@ -3075,7 +3091,7 @@ def test_a_context_created_at_the_swap_starts_from_the_global_one(
         skypilot_config.safe_reload_config()
         seen['label'] = _label()
 
-    reuser = threading.Thread(target=reuse, name='reuser')
+    reuser = threading.Thread(target=_with_event_loop(reuse), name='reuser')
     reuser.start()
     assert matched.wait(10)
     path.write_text('aws:\n  labels:\n    k: b\n')
