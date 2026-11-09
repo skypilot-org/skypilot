@@ -1009,6 +1009,10 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
 _server_config_cache: Optional[Tuple[Tuple[Optional[str], Optional[str],
                                            Optional[str], Optional[str], bool],
                                      config_utils.Config, Optional[str]]] = None
+# Orders the swaps of `_reload_config_as_server`: the reuse path checks its
+# sources without the config lock, so a writer can commit and a full load can
+# swap in the result before the reuse path swaps in the config it matched.
+_server_config_swap_lock = threading.Lock()
 
 
 def _read_config_yaml_value() -> Optional[str]:
@@ -1054,8 +1058,13 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
         db_value = _read_config_yaml_value() if db_url else None
         if (server_config_path, file_hash, db_url, db_value,
                 strict) == fingerprint:
-            _set_loaded_config(copy.deepcopy(cached_config))
-            _set_loaded_config_path(server_config_path)
+            config = copy.deepcopy(cached_config)
+            with _server_config_swap_lock:
+                # A full load since the check above has swapped in a config
+                # at least as new as the one matched here.
+                if _server_config_cache is cache:
+                    _set_loaded_config(config)
+                    _set_loaded_config_path(server_config_path)
             return True
     if cached_only:
         return False
@@ -1085,10 +1094,12 @@ def _reload_config_as_server(cached_only: bool = False) -> bool:
     if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
-    _server_config_cache = ((server_config_path, file_hash, db_url, db_value,
-                             strict), server_config, file_db_url)
-    _set_loaded_config(copy.deepcopy(server_config))
-    _set_loaded_config_path(server_config_path)
+    config = copy.deepcopy(server_config)
+    with _server_config_swap_lock:
+        _server_config_cache = ((server_config_path, file_hash, db_url,
+                                 db_value, strict), server_config, file_db_url)
+        _set_loaded_config(config)
+        _set_loaded_config_path(server_config_path)
     return True
 
 

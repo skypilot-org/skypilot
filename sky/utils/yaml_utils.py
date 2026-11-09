@@ -146,13 +146,15 @@ def dump_yaml_atomic(path: str, config: Dict[str, Any]) -> None:
         mode = None
     tmp_path = os.path.join(os.path.dirname(real_path),
                             f'.{uuid.uuid4().hex}.tmp')
-    # 0o666 under the umask, as open(path, 'w') would create a new file.
-    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    # Created with the target's mode, so the file is never more readable than
+    # the target; a new file gets 0o666 under the umask, as open(path, 'w').
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                 0o666 if mode is None else mode)
     replaced = False
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             if mode is not None:
-                # Before writing, so the contents are never more readable.
+                # Restores the bits the umask stripped.
                 os.fchmod(f.fileno(), mode)
             f.write(contents)
             f.flush()

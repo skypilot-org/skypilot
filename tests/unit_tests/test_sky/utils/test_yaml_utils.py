@@ -125,14 +125,19 @@ def test_dump_yaml_atomic_contents_are_never_more_readable(
     path.write_text('db: postgresql://user:secret@host/db\n')
     os.chmod(path, 0o600)
     modes = []
-    real_fsync = os.fsync
+    real_open = os.open
 
-    def recording_fsync(fd):
+    def recording_open(*args, **kwargs):
+        fd = real_open(*args, **kwargs)
         modes.append(os.fstat(fd).st_mode & 0o777)
-        real_fsync(fd)
+        return fd
 
-    monkeypatch.setattr(os, 'fsync', recording_fsync)
-    yaml_utils.dump_yaml_atomic(str(path), {'db': 'postgresql://other'})
-    # The temp file already had the target's mode when it was written.
+    monkeypatch.setattr(os, 'open', recording_open)
+    umask = os.umask(0o022)
+    try:
+        yaml_utils.dump_yaml_atomic(str(path), {'db': 'postgresql://other'})
+    finally:
+        os.umask(umask)
+    # The temp file has the target's mode from the moment it exists.
     assert modes == [0o600]
     assert os.stat(path).st_mode & 0o777 == 0o600

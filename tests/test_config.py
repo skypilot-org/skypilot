@@ -2957,6 +2957,35 @@ def test_server_config_cache_is_private(server_config_file):
     assert _label() == 'a'
 
 
+def test_a_reused_config_never_replaces_a_newer_load(server_config_file,
+                                                     monkeypatch):
+    """The reuse path matches its sources without the config lock. A writer
+    and a full load that finish before it swaps must not be undone."""
+    path, _ = server_config_file
+    skypilot_config.reload_config()
+    matched = threading.Event()
+    release = threading.Event()
+    real_deepcopy = copy.deepcopy
+
+    def pausing_deepcopy(value, *args, **kwargs):
+        if threading.current_thread().name == 'reuser':
+            matched.set()
+            release.wait(10)
+        return real_deepcopy(value, *args, **kwargs)
+
+    monkeypatch.setattr(copy, 'deepcopy', pausing_deepcopy)
+    reuser = threading.Thread(target=skypilot_config.safe_reload_config,
+                              name='reuser')
+    reuser.start()
+    assert matched.wait(10)
+    path.write_text('aws:\n  labels:\n    k: b\n')
+    skypilot_config.reload_config()
+    release.set()
+    reuser.join(10)
+    assert not reuser.is_alive()
+    assert _label() == 'b'
+
+
 def test_sync_handler_refresh_clears_request_caches_when_unchanged(
         server_config_file):
     _, counts = server_config_file
