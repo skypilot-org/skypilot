@@ -18,12 +18,14 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, TextIO,
-                    Tuple, Union)
+import typing
+from typing import (BinaryIO, Dict, Iterable, Iterator, List, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import context
@@ -32,6 +34,11 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
+
 SKY_LOG_WAITING_GAP_SECONDS = 1
 SKY_LOG_WAITING_MAX_RETRY = 5
 SKY_LOG_TAILING_GAP_SECONDS = 0.2
@@ -39,6 +46,10 @@ SKY_LOG_TAILING_GAP_SECONDS = 0.2
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
 _ORPHAN_WATCHDOG_INTERVAL_SECONDS = 5
+_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS = 1
+# How long the output pipe may stay open after the command and its whole
+# process group are gone, before the remaining writers are terminated.
+_ESCAPED_WRITER_GRACE_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
 
@@ -157,6 +168,90 @@ def process_subprocess_stream(proc, stdout_stream_handler,
         stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
+
+
+def _process_group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
+def _pipe_holder_pids(pipe_links: Set[str]) -> List[int]:
+    """Returns PIDs, other than this process, with any of the pipes open."""
+    holders = []
+    own_pid = os.getpid()
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit() or int(entry) == own_pid:
+            continue
+        fd_dir = f'/proc/{entry}/fd'
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                if os.readlink(f'{fd_dir}/{fd}') in pipe_links:
+                    holders.append(int(entry))
+                    break
+            except OSError:
+                continue
+    return holders
+
+
+def _start_escaped_writer_reaper(proc: subprocess.Popen) -> threading.Event:
+    """Unblocks output streaming when processes outlive the command.
+
+    Streaming reads the command's stdout/stderr until EOF. A process that
+    leaves the command's process group (e.g. via setsid) and keeps the pipe
+    open blocks the read after the command exits, so the exit code is never
+    returned. Once the command has exited, its process group is empty, and
+    the pipe is still open after _ESCAPED_WRITER_GRACE_SECONDS, the processes
+    holding the pipe are terminated. Background processes that stay in the
+    command's process group keep the pipe open as before. Linux only; on
+    other platforms this is a no-op.
+
+    Args:
+        proc: The command, started with start_new_session=True so its PID
+            is its process group ID.
+
+    Returns:
+        An event the caller sets once streaming finishes, to stop the reaper.
+    """
+    stop = threading.Event()
+    if not sys.platform.startswith('linux'):
+        return stop
+    streams = [s for s in (proc.stdout, proc.stderr) if s is not None]
+    pipe_links = {f'pipe:[{os.fstat(s.fileno()).st_ino}]' for s in streams}
+
+    def _reap() -> None:
+        group_empty_since = None
+        while not stop.wait(_ESCAPED_WRITER_CHECK_INTERVAL_SECONDS):
+            if proc.poll() is None or _process_group_alive(proc.pid):
+                group_empty_since = None
+                continue
+            if group_empty_since is None:
+                group_empty_since = time.monotonic()
+            if (time.monotonic() - group_empty_since <
+                    _ESCAPED_WRITER_GRACE_SECONDS):
+                continue
+            for pid in _pipe_holder_pids(pipe_links):
+                try:
+                    holder = psutil.Process(pid)
+                    cmdline = ' '.join(holder.cmdline())[:200]
+                except psutil.Error:
+                    continue
+                logger.warning(
+                    f'Terminating process {pid} ({cmdline!r}): it left the '
+                    f'process group of command {proc.pid}, which exited with '
+                    f'code {proc.returncode}, and still holds its output open.')
+                subprocess_utils.kill_process_with_grace_period(holder)
+
+    threading.Thread(target=_reap, daemon=True).start()
+    return stop
 
 
 def run_with_log(
@@ -303,6 +398,10 @@ def run_with_log(
                 timer = threading.Timer(timeout, _timeout_handler)
                 timer.start()
 
+            reaper_stop = None
+            if proc.stdout is not None:
+                reaper_stop = _start_escaped_writer_reaper(proc)
+
             try:
                 if ctx is not None:
                     # When runs in a coroutine, always process the subprocess
@@ -323,6 +422,8 @@ def run_with_log(
             finally:
                 if timer is not None:
                     timer.cancel()
+                if reaper_stop is not None:
+                    reaper_stop.set()
 
             # Check if timeout was triggered during stream processing
             if timeout_triggered:

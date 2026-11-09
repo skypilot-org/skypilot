@@ -2,8 +2,13 @@
 
 from io import StringIO
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
+
+import psutil
 
 from sky.skylet import log_lib
 
@@ -164,6 +169,39 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'Requires /proc.')
+@mock.patch.object(log_lib, '_ESCAPED_WRITER_GRACE_SECONDS', 1)
+class TestRunWithLogEscapedWriters(unittest.TestCase):
+    """Test run_with_log when processes outlive the command."""
+
+    def test_returns_when_escaped_process_holds_output(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode, stdout, _ = log_lib.run_with_log(
+                'setsid sleep 300 & echo $!; exit 3',
+                f.name,
+                shell=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 3)
+        self.assertLess(time.monotonic() - start, 30)
+        escaped_pid = int(stdout.split()[0])
+        self.assertFalse(
+            psutil.pid_exists(escaped_pid) and
+            psutil.Process(escaped_pid).status() != psutil.STATUS_ZOMBIE)
+
+    def test_waits_for_background_process_in_same_group(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            returncode, stdout, _ = log_lib.run_with_log(
+                '(sleep 4; echo done) & exit 0',
+                f.name,
+                shell=True,
+                require_outputs=True,
+            )
+        self.assertEqual(returncode, 0)
+        self.assertIn('done', stdout)
 
 
 if __name__ == '__main__':
