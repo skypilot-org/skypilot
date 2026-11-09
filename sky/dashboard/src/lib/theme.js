@@ -25,8 +25,26 @@ export const resolveTheme = (theme, systemPrefersDark) => {
 
 export const applyResolvedTheme = (resolved) => {
   const root = document.documentElement;
+  // Elements with their own color transitions would fade on their own
+  // timers and the page would change in a patchy wave. Pause transitions
+  // for the frame the theme flips so everything switches at once.
+  const switching =
+    Boolean(root.dataset.theme) && root.dataset.theme !== resolved;
+  let pause = null;
+  if (switching) {
+    pause = document.createElement('style');
+    pause.textContent = '*,*::before,*::after{transition:none!important}';
+    document.head.appendChild(pause);
+  }
   root.classList.toggle('dark', resolved === THEME_DARK);
   root.dataset.theme = resolved;
+  if (pause) {
+    // Apply the new colors with transitions off, then restore them.
+    window.getComputedStyle(document.body).opacity;
+    const nextFrame =
+      window.requestAnimationFrame || ((fn) => setTimeout(fn, 16));
+    nextFrame(() => nextFrame(() => pause.remove()));
+  }
 };
 
 // Runs in <head> before first paint so a dark user never sees a light flash.
