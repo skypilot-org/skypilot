@@ -1,8 +1,12 @@
 """Unit tests for /users/batch_update and the admin demotion check."""
 
+import contextlib
+import time
+import types
 from unittest import mock
 
 import fastapi
+import filelock
 import pytest
 
 from sky import models
@@ -74,7 +78,7 @@ class TestUserBatchUpdate:
                                                mock_update_roles,
                                                mock_user_lock, admin_request):
 
-        def _lock(user_id):
+        def _lock(user_id, timeout=None):  # pylint: disable=unused-argument
             if user_id == 'u2':
                 raise RuntimeError('Failed to update user due to a timeout')
             return mock.MagicMock(__enter__=mock.MagicMock(),
@@ -369,3 +373,86 @@ class TestUserRoleDemotion:
         # Should not raise (public workspace not even checked).
         resource_checker.check_user_role_demotion(_mk_user('u1', name='alice'))
         mock_get_ws_users.assert_not_called()
+
+
+def _promote(monkeypatch, admin_request, user_ids):
+    """Promotes `user_ids` (all `user` now) to admin; returns the
+    update_roles calls and the result."""
+    monkeypatch.setattr(server.global_user_state, 'get_users',
+                        lambda ids: {u: _mk_user(u) for u in ids})
+    monkeypatch.setattr(server.permission.permission_service,
+                        'get_users_for_role', lambda r: list(user_ids)
+                        if r == 'user' else [])
+    writes = []
+    monkeypatch.setattr(server.permission.permission_service, 'update_roles',
+                        lambda roles: writes.append(sorted(roles)))
+    body = payloads.UserBatchUpdateBody(user_ids=list(user_ids), role='admin')
+    return writes, server.user_batch_update(admin_request, body)
+
+
+def test_a_large_batch_is_locked_and_written_in_chunks(monkeypatch,
+                                                       admin_request):
+    """Holding every lock until one write opens a lock file per user."""
+    users = [f'u{i:03d}' for i in range(120)]
+    held = []
+    peak = []
+
+    @contextlib.contextmanager
+    def lock(user_id, timeout):  # pylint: disable=unused-argument
+        held.append(user_id)
+        peak.append(len(held))
+        yield
+        held.remove(user_id)
+
+    monkeypatch.setattr(server, '_user_lock', lock)
+    writes, result = _promote(monkeypatch, admin_request, users)
+    assert [len(w) for w in writes] == [50, 50, 20]
+    assert sum(writes, []) == users
+    assert max(peak) == 50
+    assert result['succeeded'] == users
+
+
+def test_lock_waits_in_a_chunk_share_one_budget(monkeypatch, admin_request):
+    """Each lock gets what is left of the chunk's timeout, never below 0:
+    filelock waits forever on a negative timeout."""
+    monkeypatch.setattr(server, '_BATCH_UPDATE_CHUNK_SIZE', 4)
+    now = [0.0]
+    monkeypatch.setattr(server, 'time',
+                        types.SimpleNamespace(monotonic=lambda: now[0]))
+    timeouts = []
+
+    @contextlib.contextmanager
+    def slow_lock(user_id, timeout):  # pylint: disable=unused-argument
+        timeouts.append(timeout)
+        now[0] += 8  # Each lock was contended for 8 s.
+        yield
+
+    monkeypatch.setattr(server, '_user_lock', slow_lock)
+    _promote(monkeypatch, admin_request, ['a', 'b', 'c', 'd', 'e'])
+    budget = server.USER_LOCK_TIMEOUT_SECONDS
+    assert timeouts == [budget, budget - 8, budget - 16, 0.0, budget]
+
+
+def test_a_held_user_lock_fails_only_that_user(monkeypatch, admin_request,
+                                               tmp_path):
+    monkeypatch.setattr(server, 'USER_LOCK_PATH',
+                        str(tmp_path / '.{user_id}.lock'))
+    monkeypatch.setattr(server, 'USER_LOCK_TIMEOUT_SECONDS', 0.5)
+    with filelock.FileLock(str(tmp_path / '.u2.lock')):
+        writes, result = _promote(monkeypatch, admin_request,
+                                  ['u1', 'u2', 'u3'])
+    assert writes == [['u1', 'u3']]
+    assert result['succeeded'] == ['u1', 'u3']
+    assert [f['user_id'] for f in result['failed']] == ['u2']
+
+
+def test_user_lock_uses_the_timeout_it_is_given(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, 'USER_LOCK_PATH',
+                        str(tmp_path / '.{user_id}.lock'))
+    monkeypatch.setattr(server, 'USER_LOCK_TIMEOUT_SECONDS', 30)
+    with filelock.FileLock(str(tmp_path / '.u2.lock')):
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='timeout'):
+            with server._user_lock('u2', 0):
+                pass
+    assert time.monotonic() - started < 5
