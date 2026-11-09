@@ -1618,6 +1618,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
+def _cluster_name_for_job(job: Dict[str, Any]) -> str:
+    """Cluster whose handle backs this job's cloud and region columns."""
+    cluster_name = job.get('current_cluster_name', None)
+    if cluster_name is None:
+        cluster_name = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
+    return cluster_name
+
+
 # Managed-job queue fields by the controller SKYLET_VERSION that introduced
 # them. A remote controller older than that version has no such column and
 # rejects a request naming it, so the server strips them before asking over
@@ -3823,9 +3832,13 @@ def get_managed_job_queue(
     )
 
     if cluster_handle_required:
-        # Fetch the cluster name to handle map for managed clusters only.
+        # Unpickle only this page's clusters. The managed table keeps every
+        # historical job cluster.
         cluster_name_to_handle = (
-            global_user_state.get_cluster_name_to_handle_map(is_managed=True))
+            global_user_state.get_handles_from_cluster_names(
+                {_cluster_name_for_job(job) for job in jobs},
+                is_managed=True,
+            ))
 
     highest_blocking_priority = constants.MIN_PRIORITY
     max_launching_jobs_per_user = get_max_launching_jobs_per_user()
@@ -3867,12 +3880,8 @@ def get_managed_job_queue(
             job['schedule_state'] = None
 
         if cluster_handle_required:
-            cluster_name = job.get('current_cluster_name', None)
-            if cluster_name is None:
-                cluster_name = generate_managed_job_cluster_name(
-                    job['task_name'], job['job_id'])
-            handle = cluster_name_to_handle.get(
-                cluster_name, None) if cluster_name is not None else None
+            cluster_name = _cluster_name_for_job(job)
+            handle = cluster_name_to_handle.get(cluster_name, None)
             if isinstance(handle, backends.CloudVmRayResourceHandle):
                 jobs_with_handle.append({
                     'job': job,
@@ -4121,16 +4130,31 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    all_users = global_user_state.get_all_users()
-    all_users_map = {user.id: user.name for user in all_users}
-    for job in jobs:
-        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = all_users_map.get(job['user_hash'])
+    restore_managed_job_queue_jobs(jobs)
     return jobs, total, result_type, total_no_filter, status_counts, \
         infra_options
+
+
+def restore_managed_job_queue_jobs(jobs: List[Dict[str, Any]]) -> None:
+    """Restore the status enum and owner name on queue rows, in place.
+
+    ``get_managed_job_queue`` stringifies ``status`` so a controller payload
+    can be encoded. ``queue_v2`` callers receive ``ManagedJobStatus``, and
+    ``user_name`` looked up from ``user_hash``. A missing user stays None.
+    A ``ManagedJobRunner`` that returns ``DICT`` rows in the controller's
+    serialized form should pass them through this before returning.
+    """
+    # Skip jobs that do not have user_hash info.
+    # TODO(cooperc): Remove check before 0.12.0.
+    user_hashes = {
+        job['user_hash'] for job in jobs if job.get('user_hash') is not None
+    }
+    users = global_user_state.get_users(user_hashes)
+    for job in jobs:
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
+        if job.get('user_hash') is not None:
+            user = users.get(job['user_hash'])
+            job['user_name'] = user.name if user is not None else None
 
 
 def _get_job_status_from_tasks(
