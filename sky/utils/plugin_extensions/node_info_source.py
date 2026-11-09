@@ -20,7 +20,8 @@ A plugin can also register a snapshot provider that serves the raw node and
 pod objects behind realtime GPU availability:
 
     NodeInfoSource.register_snapshot(my_snapshot_provider)
-    snapshot = NodeInfoSource.get_snapshot(context='my-k8s-context')
+    snapshot = NodeInfoSource.get_snapshot(
+        context='my-k8s-context', label_keys=['nvidia.com/gpu.product'])
 """
 import dataclasses
 from typing import Any, Callable, Dict, List, Optional
@@ -41,9 +42,10 @@ class KubernetesNodeSnapshot:
 
     Attributes:
         nodes: Every node in the context, before any allowed_nodes filtering,
-            with at least metadata.name, metadata.labels, spec.unschedulable,
-            spec.taints, status.capacity, status.allocatable,
-            status.addresses and status.conditions.
+            with at least metadata.name, spec.unschedulable, spec.taints,
+            status.capacity, status.allocatable, status.addresses, the
+            Ready condition of status.conditions, and the requested label
+            keys of metadata.labels.
         pods: At least every pod in phase Running or Pending that is bound
             to a node and requests an extended resource (such as
             nvidia.com/gpu), with metadata.name, metadata.namespace,
@@ -60,8 +62,10 @@ class KubernetesNodeSnapshot:
     pods: List[Dict[str, Any]]
 
 
-# Function signature: (context: str) -> Optional[KubernetesNodeSnapshot]
-NodeSnapshotProviderFunc = Callable[[str], Optional[KubernetesNodeSnapshot]]
+# Function signature:
+# (context: str, label_keys: List[str]) -> Optional[KubernetesNodeSnapshot]
+NodeSnapshotProviderFunc = Callable[[str, List[str]],
+                                    Optional[KubernetesNodeSnapshot]]
 
 
 class NodeInfoSource:
@@ -125,19 +129,24 @@ class NodeInfoSource:
         Only one snapshot provider can be registered at a time.
 
         Args:
-            provider: Function to get a node snapshot for a context.
-                Signature: (context: str) -> Optional[KubernetesNodeSnapshot]
+            provider: Function to get a node snapshot for a context, with
+                at least the given label keys of each node's labels.
+                Signature: (context: str, label_keys: List[str]) ->
+                Optional[KubernetesNodeSnapshot]
                 Returns KubernetesNodeSnapshot if available, None otherwise.
         """
         cls._snapshot_provider_func = provider
         logger.debug('Registered external node snapshot provider')
 
     @classmethod
-    def get_snapshot(cls, context: str) -> Optional[KubernetesNodeSnapshot]:
+    def get_snapshot(cls, context: str,
+                     label_keys: List[str]) -> Optional[KubernetesNodeSnapshot]:
         """Get a node snapshot from the registered snapshot provider.
 
         Args:
             context: Kubernetes context name to get the snapshot for.
+            label_keys: Node label keys the caller reads; other labels may be
+                left out of the snapshot.
 
         Returns:
             KubernetesNodeSnapshot if the provider returns one, None if no
@@ -148,7 +157,7 @@ class NodeInfoSource:
             return None
         try:
             # pylint: disable=not-callable
-            return cls._snapshot_provider_func(context)
+            return cls._snapshot_provider_func(context, label_keys)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'External node snapshot provider failed: {e}')
             return None

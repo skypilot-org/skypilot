@@ -159,7 +159,8 @@ def _list_accelerators(
     if context is None:
         return {}, {}, {}
 
-    snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(context)
+    snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(
+        context, kubernetes_utils.get_node_snapshot_label_keys(context))
                 if realtime else None)
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     if snapshot is not None:

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 import pytest
 
 from sky.catalog import kubernetes_catalog
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import plugin_extensions
 
@@ -26,7 +27,10 @@ def _node(name: str,
     return {
         'metadata': {
             'name': name,
-            'labels': labels or {}
+            'labels': {
+                'kubernetes.io/hostname': name,
+                **(labels or {})
+            }
         },
         'spec': {
             'unschedulable': unschedulable,
@@ -40,6 +44,9 @@ def _node(name: str,
                 'address': ip
             }],
             'conditions': [{
+                'type': 'MemoryPressure',
+                'status': 'False'
+            }, {
                 'type': 'Ready',
                 'status': 'True' if ready else 'False'
             }],
@@ -247,7 +254,8 @@ def cluster_env(monkeypatch):
     return configure
 
 
-_Provider = Callable[[str], Optional[plugin_extensions.KubernetesNodeSnapshot]]
+_Provider = Callable[[str, List[str]],
+                     Optional[plugin_extensions.KubernetesNodeSnapshot]]
 
 
 def _serve(monkeypatch, core_api: _CoreApi,
@@ -285,14 +293,42 @@ def _assert_snapshot_matches_api(monkeypatch, cluster: str, **list_kwargs):
     expected = _list_realtime(monkeypatch, api, **list_kwargs)
     assert api.calls, 'the direct path must read the Kubernetes API'
 
+    requested_keys: List[str] = []
+
+    def provider(context, label_keys):
+        # Keeps only the requested labels and the Ready condition, as a cache
+        # serving the snapshot may.
+        if context != _CONTEXT:
+            return None
+        requested_keys.extend(label_keys)
+        trimmed = [
+            dict(node,
+                 metadata={
+                     'name': node['metadata']['name'],
+                     'labels': {
+                         k: v
+                         for k, v in node['metadata']['labels'].items()
+                         if k in label_keys
+                     },
+                 },
+                 status=dict(node['status'],
+                             conditions=[
+                                 c
+                                 for c in node['status']['conditions']
+                                 if c['type'] == 'Ready'
+                             ]))
+            for node in nodes
+        ]
+        return plugin_extensions.KubernetesNodeSnapshot(nodes=trimmed,
+                                                        pods=pods)
+
     snapshot_api = _CoreApi(nodes, pods)
-    snapshot = plugin_extensions.KubernetesNodeSnapshot(nodes=nodes, pods=pods)
     actual = _list_realtime(monkeypatch,
                             snapshot_api,
-                            provider=lambda context: snapshot
-                            if context == _CONTEXT else None,
+                            provider=provider,
                             **list_kwargs)
     assert snapshot_api.calls == []
+    assert 'kubernetes.io/hostname' not in requested_keys
     assert actual == expected
     return actual
 
@@ -357,12 +393,13 @@ def test_snapshot_counts(monkeypatch, cluster_env):
     assert counts == {'H100-80GB': [1, 2, 4, 8], 'A100-80GB': [1, 2, 4]}
 
 
-def _unserved(context):
-    del context
+def _unserved(context, label_keys):
+    del context, label_keys
     return None
 
 
-def _failing(context):
+def _failing(context, label_keys):
+    del label_keys
     raise RuntimeError(f'cache for {context} unavailable')
 
 
@@ -379,10 +416,22 @@ def test_non_realtime_listing_ignores_snapshot(monkeypatch, cluster_env):
     nodes, pods = _CLUSTERS['gfd']
     api = _CoreApi(nodes, pods)
     snapshot = plugin_extensions.KubernetesNodeSnapshot(nodes=[], pods=[])
-    _serve(monkeypatch, api, lambda context: snapshot)
+    _serve(monkeypatch, api, lambda context, label_keys: snapshot)
     qtys = kubernetes_catalog.list_accelerators(gpus_only=True,
                                                 name_filter=None,
                                                 region_filter=_CONTEXT,
                                                 quantity_filter=None)
     assert set(qtys) == {'H100-80GB', 'A100-80GB'}
     assert 'list_node' in api.calls
+
+
+def test_snapshot_label_keys(cluster_env):
+    cluster_env(allowed_nodes={'label_selector': {'pool': 'a100'}})
+    keys = set(kubernetes_utils.get_node_snapshot_label_keys(_CONTEXT))
+    for formatter in kubernetes_utils.LABEL_FORMATTER_REGISTRY:
+        assert set(formatter.get_label_keys()) <= keys
+    assert {
+        'cloud.google.com/gke-tpu-topology',
+        'cloud.google.com/gke-accelerator-count',
+        'pool',
+    } <= keys

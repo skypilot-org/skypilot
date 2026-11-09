@@ -2827,6 +2827,25 @@ def read_node_snapshot(
             allocated_qty_by_node)
 
 
+def get_node_snapshot_label_keys(context: str) -> List[str]:
+    """Returns the node label keys that accelerator availability reads.
+
+    These are the GPU label formatters' keys, the GKE TPU keys that
+    is_multi_host_tpu() reads, and the allowed_nodes label_selector keys.
+    Formatters match label keys exactly, so nodes with only these labels give
+    the same result as the full node objects.
+    """
+    keys = {
+        key for formatter in LABEL_FORMATTER_REGISTRY
+        for key in formatter.get_label_keys()
+    }
+    keys.update((GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+                 GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY))
+    allowed_nodes = get_allowed_nodes_config(context) or {}
+    keys.update(allowed_nodes.get('label_selector') or {})
+    return sorted(keys)
+
+
 def adjust_resources_to_allocatable(
     cpus: float,
     mem: float,
