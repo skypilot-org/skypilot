@@ -21,6 +21,8 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import dataclasses
+import enum
 import functools
 import inspect
 import multiprocessing
@@ -30,7 +32,8 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
+from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
+                    Set, TextIO, Tuple)
 
 import psutil
 import setproctitle
@@ -119,6 +122,105 @@ _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # 1. blocking the event loop;
 # 2. exhausting the default thread pool executor of event loop;
 _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
+# How often a request running in coroutine checks whether it was cancelled.
+_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS = 0.5
+
+# Keeps in-process request tasks alive until they finish.
+_in_process_tasks: Set[asyncio.Task] = set()
+# Per server process; keeps most of the request thread executor for log
+# streaming and auth lookups, which have no queue to fall back to.
+_MAX_IN_PROCESS_REQUESTS = 16
+
+
+class ExecutionMode(enum.Enum):
+    """How the API server process that schedules a request executes it."""
+    # Write the request row and queue the request for a worker process.
+    QUEUE = 'queue'
+    # Write the request row and run the request in this process's request
+    # thread executor; queue it when this process is at capacity.
+    IN_PROCESS = 'in_process'
+    # The execution policy handled the request and answers the client; no
+    # request row is written, so its request ID cannot be fetched.
+    HANDLED = 'handled'
+
+
+@dataclasses.dataclass
+class RequestToSchedule:
+    """A request that is about to be scheduled.
+
+    request_body is already stamped with the caller's identity. An execution
+    policy may replace func, e.g. to wrap the entrypoint; the replacement is
+    what runs and what the request row records.
+    """
+    request_id: str
+    # With the 'sky.' prefix.
+    request_name: str
+    request_body: payloads.RequestBody
+    # The user the request runs as.
+    user_id: str
+    func: Callable[..., Any]
+    schedule_type: api_requests.ScheduleType
+    request_cluster_name: Optional[str]
+    ignore_return_value: bool
+
+
+ExecutionPolicy = Callable[[RequestToSchedule], Awaitable[ExecutionMode]]
+
+_execution_policy: Optional[ExecutionPolicy] = None
+
+
+def set_execution_policy(policy: Optional[ExecutionPolicy]) -> None:
+    """Sets how this API server process executes the requests it schedules.
+
+    schedule_request_async awaits the policy in the context of the HTTP
+    request, before the request row is written, for every request that has no
+    precondition and is not retryable. Exceptions raised by the policy
+    propagate to the caller. Without a policy, every request is queued.
+
+    Must be called in every API server process that schedules requests, e.g.
+    from a plugin's install().
+    """
+    global _execution_policy
+    _execution_policy = policy
+
+
+def run_request_inline(
+        request: RequestToSchedule,
+        executor: concurrent.futures.Executor) -> 'asyncio.Task[Any]':
+    """Runs a request's entrypoint in a thread of executor.
+
+    The entrypoint runs under the request's env and config overrides, as an
+    in-process request does, but nothing is recorded: no request row and no
+    log file. Cancelling the returned task cancels the request's context,
+    which the entrypoint observes at its next cancellation check.
+
+    Returns:
+        A task with the entrypoint's return value, or what it raised.
+    """
+    # A task of its own keeps the request's context out of the caller's.
+    return asyncio.create_task(_run_request_inline(request, executor))
+
+
+async def _run_request_inline(request: RequestToSchedule,
+                              executor: concurrent.futures.Executor) -> Any:
+    ctx = context.initialize()
+    try:
+        return await context_utils.to_thread_with_executor(
+            executor, _execute_with_config_override, request.func,
+            request.request_body, request.request_id, request.request_name,
+            **request.request_body.to_kwargs())
+    finally:
+        ctx.cancel()
+
+
+def _has_in_process_capacity() -> bool:
+    if len(_in_process_tasks) >= _MAX_IN_PROCESS_REQUESTS:
+        return False
+    try:
+        get_request_thread_executor().check_available()
+    except exceptions.ConcurrentWorkerExhaustedError:
+        return False
+    return True
 
 
 def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
@@ -770,9 +872,16 @@ def _sanitize_request_env_vars(env_vars: Dict[str, str],
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody, request_id: str,
-        request_name: str) -> Generator[None, None, None]:
-    """Override the environment and SkyPilot config for a request."""
+        request_body: payloads.RequestBody,
+        request_id: str,
+        request_name: str,
+        sync_refresh: bool = False) -> Generator[None, None, None]:
+    """Override the environment and SkyPilot config for a request.
+
+    Args:
+        sync_refresh: The request runs in a thread of a process shared with
+            other requests; see annotations.clear_request_level_cache.
+    """
     # Daemons run AS the server, not as any client. Their persisted
     # request_body.env_vars came from whichever pod first scheduled them,
     # which may be a previous deployment generation with stale downward-API
@@ -790,6 +899,8 @@ def override_request_env_and_config(
     # did not already have.
     from_loopback = getattr(request_body, 'from_loopback', None) is not False
     original_env = os.environ.copy()
+    # Auth already holds the user's row and role; see stamp_request_body.
+    authenticated = getattr(request_body, 'authenticated', False)
     try:
         if is_daemon:
             # The SkyPilot system user is already upserted at scheduling
@@ -826,9 +937,10 @@ def override_request_env_and_config(
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                 name=request_body.env_vars[constants.USER_ENV_VAR])
-            _, user = global_user_state.add_or_update_user(user,
-                                                           return_user=True)
-            _seed_role_if_missing(user.id)
+            if not authenticated:
+                _, user = global_user_state.add_or_update_user(user,
+                                                               return_user=True)
+                _seed_role_if_missing(user.id)
             using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
@@ -838,7 +950,8 @@ def override_request_env_and_config(
             client_command=request_body.entrypoint_command,
             using_remote_api_server=using_remote_api_server,
             user=user,
-            request_id=request_id)
+            request_id=request_id,
+            sync_refresh=sync_refresh)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
@@ -883,6 +996,9 @@ def override_request_env_and_config(
                              workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
+                    if authenticated:
+                        # The resolver reads the preferred workspace.
+                        user = global_user_state.get_user(user.id) or user
                     resolution = workspaces_core.resolve_workspace_for_user(
                         user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
@@ -1279,84 +1395,116 @@ def _execute_with_config_override(func: Callable,
     """Execute a function with env and config override inside a thread."""
     # Override the environment and config within this thread's context,
     # which gets copied when we call to_thread.
-    with override_request_env_and_config(request_body, request_id,
-                                         request_name):
-        return func(**kwargs)
+    with override_request_env_and_config(request_body,
+                                         request_id,
+                                         request_name,
+                                         sync_refresh=True):
+        with metrics_utils.time_it(name=request_name,
+                                   group='request_execution'):
+            return func(**kwargs)
 
 
-async def _execute_request_coroutine(request: api_requests.Request):
+async def _execute_request_coroutine(
+        request: api_requests.Request,
+        ignore_return_value: bool = False,
+        on_executor_exhausted: Optional[Callable[[], Awaitable[None]]] = None):
     """Execute a request in current event loop.
 
     Similar to _request_execution_wrapper, but executed as coroutine in current
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
+
+    Args:
+        request: The request to execute.
+        ignore_return_value: If True, the return value is not stored.
+        on_executor_exhausted: Called instead of failing the request when the
+            request thread executor has no free thread.
     """
     context.initialize()
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
-    logger.info(f'Executing request {request.request_id} in coroutine')
+    request_id = request.request_id
+    status = api_requests.RequestStatus
+    claim = asyncio.ensure_future(
+        api_requests.transition_request_status_async(
+            request_id, status.executable_statuses(), status.RUNNING))
+    try:
+        claimed = await asyncio.shield(claim)
+    except asyncio.CancelledError:
+        # The claim may still commit RUNNING; let it settle first.
+        await asyncio.wait({claim})
+        await api_requests.set_request_cancelled_async(request_id)
+        return
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to start request {request_id}: '
+                     f'{common_utils.format_exception(e)}')
+        await api_requests.set_request_failed_async(request_id, e)
+        return
+    if not claimed:
+        logger.info(f'Request {request_id} is no longer executable, skipping')
+        return
+    logger.info(f'Executing request {request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
     _maybe_observe_request_pending(request)
-    await api_requests.update_status_async(request.request_id,
-                                           api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
         fut: asyncio.Future = context_utils.to_thread_with_executor(
             get_request_thread_executor(), _execute_with_config_override, func,
-            request_body, request.request_id, request.name,
-            **request_body.to_kwargs())
+            request_body, request_id, request.name, **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
-        await api_requests.set_request_failed_async(request.request_id, e)
-        logger.error(f'Failed to run request {request.request_id} due to '
+        if (on_executor_exhausted is not None and
+                isinstance(e, exceptions.ConcurrentWorkerExhaustedError)):
+            try:
+                # Hand the request back to the queue unclaimed.
+                await api_requests.transition_request_status_async(
+                    request_id, [status.RUNNING], status.PENDING)
+                await on_executor_exhausted()
+            except (Exception, asyncio.CancelledError):  # pylint: disable=broad-except
+                # The fallback logs and records its own failure.
+                pass
+            return
+        await api_requests.set_request_failed_async(request_id, e)
+        logger.error(f'Failed to run request {request_id} due to '
                      f'{common_utils.format_exception(e)}')
         return
 
-    async def poll_task(request_id: str) -> bool:
-        req_status = await api_requests.get_request_status_async(request_id)
-        if req_status is None:
-            raise RuntimeError('Request not found')
-
-        if req_status.status == api_requests.RequestStatus.CANCELLED:
-            ctx.cancel()
-            return True
-
-        if fut.done():
-            try:
-                result = await fut
-                await api_requests.set_request_succeeded_async(
-                    request_id, result)
-            except asyncio.CancelledError:
-                # The task is cancelled by ctx.cancel(), where the status
-                # should already be set to CANCELLED.
-                pass
-            except Exception as e:  # pylint: disable=broad-except
-                ctx.redirect_log(original_output)
-                await api_requests.set_request_failed_async(request_id, e)
-                logger.error(f'Request {request_id} failed due to '
-                             f'{common_utils.format_exception(e)}')
-            return True
-        return False
-
     try:
         while True:
-            res = await poll_task(request.request_id)
-            if res:
+            done, _ = await asyncio.wait(
+                {fut}, timeout=_COROUTINE_CANCEL_CHECK_INTERVAL_SECONDS)
+            if done:
                 break
-            await asyncio.sleep(0.5)
+            req_status = await api_requests.get_request_status_async(request_id)
+            if req_status is None:
+                raise RuntimeError('Request not found')
+            if req_status.status == api_requests.RequestStatus.CANCELLED:
+                return
+        try:
+            result = await fut
+            await api_requests.set_request_succeeded_async(
+                request_id, None if ignore_return_value else result)
+        except asyncio.CancelledError:
+            # The task is cancelled by ctx.cancel(), where the status
+            # should already be set to CANCELLED.
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            ctx.redirect_log(original_output)
+            await api_requests.set_request_failed_async(request_id, e)
+            logger.error(f'Request {request_id} failed due to '
+                         f'{common_utils.format_exception(e)}')
     except asyncio.CancelledError:
         # Current coroutine is cancelled due to client disconnect, set the
         # request status for consistency.
-        await api_requests.set_request_cancelled_async(request.request_id)
-        pass
+        await api_requests.set_request_cancelled_async(request_id)
     # pylint: disable=broad-except
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)
-        await api_requests.set_request_failed_async(request.request_id, e)
-        logger.error(f'Request {request.request_id} interrupted due to '
+        await api_requests.set_request_failed_async(request_id, e)
+        logger.error(f'Request {request_id} interrupted due to '
                      f'unhandled exception: {common_utils.format_exception(e)}')
         raise
     finally:
@@ -1378,7 +1526,10 @@ def stamp_request_body(request_body: payloads.RequestBody,
         # Set user identity for executors.
         request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
         request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+        # The middleware that set `auth_user` ensured its users row and role.
+        request_body.authenticated = True
     else:
+        request_body.authenticated = False
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars.get(constants.USER_ID_ENV_VAR, '')
@@ -1434,6 +1585,19 @@ async def prepare_request_async(
 ) -> api_requests.Request:
     """Prepare a request for execution."""
     user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    return await _create_request_async(request_id, request_name, request_body,
+                                       func, request_cluster_name,
+                                       schedule_type, user_id)
+
+
+async def _create_request_async(request_id: str,
+                                request_name: request_names.RequestName,
+                                request_body: payloads.RequestBody,
+                                func: Callable[..., Any],
+                                request_cluster_name: Optional[str],
+                                schedule_type: api_requests.ScheduleType,
+                                user_id: str) -> api_requests.Request:
+    """Writes the row and log file of a request whose body is stamped."""
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
@@ -1468,7 +1632,10 @@ async def schedule_request_async(
         precondition: Optional[preconditions.Precondition] = None,
         retryable: bool = False,
         auth_user: Optional[models.User] = None) -> None:
-    """Enqueue a request to the request queue.
+    """Schedule a request for execution.
+
+    The request is queued for a worker process unless the execution policy
+    (see set_execution_policy) runs it in this process.
 
     Args:
         request_id: ID of the request.
@@ -1488,16 +1655,32 @@ async def schedule_request_async(
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = await prepare_request_async(request_id,
-                                               request_name,
-                                               request_body,
-                                               func,
+    user_id = stamp_request_body(request_body, auth_user, is_skypilot_system)
+    mode = ExecutionMode.QUEUE
+    if (_execution_policy is not None and precondition is None and
+            not retryable):
+        request = RequestToSchedule(
+            request_id=request_id,
+            request_name=server_constants.REQUEST_NAME_PREFIX + request_name,
+            request_body=request_body,
+            user_id=user_id,
+            func=func,
+            schedule_type=schedule_type,
+            request_cluster_name=request_cluster_name,
+            ignore_return_value=ignore_return_value)
+        mode = await _execution_policy(request)
+        if mode == ExecutionMode.HANDLED:
+            return
+        func = request.func
+    request_task = await _create_request_async(request_id, request_name,
+                                               request_body, func,
                                                request_cluster_name,
-                                               schedule_type,
-                                               is_skypilot_system,
-                                               auth_user=auth_user)
-    await schedule_prepared_request(request_task, ignore_return_value,
-                                    precondition, retryable)
+                                               schedule_type, user_id)
+    await schedule_prepared_request(request_task,
+                                    ignore_return_value,
+                                    precondition,
+                                    retryable,
+                                    in_process=mode == ExecutionMode.IN_PROCESS)
 
 
 async def schedule_internal_daemon_async(
@@ -1536,7 +1719,8 @@ async def schedule_prepared_request(request_task: api_requests.Request,
                                     ignore_return_value: bool = False,
                                     precondition: Optional[
                                         preconditions.Precondition] = None,
-                                    retryable: bool = False) -> None:
+                                    retryable: bool = False,
+                                    in_process: bool = False) -> None:
     """Enqueue a request to the request queue
 
     Args:
@@ -1548,6 +1732,9 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             The precondition is waited asynchronously and does not block the
             caller.
         retryable: Whether the request should be retried if it fails.
+        in_process: Run the request in this process's request thread executor
+            instead of a worker process, unless the process is at capacity.
+            Ignored for a request with a precondition or that is retryable.
     """
 
     async def enqueue():
@@ -1579,6 +1766,13 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             precondition.wait_async(on_condition_met=enqueue))
         preconditions.background_tasks.add(task)
         task.add_done_callback(preconditions.background_tasks.discard)
+    elif in_process and not retryable and _has_in_process_capacity():
+        task = asyncio.create_task(
+            _execute_request_coroutine(request_task,
+                                       ignore_return_value=ignore_return_value,
+                                       on_executor_exhausted=enqueue))
+        _in_process_tasks.add(task)
+        task.add_done_callback(_in_process_tasks.discard)
     else:
         await enqueue()
 

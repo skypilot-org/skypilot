@@ -699,6 +699,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'kai'),
     ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
@@ -948,6 +949,12 @@ ENV_VAR_SERVER_LONG_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}LONG_WORKERS'
 ENV_VAR_SERVER_SHORT_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}SHORT_WORKERS'
 ENV_VAR_SERVER_JOBS_CONTROLLERS = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}JOBS_CONTROLLERS')
+# Memory one API server (uvicorn) worker process is expected to hold, in GB,
+# overriding the built-in estimate. Used only with
+# SKYPILOT_MEMORY_AWARE_WORKER_SIZING; raise it when requests run in the
+# server processes (`executor.set_execution_policy`).
+ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}UVICORN_WORKER_MEM_GB')
 
 # Concurrent state-DB connections a server process uses before it starts
 # queueing queries, when the burst size is left to the default.

@@ -510,6 +510,15 @@ class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
 _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
+async def _update_token_last_used(token_id: str) -> None:
+    try:
+        await db_lookup.call_with_deadline(
+            global_user_state.update_service_account_token_last_used, token_id,
+            _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to update token last used time: {e}')
+
+
 @middleware_utils.websocket_aware
 class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
@@ -681,14 +690,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
                 # The row may be cached: later hits must see it as fresh.
                 token_row['last_used_at'] = int(now)
-                try:
-                    await db_lookup.call_with_deadline(
-                        global_user_state.
-                        update_service_account_token_last_used,
-                        token_row['token_id'],
-                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to update token last used time: {e}')
+                asyncio_utils.run_in_background(
+                    _update_token_last_used(token_row['token_id']))
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,

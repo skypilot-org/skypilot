@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import kai
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -102,6 +103,7 @@ def dump_cluster_resources(context: Optional[str], namespace: str,
           ...                  #   instance creation (PVCs, ConfigMaps,
           secrets.yaml         #   Secrets [redacted], Ingresses)
           kueue/workloads.yaml # this cluster's Kueue Workload, if it uses Kueue
+          kai/podgroups.yaml   # this cluster's KAI PodGroup, if it uses KAI
 
     Cluster-WIDE k8s info (GPU-metrics pods, the non-Workload Kueue objects) is
     not tied to one cluster; it's collected once per kube context by
@@ -153,6 +155,12 @@ def dump_cluster_resources(context: Optional[str], namespace: str,
     if uses_kueue:
         _dump_workload(context, namespace, cluster_name_on_cloud, output_dir,
                        errors)
+    uses_kai = any(
+        kai.QUEUE_LABEL in (getattr(pod.metadata, 'labels', None) or {})
+        for pod in pods)
+    if uses_kai:
+        _dump_pod_group(context, namespace, cluster_name_on_cloud, output_dir,
+                        errors)
     return errors
 
 
@@ -752,6 +760,31 @@ def _dump_workload(context: Optional[str], namespace: str,
         os.makedirs(kueue_dir, exist_ok=True)
         _write_yaml(os.path.join(kueue_dir, 'workloads.yaml'),
                     [_strip_managed_fields(item) for item in items])
+
+
+def _dump_pod_group(context: Optional[str], namespace: str,
+                    cluster_name_on_cloud: str, output_dir: str,
+                    errors: List[Dict[str, str]]) -> None:
+    """Dump this cluster's KAI PodGroup, named cluster_name_on_cloud."""
+    api = _fail_fast(kubernetes.custom_objects_api(context))
+    try:
+        pod_group = api.get_namespaced_custom_object(
+            *kai.POD_GROUP_API,
+            namespace,
+            'podgroups',
+            cluster_name_on_cloud,
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            _record_error(errors, 'kubernetes/kai/podgroups', e)
+        return
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'kubernetes/kai/podgroups', e)
+        return
+    kai_dir = os.path.join(output_dir, 'kai')
+    os.makedirs(kai_dir, exist_ok=True)
+    _write_yaml(os.path.join(kai_dir, 'podgroups.yaml'),
+                [_strip_managed_fields(pod_group)])
 
 
 def _dump_kueue_cluster_objects(context: Optional[str], output_dir: str,
