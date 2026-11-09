@@ -15,8 +15,8 @@ import subprocess
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import ijson
 
@@ -1030,9 +1030,19 @@ def detect_gpu_label_formatter(
         Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
              labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
+    return detect_gpu_label_formatter_from_nodes(
+        get_kubernetes_nodes(context=context))
+
+
+def detect_gpu_label_formatter_from_nodes(
+    nodes: List['V1Node']
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
+    """Detects the GPU label formatter for a cluster with the given nodes.
+
+    See detect_gpu_label_formatter() for the return values.
+    """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -2719,51 +2729,62 @@ def get_allocated_resources_by_node(
         _preload_content=False,
         field_selector=field_selector)
     try:
-        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-        allocated_cpu_memory_by_node: Dict[str, Tuple[
-            float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
-        for item_dict in ijson.items(response,
-                                     'items.item',
-                                     buf_size=IJSON_BUFFER_SIZE):
-            pod = V1Pod.from_dict(item_dict)
-            if should_exclude_pod_from_gpu_allocation(pod):
-                logger.debug(
-                    f'Excluding pod {pod.metadata.name} from resource count '
-                    f'calculations on node {pod.spec.node_name}')
-                continue
-            if not pod.spec.node_name:
-                continue
-
-            # Iterate over all the containers in the pod and sum the resources
-            pod_allocated_qty = 0
-            pod_allocated_cpu = 0.0
-            pod_allocated_memory_gb = 0.0
-            for container in pod.spec.containers:
-                if container.resources.requests:
-                    requests = container.resources.requests
-                    # Parse GPU
-                    pod_allocated_qty += get_node_accelerator_count(
-                        context, requests)
-                    # Parse CPU
-                    if 'cpu' in requests:
-                        pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
-                            requests['cpu'])
-                    # Parse memory
-                    if 'memory' in requests:
-                        pod_allocated_memory_gb += parse_memory_resource(
-                            requests['memory'], unit='G')
-
-            if pod_allocated_qty > 0:
-                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
-            if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
-                current_cpu, current_memory = allocated_cpu_memory_by_node[
-                    pod.spec.node_name]
-                allocated_cpu_memory_by_node[pod.spec.node_name] = (
-                    current_cpu + pod_allocated_cpu,
-                    current_memory + pod_allocated_memory_gb)
-        return allocated_qty_by_node, allocated_cpu_memory_by_node
+        return _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)), context)
     finally:
         response.release_conn()
+
+
+def _sum_allocated_resources_by_node(
+    pods: Iterable[V1Pod],
+    context: Optional[str],
+    gpu_resource_key: Optional[str] = None,
+) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
+    """Sums the accelerators, CPU and memory that pods request on each node.
+
+    See get_allocated_resources_by_node() for the return values.
+    """
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    allocated_cpu_memory_by_node: Dict[str, Tuple[
+        float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
+    for pod in pods:
+        if should_exclude_pod_from_gpu_allocation(pod):
+            logger.debug(
+                f'Excluding pod {pod.metadata.name} from resource count '
+                f'calculations on node {pod.spec.node_name}')
+            continue
+        if not pod.spec.node_name:
+            continue
+
+        # Iterate over all the containers in the pod and sum the resources
+        pod_allocated_qty = 0
+        pod_allocated_cpu = 0.0
+        pod_allocated_memory_gb = 0.0
+        for container in pod.spec.containers:
+            if container.resources.requests:
+                requests = container.resources.requests
+                # Parse GPU
+                pod_allocated_qty += get_node_accelerator_count(
+                    context, requests, gpu_resource_key=gpu_resource_key)
+                # Parse CPU
+                if 'cpu' in requests:
+                    pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
+                        requests['cpu'])
+                # Parse memory
+                if 'memory' in requests:
+                    pod_allocated_memory_gb += parse_memory_resource(
+                        requests['memory'], unit='G')
+
+        if pod_allocated_qty > 0:
+            allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
+            current_cpu, current_memory = allocated_cpu_memory_by_node[
+                pod.spec.node_name]
+            allocated_cpu_memory_by_node[pod.spec.node_name] = (
+                current_cpu + pod_allocated_cpu,
+                current_memory + pod_allocated_memory_gb)
+    return allocated_qty_by_node, allocated_cpu_memory_by_node
 
 
 @_retry_on_error(resource_type='pod')
@@ -2779,6 +2800,27 @@ def get_allocated_gpu_qty_by_node(
     """
     allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
     return allocated_qty_by_node
+
+
+def read_node_snapshot(
+    context: str, snapshot: plugin_extensions.KubernetesNodeSnapshot
+) -> Tuple[List[V1Node], str, Dict[str, int]]:
+    """Reads the accelerator availability inputs from a node snapshot.
+
+    Returns:
+        The same values as get_kubernetes_nodes(), get_gpu_resource_key() and
+        get_allocated_gpu_qty_by_node() for the context, computed from the
+        snapshot without calling the Kubernetes API.
+    """
+    nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
+    gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
+    pods = (V1Pod.from_dict(pod)
+            for pod in snapshot.pods
+            if pod.get('status', {}).get('phase') in ('Running', 'Pending'))
+    allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
+        pods, context, gpu_resource_key=gpu_resource_key)
+    return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
+            allocated_qty_by_node)
 
 
 def adjust_resources_to_allocatable(
@@ -5671,7 +5713,8 @@ def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
 
 
 def get_node_accelerator_count(context: Optional[str],
-                               attribute_dict: dict) -> int:
+                               attribute_dict: dict,
+                               gpu_resource_key: Optional[str] = None) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -5681,12 +5724,15 @@ def get_node_accelerator_count(context: Optional[str],
     Args:
         attribute_dict: Containing resource information from a node, such as
             allocatable or requested resources.
+        gpu_resource_key: The context's GPU resource key. Defaults to
+            get_gpu_resource_key(context).
 
     Returns:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key(context)
+    gpu_resource_name = (gpu_resource_key if gpu_resource_key is not None else
+                         get_gpu_resource_key(context))
     # A node is expected to advertise at most one accelerator family (GPU, TPU,
     # or Neuron). Rather than assert on external cluster state (which would crash
     # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
@@ -5917,6 +5963,14 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
+def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
+    """Picks the GPU resource key from the capacity keys of all nodes."""
+    for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
+        if gpu_key in capacity_keys:
+            return gpu_key
+    return SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
+
+
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
     gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
@@ -5933,15 +5987,26 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
                     supported_gpu_keys.intersection(capacity.keys()))
                 if len(capacity_keys) == len(supported_gpu_keys):
                     break
-            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-                if gpu_key in capacity_keys:
-                    return gpu_key
+            return _select_gpu_resource_key(capacity_keys)
         finally:
             response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
     return gpu_resource_key
+
+
+def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
+    """Gets the GPU resource key for a cluster with the given nodes.
+
+    Same as get_gpu_resource_key(), for all nodes of the cluster, before
+    allowed_nodes filtering.
+    """
+    capacity_keys: Set[str] = set()
+    for node in nodes:
+        capacity_keys.update(node.status.capacity.keys())
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY',
+                     default=_select_gpu_resource_key(capacity_keys))
 
 
 @annotations.lru_cache(scope='request')
