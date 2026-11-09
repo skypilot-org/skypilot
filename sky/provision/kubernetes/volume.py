@@ -11,6 +11,7 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -115,16 +116,12 @@ def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
     return PvcFailure.UNKNOWN
 
 
-def _is_rbac_permission_error(e: Exception) -> bool:
-    """True if the K8s ApiException is a 401/403 RBAC denial.
-
-    Namespace-constrained users on multi-tenant clusters often lack the
-    cluster-scoped `list`/`get` perms on `storageclasses` that the
-    pre-flight checks require, but they can still create PVCs in their
-    namespace and rely on K8s admission to bind. Don't block them just
-    because we can't validate up front.
-    """
-    return getattr(e, 'status', None) in (401, 403)
+# Namespace-constrained users on multi-tenant clusters often lack the
+# cluster-scoped `list`/`get` perms on `storageclasses` that the pre-flight
+# checks require, but they can still create PVCs in their namespace and rely
+# on K8s admission to bind. Don't block them just because we can't validate up
+# front.
+_is_rbac_permission_error = api_errors.is_rbac_denial
 
 
 def _resolve_context_for_new_volume() -> Optional[str]:

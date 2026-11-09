@@ -30,6 +30,7 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
@@ -372,53 +373,10 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
-def _is_cloudflare_403_error(exception: Exception) -> bool:
-    """Check if an exception is a transient CloudFlare 403 error.
-
-    CloudFlare proxy 403 errors with CF-specific headers are transient and
-    should be retried, unlike real RBAC 403 errors.
-
-    Args:
-        exception: The exception to check
-
-    Returns:
-        True if this is a CloudFlare 403 error that should be retried
-    """
-    if not isinstance(exception, kubernetes.api_exception()):
-        return False
-
-    # Only check for 403 errors
-    if exception.status != 403:
-        return False
-
-    # Check for CloudFlare-specific headers
-    headers = exception.headers if hasattr(exception, 'headers') else {}
-    if not headers:
-        return False
-
-    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    for k, v in headers.items():
-        if 'cf-ray' in k.lower():
-            return True
-        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            return True
-
-    return False
-
-
-def is_transient_api_error(exception: Optional[BaseException]) -> bool:
-    """Whether a failed Kubernetes API call may succeed if retried later.
-
-    True for connection errors and timeouts, 429, 5xx and a CloudFlare 403.
-    False for other 4xx responses and kubeconfig errors.
-    """
-    if isinstance(exception, kubernetes.max_retry_error()):
-        return True
-    if isinstance(exception, kubernetes.api_exception()):
-        status = exception.status or 0
-        return (status == 429 or status >= 500 or
-                _is_cloudflare_403_error(exception))
-    return False
+# Kept under their old names: callers inside and outside this repo use them.
+# The definitions live in api_errors, with the other API-error classifiers.
+_is_cloudflare_403_error = api_errors.is_cloudflare_403
+is_transient_api_error = api_errors.is_transient
 
 
 # Checks for contexts whose API server is known to be unreachable, e.g. one
