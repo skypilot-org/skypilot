@@ -4735,6 +4735,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
+        # At most one of the two multipliers exceeds 1: num_ips_per_node for a
+        # GCP TPU VM pod (one node with an IP per VM), tpu_vms_per_slice for a
+        # multi-host TPU slice on Kubernetes (task num_nodes counts slices;
+        # the cluster has one pod per VM of each slice).
         num_actual_nodes = (
             task.num_nodes * handle.num_ips_per_node *
             kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
@@ -7245,6 +7249,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips.
         # A multi-host TPU slice on Kubernetes has one cluster node per VM.
+        # At most one of the two multipliers exceeds 1 (see _execute()).
         num_actual_nodes = (
             task.num_nodes * handle.num_ips_per_node *
             kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
