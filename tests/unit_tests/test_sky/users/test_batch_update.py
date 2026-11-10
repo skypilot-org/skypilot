@@ -58,7 +58,8 @@ class TestUserBatchUpdate:
         mock_update_roles.assert_called_once_with({
             'u1': 'admin',
             'u2': 'admin'
-        })
+        },
+                                                  existing_users_only=True)
         # Promotions never trigger the demotion check.
         mock_demotion_check.assert_not_called()
 
@@ -104,7 +105,8 @@ class TestUserBatchUpdate:
             'unknown',
         ])
         # Only the good user's role is written.
-        mock_update_roles.assert_called_once_with({'good': 'admin'})
+        mock_update_roles.assert_called_once_with({'good': 'admin'},
+                                                  existing_users_only=True)
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     def test_non_admin_caller_is_forbidden(self, mock_get_user_roles):
@@ -164,7 +166,11 @@ class TestUserBatchUpdate:
         assert len(result['failed']) == 1
         assert result['failed'][0]['user_id'] == 'u2'
         # Only the two that passed the check are written.
-        mock_update_roles.assert_called_once_with({'u1': 'user', 'u3': 'user'})
+        mock_update_roles.assert_called_once_with({
+            'u1': 'user',
+            'u3': 'user'
+        },
+                                                  existing_users_only=True)
 
     @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
                 return_value=mock.MagicMock())
@@ -190,7 +196,8 @@ class TestUserBatchUpdate:
 
         assert result == {'succeeded': ['u1'], 'failed': []}
         mock_demotion_check.assert_called_once()
-        mock_update_roles.assert_called_once_with({'u1': 'viewer'})
+        mock_update_roles.assert_called_once_with({'u1': 'viewer'},
+                                                  existing_users_only=True)
 
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -331,8 +338,14 @@ def _promote(monkeypatch, admin_request, user_ids):
                         'get_users_for_role', lambda r: list(user_ids)
                         if r == 'user' else [])
     writes = []
+
+    def update_roles(roles, existing_users_only=False):
+        assert existing_users_only
+        writes.append(sorted(roles))
+        return []
+
     monkeypatch.setattr(server.permission.permission_service, 'update_roles',
-                        lambda roles: writes.append(sorted(roles)))
+                        update_roles)
     body = payloads.UserBatchUpdateBody(user_ids=list(user_ids), role='admin')
     return writes, server.user_batch_update(admin_request, body)
 
@@ -353,7 +366,7 @@ def test_a_batch_takes_no_user_lock_and_writes_once(monkeypatch, admin_request,
 
 def test_a_failed_write_fails_every_user_in_it(monkeypatch, admin_request):
 
-    def fail(roles):
+    def fail(roles, existing_users_only=False):  # pylint: disable=unused-argument
         raise RuntimeError('database is locked')
 
     monkeypatch.setattr(server.global_user_state, 'get_users',
@@ -367,3 +380,24 @@ def test_a_failed_write_fails_every_user_in_it(monkeypatch, admin_request):
     result = server.user_batch_update(admin_request, body)
     assert result['succeeded'] == []
     assert sorted(f['user_id'] for f in result['failed']) == ['u1', 'u2']
+
+
+def test_a_user_deleted_after_the_checks_is_reported_failed(
+        monkeypatch, admin_request):
+    """update_roles skips a user deleted since the checks; the batch must not
+    report it updated."""
+    monkeypatch.setattr(server.global_user_state, 'get_users',
+                        lambda ids: {u: _mk_user(u) for u in ids})
+    monkeypatch.setattr(server.permission.permission_service,
+                        'get_users_for_role', lambda r: ['u1', 'u2']
+                        if r == 'user' else [])
+    monkeypatch.setattr(server.permission.permission_service,
+                        'update_roles',
+                        lambda roles, existing_users_only=False: ['u2'])
+    body = payloads.UserBatchUpdateBody(user_ids=['u1', 'u2'], role='admin')
+    result = server.user_batch_update(admin_request, body)
+    assert result['succeeded'] == ['u1']
+    assert result['failed'] == [{
+        'user_id': 'u2',
+        'error': 'User u2 does not exist'
+    }]

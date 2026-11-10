@@ -529,7 +529,12 @@ def user_update(request: fastapi.Request,
                             password=password_hash))
         if role and need_update_role:
             # Update user role in casbin policy
-            permission.permission_service.update_role(user_info.id, role)
+            # A user deleted since the check above gets no role.
+            if not permission.permission_service.update_role(
+                    user_info.id, role, existing_user_only=True):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
 
 
 @router.post('/batch_update')
@@ -656,9 +661,15 @@ def user_batch_update(request: fastapi.Request,
     targets = sorted(set(to_update))
     if targets:
         try:
-            permission.permission_service.update_roles(
-                {user_id: role for user_id in targets})
-            done.update(targets)
+            # A user deleted since the checks above gets no role.
+            missing = permission.permission_service.update_roles(
+                {user_id: role for user_id in targets},
+                existing_users_only=True)
+            done.update(set(targets) - set(missing))
+            failed.extend({
+                'user_id': user_id,
+                'error': f'User {user_id} does not exist'
+            } for user_id in missing)
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Failed to update roles for users {targets}')
             failed.extend({

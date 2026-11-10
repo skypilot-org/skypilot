@@ -358,7 +358,9 @@ class TestUsersEndpoints:
         # Verify
         assert result is None  # Function returns None on success
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -389,7 +391,9 @@ class TestUsersEndpoints:
         assert result is None  # Function returns None on success
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.id == 'test_user'
@@ -467,7 +471,9 @@ class TestUsersEndpoints:
         assert 'Database error' in str(exc_info.value)
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.global_user_state.get_all_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -867,7 +873,9 @@ class TestUsersEndpoints:
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
         mock_add_or_update_user.assert_called_once()
-        mock_update_role.assert_called_once_with('test_user', 'user')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'user',
+                                                 existing_user_only=True)
         # Check password hash
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]

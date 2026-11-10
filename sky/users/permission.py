@@ -173,6 +173,14 @@ _POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
 _RULE_WIDTH = {'g': 2, 'p': 3}
+# Ids per statement in a multi-user write: under SQLite's 999 bind
+# parameters before 3.32, with 3 per inserted role row.
+_IDS_PER_STATEMENT = 300
+
+
+def _chunks(ids: List[str]) -> Iterable[List[str]]:
+    for start in range(0, len(ids), _IDS_PER_STATEMENT):
+        yield ids[start:start + _IDS_PER_STATEMENT]
 
 
 class _PolicyRows:
@@ -714,35 +722,65 @@ class PermissionService:
         return removed + rows.delete_where('p', rows.c.v0 == user_id, rows.c.v2
                                            == '*')
 
-    def update_role(self, user_id: str, new_role: str) -> None:
-        """Replace every role held by a user with `new_role`."""
-        self.update_roles({user_id: new_role})
+    def update_role(self,
+                    user_id: str,
+                    new_role: str,
+                    existing_user_only: bool = False) -> bool:
+        """Replace every role held by a user with `new_role`. Returns False if
+        skipped for `existing_user_only` (see `update_roles`)."""
+        return not self.update_roles({user_id: new_role},
+                                     existing_users_only=existing_user_only)
 
-    def update_roles(self, roles: Dict[str, str]) -> None:
-        """Give each user exactly the role mapped to it, in one write."""
+    def update_roles(self,
+                     roles: Dict[str, str],
+                     existing_users_only: bool = False) -> List[str]:
+        """Give each user exactly the role mapped to it, in one write.
+
+        With `existing_users_only`, users without a record are skipped and
+        returned. The check shares the write's transaction and lock with
+        `delete_user_and_record`, so a user deleted after the caller's own
+        check is not given a role that a recreated user would inherit.
+        """
         if not roles:
-            return
+            return []
         with _policy_lock():
             with self._policy_transaction() as rows:
+                ids = sorted(roles)
+                missing: List[str] = []
+                if existing_users_only:
+                    users = global_user_state.user_table
+                    found = set()
+                    for chunk in _chunks(ids):
+                        found.update(
+                            rows.conn.execute(
+                                sqlalchemy.select(users.c.id).where(
+                                    users.c.id.in_(chunk))).scalars())
+                    missing = [
+                        user_id for user_id in ids if user_id not in found
+                    ]
+                    ids = [user_id for user_id in ids if user_id in found]
                 held: Dict[str, List[str]] = {}
-                for user_id, role in rows.select('g',
-                                                 rows.c.v0.in_(sorted(roles))):
-                    held.setdefault(user_id, []).append(role)
-                changed = sorted(user_id for user_id, role in roles.items()
-                                 if held.get(user_id) != [role])
+                for chunk in _chunks(ids):
+                    for user_id, role in rows.select('g', rows.c.v0.in_(chunk)):
+                        held.setdefault(user_id, []).append(role)
+                changed = [
+                    user_id for user_id in ids
+                    if held.get(user_id) != [roles[user_id]]
+                ]
                 # Replace, don't add: a user is only ever meant to hold one
                 # role, and a leftover `admin` would survive a demotion --
                 # silently restoring what the demotion took away, since the
                 # blocklist check lets admin win over the other role.
-                if changed:
-                    rows.delete_where('g', rows.c.v0.in_(changed))
-                rows.insert('g',
-                            [(user_id, roles[user_id]) for user_id in changed])
+                for chunk in _chunks(changed):
+                    rows.delete_where('g', rows.c.v0.in_(chunk))
+                    rows.insert(
+                        'g', [(user_id, roles[user_id]) for user_id in chunk])
             # Always invalidate a change: even a first role assignment can
             # grant workspace access that was previously denied and cached.
             for user_id in changed:
                 self._invalidate_after_write(
                     self.invalidate_user_permission_cache, user_id)
+        return missing
 
     @staticmethod
     def _invalidate_after_write(invalidate, key: str) -> None:
