@@ -2869,9 +2869,14 @@ class TestProbeThrottle:
         worker = policy_db()
         worker.enforcer.load_policy()
         loads = []
-        with mock.patch.object(worker,
-                               '_load_policy_no_lock',
-                               side_effect=lambda: loads.append(1)):
+
+        def slow_load():
+            # The cooldown is 9x the reload, so an instant stub buys a few
+            # microseconds and a slow runner reaches the second probe after.
+            loads.append(1)
+            time.sleep(0.05)
+
+        with mock.patch.object(worker, '_load_policy_no_lock', slow_load):
             worker._probe_unknown_principal('ghost1')
             worker._probe_unknown_principal('ghost2')
         assert len(loads) == 1, f'reloaded {len(loads)} times, expected 1'

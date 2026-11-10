@@ -59,7 +59,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
+                    Tuple, Union)
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -868,7 +869,7 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
         db_url = config.pop_nested(('db',), None)
         if db_url:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        if sky_logging.will_log(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{config_utils.dump_redacted_yaml(config)}')
     except yaml.YAMLError as e:
@@ -1009,7 +1010,7 @@ def _reload_config_as_server() -> None:
         db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
         if db_config:
             server_config = overlay_skypilot_config(server_config, db_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{config_utils.dump_redacted_yaml(server_config)}')
     _set_loaded_config(server_config)
@@ -1034,7 +1035,7 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(
             f'client config (before task and CLI overrides): \n'
             f'{config_utils.dump_redacted_yaml(overlaid_client_config)}')
@@ -1622,6 +1623,25 @@ def get_effective_queue_admission_timeout(
     return int(value)
 
 
+def get_effective_kai_value(
+        key: Literal['queue', 'preemptibility', 'topology',
+                     'required_topology_level', 'preferred_topology_level'],
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns a ``kubernetes.kai.<key>`` value, or None if unset.
+
+    Resolved with the same scope precedence as :func:`get_effective_queue_name`
+    (workspace over global, context over cloud), with ``override_configs`` (a
+    task's ``config`` block) merged in at every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='kubernetes',
+                                              property_keys=[('kai', key)],
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,
@@ -1656,7 +1676,7 @@ def register_queue_name_key(key: Tuple[str, ...]) -> None:
 
 @contextlib.contextmanager
 def remove_queue_name_from_config() -> Iterator[None]:
-    """Removes the local_queue_name from the config."""
+    """Removes the local_queue_name and the KAI config from the config."""
     config = to_dict()
 
     def pop_if_set(keys: Tuple[str, ...]) -> None:
@@ -1669,6 +1689,8 @@ def remove_queue_name_from_config() -> Iterator[None]:
                 # anything reading the config file pointed to by
                 # SKYPILOT_CONFIG while the override is active).
                 config.pop_nested(keys + queue_key, None)
+        # The whole block: its other keys are rejected without a KAI queue.
+        config.pop_nested(keys + ('kai',), None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
@@ -1734,7 +1756,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         list of key-value pairs.
     """
     parsed_config = _compose_cli_config(cli_config)
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+    if sky_logging.will_log(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
                      f'{config_utils.dump_redacted_yaml(parsed_config)}')
     _set_loaded_config(

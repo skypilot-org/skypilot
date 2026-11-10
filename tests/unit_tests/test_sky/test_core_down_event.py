@@ -2,7 +2,11 @@
 """
 import unittest.mock as mock
 
+import pytest
+
+from sky import backends
 from sky import core
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky.utils import common_utils
@@ -156,3 +160,22 @@ def test_stop_event_without_request_context(monkeypatch):
         'evt-test', status_lib.ClusterStatus.STOPPED,
         'Cluster was stopped by user.',
         global_user_state.ClusterEventType.STATUS_CHANGE)
+
+
+def test_stop_the_cloud_does_not_support_records_no_event(monkeypatch):
+    """The stop never started, so it must not read as the user's stop."""
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.launched_resources = mock.MagicMock()
+    cloud = handle.launched_resources.cloud
+    cloud.check_features_are_supported.side_effect = (
+        exceptions.NotSupportedError('no stop'))
+    backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
+    add_event = mock.MagicMock()
+    _patch_stop(monkeypatch, handle, backend, add_event)
+    monkeypatch.setattr(core, '_stop_not_supported_message', lambda r: 'x')
+
+    with pytest.raises(exceptions.NotSupportedError):
+        core.stop('evt-test')
+
+    add_event.assert_not_called()
+    backend.teardown.assert_not_called()

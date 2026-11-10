@@ -1233,14 +1233,40 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+    """Set a request to failed and populate the error message.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+    """
     set_exception_stacktrace(e)
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if request_task.status in RequestStatus.finished_status():
+            return
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()
         request_task.set_error(e)
+
+
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def transition_request_status_async(request_id: str,
+                                          from_statuses: List[RequestStatus],
+                                          status: RequestStatus) -> bool:
+    """Set a request's status only while it is in one of from_statuses.
+
+    Returns:
+        True if the request was transitioned; False if it is gone or in
+        another status, e.g. already cancelled.
+    """
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        if request_task is None or request_task.status not in from_statuses:
+            return False
+        request_task.status = status
+        request_task.status_msg = None
+        return True
 
 
 @metrics_lib.time_me_async
@@ -1283,10 +1309,16 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
                                       result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+    """Set a request to succeeded and populate the result.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+    """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if request_task.status in RequestStatus.finished_status():
+            return
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:

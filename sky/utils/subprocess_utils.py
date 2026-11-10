@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 import collections
+import contextvars
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -250,8 +251,15 @@ def run_in_parallel(func: Callable,
                  if num_threads is not None else get_parallel_threads())
     # len(args) is guaranteed to be greater than 1.
     processes = min(processes, len(args))
+    # Run each call in a copy of the caller's context, so that a request
+    # running in a thread of the API server keeps its env, config and user.
+    caller_ctx = contextvars.copy_context()
+
+    def run_in_caller_ctx(arg: Any) -> Any:
+        return caller_ctx.copy().run(func, arg)
+
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
+        ordered_iterators = p.imap(run_in_caller_ctx, args)
         return list(ordered_iterators)
 
 
