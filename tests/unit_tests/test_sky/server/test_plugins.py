@@ -559,6 +559,7 @@ def test_load_plugin_rbac_rules(monkeypatch, tmp_path):
         }]}))
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
     monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES', {})
+    monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES_COMPLETE', False)
 
     result = plugins.load_plugin_rbac_rules()
 
@@ -579,4 +580,30 @@ def test_load_plugin_rbac_rules(monkeypatch, tmp_path):
         }],
     }
     assert plugins.get_plugin_rbac_rules() == result
+    assert plugins.plugin_rbac_rules_complete()
     assert not installed
+
+
+def test_plugin_rbac_rules_incomplete_when_a_plugin_fails(
+        monkeypatch, tmp_path):
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(
+        yaml.safe_dump(
+            {'plugins': [{
+                'class': 'no_such_module_for_rbac_test.Plugin'
+            }]}))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES', {})
+    monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES_COMPLETE', True)
+
+    assert plugins.load_plugin_rbac_rules() == {}
+    assert not plugins.plugin_rbac_rules_complete()
+
+
+def test_plugin_rbac_rules_complete_without_plugins(monkeypatch, tmp_path):
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(tmp_path / 'missing.yaml'))
+    monkeypatch.setattr(plugins, '_PLUGIN_RBAC_RULES_COMPLETE', False)
+
+    assert plugins.load_plugin_rbac_rules() == {}
+    assert plugins.plugin_rbac_rules_complete()

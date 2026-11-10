@@ -337,6 +337,48 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.set_user_password')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @pytest.mark.asyncio
+    async def test_password_update_of_a_user_deleted_meanwhile_fails(
+            self, mock_update_role, mock_set_user_password, mock_get_user,
+            mock_get_supported_roles, mock_request):
+        """The password write finds no user; nothing is written."""
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_user.return_value = models.User(id='test_user', name='Test')
+        mock_set_user_password.return_value = False
+        mock_request.state.auth_user = None
+
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            server.user_update(
+                mock_request,
+                payloads.UserUpdateBody(user_id='test_user',
+                                        role='admin',
+                                        password='new-password'))
+        assert exc_info.value.status_code == 400
+        mock_update_role.assert_not_called()
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @pytest.mark.asyncio
+    async def test_user_update_of_a_user_deleted_meanwhile_fails(
+            self, mock_update_role, mock_get_user, mock_get_supported_roles,
+            mock_request):
+        """The user is deleted after the lookup; the role write skips it."""
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_user.return_value = models.User(id='test_user', name='Test')
+        mock_update_role.return_value = False
+        mock_request.state.auth_user = None
+
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            server.user_update(
+                mock_request,
+                payloads.UserUpdateBody(user_id='test_user', role='admin'))
+        assert exc_info.value.status_code == 400
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @pytest.mark.asyncio
     async def test_user_update_success_update_role(self, mock_update_role,
@@ -358,15 +400,17 @@ class TestUsersEndpoints:
         # Verify
         assert result is None  # Function returns None on success
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.set_user_password')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @pytest.mark.asyncio
     async def test_user_update_success(self, mock_update_role,
-                                       mock_add_or_update_user, mock_get_user,
+                                       mock_set_user_password, mock_get_user,
                                        mock_get_supported_roles, mock_request):
         """Test successful POST /users/update endpoint."""
         # Setup
@@ -389,13 +433,13 @@ class TestUsersEndpoints:
         assert result is None  # Function returns None on success
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
-        args, kwargs = mock_add_or_update_user.call_args
-        user_obj = args[0]
-        assert user_obj.id == 'test_user'
-        assert user_obj.name == 'Test User'
-        assert server_common.crypt_ctx.identify(user_obj.password) is not None
-        assert user_obj.password != new_password
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
+        user_id, password_hash = mock_set_user_password.call_args.args
+        assert user_id == 'test_user'
+        assert server_common.crypt_ctx.identify(password_hash) is not None
+        assert password_hash != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
@@ -467,7 +511,9 @@ class TestUsersEndpoints:
         assert 'Database error' in str(exc_info.value)
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.global_user_state.get_all_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -636,11 +682,10 @@ class TestUsersEndpoints:
             exc_info.value.detail)
 
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.delete_user')
-    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user_and_record'
+               )
     @pytest.mark.asyncio
-    async def test_user_delete_success(self, mock_delete_user_role,
-                                       mock_delete_user, mock_get_user,
+    async def test_user_delete_success(self, mock_delete_user, mock_get_user,
                                        mock_request):
         """Test successful POST /users/delete endpoint."""
         # Setup
@@ -655,8 +700,8 @@ class TestUsersEndpoints:
         # Verify
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
+        # Removes the record together with the role and grants.
         mock_delete_user.assert_called_once_with('test_user')
-        mock_delete_user_role.assert_called_once_with('test_user')
 
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
@@ -677,11 +722,11 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.set_user_password')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
     async def test_user_update_password_admin_success(self, mock_get_user_roles,
-                                                      mock_add_or_update_user,
+                                                      mock_set_user_password,
                                                       mock_get_user,
                                                       mock_get_supported_roles,
                                                       mock_request):
@@ -705,22 +750,20 @@ class TestUsersEndpoints:
         # Verify
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
-        mock_add_or_update_user.assert_called_once()
+        mock_set_user_password.assert_called_once()
         # Check password hash
-        args, kwargs = mock_add_or_update_user.call_args
-        user_obj = args[0]
-        assert user_obj.id == 'test_user'
-        assert user_obj.name == 'Test User'
-        assert server_common.crypt_ctx.identify(user_obj.password) is not None
-        assert user_obj.password != new_password
+        user_id, password_hash = mock_set_user_password.call_args.args
+        assert user_id == 'test_user'
+        assert server_common.crypt_ctx.identify(password_hash) is not None
+        assert password_hash != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.set_user_password')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
     async def test_user_update_password_self_success(self, mock_get_user_roles,
-                                                     mock_add_or_update_user,
+                                                     mock_set_user_password,
                                                      mock_get_user,
                                                      mock_get_supported_roles,
                                                      mock_request):
@@ -743,14 +786,12 @@ class TestUsersEndpoints:
         # Verify
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
-        mock_add_or_update_user.assert_called_once()
+        mock_set_user_password.assert_called_once()
         # Check password hash
-        args, kwargs = mock_add_or_update_user.call_args
-        user_obj = args[0]
-        assert user_obj.id == 'test_user'
-        assert user_obj.name == 'Test User'
-        assert server_common.crypt_ctx.identify(user_obj.password) is not None
-        assert user_obj.password != new_password
+        user_id, password_hash = mock_set_user_password.call_args.args
+        assert user_id == 'test_user'
+        assert server_common.crypt_ctx.identify(password_hash) is not None
+        assert password_hash != new_password
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -838,14 +879,13 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.set_user_password')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @pytest.mark.asyncio
     async def test_user_update_role_and_password_admin_success(
-            self, mock_update_role, mock_get_user_roles,
-            mock_add_or_update_user, mock_get_user, mock_get_supported_roles,
-            mock_request):
+            self, mock_update_role, mock_get_user_roles, mock_set_user_password,
+            mock_get_user, mock_get_supported_roles, mock_request):
         """Test successful combined role and password update by admin."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
@@ -867,15 +907,15 @@ class TestUsersEndpoints:
         # Verify
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
-        mock_add_or_update_user.assert_called_once()
-        mock_update_role.assert_called_once_with('test_user', 'user')
+        mock_set_user_password.assert_called_once()
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'user',
+                                                 existing_user_only=True)
         # Check password hash
-        args, kwargs = mock_add_or_update_user.call_args
-        user_obj = args[0]
-        assert user_obj.id == 'test_user'
-        assert user_obj.name == 'Test User'
-        assert server_common.crypt_ctx.identify(user_obj.password) is not None
-        assert user_obj.password != new_password
+        user_id, password_hash = mock_set_user_password.call_args.args
+        assert user_id == 'test_user'
+        assert server_common.crypt_ctx.identify(password_hash) is not None
+        assert password_hash != new_password
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -920,7 +960,8 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.global_user_state.delete_user')
-    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user_and_record'
+               )
     @pytest.mark.asyncio
     async def test_user_delete_forbidden_internal_users(self,
                                                         mock_delete_user_role,
