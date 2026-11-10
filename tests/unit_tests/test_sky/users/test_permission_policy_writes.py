@@ -1,0 +1,692 @@
+"""Multi-row policy writes commit once, and no reader sees one half done.
+
+Each test runs on SQLite, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
+"""
+# pylint: disable=protected-access,redefined-outer-name
+import contextlib
+import copy
+import os
+import sqlite3
+from unittest import mock
+
+import casbin
+import pytest
+import sqlalchemy
+import sqlalchemy_adapter
+
+from sky import global_user_state
+from sky import models
+from sky import skypilot_config
+from sky.users import permission
+from sky.utils.db import migration_utils
+from sky.workspaces import core
+
+_PG_URL = os.environ.get('SKYPILOT_TEST_PG_URL')
+_PG_SCHEMA = 'rbac_policy_writes_test'
+
+
+@pytest.fixture(params=[
+    'sqlite',
+    pytest.param('postgres',
+                 marks=[
+                     pytest.mark.skipif(
+                         not _PG_URL, reason='SKYPILOT_TEST_PG_URL is not set'),
+                     pytest.mark.xdist_group('rbac_policy_writes_pg')
+                 ])
+])
+def engine(request, tmp_path):
+    """A global_user_state database migrated by the real migrations."""
+    if request.param == 'sqlite':
+        url = sqlalchemy.engine.make_url(f'sqlite:///{tmp_path}/state.db')
+    else:
+        pg_url = sqlalchemy.engine.make_url(_PG_URL).set(
+            drivername='postgresql+psycopg2')
+        admin = sqlalchemy.create_engine(pg_url)
+        with admin.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(f'DROP SCHEMA IF EXISTS {_PG_SCHEMA} CASCADE'))
+            conn.execute(sqlalchemy.text(f'CREATE SCHEMA {_PG_SCHEMA}'))
+        admin.dispose()
+        url = pg_url.update_query_dict(
+            {'options': f'-csearch_path={_PG_SCHEMA}'})
+    migration_utils.safe_alembic_upgrade(
+        sqlalchemy.create_engine(url),
+        migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
+    engine = sqlalchemy.create_engine(url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def service(engine, monkeypatch):
+    """A PermissionService over `engine`, built as an API-server process does.
+    """
+    monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
+                        lambda: engine)
+    monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
+    monkeypatch.setattr(permission, '_enforcer_instance', None)
+    monkeypatch.setattr(permission.rbac, 'get_default_role', lambda: 'user')
+    for name in ('invalidate_user_permission_cache',
+                 'invalidate_workspace_permission_cache'):
+        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
+    service = permission.PermissionService()
+    service._lazy_initialize()
+    return service
+
+
+def _is_policy_write(statement):
+    return (statement.lstrip().upper().startswith(
+        ('INSERT', 'DELETE', 'UPDATE')) and 'casbin_rule' in statement)
+
+
+@contextlib.contextmanager
+def _policy_commits(engine):
+    """Counts committed transactions that wrote to casbin_rule."""
+    counts = {'commits': 0}
+
+    def _after(conn, cursor, statement, *args):  # pylint: disable=unused-argument
+        if _is_policy_write(statement):
+            conn.info['wrote_policy'] = True
+
+    def _commit(conn):
+        if conn.info.pop('wrote_policy', False):
+            counts['commits'] += 1
+
+    def _rollback(conn):
+        conn.info.pop('wrote_policy', None)
+
+    events = (('after_cursor_execute', _after), ('commit', _commit),
+              ('rollback', _rollback))
+    for name, fn in events:
+        sqlalchemy.event.listen(engine, name, fn)
+    try:
+        yield counts
+    finally:
+        for name, fn in events:
+            sqlalchemy.event.remove(engine, name, fn)
+
+
+@contextlib.contextmanager
+def _seen_by_reader(engine, query):
+    """What another connection reads after each policy write statement."""
+    reader = sqlalchemy.create_engine(engine.url)
+    seen = []
+
+    def _after(conn, cursor, statement, *args):  # pylint: disable=unused-argument
+        if _is_policy_write(statement):
+            with reader.connect() as reader_conn:
+                seen.append({tuple(row) for row in reader_conn.execute(query)})
+
+    sqlalchemy.event.listen(engine, 'after_cursor_execute', _after)
+    try:
+        yield seen
+    finally:
+        sqlalchemy.event.remove(engine, 'after_cursor_execute', _after)
+        reader.dispose()
+
+
+def _rows(engine, ptype, where=''):
+    width = 2 if ptype == 'g' else 3
+    fields = ', '.join(f'v{i}' for i in range(width))
+    with engine.connect() as conn:
+        return {
+            tuple(row) for row in conn.execute(
+                sqlalchemy.text(f'SELECT {fields} FROM casbin_rule '
+                                f'WHERE ptype = \'{ptype}\' {where}'))
+        }
+
+
+def _insert(engine, ptype, *rules):
+    """A write by something other than PermissionService."""
+    with engine.begin() as conn:
+        for rule in rules:
+            fields = ', '.join(f'v{i}' for i in range(len(rule)))
+            values = ', '.join(f'\'{v}\'' for v in rule)
+            conn.execute(
+                sqlalchemy.text(f'INSERT INTO casbin_rule (ptype, {fields}) '
+                                f'VALUES (\'{ptype}\', {values})'))
+
+
+def _members(engine, workspace_name):
+    return {
+        user for user, _, _ in _rows(
+            engine, 'p', f'AND v1 = \'{workspace_name}\' AND v2 = \'*\'')
+    }
+
+
+_MEMBERS_OF_WS = sqlalchemy.text(
+    'SELECT v0 FROM casbin_rule WHERE ptype = \'p\' AND v1 = \'ws\' '
+    'AND v2 = \'*\'')
+_ALICE_ROLES = sqlalchemy.text(
+    'SELECT v1 FROM casbin_rule WHERE ptype = \'g\' AND v0 = \'alice\'')
+
+
+def test_member_update_commits_once_and_keeps_staying_members(service, engine):
+    service.update_workspace_policy('ws', ['alice', 'bob'])
+
+    with _policy_commits(engine) as counts, \
+            _seen_by_reader(engine, _MEMBERS_OF_WS) as seen:
+        service.update_workspace_policy('ws', ['bob', 'carol'])
+
+    # Before the commit another connection still sees the old members.
+    assert seen and all(members == {('alice',), ('bob',)} for members in seen)
+    assert counts['commits'] == 1
+    assert _members(engine, 'ws') == {'bob', 'carol'}
+    assert service.enforcer.enforce('carol', 'ws', '*')
+    assert not service.enforcer.enforce('alice', 'ws', '*')
+
+
+def test_unchanged_members_write_nothing(service, engine):
+    service.update_workspace_policy('ws', ['alice', 'bob'])
+    service.invalidate_workspace_permission_cache.reset_mock()
+
+    with _policy_commits(engine) as counts:
+        service.update_workspace_policy('ws', ['bob', 'alice'])
+
+    assert counts['commits'] == 0
+    service.invalidate_workspace_permission_cache.assert_not_called()
+
+
+def test_member_sync_leaves_other_rows_alone(service, engine):
+    _insert(engine, 'p', ('user', '/workspaces/ws', 'POST'),
+            ('alice', 'other', '*'))
+    service.sync_workspace_members({'ws': ['bob']})
+    assert _rows(engine, 'p') == {('user', '/workspaces/ws', 'POST'),
+                                  ('alice', 'other', '*'), ('bob', 'ws', '*')}
+
+
+def test_full_sync_removes_members_of_unconfigured_workspaces(service, engine):
+    _insert(engine, 'p', ('alice', 'gone', '*'), ('*', 'gone', '*'),
+            ('user', '/admin/*', '*'), ('carol', 'unresolved', '*'))
+    service.sync_workspace_members({'ws': ['bob']},
+                                   all_workspaces=['ws', 'unresolved'])
+    # A role's blocklist rule and an unresolved configured workspace stay.
+    assert _rows(engine, 'p') == {('bob', 'ws', '*'), ('user', '/admin/*', '*'),
+                                  ('carol', 'unresolved', '*')}
+
+
+def test_role_change_commits_once_and_never_leaves_no_role(service, engine):
+    service.update_role('alice', 'user')
+
+    with _policy_commits(engine) as counts, \
+            _seen_by_reader(engine, _ALICE_ROLES) as seen:
+        service.update_role('alice', 'admin')
+
+    assert seen and all(roles == {('user',)} for roles in seen)
+    assert counts['commits'] == 1
+    assert _rows(engine, 'g', 'AND v0 = \'alice\'') == {('alice', 'admin')}
+    assert service.get_user_roles('alice') == ['admin']
+
+
+def test_role_change_drops_every_extra_role(service, engine):
+    _insert(engine, 'g', ('alice', 'admin'), ('alice', 'user'),
+            ('alice', 'user'))
+    service.update_role('alice', 'viewer')
+    assert service.get_user_roles('alice') == ['viewer']
+
+
+def test_batch_role_update_commits_once(service, engine):
+    users = [f'u{i}' for i in range(50)]
+    service.update_roles({user: 'user' for user in users})
+
+    service.invalidate_user_permission_cache.reset_mock()
+    with _policy_commits(engine) as counts:
+        service.update_roles({user: 'viewer' for user in users})
+
+    assert counts['commits'] == 1
+    assert _rows(engine, 'g') == {(user, 'viewer') for user in users}
+    assert {
+        call.args[0]
+        for call in service.invalidate_user_permission_cache.call_args_list
+    } == set(users)
+
+
+def test_add_workspace_policy_adds_only_missing_members(service, engine):
+    service.add_workspace_policy('ws', ['alice'])
+    with _policy_commits(engine) as counts:
+        service.add_workspace_policy('ws', ['alice', 'bob', 'bob'])
+    assert counts['commits'] == 1
+    assert _rows(engine, 'p') == {('alice', 'ws', '*'), ('bob', 'ws', '*')}
+
+
+def test_writes_land_in_the_enforcers_own_database(tmp_path, monkeypatch):
+    # An enforcer set up outside `_lazy_initialize`, on its own database.
+    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/casbin.db')
+    service = permission.PermissionService()
+    service.enforcer = casbin.SyncedEnforcer(
+        os.path.join(os.path.dirname(permission.__file__), 'model.conf'),
+        sqlalchemy_adapter.Adapter(engine))
+    monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
+                        mock.Mock(side_effect=AssertionError('wrong database')))
+    monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
+    for name in ('invalidate_user_permission_cache',
+                 'invalidate_workspace_permission_cache'):
+        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
+
+    service.update_role('alice', 'user')
+    service.update_workspace_policy('ws', ['alice'])
+
+    assert service.get_user_roles('alice') == ['user']
+    assert service.enforcer.enforce('alice', 'ws', '*')
+    assert _members(engine, 'ws') == {'alice'}
+
+
+def test_cache_is_cleared_when_the_reload_after_a_write_fails(
+        service, engine, monkeypatch):
+    service.update_workspace_policy('ws', ['alice'])
+    service.invalidate_workspace_permission_cache.reset_mock()
+    monkeypatch.setattr(service, '_load_policy_no_lock',
+                        mock.Mock(side_effect=RuntimeError('reload failed')))
+
+    service.update_workspace_policy('ws', ['bob'])
+
+    assert _members(engine, 'ws') == {'bob'}
+    service.invalidate_workspace_permission_cache.assert_called_once_with('ws')
+
+
+@pytest.mark.parametrize('cache_fails', [False, True])
+def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch,
+                                                cache_fails):
+    service.add_workspace_policy('ws-a', ['alice'])
+    if cache_fails:
+        # The grant is committed; a failed clear must not fail the caller.
+        service.invalidate_user_permission_cache.side_effect = RuntimeError(
+            'cache down')
+    workspaces = {
+        name: {
+            'private': True,
+            'allowed_users': ['alice']
+        } for name in ('ws-a', 'ws-b')
+    }
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda *a, **k: copy.deepcopy(workspaces))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        lambda *a, **k: contextlib.nullcontext())
+    resolver = mock.Mock()
+    resolver.entries_for.return_value = ['alice']
+    with mock.patch('sky.users.resolver.UserResolver', return_value=resolver):
+        service.resync_workspace_policies_for_new_user('alice')
+    assert _rows(engine, 'p') == {('alice', 'ws-a', '*'),
+                                  ('alice', 'ws-b', '*')}
+
+
+def _startup_patches(monkeypatch, service, rules_complete):
+    monkeypatch.setattr(
+        permission.rbac, 'get_role_permissions', lambda **_: {
+            'user': {
+                'permissions': {
+                    'blocklist': [{
+                        'path': '/a',
+                        'method': 'POST'
+                    }, {
+                        'path': '/b',
+                        'method': 'POST'
+                    }]
+                }
+            }
+        })
+    monkeypatch.setattr(permission.rbac, 'get_workspace_policy_permissions',
+                        lambda: {'default': ['*']})
+    monkeypatch.setattr(service, '_get_plugin_rbac_rules', lambda: {})
+    monkeypatch.setattr(service, '_plugin_rbac_rules_complete',
+                        lambda: rules_complete)
+    monkeypatch.setattr(permission.global_user_state, 'add_or_update_user',
+                        mock.Mock())
+    monkeypatch.setattr(permission.global_user_state, 'get_all_users',
+                        lambda: [models.User(id='bob', name='bob')])
+
+
+def test_startup_sync_commits_once_and_matches_expected(service, engine,
+                                                        monkeypatch):
+    _startup_patches(monkeypatch, service, rules_complete=True)
+    _insert(engine, 'p', ('user', '/a', 'POST'), ('user', '/old', 'POST'),
+            ('alice', 'gone', '*'))
+
+    with _policy_commits(engine) as counts:
+        service._maybe_initialize_policies()
+
+    assert counts['commits'] == 1
+    assert _rows(engine, 'p') == {('user', '/a', 'POST'),
+                                  ('user', '/b', 'POST'), ('*', 'default', '*')}
+    roles = dict(_rows(engine, 'g'))
+    assert roles['bob'] == 'user'
+    for user_id, role in permission._system_user_roles().items():
+        assert roles[user_id] == role
+
+
+@pytest.mark.parametrize('rules_complete', [True, False])
+def test_startup_keeps_role_rules_when_plugin_rules_failed(
+        service, engine, monkeypatch, rules_complete):
+    _startup_patches(monkeypatch, service, rules_complete)
+    plugin_rule = ('user', '/plugins/api/thing', 'POST')
+    _insert(engine, 'p', plugin_rule, ('alice', 'gone', '*'))
+
+    service._maybe_initialize_policies()
+
+    rows = _rows(engine, 'p')
+    # Without every plugin's rules, a missing rule may be one of theirs.
+    assert (plugin_rule in rows) is not rules_complete
+    assert ('alice', 'gone', '*') not in rows
+
+
+def _add_user_row(engine, user_id):
+    users = global_user_state.user_table
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.insert(users).values(id=user_id, name=user_id))
+
+
+def _user_row_exists(engine, user_id):
+    users = global_user_state.user_table
+    with engine.connect() as conn:
+        return conn.execute(
+            sqlalchemy.select(
+                users.c.id).where(users.c.id == user_id)).first() is not None
+
+
+def test_delete_user_keeps_the_record(service, engine):
+    _add_user_row(engine, 'bob')
+    service.update_role('bob', 'admin')
+    service.delete_user('bob')
+    assert _user_row_exists(engine, 'bob')
+    assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
+
+
+@pytest.mark.parametrize('write', [
+    'delete_user', 'delete_user_and_record', 'add_workspace_policy',
+    'remove_workspace_policy'
+])
+def test_a_failed_cache_clear_does_not_fail_a_committed_write(
+        service, engine, write):
+    """A raise after the commit would report a done write as failed, and a
+    retry of a delete then finds no user."""
+    _add_user_row(engine, 'bob')
+    service.update_role('bob', 'user')
+    service.add_workspace_policy('ws', ['alice'])
+    for name in ('invalidate_user_permission_cache',
+                 'invalidate_workspace_permission_cache'):
+        getattr(service, name).side_effect = RuntimeError('cache down')
+
+    if write == 'add_workspace_policy':
+        service.add_workspace_policy('ws', ['bob'])
+        assert _members(engine, 'ws') == {'alice', 'bob'}
+        service.invalidate_workspace_permission_cache.assert_called_with('ws')
+    elif write == 'remove_workspace_policy':
+        service.remove_workspace_policy('ws')
+        assert _members(engine, 'ws') == set()
+        service.invalidate_workspace_permission_cache.assert_called_with('ws')
+    else:
+        getattr(service, write)('bob')
+        assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
+        assert _user_row_exists(engine, 'bob') == (write == 'delete_user')
+        service.invalidate_user_permission_cache.assert_called_with('bob')
+
+
+def test_delete_user_and_record_is_one_transaction(service, engine):
+    _add_user_row(engine, 'bob')
+    service.update_role('bob', 'admin')
+    service.add_workspace_policy('private', ['bob'])
+
+    def _fail_policy_delete(conn, cursor, statement, *args):  # pylint: disable=unused-argument
+        if statement.lstrip().upper().startswith('DELETE') and ('casbin_rule'
+                                                                in statement):
+            raise RuntimeError('policy delete failed')
+
+    sqlalchemy.event.listen(engine, 'before_cursor_execute',
+                            _fail_policy_delete)
+    try:
+        with pytest.raises(Exception, match='policy delete failed'):
+            service.delete_user_and_record('bob')
+    finally:
+        sqlalchemy.event.remove(engine, 'before_cursor_execute',
+                                _fail_policy_delete)
+    assert _user_row_exists(engine, 'bob')
+    assert _rows(engine, 'g', 'AND v0 = \'bob\'') == {('bob', 'admin')}
+
+    service.delete_user_and_record('bob')
+    assert not _user_row_exists(engine, 'bob')
+    assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
+    assert _rows(engine, 'p', 'AND v0 = \'bob\'') == set()
+
+    # A user recreated with the same id starts clean.
+    service.add_user_if_not_exists('bob')
+    assert service.get_user_roles('bob') == ['user']
+    assert not service.enforcer.enforce('bob', 'private', '*')
+
+
+def test_a_user_deleted_before_the_role_write_gets_no_role(service, engine):
+    """The caller found both users; one is deleted before its write. A role
+    left behind would be inherited by a user recreated under the same id."""
+    for user_id in ('alice', 'bob'):
+        _add_user_row(engine, user_id)
+    service.update_roles({'alice': 'user', 'bob': 'user'})
+    service.delete_user_and_record('bob')
+
+    roles = {'alice': 'admin', 'bob': 'admin'}
+    missing = service.update_roles(roles, existing_users_only=True)
+
+    assert missing == ['bob']
+    assert _rows(engine, 'g') == {('alice', 'admin')}
+
+
+@pytest.mark.skipif(not hasattr(sqlite3.Connection, 'setlimit'),
+                    reason='needs Python 3.11+')
+def test_get_users_fits_old_sqlite_variable_limit(engine, monkeypatch):
+    """The batch promotion path looks up every user before writing roles."""
+    if engine.dialect.name != 'sqlite':
+        pytest.skip('SQLite only')
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: engine)
+    users = [f'u{i:04d}' for i in range(1200)]
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.insert(global_user_state.user_table), [{
+            'id': user,
+            'name': user
+        } for user in users])
+
+    def _limit(dbapi_conn, *args):  # pylint: disable=unused-argument
+        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+    sqlalchemy.event.listen(engine, 'checkout', _limit)
+    try:
+        found = global_user_state.get_users(set(users) | {'ghost'})
+    finally:
+        sqlalchemy.event.remove(engine, 'checkout', _limit)
+    assert sorted(found) == users
+
+
+def test_update_role_reports_a_user_without_a_record(service, engine):
+    _add_user_row(engine, 'alice')
+    assert service.update_role('ghost', 'admin',
+                               existing_user_only=True) is False
+    assert service.update_role('alice', 'admin',
+                               existing_user_only=True) is True
+    assert _rows(engine, 'g') == {('alice', 'admin')}
+
+
+def test_a_password_update_never_recreates_a_deleted_user(engine, monkeypatch):
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: engine)
+    _add_user_row(engine, 'alice')
+    assert global_user_state.set_user_password('alice', 'new-hash')
+    assert not global_user_state.set_user_password('bob', 'new-hash')
+    assert not _user_row_exists(engine, 'bob')
+    users = global_user_state.user_table
+    with engine.connect() as conn:
+        assert conn.execute(
+            sqlalchemy.select(users.c.password).where(
+                users.c.id == 'alice')).scalar() == 'new-hash'
+
+
+@pytest.mark.skipif(not hasattr(sqlite3.Connection, 'setlimit'),
+                    reason='needs Python 3.11+')
+def test_a_large_role_write_fits_old_sqlite_variable_limit(service, engine):
+    """SQLite before 3.32 allows 999 bound variables per statement."""
+    if engine.dialect.name != 'sqlite':
+        pytest.skip('SQLite only')
+    users = [f'u{i:04d}' for i in range(1200)]
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.insert(global_user_state.user_table), [{
+            'id': user,
+            'name': user
+        } for user in users])
+    enforcer = service._ensure_enforcer()
+    policy_engine = getattr(enforcer, '_e', enforcer).get_adapter()._engine
+
+    def _limit(dbapi_conn, *args):  # pylint: disable=unused-argument
+        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+    sqlalchemy.event.listen(policy_engine, 'checkout', _limit)
+    try:
+        with _policy_commits(policy_engine) as counts:
+            missing = service.update_roles({user: 'viewer' for user in users},
+                                           existing_users_only=True)
+    finally:
+        sqlalchemy.event.remove(policy_engine, 'checkout', _limit)
+
+    assert missing == []
+    assert counts['commits'] == 1
+    assert _rows(engine, 'g') == {(user, 'viewer') for user in users}
+
+
+@pytest.fixture
+def store(service, monkeypatch):
+    """An in-memory config store behind the real config save path, with the
+    real policy writes on `service`."""
+    store = {'workspaces': {}}
+
+    def get_nested(keys, default_value=None, **kwargs):
+        del kwargs
+        value = store
+        for key in keys:
+            if not isinstance(value, dict) or key not in value:
+                return default_value
+            value = value[key]
+        return copy.deepcopy(value)
+
+    def save(config):
+        store.clear()
+        store.update(copy.deepcopy(dict(config)))
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
+    monkeypatch.setattr(skypilot_config, '_get_loaded_config', lambda: store)
+    monkeypatch.setattr(skypilot_config, 'to_dict',
+                        lambda: copy.deepcopy(store))
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+    monkeypatch.setattr(skypilot_config, 'update_api_server_config_no_lock',
+                        save)
+    monkeypatch.setattr(skypilot_config, 'get_skypilot_config_lock',
+                        lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(core.resource_checker,
+                        'check_no_active_resources_for_workspaces',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(core, '_validate_workspace_config_changes_with_lock',
+                        lambda *a, **k: None)
+
+    def get_workspace_users(config, resolver=None):
+        del resolver
+        users = config.get('allowed_users', [])
+        if 'ambiguous' in users:
+            raise ValueError('ambiguous matches several users')
+        return users if config.get('private') else ['*']
+
+    monkeypatch.setattr(core.workspaces_utils, 'get_workspace_users',
+                        get_workspace_users)
+    monkeypatch.setattr(core.user_resolver, 'UserResolver', mock.Mock)
+    monkeypatch.setattr(core.permission, 'permission_service', service)
+    return store
+
+
+def _private(*users):
+    return {'private': True, 'allowed_users': list(users)}
+
+
+def test_retried_config_save_repairs_a_failed_policy_write(
+        store, service, engine, monkeypatch):
+    core.update_config({'workspaces': {'ws': _private('alice', 'bob')}})
+    assert _members(engine, 'ws') == {'alice', 'bob'}
+
+    new_config = {'workspaces': {'ws': _private('bob')}}
+    sync = service.sync_workspace_members
+    monkeypatch.setattr(service, 'sync_workspace_members',
+                        mock.Mock(side_effect=RuntimeError('lock timeout')))
+    with pytest.raises(RuntimeError):
+        core.update_config(new_config)
+    # The config was saved; its policy write was not.
+    assert store['workspaces']['ws'] == _private('bob')
+    assert _members(engine, 'ws') == {'alice', 'bob'}
+
+    monkeypatch.setattr(service, 'sync_workspace_members', sync)
+    core.update_config(copy.deepcopy(new_config))
+    assert _members(engine, 'ws') == {'bob'}
+
+
+def test_config_save_writes_every_workspace_in_one_transaction(
+        store, engine, monkeypatch):
+    core.update_config(
+        {'workspaces': {f'ws{i}': _private('alice') for i in range(5)}})
+    locks_taken = []
+
+    @contextlib.contextmanager
+    def _counting_lock():
+        locks_taken.append(1)
+        yield
+
+    monkeypatch.setattr(permission, '_policy_lock', _counting_lock)
+    new_workspaces = {f'ws{i}': _private('bob') for i in range(1, 6)}
+    with _policy_commits(engine) as counts:
+        core.update_config({'workspaces': new_workspaces})
+
+    assert len(locks_taken) == 1
+    assert counts['commits'] == 1
+    assert _members(engine, 'ws0') == set()
+    for name in new_workspaces:
+        assert _members(engine, name) == {'bob'}
+    assert _members(engine, 'default') == {'*'}
+
+
+def test_unresolvable_untouched_workspace_keeps_its_members(store, engine):
+    core.update_config({'workspaces': {'x': _private('alice')}})
+    store['workspaces']['x'] = _private('ambiguous')
+
+    core.update_config(
+        {'workspaces': {
+            'x': _private('ambiguous'),
+            'y': _private('bob')
+        }})
+
+    assert _members(engine, 'x') == {'alice'}
+    assert _members(engine, 'y') == {'bob'}
+
+
+def test_unresolvable_changed_workspace_fails_before_saving(store, engine):
+    core.update_config({'workspaces': {'x': _private('alice')}})
+
+    with pytest.raises(ValueError, match='ambiguous'):
+        core.update_config({'workspaces': {'x': _private('ambiguous')}})
+
+    assert store['workspaces']['x'] == _private('alice')
+    assert _members(engine, 'x') == {'alice'}
+
+
+def test_retried_save_removes_members_of_a_deleted_workspace(
+        store, service, engine, monkeypatch):
+    core.update_config(
+        {'workspaces': {
+            'old': _private('alice'),
+            'ws': _private('bob')
+        }})
+    new_config = {'workspaces': {'ws': _private('bob')}}
+    sync = service.sync_workspace_members
+    monkeypatch.setattr(service, 'sync_workspace_members',
+                        mock.Mock(side_effect=RuntimeError('lock timeout')))
+    with pytest.raises(RuntimeError):
+        core.update_config(new_config)
+    assert _members(engine, 'old') == {'alice'}
+
+    monkeypatch.setattr(service, 'sync_workspace_members', sync)
+    core.update_config(copy.deepcopy(new_config))
+    assert _members(engine, 'old') == set()
+    assert _members(engine, 'ws') == {'bob'}
