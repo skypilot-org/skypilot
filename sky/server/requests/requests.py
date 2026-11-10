@@ -187,6 +187,12 @@ def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
     return orjson.dumps(None).decode('utf-8')
 
 
+def _entrypoint_name(entrypoint: Callable[..., Any]) -> str:
+    # An execution policy may record a wrapper, e.g. a functools.partial,
+    # that has no __name__.
+    return getattr(entrypoint, '__name__', type(entrypoint).__name__)
+
+
 def validate_fields(fields: Optional[List[str]]) -> None:
     """Validates a caller-supplied column list for a request query.
 
@@ -348,7 +354,7 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
+            entrypoint=_entrypoint_name(self.entrypoint),
             request_body=_request_body_for_display(self.request_body,
                                                    self.user_id,
                                                    caller_user_id),
@@ -494,7 +500,7 @@ def encode_requests(
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
+            entrypoint=_entrypoint_name(request.entrypoint)
             if request.entrypoint is not None else '',
             request_body=_request_body_for_display(
                 request.request_body, request.user_id, caller_user_id)
