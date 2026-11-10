@@ -1,8 +1,5 @@
 """Unit tests for /users/batch_update and the admin demotion check."""
 
-import contextlib
-import time
-import types
 from unittest import mock
 
 import fastapi
@@ -32,7 +29,6 @@ def _mk_user(user_id, name='User'):
 class TestUserBatchUpdate:
     """Tests for POST /users/batch_update."""
 
-    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -41,10 +37,7 @@ class TestUserBatchUpdate:
     def test_promote_two_users_to_admin(self, mock_get_users,
                                         mock_get_users_for_role,
                                         mock_get_user_roles, mock_update_roles,
-                                        mock_demotion_check, mock_user_lock,
-                                        admin_request):
-        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
-                                                     __exit__=mock.MagicMock())
+                                        mock_demotion_check, admin_request):
         # Promotion path uses get_users(set(user_ids)), which returns
         # {id -> User}.
         mock_get_users.return_value = {
@@ -69,50 +62,13 @@ class TestUserBatchUpdate:
         # Promotions never trigger the demotion check.
         mock_demotion_check.assert_not_called()
 
-    @mock.patch('sky.users.server._user_lock')
-    @mock.patch('sky.users.permission.permission_service.update_roles')
-    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_users')
-    def test_lock_timeout_fails_only_that_user(self, mock_get_users,
-                                               mock_get_users_for_role,
-                                               mock_update_roles,
-                                               mock_user_lock, admin_request):
-
-        def _lock(user_id, timeout=None):  # pylint: disable=unused-argument
-            if user_id == 'u2':
-                raise RuntimeError('Failed to update user due to a timeout')
-            return mock.MagicMock(__enter__=mock.MagicMock(),
-                                  __exit__=mock.MagicMock())
-
-        mock_user_lock.side_effect = _lock
-        mock_get_users.return_value = {
-            user_id: _mk_user(user_id) for user_id in ('u1', 'u2', 'u3')
-        }
-        mock_get_users_for_role.side_effect = (lambda r: ['u1', 'u2', 'u3']
-                                               if r == 'user' else [])
-
-        body = payloads.UserBatchUpdateBody(user_ids=['u3', 'u2', 'u1'],
-                                            role='admin')
-        result = server.user_batch_update(admin_request, body)
-
-        # In request order; the locked-out user fails alone.
-        assert result['succeeded'] == ['u3', 'u1']
-        assert [f['user_id'] for f in result['failed']] == ['u2']
-        mock_update_roles.assert_called_once_with({
-            'u1': 'admin',
-            'u3': 'admin'
-        })
-
-    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.global_user_state.get_users')
     def test_internal_user_and_missing_user_are_isolated_failures(
             self, mock_get_users, mock_get_users_for_role, mock_get_user_roles,
-            mock_update_roles, mock_user_lock, admin_request):
-        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
-                                                     __exit__=mock.MagicMock())
+            mock_update_roles, admin_request):
         # 'unknown' is intentionally NOT in the get_users return so the
         # lookup returns None and the batch records it as a failure.
         # Promotion path uses get_users(set(user_ids)) -> {id -> User}.
@@ -173,7 +129,6 @@ class TestUserBatchUpdate:
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
-    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -182,10 +137,8 @@ class TestUserBatchUpdate:
     def test_demotion_failure_isolated_to_offending_user(
             self, mock_get_all_users, mock_get_users_for_role,
             mock_get_user_roles, mock_update_roles, mock_demotion_check,
-            mock_user_lock, mock_load_fresh_workspaces,
-            mock_get_active_resources, admin_request):
-        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
-                                                     __exit__=mock.MagicMock())
+            mock_load_fresh_workspaces, mock_get_active_resources,
+            admin_request):
         mock_get_all_users.return_value = [
             _mk_user('u1', name='name-u1'),
             _mk_user('u2', name='name-u2'),
@@ -217,7 +170,6 @@ class TestUserBatchUpdate:
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
-    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -226,10 +178,8 @@ class TestUserBatchUpdate:
     def test_demotion_check_also_fires_for_admin_to_viewer(
             self, mock_get_all_users, mock_get_users_for_role,
             mock_get_user_roles, mock_update_roles, mock_demotion_check,
-            mock_user_lock, mock_load_fresh_workspaces,
-            mock_get_active_resources, admin_request):
-        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
-                                                     __exit__=mock.MagicMock())
+            mock_load_fresh_workspaces, mock_get_active_resources,
+            admin_request):
         mock_get_all_users.return_value = [_mk_user('u1', name='alice')]
         mock_get_users_for_role.side_effect = (lambda r: ['u1']
                                                if r == 'admin' else [])
@@ -242,7 +192,6 @@ class TestUserBatchUpdate:
         mock_demotion_check.assert_called_once()
         mock_update_roles.assert_called_once_with({'u1': 'viewer'})
 
-    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.users.permission.permission_service.update_roles')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -250,9 +199,7 @@ class TestUserBatchUpdate:
     def test_noop_when_role_unchanged(self, mock_get_users,
                                       mock_get_users_for_role,
                                       mock_get_user_roles, mock_update_roles,
-                                      mock_user_lock, admin_request):
-        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
-                                                     __exit__=mock.MagicMock())
+                                      admin_request):
         # Promotion path -> get_users(set(user_ids)) returns {id -> User}.
         mock_get_users.return_value = {'u1': _mk_user('u1', name='alice')}
         # u1 is already an admin; the batch is a no-op.
@@ -390,69 +337,33 @@ def _promote(monkeypatch, admin_request, user_ids):
     return writes, server.user_batch_update(admin_request, body)
 
 
-def test_a_large_batch_is_locked_and_written_in_chunks(monkeypatch,
-                                                       admin_request):
-    """Holding every lock until one write opens a lock file per user."""
-    users = [f'u{i:03d}' for i in range(120)]
-    held = []
-    peak = []
-
-    @contextlib.contextmanager
-    def lock(user_id, timeout):  # pylint: disable=unused-argument
-        held.append(user_id)
-        peak.append(len(held))
-        yield
-        held.remove(user_id)
-
-    monkeypatch.setattr(server, '_user_lock', lock)
-    writes, result = _promote(monkeypatch, admin_request, users)
-    assert [len(w) for w in writes] == [50, 50, 20]
-    assert sum(writes, []) == users
-    assert max(peak) == 50
-    assert result['succeeded'] == users
-
-
-def test_lock_waits_in_a_chunk_share_one_budget(monkeypatch, admin_request):
-    """Each lock gets what is left of the chunk's timeout, never below 0:
-    filelock waits forever on a negative timeout."""
-    monkeypatch.setattr(server, '_BATCH_UPDATE_CHUNK_SIZE', 4)
-    now = [0.0]
-    monkeypatch.setattr(server, 'time',
-                        types.SimpleNamespace(monotonic=lambda: now[0]))
-    timeouts = []
-
-    @contextlib.contextmanager
-    def slow_lock(user_id, timeout):  # pylint: disable=unused-argument
-        timeouts.append(timeout)
-        now[0] += 8  # Each lock was contended for 8 s.
-        yield
-
-    monkeypatch.setattr(server, '_user_lock', slow_lock)
-    _promote(monkeypatch, admin_request, ['a', 'b', 'c', 'd', 'e'])
-    budget = server.USER_LOCK_TIMEOUT_SECONDS
-    assert timeouts == [budget, budget - 8, budget - 16, 0.0, budget]
-
-
-def test_a_held_user_lock_fails_only_that_user(monkeypatch, admin_request,
-                                               tmp_path):
+def test_a_batch_takes_no_user_lock_and_writes_once(monkeypatch, admin_request,
+                                                    tmp_path):
+    """The whole batch is one role write: a user whose lock another request
+    holds is still updated, and nothing waits on that lock."""
     monkeypatch.setattr(server, 'USER_LOCK_PATH',
                         str(tmp_path / '.{user_id}.lock'))
     monkeypatch.setattr(server, 'USER_LOCK_TIMEOUT_SECONDS', 0.5)
-    with filelock.FileLock(str(tmp_path / '.u2.lock')):
-        writes, result = _promote(monkeypatch, admin_request,
-                                  ['u1', 'u2', 'u3'])
-    assert writes == [['u1', 'u3']]
-    assert result['succeeded'] == ['u1', 'u3']
-    assert [f['user_id'] for f in result['failed']] == ['u2']
+    users = [f'u{i:03d}' for i in range(120)]
+    with filelock.FileLock(str(tmp_path / '.u001.lock')):
+        writes, result = _promote(monkeypatch, admin_request, users)
+    assert writes == [users]
+    assert result == {'succeeded': users, 'failed': []}
 
 
-def test_user_lock_uses_the_timeout_it_is_given(monkeypatch, tmp_path):
-    monkeypatch.setattr(server, 'USER_LOCK_PATH',
-                        str(tmp_path / '.{user_id}.lock'))
-    monkeypatch.setattr(server, 'USER_LOCK_TIMEOUT_SECONDS', 30)
-    with filelock.FileLock(str(tmp_path / '.u2.lock')):
-        started = time.monotonic()
-        with pytest.raises(RuntimeError, match='timeout'):
-            with server._user_lock('u2', 0):
-                pass
-    assert time.monotonic() - started < 5
+def test_a_failed_write_fails_every_user_in_it(monkeypatch, admin_request):
+
+    def fail(roles):
+        raise RuntimeError('database is locked')
+
+    monkeypatch.setattr(server.global_user_state, 'get_users',
+                        lambda ids: {u: _mk_user(u) for u in ids})
+    monkeypatch.setattr(server.permission.permission_service,
+                        'get_users_for_role', lambda r: ['u1', 'u2']
+                        if r == 'user' else [])
+    monkeypatch.setattr(server.permission.permission_service, 'update_roles',
+                        fail)
+    body = payloads.UserBatchUpdateBody(user_ids=['u2', 'u1'], role='admin')
+    result = server.user_batch_update(admin_request, body)
+    assert result['succeeded'] == []
+    assert sorted(f['user_id'] for f in result['failed']) == ['u1', 'u2']
