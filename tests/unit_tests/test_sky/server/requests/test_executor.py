@@ -2351,6 +2351,7 @@ _SERVER_SETTING_ENV_VARS = {
     'SKYPILOT_POD_MEMORY_GB_LIMIT': '1',
     'SKYPILOT_FUTURE_SETTING': '1',
     constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE: 'true',
+    constants.LEGACY_ENV_VAR_IN_CONTROLLER_PROCESS_TREE: 'true',
     'LD_PRELOAD': '/tmp/x.so',
 }
 # What a remote client may set: identity and this request's logging.
@@ -2404,6 +2405,36 @@ def test_remote_filter_classifies_every_sender_var(monkeypatch):
         assert key in executor._REMOTE_REQUEST_ENV_VARS, key
 
 
+def test_controller_process_tree_env_never_crosses_a_loopback_request(
+        monkeypatch):
+    """A controller's own requests to its API server never carry the
+    controller-process-tree variable into the server's request workers.
+
+    Controllers talk to their API server over loopback, where the server keeps
+    SKYPILOT_-prefixed request env vars. If the variable crossed, the request
+    worker would read consolidation as forced on and force the loopback
+    endpoint. Both sides must drop it: the client sender and the server filter.
+    """
+    monkeypatch.setattr('sky.server.common.is_api_server_local', lambda: True)
+    for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+        monkeypatch.setenv(name, 'true')
+    # Positive control: an ordinary SKYPILOT_ var is forwarded, so the
+    # assertions below are not vacuous.
+    monkeypatch.setenv('SKYPILOT_DEBUG', '1')
+
+    emitted = payloads.request_body_env_vars()
+    assert emitted.get('SKYPILOT_DEBUG') == '1'
+    for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+        assert name not in emitted, name
+
+    # Even if a client sends it, a loopback server drops it.
+    kept = _sanitize({
+        name: 'true' for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE
+    })
+    for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+        assert name not in kept, name
+
+
 @pytest.mark.parametrize('enforce_containment', [True, False])
 def test_remote_request_applies_only_allowlisted_env(
         stub_override_request_env_deps, monkeypatch, enforce_containment):
@@ -2452,7 +2483,8 @@ def test_loopback_request_keeps_skypilot_env(stub_override_request_env_deps,
         assert ('KUBECONFIG' in os.environ) is (not enforce_containment)
         assert ('AWS_PROFILE' in os.environ) is (not enforce_containment)
         assert 'LD_PRELOAD' not in os.environ
-        assert constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE not in os.environ
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            assert name not in os.environ
 
 
 def test_stamp_overwrites_client_from_loopback():

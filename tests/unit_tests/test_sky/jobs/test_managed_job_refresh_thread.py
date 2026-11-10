@@ -27,6 +27,7 @@ from unittest import mock
 import pytest
 
 from sky.jobs import managed_job_refresh_thread as mjrt
+from sky.skylet import constants
 from sky.utils import locks
 
 _REAL_EXIT_AFTER = mjrt._exit_after
@@ -601,16 +602,20 @@ class TestStart:
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_called_once_with()
 
-    def test_skips_in_server_started_by_a_jobs_controller(self, monkeypatch):
+    @pytest.mark.parametrize('env_name',
+                             constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE)
+    def test_skips_in_server_started_by_a_jobs_controller(
+            self, monkeypatch, env_name):
         """A local server started by a jobs controller never starts the thread.
 
         On a standalone controller cluster, the controller's sdk.api_start()
-        starts a local API server that inherits IS_SKYPILOT_JOB_CONTROLLER,
+        starts a local API server that inherits the controller-process-tree
+        variable (the new name, or the legacy one from an older controller),
         so consolidation mode reads as on there. Skylet owns that machine's
         controllers; controllers started by this server would inherit
         IS_SKYPILOT_SERVER and never restart the server if it died.
         """
-        monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', 'true')
+        monkeypatch.setenv(env_name, 'true')
         with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread,
                                'start') as start_mock, \
                 mock.patch(

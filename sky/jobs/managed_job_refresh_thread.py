@@ -241,7 +241,7 @@ def start_managed_job_refresh_daemon() -> None:
     historical ``should_skip_managed_job_status_refresh`` provided. Also a
     no-op in a local API server started by a jobs controller; see below.
     """
-    if os.environ.get(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE) is not None:
+    if constants.in_controller_process_tree():
         # This API server was started by a jobs controller process (the local
         # server of a standalone controller cluster, via sdk.api_start) and
         # inherited its ENV_VAR_IN_CONTROLLER_PROCESS_TREE, so

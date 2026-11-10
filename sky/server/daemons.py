@@ -323,7 +323,7 @@ def should_skip_pool_status_refresh():
 
 def should_skip_server_heartbeat():
     """Skip server heartbeat when running as a controller."""
-    if os.environ.get(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE) is not None:
+    if constants.in_controller_process_tree():
         # We are running as a controller.
         return True
     return False

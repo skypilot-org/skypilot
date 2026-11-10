@@ -1060,10 +1060,13 @@ class TestIsJobsConsolidationMode:
         (controller_utils._effective_jobs_consolidation_with_warnings.
          cache_clear())
 
-    def test_override_env_short_circuits_to_true(self, monkeypatch, tmp_path):
-        """ENV_VAR_IN_CONTROLLER_PROCESS_TREE forces True without reading signal
-        file or config. Used inside the controller process itself."""
-        monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', '1')
+    @pytest.mark.parametrize('env_name',
+                             constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE)
+    def test_override_env_short_circuits_to_true(self, monkeypatch, tmp_path,
+                                                 env_name):
+        """Either controller-process-tree name forces True without reading
+        the signal file or config. Used inside the controller process itself."""
+        monkeypatch.setenv(env_name, '1')
         signal_file = tmp_path / 'signal'  # does not exist
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
              mock.patch('sky.utils.controller_utils.skypilot_config'
@@ -1080,7 +1083,8 @@ class TestIsJobsConsolidationMode:
         """Without IS_SKYPILOT_SERVER, no config reads or validator calls.
         Matches the behavior for CLI-only callers and inside controllers."""
         monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         signal_file = tmp_path / 'signal'
         if signal_exists:
             signal_file.touch()
@@ -1118,7 +1122,8 @@ class TestIsJobsConsolidationMode:
                                              expected_effective, expected_warn,
                                              expected_validator_arg):
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         signal_file = tmp_path / 'signal'
         if signal_exists:
             signal_file.touch()
@@ -1142,7 +1147,8 @@ class TestIsJobsConsolidationMode:
         """extra_validator receives the same intent arg as the jobs validator.
         Used by pool reader to warn about leftover pools."""
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         signal_file = tmp_path / 'signal'
         signal_file.touch()
         extra = mock.Mock()
@@ -1161,7 +1167,8 @@ class TestIsJobsConsolidationMode:
         """extra_validator is only invoked when on the API server (intent
         arg is meaningful). Skip off-server to match jobs validator behavior."""
         monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            monkeypatch.delenv(name, raising=False)
         signal_file = tmp_path / 'signal'
         extra = mock.Mock()
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):

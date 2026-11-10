@@ -81,8 +81,8 @@ class TestConsolidationModeDetector:
             monkeypatch.setenv(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
                                'true')
         else:
-            monkeypatch.delenv(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
-                               raising=False)
+            for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+                monkeypatch.delenv(name, raising=False)
 
         # Set up signal file
         signal_file = tmp_path / '.jobs_controller_consolidation_reloaded_signal'
@@ -139,11 +139,11 @@ class TestConsolidationModeDetector:
             'controller_envs; if not, this test is asserting against the '
             'wrong dict')
 
-        # The override should NOT be in the nested controller_envs dict.
-        assert (
-            constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE not in controller_envs
-        ), (f'{constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE} must not be in '
-            'controller_envs to avoid breaking the jobs-controller VM path')
+        # Neither name may be in the nested controller_envs dict.
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            assert name not in controller_envs, (
+                f'{name} must not be in controller_envs to avoid breaking the '
+                'jobs-controller VM path')
 
     def test_controller_module_never_reaches_from_scheduler_path(self):
         """Tripwire: controller.py has no DIRECT reference to

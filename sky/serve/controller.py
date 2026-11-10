@@ -291,7 +291,8 @@ class SkyServeController:
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
                    version: int, controller_host: str, controller_port: int):
-    os.environ[constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE] = 'true'
+    for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+        os.environ[name] = 'true'
     # Hijack sys.stdout/stderr to be context aware.
     context_utils.hijack_sys_attrs()
     controller = SkyServeController(service_name, service_spec, version,
