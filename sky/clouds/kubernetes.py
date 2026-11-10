@@ -28,7 +28,7 @@ from sky.provision.kubernetes import oci_nccl
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
-from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common
@@ -974,7 +974,7 @@ class Kubernetes(clouds.Cloud):
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
         if acc_type is not None and is_tpu_on_gke(acc_type):
-            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
         else:
             acc_count = acc_count or 0
 

@@ -901,8 +901,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Check for API server changes and validate them
     current_config = skypilot_config.to_dict()
-    # If there is no changes to the config, we can return early
     if current_config == config:
+        # Nothing to save, but the save that stored this config may have
+        # failed its policy write; retrying it must repair that.
+        _save_config_and_sync_members(None)
         return config
 
     current_endpoint = current_config.get('api_server', {}).get('endpoint')
@@ -917,11 +919,6 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Collect all workspaces that need to be checked for active resources
     workspaces_to_check: List[Tuple[str, str]] = []
-    workspaces_to_check_policy: Dict[str, Dict[str, List[str]]] = {
-        'add': {},
-        'update': {},
-        'delete': {}
-    }
 
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
@@ -930,8 +927,6 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             # ones, for backward compatibility with pre-validation names).
             common_utils.check_workspace_name_is_valid(workspace_name)
             _validate_workspace_name_field(workspace_name, new_workspace_config)
-            users = workspaces_utils.get_workspace_users(new_workspace_config)
-            workspaces_to_check_policy['add'][workspace_name] = users
             continue
 
         current_workspace_config = current_workspaces.get(workspace_name, {})
@@ -942,8 +937,6 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                                        current_workspace_config)
             _validate_workspace_config_changes_with_lock(
                 workspace_name, current_workspace_config, new_workspace_config)
-            users = workspaces_utils.get_workspace_users(new_workspace_config)
-            workspaces_to_check_policy['update'][workspace_name] = users
 
     # Check for workspace deletions
     for workspace_name in current_workspaces:
@@ -953,41 +946,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 raise ValueError(f'Cannot delete the default workspace '
                                  f'{constants.SKYPILOT_DEFAULT_WORKSPACE!r}.')
             workspaces_to_check.append((workspace_name, 'delete'))
-            workspaces_to_check_policy['delete'][workspace_name] = ['*']
 
     # Check all workspaces for active resources in one efficient call
     resource_checker.check_no_active_resources_for_workspaces(
         workspaces_to_check)
 
-    try:
-        with skypilot_config.get_skypilot_config_lock(
-                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
-            # Check names against the store as of now, not the pre-lock read,
-            # so a concurrent create can't slip a duplicate in.
-            skypilot_config.reload_config()
-            _check_workspace_names_unique(
-                skypilot_config.to_dict().get('workspaces', {}), new_workspaces)
-            # Convert to config_utils.Config and save
-            config_obj = config_utils.Config.from_dict(config)
-            skypilot_config.update_api_server_config_no_lock(config_obj)
-            permission_service = permission.permission_service
-            for operation, workspaces in workspaces_to_check_policy.items():
-                for workspace_name, users in workspaces.items():
-                    if operation == 'add':
-                        permission_service.add_workspace_policy(
-                            workspace_name, users)
-                    elif operation == 'update':
-                        permission_service.update_workspace_policy(
-                            workspace_name, users)
-                    elif operation == 'delete':
-                        permission_service.remove_workspace_policy(
-                            workspace_name)
-    except locks.LockTimeout as e:
-        raise RuntimeError(
-            'Failed to update configuration due to a timeout '
-            'when trying to acquire the config lock. This may '
-            'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again.') from e
+    _save_config_and_sync_members(config)
 
     # The `sky check` that refreshes the enabled-clouds cache for the new
     # config is scheduled as a separate request by
@@ -1086,6 +1050,54 @@ def check_cluster_write_permission(user: models.User,
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have permission to access '
             f'the workspace of cluster {cluster_name!r}')
+
+
+def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
+    """Saves `config`, then syncs every workspace's members with it.
+
+    With `config` None, syncs with the stored config instead. Members are
+    resolved before anything is saved, so a workspace being changed whose
+    members cannot be resolved fails the save; one left unchanged keeps its
+    current members.
+    """
+    try:
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            skypilot_config.reload_config()
+            stored = skypilot_config.get_nested(('workspaces',),
+                                                default_value={})
+            workspaces = dict(
+                stored if config is None else config.get('workspaces', {}))
+            if config is not None:
+                # Check names against the store as of now, not the pre-lock
+                # read, so a concurrent create can't slip a duplicate in.
+                _check_workspace_names_unique(stored, workspaces)
+            workspaces.setdefault(constants.SKYPILOT_DEFAULT_WORKSPACE, {})
+            resolver = user_resolver.UserResolver()
+            members: Dict[str, List[str]] = {}
+            for name, workspace_config in workspaces.items():
+                try:
+                    members[name] = workspaces_utils.get_workspace_users(
+                        workspace_config, resolver)
+                except ValueError as e:
+                    if stored.get(name, {}) != workspace_config:
+                        raise
+                    logger.warning(
+                        'Keeping the current members of workspace '
+                        f'{skypilot_config.workspace_label(name)}: {e}')
+            if config is not None:
+                skypilot_config.update_api_server_config_no_lock(
+                    config_utils.Config.from_dict(config))
+            # Every configured workspace, so the members of one this save (or
+            # an earlier, failed one) deleted are removed too.
+            permission.permission_service.sync_workspace_members(
+                members, all_workspaces=workspaces)
+    except locks.LockTimeout as e:
+        raise RuntimeError(
+            'Failed to update configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
+            'indicate another SkyPilot process is currently updating the '
+            'configuration. Please try again.') from e
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
