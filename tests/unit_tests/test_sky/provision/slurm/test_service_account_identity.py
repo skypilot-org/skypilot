@@ -165,27 +165,37 @@ def test_submit_validation_failure(rc, stderr):
         assert f'code {rc}' in str(exc.value)
 
 
-@pytest.mark.parametrize(
-    'stderr', ['sudo: a password is required', 'sudo: unknown user alice'])
-def test_submit_validation_refusal(stderr):
-    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+@pytest.mark.parametrize('ssh_user,stderr,command', [
+    ('login', 'sudo: a password is required',
+     'sudo --non-interactive -H -u alice -- id -un'),
+    ('login', 'sudo: unknown user alice',
+     'sudo --non-interactive -H -u alice -- id -un'),
+    ('root', 'runuser: user alice does not exist',
+     'runuser -u alice -- id -un'),
+    ('login', 'Login banner\nsudo: a password is required',
+     'sudo --non-interactive -H -u alice -- id -un'),
+])
+def test_submit_validation_refusal(ssh_user, stderr, command):
+    client = slurm.SlurmClient('host', 22, ssh_user, slurm_user='alice')
     with mock.patch.object(command_runner.SSHCommandRunner,
                            'run',
                            return_value=(1, '', stderr)) as run:
         with pytest.raises(slurm.SubmitUserRefusedError) as e:
             client.validate_submit_user('cluster', 'alice')
     run.assert_called_once()
-    assert ('(`sudo --non-interactive -H -u alice -- id -un`) exited with '
-            'code 1') in str(e.value)
+    assert f'(`{command}`) exited with code 1' in str(e.value)
     assert stderr in str(e.value)
 
 
 # Only a refusal is final. Everything else stays retryable, including output
 # this check cannot interpret.
-@pytest.mark.parametrize('rc,stdout,stderr', [(255, '', 'ssh: connect failed'),
-                                              (126, '', ''), (137, '', ''),
-                                              (0, 'login\n', ''), (0, '', ''),
-                                              (0, 'Welcome alice\n', '')])
+@pytest.mark.parametrize('rc,stdout,stderr',
+                         [(255, '', 'ssh: connect failed'), (126, '', ''),
+                          (137, '', ''), (0, 'login\n', ''), (0, '', ''),
+                          (0, 'Welcome alice\n', ''), (1, '', ''),
+                          (1, '', 'login profile failed'),
+                          (1, '', '/bin/bash: startup failed'),
+                          (1, '', 'profile: sudo: failed')])
 def test_submit_validation_failure_is_not_a_refusal(rc, stdout, stderr):
     client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
     with mock.patch.object(command_runner.SSHCommandRunner,
@@ -196,24 +206,17 @@ def test_submit_validation_failure_is_not_a_refusal(rc, stdout, stderr):
     assert not isinstance(e.value, slurm.SubmitUserRefusedError)
 
 
-def test_submit_validation_timeout_is_not_a_refusal():
-    with mock.patch(
-            'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
-    ) as runner:
-        runner.return_value.run.side_effect = subprocess.TimeoutExpired(
-            'ssh', 15)
-        client = slurm.SlurmClient('host', 22, 'login', slurm_user='svc')
-        with pytest.raises(RuntimeError) as e:
-            client.validate_submit_user('a', 'svc')
-    assert not isinstance(e.value, slurm.SubmitUserRefusedError)
-
-
-def test_submit_validation_timeout_through_the_ssh_runner():
-    """The SSH runner returns its timeout as an exit code, not an exception."""
-    client = slurm.SlurmClient('host', 22, 'login', slurm_user='alice')
+@pytest.mark.parametrize('is_inside_slurm_cluster', [False, True])
+def test_submit_validation_timeout_through_the_runner(is_inside_slurm_cluster):
+    """Both real runners translate process timeouts to a retryable error."""
+    client = slurm.SlurmClient('host',
+                               22,
+                               'login',
+                               slurm_user='alice',
+                               is_inside_slurm_cluster=is_inside_slurm_cluster)
     with mock.patch.object(command_runner.log_lib,
                            'run_with_log',
-                           side_effect=subprocess.TimeoutExpired('ssh', 15)):
+                           side_effect=subprocess.TimeoutExpired('id -un', 15)):
         with pytest.raises(RuntimeError,
                            match='Account validation timed out after 15 '
                            'seconds') as e:
@@ -254,17 +257,6 @@ def test_submit_validation_rejects_wrong_user_or_failed_command(rc, stdout):
                            return_value=(rc, stdout, '')):
         with pytest.raises(RuntimeError):
             client.validate_submit_user('cluster', 'alice')
-
-
-def test_submit_validation_timeout():
-    with mock.patch(
-            'sky.adaptors.slurm.command_runner.SlurmLoginNodeCommandRunner'
-    ) as runner:
-        runner.return_value.run.side_effect = subprocess.TimeoutExpired(
-            'ssh', 15)
-        client = slurm.SlurmClient('host', 22, 'login', slurm_user='svc')
-        with pytest.raises(RuntimeError, match='timed out after 15 seconds'):
-            client.validate_submit_user('a', 'svc')
 
 
 def test_allocation_client_uses_stored_identity(identity_config):

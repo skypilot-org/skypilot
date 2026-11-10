@@ -6,7 +6,6 @@ import ipaddress
 import logging
 import re
 import shlex
-import subprocess
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from sky.utils import command_runner
@@ -267,10 +266,9 @@ def _parse_partitions_info_output(stdout: str) -> List[SlurmPartition]:
     return partitions
 
 
-# sudo, runuser and id exit with 1 when they refuse to run as an account or
-# cannot resolve it, for example "sudo: a password is required". ssh exits with
-# 255 when it fails, and the runner reports its own timeout as
-# command_runner.TIMEOUT_RETURNCODE, so neither reads as a refusal.
+# sudo and runuser exit with 1 when they refuse to run as an account or
+# cannot resolve it. Require their diagnostic too: the SSH login shell can
+# exit with 1 before the account check runs.
 _SUBMIT_USER_REFUSED_RETURNCODE = 1
 
 
@@ -346,21 +344,17 @@ class SlurmClient:
         """Check the Unix account through the submit runner.
 
         Raises:
-            SubmitUserRefusedError: The account check exited with code 1.
+            SubmitUserRefusedError: The check exited with code 1 and a
+                sudo or runuser diagnostic.
             RuntimeError: Any other failure, including SSH failures and
                 timeouts that may pass on a later attempt.
         """
         command = ['id', '-un']
         error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
                  f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
-        try:
-            rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(error + 'Account validation timed out after '
-                               '15 seconds.') from e
+        rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
         if rc == command_runner.TIMEOUT_RETURNCODE:
-            # The SSH runner reports a timeout with this exit code instead of
-            # raising TimeoutExpired.
+            # Both local and SSH runners return this code on timeout.
             raise RuntimeError(error + 'Account validation timed out after '
                                '15 seconds.')
         output_lines = [
@@ -373,7 +367,10 @@ class SlurmClient:
                    f'{rc}. Check that the account exists and that the SSH '
                    'user can run this command without a password. '
                    f'{stdout}\n{stderr}')
-        if rc == _SUBMIT_USER_REFUSED_RETURNCODE:
+        has_refusal_diagnostic = any(
+            line.startswith(('sudo:', 'runuser:'))
+            for line in stderr.splitlines())
+        if rc == _SUBMIT_USER_REFUSED_RETURNCODE and has_refusal_diagnostic:
             raise SubmitUserRefusedError(message)
         raise RuntimeError(message)
 
