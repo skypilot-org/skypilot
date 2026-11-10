@@ -45,7 +45,6 @@ from sky.skylet import job_lib
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import cloud_api_retries
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
@@ -1750,15 +1749,15 @@ class JobController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await asyncio.to_thread(
-                        backend_utils.get_clusters,
-                        cluster_names=[cluster_name],
-                        refresh=common.StatusRefreshMode.NONE,
-                        all_users=True,
-                        _include_is_managed=True)
-                    if clusters:
-                        assert len(clusters) == 1, (clusters, cluster_name)
-                        handle = clusters[0].get('handle')
+                    # Look the cluster up by name, not through get_clusters():
+                    # that filters by the process-wide workspace cache, which
+                    # a long-lived controller filled before newer workspaces
+                    # existed, so their clusters were "not found" and their
+                    # logs never downloaded.
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        cluster_name)
+                    if handle is not None:
                         # Best effort to download and stream the logs.
                         await asyncio.to_thread(self.download_log_and_stream,
                                                 task_id, handle,
@@ -4115,20 +4114,15 @@ class ControllerManager:
         download_log_and_stream method. Skips gracefully if the cluster is
         not found.
         """
-        clusters = await asyncio.to_thread(
-            backend_utils.get_clusters,
-            cluster_names=[cluster_name],
-            refresh=common.StatusRefreshMode.NONE,
-            all_users=True,
-            _include_is_managed=True)
+        # By name, not get_clusters(): see the success path in JobController.
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
 
-        if not clusters:
+        if handle is None:
             logger.info(f'Cluster {cluster_name} not found for job {job_id}, '
                         f'task {task_id}. Skipping log download.')
             return
 
-        assert len(clusters) == 1, (clusters, cluster_name)
-        handle = clusters[0].get('handle')
         await asyncio.to_thread(controller.download_log_and_stream, task_id,
                                 handle, job_id_on_cluster)
 
