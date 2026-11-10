@@ -7290,6 +7290,30 @@ def test_stop_instances_refuses_when_flag_off(monkeypatch):
     assert not core_api_mock.delete_namespaced_pod.called
 
 
+def test_stop_instances_reads_flag_for_in_cluster_context(monkeypatch):
+    """In-cluster auth uses a None context, but the flag is keyed by name."""
+    in_cluster = 'in-cluster'
+    monkeypatch.setattr('sky.adaptors.kubernetes.in_cluster_context_name',
+                        lambda: in_cluster)
+    seen = []
+
+    def _allow(context):
+        seen.append(context)
+        return False
+
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        _allow)
+
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={
+                                    'namespace': 'default',
+                                    'context': in_cluster
+                                })
+    assert seen == [in_cluster]
+
+
 def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch,
                                                    destructive_stop_allowed):
     """`sky stop` on Kubernetes must delete pods/services but never PVCs."""

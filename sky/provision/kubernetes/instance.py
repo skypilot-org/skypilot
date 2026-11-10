@@ -2931,8 +2931,10 @@ def stop_instances(
     context = kubernetes_utils.get_context_from_config(provider_config)
 
     # `sky stop` is gated earlier, but a failed relaunch of a cluster that was
-    # once up also stops it, and that path never checks the flag.
-    if not kubernetes_utils.allow_unmanaged_cluster_destructive_stop(context):
+    # once up also stops it, and that path never checks the flag. The flag is
+    # keyed by the named context; `context` is None for in-cluster auth.
+    if not kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+            provider_config.get('context')):
         raise NotImplementedError(
             'Stopping clusters is not supported on Kubernetes.')
 
