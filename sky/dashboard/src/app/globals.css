@@ -437,7 +437,9 @@
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid hsl(var(--line));
+  /* No backdrop, so the edge has to hold against gray pages and the table
+     lines behind it. */
+  border: 1px solid hsl(var(--line-strong));
   background: hsl(var(--popover));
   font-family: inherit;
   margin: 8px;
@@ -619,10 +621,8 @@
   color: hsl(var(--blue-fg));
 }
 
-/* The tour has no backdrop. On dark its light shadow disappears and its
-   border matches the table lines behind it, so give it a stronger edge. */
+/* On dark the light shadow disappears; a deeper one lifts the tour. */
 .dark .shepherd-element {
-  border-color: hsl(var(--line-strong));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
