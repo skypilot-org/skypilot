@@ -6,6 +6,7 @@ Each test runs on SQLite, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
 import contextlib
 import copy
 import os
+import sqlite3
 import time
 from unittest import mock
 
@@ -491,6 +492,52 @@ def test_delete_user_and_record_is_one_transaction(service, engine):
     service.add_user_if_not_exists('bob')
     assert service.get_user_roles('bob') == ['user']
     assert not service.enforcer.enforce('bob', 'private', '*')
+
+
+def test_a_user_deleted_before_the_role_write_gets_no_role(service, engine):
+    """The caller found both users; one is deleted before its write. A role
+    left behind would be inherited by a user recreated under the same id."""
+    for user_id in ('alice', 'bob'):
+        _add_user_row(engine, user_id)
+    service.update_roles({'alice': 'user', 'bob': 'user'})
+    service.delete_user_and_record('bob')
+
+    roles = {'alice': 'admin', 'bob': 'admin'}
+    missing = service.update_roles(roles, existing_users_only=True)
+
+    assert missing == ['bob']
+    assert _rows(engine, 'g') == {('alice', 'admin')}
+
+
+@pytest.mark.skipif(not hasattr(sqlite3.Connection, 'setlimit'),
+                    reason='needs Python 3.11+')
+def test_a_large_role_write_fits_old_sqlite_variable_limit(service, engine):
+    """SQLite before 3.32 allows 999 bound variables per statement."""
+    if engine.dialect.name != 'sqlite':
+        pytest.skip('SQLite only')
+    users = [f'u{i:04d}' for i in range(1200)]
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.insert(global_user_state.user_table), [{
+            'id': user,
+            'name': user
+        } for user in users])
+    enforcer = service._ensure_enforcer()
+    policy_engine = getattr(enforcer, '_e', enforcer).get_adapter()._engine
+
+    def _limit(dbapi_conn, *args):  # pylint: disable=unused-argument
+        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+    sqlalchemy.event.listen(policy_engine, 'checkout', _limit)
+    try:
+        with _policy_commits(policy_engine) as counts:
+            missing = service.update_roles({user: 'viewer' for user in users},
+                                           existing_users_only=True)
+    finally:
+        sqlalchemy.event.remove(policy_engine, 'checkout', _limit)
+
+    assert missing == []
+    assert counts['commits'] == 1
+    assert _rows(engine, 'g') == {(user, 'viewer') for user in users}
 
 
 @pytest.fixture

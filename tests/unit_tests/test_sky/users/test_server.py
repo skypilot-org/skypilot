@@ -339,6 +339,25 @@ class TestUsersEndpoints:
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @pytest.mark.asyncio
+    async def test_user_update_of_a_user_deleted_meanwhile_fails(
+            self, mock_update_role, mock_get_user, mock_get_supported_roles,
+            mock_request):
+        """The user is deleted after the lookup; the role write skips it."""
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_user.return_value = models.User(id='test_user', name='Test')
+        mock_update_role.return_value = False
+        mock_request.state.auth_user = None
+
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            server.user_update(
+                mock_request,
+                payloads.UserUpdateBody(user_id='test_user', role='admin'))
+        assert exc_info.value.status_code == 400
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @pytest.mark.asyncio
     async def test_user_update_success_update_role(self, mock_update_role,
                                                    mock_get_user,
                                                    mock_get_supported_roles,
@@ -358,7 +377,9 @@ class TestUsersEndpoints:
         # Verify
         assert result is None  # Function returns None on success
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -389,7 +410,9 @@ class TestUsersEndpoints:
         assert result is None  # Function returns None on success
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.id == 'test_user'
@@ -467,7 +490,9 @@ class TestUsersEndpoints:
         assert 'Database error' in str(exc_info.value)
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
-        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'admin',
+                                                 existing_user_only=True)
 
     @mock.patch('sky.global_user_state.get_all_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -867,7 +892,9 @@ class TestUsersEndpoints:
         assert result is None
         mock_get_user.assert_called_once_with('test_user')
         mock_add_or_update_user.assert_called_once()
-        mock_update_role.assert_called_once_with('test_user', 'user')
+        mock_update_role.assert_called_once_with('test_user',
+                                                 'user',
+                                                 existing_user_only=True)
         # Check password hash
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
