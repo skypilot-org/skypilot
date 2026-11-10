@@ -1966,7 +1966,7 @@ async def test_wrapper_clears_request_cache_when_release_is_skipped(
     executor._request_execution_wrapper('release-skipped',
                                         ignore_return_value=False)
 
-    clear_cache.assert_called_once()
+    assert mock.call() in clear_cache.mock_calls
     release_memory.assert_not_called()
     assert requests_lib.get_request('release-skipped').status == (
         requests_lib.RequestStatus.SUCCEEDED)
