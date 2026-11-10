@@ -521,15 +521,16 @@ def user_update(request: fastapi.Request,
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_info.id):
+        # A user deleted since the check above gets no password and no role:
+        # both writes only update an existing user.
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
-            global_user_state.add_or_update_user(
-                models.User(id=user_info.id,
-                            name=user_info.name,
-                            password=password_hash))
+            if not global_user_state.set_user_password(user_info.id,
+                                                       password_hash):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
         if role and need_update_role:
-            # Update user role in casbin policy
-            # A user deleted since the check above gets no role.
             if not permission.permission_service.update_role(
                     user_info.id, role, existing_user_only=True):
                 raise fastapi.HTTPException(
