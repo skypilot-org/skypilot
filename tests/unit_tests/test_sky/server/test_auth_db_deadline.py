@@ -852,10 +852,10 @@ class TestDeadlineHandedToTheDbLayer:
                 raise _PgError('55P03', 'lock not available')
 
             await db_lookup._run_with_deadline(pool, db_lookup.POOL_AUTH,
-                                              lambda: 'ok')
+                                               lambda: 'ok')
             with pytest.raises(db_lookup.AuthDBTimeoutError) as excinfo:
                 await db_lookup._run_with_deadline(pool, db_lookup.POOL_AUTH,
-                                              _lock_timeout)
+                                                   _lock_timeout)
             assert 'lock_timeout' in excinfo.value.args
             assert pool.submit(db_deadline.get_deadline).result(5) is None
         finally:
@@ -893,8 +893,7 @@ class TestDeadlineErrorMapping:
             await db_lookup.call_with_deadline(_raises_db_error('55P03'))
         assert ei.value.reason == 'lock_timeout'
         assert isinstance(ei.value.__cause__, sqlalchemy.exc.OperationalError)
-        assert _timeouts(cause='lock_timeout',
-                         pool=db_lookup.POOL_AUTH) == 1.0
+        assert _timeouts(cause='lock_timeout', pool=db_lookup.POOL_AUTH) == 1.0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('orig', [
