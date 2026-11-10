@@ -473,6 +473,55 @@ def test_a_user_deleted_before_the_role_write_gets_no_role(service, engine):
 
 @pytest.mark.skipif(not hasattr(sqlite3.Connection, 'setlimit'),
                     reason='needs Python 3.11+')
+def test_get_users_fits_old_sqlite_variable_limit(engine, monkeypatch):
+    """The batch promotion path looks up every user before writing roles."""
+    if engine.dialect.name != 'sqlite':
+        pytest.skip('SQLite only')
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: engine)
+    users = [f'u{i:04d}' for i in range(1200)]
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.insert(global_user_state.user_table), [{
+            'id': user,
+            'name': user
+        } for user in users])
+
+    def _limit(dbapi_conn, *args):  # pylint: disable=unused-argument
+        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+    sqlalchemy.event.listen(engine, 'checkout', _limit)
+    try:
+        found = global_user_state.get_users(set(users) | {'ghost'})
+    finally:
+        sqlalchemy.event.remove(engine, 'checkout', _limit)
+    assert sorted(found) == users
+
+
+def test_update_role_reports_a_user_without_a_record(service, engine):
+    _add_user_row(engine, 'alice')
+    assert service.update_role('ghost', 'admin',
+                               existing_user_only=True) is False
+    assert service.update_role('alice', 'admin',
+                               existing_user_only=True) is True
+    assert _rows(engine, 'g') == {('alice', 'admin')}
+
+
+def test_a_password_update_never_recreates_a_deleted_user(engine, monkeypatch):
+    monkeypatch.setattr(global_user_state._db_manager, 'get_engine',
+                        lambda: engine)
+    _add_user_row(engine, 'alice')
+    assert global_user_state.set_user_password('alice', 'new-hash')
+    assert not global_user_state.set_user_password('bob', 'new-hash')
+    assert not _user_row_exists(engine, 'bob')
+    users = global_user_state.user_table
+    with engine.connect() as conn:
+        assert conn.execute(
+            sqlalchemy.select(users.c.password).where(
+                users.c.id == 'alice')).scalar() == 'new-hash'
+
+
+@pytest.mark.skipif(not hasattr(sqlite3.Connection, 'setlimit'),
+                    reason='needs Python 3.11+')
 def test_a_large_role_write_fits_old_sqlite_variable_limit(service, engine):
     """SQLite before 3.32 allows 999 bound variables per statement."""
     if engine.dialect.name != 'sqlite':

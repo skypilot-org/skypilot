@@ -173,9 +173,11 @@ _POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
 _RULE_WIDTH = {'g': 2, 'p': 3}
-# Ids per IN list in a multi-user write: under SQLite's 999 bound variables
-# before 3.32.
-_IDS_PER_STATEMENT = 300
+# Ids per IN list in a multi-user write. Bound the IN list so we stay under
+# SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on
+# newer builds) and avoid pathological IN-clause planning on PostgreSQL. 500
+# is comfortably under both ceilings.
+_IDS_PER_STATEMENT = 500
 
 
 def _chunks(ids: List[str]) -> Iterable[List[str]]:

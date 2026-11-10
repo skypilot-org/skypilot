@@ -801,6 +801,18 @@ def _user_upsert_session(
             dbapi_conn.execute(f'PRAGMA busy_timeout = {previous_ms}')
 
 
+def set_user_password(user_id: str, password: str) -> bool:
+    """Sets an existing user's password hash. Returns False, and creates no
+    user, if the user does not exist."""
+    engine = _db_manager.get_engine()
+    with _user_upsert_session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(password=password))
+        session.commit()
+        return result.rowcount > 0
+
+
 @metrics_lib.time_me
 def add_or_update_user(
     user: models.User,
@@ -985,9 +997,15 @@ def get_user(user_id: str) -> Optional[models.User]:
 @metrics_lib.time_me
 def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
     engine = _db_manager.get_engine()
+    ids = sorted(user_ids)
+    rows = []
     with orm.Session(engine) as session:
-        rows = session.query(user_table).filter(
-            user_table.c.id.in_(user_ids)).all()
+        # Chunked IN; see _CLUSTER_IN_QUERY_CHUNK_SIZE.
+        for offset in range(0, len(ids), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = ids[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows.extend(
+                session.query(user_table).filter(
+                    user_table.c.id.in_(batch)).all())
     return {
         row.id: models.User(
             id=row.id,
