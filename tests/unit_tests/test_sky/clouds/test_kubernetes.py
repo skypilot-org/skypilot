@@ -1404,6 +1404,26 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         # The slice shape comes from the request, not from node labels.
         mock_get_label_key_values.assert_not_called()
 
+        # With a gang scheduler queue, its placement keeps the slice in one
+        # pool, so there is no podAffinity.
+        self.resources.instance_type = '16CPU--64GB--tpu-v6e-8:1'
+        self.resources.enforce_multi_host = True
+        with patch('sky.skypilot_config.get_effective_queue_name',
+                   return_value='default-queue'):
+            deploy_vars = k8s_cloud.make_deploy_resources_variables(
+                resources=self.resources,
+                cluster_name=resources_utils.ClusterName(
+                    display_name=self.cluster_name,
+                    name_on_cloud=self.cluster_name),
+                region=self.region,
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+        self.assertEqual(deploy_vars['k8s_kueue_local_queue_name'],
+                         'default-queue')
+        self.assertNotIn('podAffinity',
+                         deploy_vars['pod_fields']['spec'].get('affinity', {}))
+
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
