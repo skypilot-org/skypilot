@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import PropTypes from 'prop-types';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -69,6 +70,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import {
   BatchRoleDialog,
@@ -76,14 +84,15 @@ import {
   BatchRemoveFromWorkspacesDialog,
 } from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
   Filters,
-  updateURLParams as sharedUpdateURLParams,
-  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   filterData,
 } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { trackUserAction, trackFilterUsed } from '@/lib/analytics';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
@@ -103,29 +112,56 @@ const GPU_CONSUMING_JOB_STATUSES = new Set([
   'CANCELLING',
 ]);
 
-// Define filter options for the filter dropdown
-const PROPERTY_OPTIONS = [
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands on a chip, which
+// `evaluateCondition` lowercases to look up the field on each row.
+// `legacyKeys` are the spellings the old triple-array URLs carried, which the
+// dropdown chose to match a suggestion-list key rather than to read well.
+//
+// GPU and Infra are multi-valued: the table's counting path already reads
+// several values on either as alternatives (see `getFilteredCounts`), so they
+// join with a comma. The rest are single-valued -- a user has one name, one id,
+// one role -- and a second value could only ever empty the table.
+export const USER_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
   {
-    label: 'Name',
-    value: 'name',
-  },
-  {
+    key: 'gpu',
     label: 'GPU',
-    value: 'gpu type', // Match valueList key
+    kind: 'enum',
+    multi: true,
+    legacyKeys: ['gpu type'],
   },
-  {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
-    label: 'User ID',
-    value: 'user id', // Match valueList key
-  },
-  {
-    label: 'Role',
-    value: 'role',
-  },
+  { key: 'infra', label: 'Infra', kind: 'enum', multi: true },
+  { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
+  { key: 'role', label: 'Role', kind: 'text' },
 ];
+
+// Non-filter state that also belongs in a shared link. Deduplication defaults
+// to on, so only the off state needs to travel.
+const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
+
+const SERVICE_ACCOUNT_SEARCH_PLACEHOLDER =
+  'Search by service account name, or created by';
+
+const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
+  label,
+  value: key,
+  multi: multi ?? false,
+}));
+
+const MULTI_VALUE_LABELS = new Set(
+  USER_FILTER_SCHEMA.filter((e) => e.multi).map((e) => e.label)
+);
+
+// A multi-valued property stacks -- two GPU chips mean "either" -- and ignores
+// an exact duplicate. Everything else replaces, so the chip bar can never show
+// a filter the URL is unable to carry.
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 // Helper function to get GPU count with validation
 const getGPUCount = (accelerators, source) => {
@@ -197,10 +233,8 @@ export const getJobGpuCount = (job) => {
 const fetchClustersAndJobs = async () => {
   const [clustersResult, jobsResult] = await Promise.allSettled([
     dashboardCache.get(getClusters),
-    // Use shared cache key (no field filtering) - preloader uses same args
-    dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]),
+    // Shared cache key — must match the preloader's args exactly
+    dashboardCache.get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]),
   ]);
 
   const clustersData =
@@ -301,6 +335,30 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   );
 };
 
+// Mirrors check_service_account_token_permission on the server: admins can
+// manage any token, other users only their own, and viewers none.
+export function canManageServiceAccountToken(roleData, token) {
+  if (!roleData || !token) return false;
+  if (roleData.role === 'admin') return true;
+  return roleData.role !== 'viewer' && token.creator_user_hash === roleData.id;
+}
+
+// The server lets any non-viewer create a service account, but only admins
+// can grant the admin role (see _check_role_grantable).
+export function canCreateServiceAccountToken(roleData) {
+  return Boolean(roleData) && roleData.role !== 'viewer';
+}
+
+export function grantableServiceAccountRoles(role) {
+  return role === 'admin' ? ['admin', 'user', 'viewer'] : ['user', 'viewer'];
+}
+
+const SERVICE_ACCOUNT_ROLE_LABELS = {
+  admin: 'Admin',
+  user: 'User',
+  viewer: 'Viewer',
+};
+
 export function Users() {
   const router = useRouter();
   const { userEmail } = useSidebar();
@@ -354,92 +412,39 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
-  const [filters, setFilters] = useState([]);
+  // Filters and the shareable view state both live in the URL, keyed by name.
+  const { filters, setFilters, view, setView, initialQuery } =
+    useUrlFilterState(USER_FILTER_SCHEMA, USER_VIEW_SCHEMA);
   const [valueList, setValueList] = useState({
     name: [],
-    'user id': [],
+    userId: [],
     role: [],
-    'gpu type': [],
+    gpu: [],
     infra: [],
   });
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
-  // Initialize deduplicateUsers from URL parameter
-  const getInitialDeduplicateUsers = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const deduplicateParam = router.query.deduplicate;
-      // If parameter is explicitly set, use it; otherwise default to true
-      if (deduplicateParam !== undefined) {
-        return deduplicateParam === 'true';
-      }
-    }
-    return true; // Default to deduplicated view
-  };
-
-  const [deduplicateUsers, setDeduplicateUsers] = useState(
-    getInitialDeduplicateUsers
+  // Deduplication is view state: on by default, so only the off state has to
+  // travel in the link.
+  const deduplicateUsers = view.deduplicate !== 'false';
+  const setDeduplicateUsers = useCallback(
+    (next) => setView('deduplicate', next ? 'true' : 'false'),
+    [setView]
   );
 
-  // Sync deduplicateUsers state with URL parameter
+  // An SSO deployment is more useful undeduplicated, since one person can hold
+  // several identities. Applied once, and only when the link did not say
+  // otherwise, so a shared URL always wins over the deployment default.
+  const ssoDefaultApplied = useRef(false);
   useEffect(() => {
-    if (router.isReady) {
-      const deduplicateParam = router.query.deduplicate;
-
-      // If URL has no deduplicate parameter, set it to the default
-      // Default to false for SSO (userEmail exists), true for non-SSO
-      if (deduplicateParam === undefined) {
-        const defaultValue = !userEmail; // false for SSO, true for non-SSO
-        updateDeduplicateURL(defaultValue);
-      } else {
-        const expectedState = deduplicateParam === 'true';
-        if (deduplicateUsers !== expectedState) {
-          setDeduplicateUsers(expectedState);
-        }
-      }
+    if (ssoDefaultApplied.current || !userEmail) {
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.deduplicate, userEmail]);
-
-  // Helper function to update deduplicate in URL
-  const updateDeduplicateURL = (deduplicateValue) => {
-    const query = { ...router.query };
-    query.deduplicate = deduplicateValue.toString();
-
-    // Use replace to avoid adding to browser history
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Helper function to update URL query parameters for filters
-  const updateURLParams = (filters) => {
-    sharedUpdateURLParams(router, filters);
-  };
-
-  // Create property map for filter URL parameters
-  const propertyMap = new Map([
-    ['name', 'Name'],
-    ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
-    ['role', 'Role'],
-    ['gpu type', 'GPU'], // Note: lowercase with space to match URL encoding
-    ['infra', 'Infra'],
-  ]);
-
-  // Initialize filters from URL parameters
-  useEffect(() => {
-    if (router.isReady && activeMainTab === 'users') {
-      const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
-      if (urlFilters.length > 0) {
-        setFilters(urlFilters);
-      }
+    ssoDefaultApplied.current = true;
+    if (initialQuery.deduplicate === undefined) {
+      setView('deduplicate', 'false');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, activeMainTab]);
+  }, [userEmail, initialQuery, setView]);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -518,11 +523,15 @@ export function Users() {
     });
   }, [getUserRole]);
 
-  const checkPermissionAndAct = async (action, actionCallback) => {
+  const checkPermissionAndAct = async (
+    action,
+    actionCallback,
+    isAllowed = (roleData) => roleData.role === 'admin'
+  ) => {
     try {
       const roleData = await getUserRole();
 
-      if (roleData.role !== 'admin') {
+      if (!isAllowed(roleData)) {
         setPermissionDenialState({
           open: true,
           message: action,
@@ -548,9 +557,7 @@ export function Users() {
     trackUserAction('refresh');
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]);
+    dashboardCache.invalidate(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -758,11 +765,19 @@ export function Users() {
     (tab) => {
       trackUserAction('tab_change', { tab });
       setActiveMainTab(tab);
-      if (tab === 'users') {
-        router.push('/users', undefined, { shallow: true });
-      } else {
-        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
-      }
+      // Keep whatever else the address bar carries: the filter params are
+      // written straight to history, so rebuilding the query from scratch here
+      // would drop them and leave the chip bar describing an unshareable URL.
+      router.push(
+        hrefWithQueryKey(
+          '/users',
+          window.location.search,
+          'tab',
+          tab === 'users' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -775,6 +790,57 @@ export function Users() {
       </div>
     );
   }
+
+  // Default filter input and active-filter chips.
+  const trackNewFilter = (property, value) =>
+    trackFilterUsed('user', { property, value });
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      onFilterAdd={trackNewFilter}
+      placeholder="Filter users"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+  const serviceAccountSearchInput = (
+    <div className="relative flex-1 max-w-md">
+      <input
+        type="text"
+        placeholder={SERVICE_ACCOUNT_SEARCH_PLACEHOLDER}
+        value={serviceAccountSearchQuery}
+        onChange={(e) => {
+          setServiceAccountSearchQuery(e.target.value);
+        }}
+        className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+      />
+      {serviceAccountSearchQuery && (
+        <button
+          onClick={() => {
+            setServiceAccountSearchQuery('');
+          }}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          title="Clear search"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -870,52 +936,33 @@ export function Users() {
       <div className="flex items-center justify-between mb-4">
         {activeMainTab === 'users' ? (
           <div className="w-full sm:w-auto max-w-xl">
-            <FilterDropdown
-              propertyList={PROPERTY_OPTIONS}
-              valueList={valueList}
-              setFilters={setFilters}
-              updateURLParams={updateURLParams}
-              onFilterAdd={(property, value) =>
-                trackFilterUsed('user', { property, value })
-              }
-              placeholder="Filter users"
+            <PluginSlot
+              name="users.filters.input"
+              context={{
+                filters,
+                setFilters,
+                addFilter,
+                propertyList: PROPERTY_OPTIONS,
+                valueList,
+                placeholder: 'Filter users',
+                onFilterAdd: trackNewFilter,
+                defaultContent: filterInput,
+              }}
+              fallback={filterInput}
             />
           </div>
         ) : activeMainTab === 'service-accounts' ? (
-          <div className="relative flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="Search by service account name, or created by"
-              value={serviceAccountSearchQuery}
-              onChange={(e) => {
-                setServiceAccountSearchQuery(e.target.value);
-              }}
-              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {serviceAccountSearchQuery && (
-              <button
-                onClick={() => {
-                  setServiceAccountSearchQuery('');
-                }}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear search"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
+          <PluginSlot
+            name="users.service-accounts.filters.input"
+            context={{
+              searchQuery: serviceAccountSearchQuery,
+              setSearchQuery: setServiceAccountSearchQuery,
+              placeholder: SERVICE_ACCOUNT_SEARCH_PLACEHOLDER,
+              defaultContent: serviceAccountSearchInput,
+            }}
+            wrapperClassName="w-full sm:w-auto max-w-xl"
+            fallback={serviceAccountSearchInput}
+          />
         ) : (
           <PluginSlot
             name="users.tab-filter"
@@ -933,7 +980,6 @@ export function Users() {
               onChange={(e) => {
                 const newValue = e.target.checked;
                 setDeduplicateUsers(newValue);
-                updateDeduplicateURL(newValue);
               }}
               className="sr-only"
             />
@@ -965,7 +1011,8 @@ export function Users() {
                 'cannot create service account tokens',
                 () => {
                   setShowCreateDialog(true);
-                }
+                },
+                canCreateServiceAccountToken
               );
             }}
             className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
@@ -979,10 +1026,10 @@ export function Users() {
 
       {/* Display Active Filters - only for users tab */}
       {activeMainTab === 'users' && (
-        <Filters
-          filters={filters}
-          setFilters={setFilters}
-          updateURLParams={updateURLParams}
+        <PluginSlot
+          name="users.filters.active"
+          context={{ filters, setFilters, defaultContent: filterChips }}
+          fallback={filterChips}
         />
       )}
 
@@ -1111,6 +1158,7 @@ export function Users() {
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
               </select>
             </div>
           </div>
@@ -1729,9 +1777,9 @@ function UsersTable({
 
         setValueList({
           name: Array.from(names).sort(),
-          'user id': Array.from(userIds).sort(),
+          userId: Array.from(userIds).sort(),
           role: Array.from(roles).sort(),
-          'gpu type': Array.from(gpuTypes).sort(),
+          gpu: Array.from(gpuTypes).sort(),
           infra: Array.from(infras).sort(),
         });
 
@@ -1795,7 +1843,10 @@ function UsersTable({
         usersWithCounts.map((user) => ({
           ...user,
           name: user.usernameDisplay,
-          'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
+          // `evaluateCondition` looks the field up by the chip's label
+          // lowercased, so the User ID chip needs a matching field name. The
+          // URL key is `userId`; only this in-memory alias keeps the space.
+          'user id': user.userId,
         })),
         standardFilters
       );
@@ -2072,6 +2123,15 @@ function UsersTable({
     }
     return '';
   };
+
+  // Columns contributed via useTableColumns() are rendered after the built-in
+  // Jobs column and sorted among themselves by header.order. Brings the Users
+  // table to parity with the clusters/jobs/volumes tables, which already render
+  // these dynamically-registered columns.
+  const extraColumns = useTableColumns('users', { deduplicateUsers });
+  const sortedExtraColumns = [...extraColumns].sort(
+    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
+  );
 
   const handleEditClick = async (userId, currentRole) => {
     await checkPermissionAndAct('cannot edit user role', () => {
@@ -2452,6 +2512,23 @@ function UsersTable({
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
+                {sortedExtraColumns.map((col) => {
+                  const sortKey = col.header?.sortKey;
+                  return (
+                    <TableHead
+                      key={col.id}
+                      onClick={sortKey ? () => requestSort(sortKey) : undefined}
+                      className={`whitespace-nowrap w-1/6${
+                        sortKey
+                          ? ' sortable cursor-pointer hover:bg-gray-50'
+                          : ''
+                      }${col.header?.className ? ' ' + col.header.className : ''}`}
+                    >
+                      {col.header?.label}
+                      {sortKey ? getSortDirection(sortKey) : ''}
+                    </TableHead>
+                  );
+                })}
                 {/* Show Actions column if basicAuthEnabled and not deduplicating */}
                 {!deduplicateUsers &&
                   (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -2514,6 +2591,7 @@ function UsersTable({
                               >
                                 <option value="admin">Admin</option>
                                 <option value="user">User</option>
+                                <option value="viewer">Viewer</option>
                               </select>
                               <button
                                 onClick={() => handleSaveEdit(user.userId)}
@@ -2639,6 +2717,14 @@ function UsersTable({
                         </Link>
                       )}
                     </TableCell>
+                    {sortedExtraColumns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={col.cell?.className || ''}
+                      >
+                        {col.cell?.render?.(user, { item: user })}
+                      </TableCell>
+                    ))}
                     {/* Actions cell logic - hide when deduplicating */}
                     {!deduplicateUsers &&
                       (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -2773,6 +2859,7 @@ function ServiceAccountTokensView({
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
+    role: '',
   });
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
@@ -2784,8 +2871,15 @@ function ServiceAccountTokensView({
   const [rotatedTokenInDialog, setRotatedTokenInDialog] = useState(null);
 
   // Role editing state
-  const [editingTokenId, setEditingTokenId] = useState(null);
-  const [currentEditingRole, setCurrentEditingRole] = useState('');
+  // The service account open in the edit dialog, and its draft role.
+  const [editingToken, setEditingToken] = useState(null);
+  const [draftRole, setDraftRole] = useState('');
+  const [savingAccess, setSavingAccess] = useState(false);
+  const [accessError, setAccessError] = useState(null);
+  // Sections plugins add to the edit dialog: {id: {dirty, valid}}, and their
+  // save callbacks.
+  const [accessSections, setAccessSections] = useState({});
+  const accessSectionSaves = useRef({});
 
   // Enhanced tokens with cluster/job counts
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
@@ -2817,6 +2911,36 @@ function ServiceAccountTokensView({
     setPage(1);
   }, [debouncedSearch, serverPaginated]);
 
+  // Start the Role field on the server's `rbac.default_role`, unless a role
+  // was already picked.
+  useEffect(() => {
+    if (!showCreateDialog) return undefined;
+    let cancelled = false;
+    const fetchDefaultRole = async () => {
+      try {
+        const response = await apiClient.get('/users/default-role');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to get default role');
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          // `rbac.default_role` falls back to admin, which a non-admin
+          // cannot grant, so start them on user instead.
+          const grantable = grantableServiceAccountRoles(userRoleCache?.role);
+          const role = grantable.includes(data.role) ? data.role : 'user';
+          setNewToken((prev) => (prev.role ? prev : { ...prev, role }));
+        }
+      } catch (error) {
+        console.error('Failed to get default role:', error);
+      }
+    };
+    fetchDefaultRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateDialog, userRoleCache?.role]);
+
   // Fetch tokens and related data
   const fetchTokensAndCounts = useCallback(
     async (forceRefresh = false) => {
@@ -2831,7 +2955,7 @@ function ServiceAccountTokensView({
           // exists to avoid. Counts will be surfaced per-row via
           // dedicated drill-ins later.
           if (forceRefresh) {
-            dashboardCache.invalidate(getServiceAccountTokensPaginated);
+            dashboardCache.invalidateFunction(getServiceAccountTokensPaginated);
           }
           const resp = await dashboardCache.get(
             getServiceAccountTokensPaginated,
@@ -2945,51 +3069,100 @@ function ServiceAccountTokensView({
     fetchTokensAndCounts();
   }, [fetchTokensAndCounts]);
 
-  // Role editing functions
-  const handleEditClick = async (tokenId, currentRole) => {
+  // Edit dialog: the role, plus whatever sections plugins add.
+  const openAccessDialog = async (token) => {
     await checkPermissionAndAct('cannot edit service account role', () => {
-      setEditingTokenId(tokenId);
-      setCurrentEditingRole(currentRole);
+      setEditingToken(token);
+      setDraftRole(token.primaryRole);
+      setAccessError(null);
     });
   };
 
-  const handleCancelEdit = () => {
-    setEditingTokenId(null);
-    setCurrentEditingRole('');
+  const closeAccessDialog = () => {
+    setEditingToken(null);
+    setDraftRole('');
+    setAccessError(null);
   };
 
-  const handleSaveEdit = async (tokenId) => {
-    if (!tokenId || !currentEditingRole) {
-      console.error('Token ID or role is missing.');
-      setCreateError(new Error('Token ID or role is missing.'));
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await apiClient.post(
-        '/users/service-account-tokens/update-role',
-        {
-          token_id: tokenId,
-          role: currentEditingRole,
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to update role');
+  // Passed to plugin sections: each registers whether it has changes, whether
+  // they are valid, and how to save them. Returns the unregister function.
+  const registerAccessSection = useCallback((id, section) => {
+    accessSectionSaves.current[id] = section.save;
+    setAccessSections((prev) => {
+      const current = prev[id];
+      if (
+        current &&
+        current.dirty === section.dirty &&
+        current.valid === section.valid
+      ) {
+        return prev;
       }
+      return { ...prev, [id]: { dirty: section.dirty, valid: section.valid } };
+    });
+    return () => {
+      delete accessSectionSaves.current[id];
+      setAccessSections((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    };
+  }, []);
 
-      setCreateSuccess('Service account role updated successfully!');
+  const roleChanged =
+    Boolean(editingToken) && draftRole !== editingToken.primaryRole;
+  const sectionsDirty = Object.values(accessSections).some((s) => s.dirty);
+  const sectionsValid = Object.values(accessSections).every((s) => s.valid);
+
+  const handleSaveAccess = async () => {
+    if (!editingToken) return;
+    setSavingAccess(true);
+    setAccessError(null);
+    let roleSaved = false;
+    try {
+      if (roleChanged) {
+        const response = await apiClient.post(
+          '/users/service-account-tokens/update-role',
+          {
+            token_id: editingToken.token_id,
+            role: draftRole,
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to update role');
+        }
+        roleSaved = true;
+        // If a section fails below, Save retries only the sections.
+        setEditingToken(
+          (token) => token && { ...token, primaryRole: draftRole }
+        );
+      }
+      for (const [id, section] of Object.entries(accessSections)) {
+        if (section.dirty) await accessSectionSaves.current[id]?.();
+      }
+      setCreateSuccess('Service account updated successfully!');
       await fetchTokensAndCounts(true); // Refresh data (force refresh after mutation)
-      handleCancelEdit(); // Exit edit mode
+      closeAccessDialog();
     } catch (error) {
-      console.error('Failed to update service account role:', error);
-      setCreateError(error);
+      console.error('Failed to update service account:', error);
+      const message = error.message || String(error);
+      setAccessError(roleSaved ? `The role is saved. ${message}` : message);
+      if (roleSaved) await fetchTokensAndCounts(true);
     } finally {
-      setLoading(false);
+      setSavingAccess(false);
     }
   };
+
+  // The roles the editor may pick from, keeping the current one even when the
+  // editor could not grant it.
+  const editableRoles = editingToken
+    ? ['admin', 'user', 'viewer'].filter(
+        (role) =>
+          grantableServiceAccountRoles(userRoleCache?.role).includes(role) ||
+          role === editingToken.primaryRole
+      )
+    : [];
 
   // Copy to clipboard
   const copyToClipboard = async (text) => {
@@ -3015,6 +3188,7 @@ function ServiceAccountTokensView({
         token_name: newToken.token_name.trim(),
         expires_in_days:
           newToken.expires_in_days === '' ? null : newToken.expires_in_days,
+        role: newToken.role,
       };
 
       const response = await apiClient.post(
@@ -3025,7 +3199,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setNewToken({ token_name: '', expires_in_days: 30 });
+        setNewToken({ token_name: '', expires_in_days: 30, role: '' });
         await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
@@ -3195,58 +3369,23 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center gap-2">
-                        {editingTokenId === token.token_id ? (
-                          <>
-                            <select
-                              value={currentEditingRole}
-                              onChange={(e) =>
-                                setCurrentEditingRole(e.target.value)
-                              }
-                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                            >
-                              <option value="admin">Admin</option>
-                              <option value="user">User</option>
-                            </select>
-                            <button
-                              onClick={() => handleSaveEdit(token.token_id)}
-                              className="text-green-600 hover:text-green-800 p-1"
-                              title="Save"
-                            >
-                              <CheckIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              className="text-gray-500 hover:text-gray-700 p-1"
-                              title="Cancel"
-                            >
-                              <XIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="capitalize">
-                              {token.primaryRole}
-                            </span>
-                            {/* Only show edit role button if admin or owner */}
-                            {(userRoleCache?.role === 'admin' ||
-                              token.creator_user_hash ===
-                                userRoleCache?.id) && (
-                              <button
-                                onClick={() =>
-                                  handleEditClick(
-                                    token.token_id,
-                                    token.primaryRole
-                                  )
-                                }
-                                className="text-blue-600 hover:text-blue-700 p-1"
-                                title="Edit role"
-                              >
-                                <PenIcon className="h-3 w-3" />
-                              </button>
-                            )}
-                          </>
+                        <span className="capitalize">{token.primaryRole}</span>
+                        {/* Only show the edit button to admins and the owner */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
+                          <button
+                            onClick={() => openAccessDialog(token)}
+                            className="text-blue-600 hover:text-blue-700 p-1"
+                            title="Edit service account"
+                          >
+                            <PenIcon className="h-3 w-3" />
+                          </button>
                         )}
                       </div>
+                      <PluginSlot
+                        name="users.service-accounts.role.detail"
+                        context={{ serviceAccount: token }}
+                      />
                     </TableCell>
                     <TableCell>
                       {token.clusterCount === undefined ? (
@@ -3344,9 +3483,8 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        {/* Show rotate button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show rotate button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <CustomTooltip
                             content={`Rotate token`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3354,11 +3492,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot rotate service account tokens',
+                                  'cannot rotate this service account token',
                                   () => {
                                     setTokenToRotate(token);
                                     setShowRotateDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
@@ -3367,9 +3510,8 @@ function ServiceAccountTokensView({
                             </button>
                           </CustomTooltip>
                         )}
-                        {/* Show delete button only if user owns the token or is admin */}
-                        {(userRoleCache?.role === 'admin' ||
-                          token.creator_user_hash === userRoleCache?.id) && (
+                        {/* Show delete button only if the user can manage this token */}
+                        {canManageServiceAccountToken(userRoleCache, token) && (
                           <Tooltip
                             content={`Delete ${token.token_name}`}
                             className="capitalize text-sm text-muted-foreground"
@@ -3377,11 +3519,16 @@ function ServiceAccountTokensView({
                             <button
                               onClick={() => {
                                 checkPermissionAndAct(
-                                  'cannot delete service account tokens',
+                                  'cannot delete this service account token',
                                   () => {
                                     setTokenToDelete(token);
                                     setShowDeleteDialog(true);
-                                  }
+                                  },
+                                  (roleData) =>
+                                    canManageServiceAccountToken(
+                                      roleData,
+                                      token
+                                    )
                                 );
                               }}
                               className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
@@ -3515,6 +3662,34 @@ function ServiceAccountTokensView({
                   />
                 </div>
                 <div className="grid gap-2">
+                  <label
+                    htmlFor="create-sa-role-select"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Role
+                  </label>
+                  <Select
+                    value={newToken.role}
+                    onValueChange={(role) => setNewToken({ ...newToken, role })}
+                  >
+                    <SelectTrigger
+                      id="create-sa-role-select"
+                      className="w-full focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {grantableServiceAccountRoles(userRoleCache?.role).map(
+                        (role) => (
+                          <SelectItem key={role} value={role}>
+                            {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
                     Expiration (days)
                   </label>
@@ -3567,12 +3742,97 @@ function ServiceAccountTokensView({
                 <button
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
                   onClick={handleCreateToken}
-                  disabled={creating || !newToken.token_name.trim()}
+                  disabled={
+                    creating || !newToken.token_name.trim() || !newToken.role
+                  }
                 >
                   {creating ? 'Creating...' : 'Create Token'}
                 </button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Service Account Dialog */}
+      <Dialog
+        open={Boolean(editingToken)}
+        onOpenChange={(open) => {
+          if (!open) closeAccessDialog();
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          onEscapeKeyDown={(e) => {
+            // A picker in a plugin section closes its own menu on Escape.
+            if (
+              e.target instanceof Element &&
+              e.target.closest('[role="combobox"][aria-expanded="true"]')
+            ) {
+              e.preventDefault();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{editingToken?.token_name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="grid gap-2">
+              <label
+                htmlFor="edit-sa-role-select"
+                className="text-sm font-medium text-gray-700"
+              >
+                Role
+              </label>
+              <Select value={draftRole} onValueChange={setDraftRole}>
+                <SelectTrigger
+                  id="edit-sa-role-select"
+                  className="w-full focus:ring-0 focus:ring-offset-0"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {editableRoles.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {SERVICE_ACCOUNT_ROLE_LABELS[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {editingToken && (
+              <PluginSlot
+                name="users.service-accounts.access"
+                context={{
+                  serviceAccount: editingToken,
+                  role: draftRole,
+                  registerSection: registerAccessSection,
+                }}
+              />
+            )}
+            {accessError && (
+              <p className="text-sm text-red-600">{accessError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={closeAccessDialog}
+              disabled={savingAccess}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              onClick={handleSaveAccess}
+              disabled={
+                savingAccess ||
+                !(roleChanged || sectionsDirty) ||
+                !sectionsValid
+              }
+            >
+              {savingAccess ? 'Saving...' : 'Save'}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

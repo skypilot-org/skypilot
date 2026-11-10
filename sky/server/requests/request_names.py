@@ -13,6 +13,7 @@ class RequestName(str, enum.Enum):
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
     SLURM_NODE_INFO = 'slurm_node_info'
+    SLURM_CLUSTER_NAMES = 'slurm_cluster_names'
     STATUS_KUBERNETES = 'status_kubernetes'
     KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
@@ -28,6 +29,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_START = 'start'
     CLUSTER_AUTOSTOP = 'autostop'
     CLUSTER_QUEUE = 'queue'
+    CLUSTER_JOB_SPEC = 'cluster_job_spec'
     CLUSTER_JOB_STATUS = 'job_status'
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'
@@ -99,6 +101,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
     REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
     REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP = 'expired-token-cleanup'
+    REQUEST_DAEMON_LAUNCH_METRICS = 'launch-metrics'
 
     def __repr__(self):
         return self.value

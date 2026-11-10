@@ -170,7 +170,11 @@ class LazyDataFrame:
     def _load_df(self) -> 'pd.DataFrame':
         if self._update_if_stale_func() or self._df is None:
             try:
-                self._df = pd.read_csv(self._filename)
+                # A catalog whose rows all lack a GPU has an empty
+                # AcceleratorName column, which pandas reads as float. The
+                # .str filters on that column then raise AttributeError.
+                self._df = pd.read_csv(self._filename,
+                                       dtype={'AcceleratorName': str})
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.
                 logger.error(f'Failed to read {self._filename}. '

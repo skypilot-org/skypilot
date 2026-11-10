@@ -8,8 +8,36 @@ import orjson
 import pandas as pd
 import pytest
 
+from sky import catalog
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
+
+
+def test_rtxpro6000_in_common_gpus():
+    # RTXPRO6000 (NVIDIA RTX PRO 6000 Blackwell) must appear in the common GPU
+    # list so that `sky show-gpus` surfaces it across clouds. Naming matches
+    # the AWS and RunPod catalogs (no hyphens), not GCP's `nvidia-rtx-pro-6000`.
+    assert 'RTXPRO6000' in catalog.get_common_gpus()
+
+
+def test_list_accelerators_with_no_gpu_rows():
+    # A catalog listing only CPU instances has an empty AcceleratorName
+    # column. Filtering by name must return no accelerators, not raise.
+    csv = ('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,'
+           'GpuInfo,Region,Price,SpotPrice\n'
+           'CPU.4V.16G,,,4.0,16.0,,FIN-03,0.048,0.0192\n')
+    with tempfile.NamedTemporaryFile('w', suffix='.csv') as f:
+        f.write(csv)
+        f.flush()
+        df = catalog_common.LazyDataFrame(f.name, lambda: False)
+        result = catalog_common.list_accelerators_impl('Verda',
+                                                       df,
+                                                       gpus_only=True,
+                                                       name_filter='H100',
+                                                       region_filter=None,
+                                                       quantity_filter=None,
+                                                       case_sensitive=False)
+    assert result == {}
 
 
 @mock.patch('sky.catalog.common.requests.get')

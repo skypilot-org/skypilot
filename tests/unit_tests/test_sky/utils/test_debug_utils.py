@@ -1,9 +1,12 @@
 """Tests for sky.utils.debug_utils module."""
+import concurrent.futures
 import contextlib
 import datetime
 import json
+import logging
 import os
 import posixpath
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -54,6 +57,7 @@ def _make_context(
         request_ids_via_job=request_ids_via_job or set(),
         request_ids_via_cluster=request_ids_via_cluster or set(),
         errors=errors if errors is not None else [],
+        timed_out_ops=[],
     )
 
 
@@ -200,7 +204,7 @@ class TestGetRequestsFromManagedJobs:
 
     MOCK_QUEUE_V2 = 'sky.jobs.server.core.queue_v2'
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_id(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has a matching job_id."""
@@ -216,7 +220,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j1' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_finds_requests_by_job_ids_list(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has matching job_ids list."""
@@ -232,7 +236,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j2' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_skips_non_matching_job_ids(self, mock_get_tasks, _mock_queue):
         """Requests with unrelated job IDs should not be collected."""
@@ -258,7 +262,7 @@ class TestGetRequestsFromManagedJobs:
         mock_get_tasks.assert_not_called()
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_none_body_is_skipped(self, mock_get_tasks, _mock_queue):
         """Requests with None body should be silently skipped."""
@@ -273,7 +277,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_db_failure_logs_warning(self, mock_get_tasks, _mock_queue):
         """DB failure should log warning but not crash."""
@@ -285,7 +289,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_filters_by_managed_job_request_names(self, mock_get_tasks,
                                                   _mock_queue):
@@ -312,7 +316,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-training',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name='my-training',
@@ -337,7 +341,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -362,7 +366,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -388,7 +392,7 @@ class TestGetRequestsFromManagedJobs:
             'job_id': 42,
             'job_name': 'my-job',
             'user_hash': 'user-abc'
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
         body = SimpleNamespace(job_id=None,
                                job_ids=None,
                                name=None,
@@ -406,7 +410,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-cancel-other' not in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value(self, mock_get_tasks, _mock_queue):
         """Should match jobs.launch request via return_value.job_id."""
@@ -423,7 +427,7 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-rv' in ctx['request_ids']
 
-    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0, []))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_matches_launch_by_return_value_list(self, mock_get_tasks,
                                                  _mock_queue):
@@ -617,7 +621,7 @@ class TestGetManagedJobsFromClusters:
             'task_name': 'train',
             'current_cluster_name': None,
             'pool': None,
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
         ctx = _make_context(cluster_names={name})
 
@@ -648,7 +652,7 @@ class TestGetManagedJobsFromClusters:
                 'current_cluster_name': 'worker-2',
                 'pool': 'p',
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(cluster_names={'worker-1'})
 
         debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
@@ -710,7 +714,7 @@ class TestGetJobClustersFromManagedJobs:
                 'current_cluster_name': None,
                 'pool': None,
             },
-        ], 0, {}, 0)
+        ], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={5})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -734,7 +738,7 @@ class TestGetJobClustersFromManagedJobs:
             'task_name': 'train',
             'current_cluster_name': 'worker-9',
             'pool': 'p',
-        }], 0, {}, 0)
+        }], 0, {}, 0, [])
         ctx = _make_context(managed_job_ids={6})
 
         debug_utils._get_job_clusters_from_managed_jobs(ctx)
@@ -946,7 +950,7 @@ class TestPopulateRecentContext:
         recent_request = _make_request(request_id='req-recent')
         mock_get_tasks.return_value = [recent_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -963,7 +967,7 @@ class TestPopulateRecentContext:
         """Should push time filtering to the DB via finished_after."""
         mock_get_tasks.return_value = []
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -997,7 +1001,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 200000,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1036,7 +1040,7 @@ class TestPopulateRecentContext:
                 'launched_at': now - 60,
             },
         ]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1065,7 +1069,7 @@ class TestPopulateRecentContext:
                 'submitted_at': now - 100000,
                 'end_at': now - 90000,
             },
-        ], 2, {}, 2)
+        ], 2, {}, 2, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1086,7 +1090,7 @@ class TestPopulateRecentContext:
                                         finished_at=None)
         mock_get_tasks.return_value = [running_request]
         mock_get_clusters.return_value = []
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1130,7 +1134,7 @@ class TestPopulateRecentContext:
             'status_updated_at': now - 100000,
             'launched_at': now - 1800,
         }]
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+        mock_queue_v2.return_value = ([], 0, {}, 0, [])
 
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx,
@@ -1238,7 +1242,7 @@ class TestCrossLinkCycleBreak:
         ]
         # queue_v2 must not raise — patch it as a no-op.
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={42})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1297,7 +1301,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.launch'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             # 'user-seeded' was already in request_ids before the helper ran.
             ctx = _make_context(managed_job_ids={42},
                                 request_ids={'user-seeded'})
@@ -1333,7 +1337,7 @@ class TestCrossLinkCycleBreak:
                           name='sky.jobs.cancel'),
         ]
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
-                        return_value=([], 0, {}, 0)):
+                        return_value=([], 0, {}, 0, [])):
             ctx = _make_context(managed_job_ids={1})
             debug_utils._get_requests_from_managed_jobs(ctx,
                                                         _StubReachability())
@@ -1480,10 +1484,14 @@ class TestCreateDebugDump:
                                   mock_clusters_from_jobs, mock_dump_server,
                                   mock_dump_requests, mock_dump_clusters,
                                   mock_dump_jobs, tmp_path):
-        """Client info should be written when provided."""
+        """Client info should be written when provided, with credentials in
+        its env redacted."""
         client_info = {
             'client_version': '0.10.0',
             'platform': 'linux',
+            'environment': {
+                'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+            },
         }
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -1498,6 +1506,8 @@ class TestCreateDebugDump:
             data = json.loads(zf.read(client_info_files[0]))
             assert data['client_version'] == '0.10.0'
             assert data['platform'] == 'linux'
+            assert (data['environment']['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] ==
+                    '<redacted>')
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -1840,7 +1850,7 @@ class TestDumpManagedJobQueueInfo:
             'job_id': 1,
             'job_name': 'test-job',
             'status': 'RUNNING',
-        }], 1, {}, 1)
+        }], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
@@ -1869,7 +1879,7 @@ class TestDumpManagedJobQueueInfo:
                 'task_name': 'task-b',
                 'status': 'RUNNING'
             },
-        ], 1, {}, 1)
+        ], 1, {}, 1, [])
 
         jobs_dir = str(tmp_path / 'managed_jobs')
         os.makedirs(jobs_dir, exist_ok=True)
@@ -1879,6 +1889,30 @@ class TestDumpManagedJobQueueInfo:
                                            'job_info_task0.json'))
         assert os.path.exists(os.path.join(jobs_dir, '1',
                                            'job_info_task1.json'))
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_redacts_task_yaml_fields(self, mock_queue_v2, tmp_path):
+        """Task YAML fields in job_info.json should be redacted."""
+        task_yaml = ('name: my-task\n'
+                     'envs:\n'
+                     '  SKYPILOT_API_SERVER_ENDPOINT: '
+                     'https://alice:real_pass@example.com\n'
+                     'secrets:\n'
+                     '  SKYPILOT_SERVICE_ACCOUNT_TOKEN: real_token\n')
+        mock_queue_v2.return_value = ([{
+            'job_id': 1,
+            'user_yaml': task_yaml,
+            'original_user_yaml_content': task_yaml,
+        }], 1, {}, 1, [])
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, [])
+
+        with open(os.path.join(jobs_dir, '1', 'job_info.json')) as f:
+            content = f.read()
+        assert 'real_pass' not in content
+        assert 'real_token' not in content
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     def test_error_handling(self, mock_queue_v2, tmp_path):
@@ -1893,6 +1927,39 @@ class TestDumpManagedJobQueueInfo:
         assert len(errors) == 1
         assert errors[0]['component'] == 'managed_jobs'
         assert 'queue_v2 failed' in errors[0]['error']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_queue_timeout_recorded_not_raised(self, mock_queue_v2, tmp_path,
+                                               monkeypatch):
+        """A queue_v2 call that exceeds its dump-side bound is recorded as a
+        partial failure and the sub-section is skipped -- the dump does not hang
+        or raise. This bounds the shared, un-timeout-able controller SSH work
+        (fetch_managed_job_table exec + the accessibility ray-status probe)
+        without touching that shared code."""
+        # Tighten the bound so the test is fast.
+        monkeypatch.setattr(debug_utils, '_MANAGED_JOB_QUEUE_TIMEOUT', 0.2)
+        started = threading.Event()
+
+        def _slow_queue(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) bound.
+            return ([], 0, {}, 0)
+
+        mock_queue_v2.side_effect = _slow_queue
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        errors: List[Dict[str, str]] = []
+        start = time.time()
+        # Must not raise, and must return well before the slow call finishes.
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, errors)
+        elapsed = time.time() - start
+
+        assert started.is_set()
+        assert elapsed < 3
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'managed_jobs'
+        assert errors[0]['resource'] == 'queue_v2_batch'
 
 
 # ---------------------------------------------------------------------------
@@ -2042,6 +2109,108 @@ class TestCollectControllerDebugData:
         assert len(errors) == 1
         assert 'rsync/' in errors[0]['resource']
 
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_and_rsync_are_bounded(self, mock_accessible,
+                                                   mock_backend_cls, tmp_path):
+        """The controller exec + rsync must pass timeouts so a slow/wedged
+        controller can't hang the dump."""
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/file.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # Exec is bounded by both a connect timeout and an overall timeout.
+        _, exec_kwargs = mock_backend.run_on_head.call_args
+        assert exec_kwargs['connect_timeout'] == (
+            debug_utils._CONTROLLER_EXEC_CONNECT_TIMEOUT)
+        assert exec_kwargs['timeout'] == debug_utils._CONTROLLER_EXEC_TIMEOUT
+        # Rsync is bounded by a total timeout.
+        _, rsync_kwargs = mock_runner.rsync.call_args
+        assert rsync_kwargs['timeout'] == debug_utils._CONTROLLER_RSYNC_TIMEOUT
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller exec is recorded as a partial failure; the
+        function returns instead of propagating and aborting the whole dump."""
+        mock_handle = mock.MagicMock()
+        mock_accessible.return_value = mock_handle
+
+        mock_backend = mock.MagicMock()
+        # run_with_log raises subprocess.TimeoutExpired on an exec timeout,
+        # which propagates out of run_on_head.
+        mock_backend.run_on_head.side_effect = subprocess.TimeoutExpired(
+            cmd='<manifest codegen>',
+            timeout=debug_utils._CONTROLLER_EXEC_TIMEOUT)
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'controller_manifest'
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_rsync_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller rsync is recorded as a partial failure and
+        does not abort the dump."""
+        from sky import exceptions as sky_exceptions
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        # rsync(timeout=...) raises CommandError (returncode 255) on timeout.
+        mock_runner.rsync.side_effect = sky_exceptions.CommandError(
+            returncode=255,
+            command='rsync ...',
+            error_msg='rsync timed out after 120 seconds.',
+            detailed_reason=None)
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/big.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert 'rsync/' in errors[0]['resource']
+
 
 # ---------------------------------------------------------------------------
 # Tests for RequestTaskFilter.finished_after
@@ -2159,15 +2328,15 @@ class TestManifestPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _SENSITIVE_ENV_VARS redaction
+# Tests for SENSITIVE_ENV_VARS redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
     """Tests for sensitive environment variable redaction."""
 
     def test_sensitive_env_vars_redacted(self):
         """Sensitive env vars should have their values replaced with bool."""
-        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
-        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_dump_helpers.SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_dump_helpers.SENSITIVE_ENV_VARS
 
     @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
@@ -2844,6 +3013,35 @@ class TestSanitizeRequestBody:
         assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
 
+    def test_debug_dump_client_credentials_redacted(self):
+        """Credentials in a debug dump request's env and client info should
+        be redacted."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'env_vars': {
+                        'SKYPILOT_API_SERVER_ENDPOINT': 'https://alice:real_pass@example.com',
+                    },
+                    'client_info': {
+                        'environment': {
+                            'SKYPILOT_SERVICE_ACCOUNT_TOKEN': 'real_token',
+                            'SKYPILOT_DEBUG': '1',
+                        },
+                    },
+                }
+
+        request = _make_request(name='sky.create_debug_dump',
+                                request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert (result['env_vars']['SKYPILOT_API_SERVER_ENDPOINT'] ==
+                'https://alice:<redacted>@example.com')
+        environment = result['client_info']['environment']
+        assert environment['SKYPILOT_SERVICE_ACCOUNT_TOKEN'] == '<redacted>'
+        assert environment['SKYPILOT_DEBUG'] == '1'
+
     def test_task_yaml_field_redacted(self):
         """Task YAML fields should have secrets redacted."""
         task_yaml = ('name: my-task\n'
@@ -2925,6 +3123,28 @@ class TestRedactTaskYaml:
         result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
+
+    def test_redacts_embedded_user_specified_yaml(self):
+        """The raw user YAML embedded in a dumped task should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    '_user_specified_yaml: |\n'
+                    '  name: my-task\n'
+                    '  secrets:\n'
+                    '    API_KEY: real_api_key\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_api_key' not in result
+        assert 'API_KEY' in result
+
+    def test_masks_api_server_endpoint_password(self):
+        """The basic-auth password in the API server endpoint env var should
+        be masked."""
+        yaml_str = ('name: my-task\n'
+                    'envs:\n'
+                    '  SKYPILOT_API_SERVER_ENDPOINT: '
+                    'https://alice:real_pass@example.com\n')
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+        assert 'real_pass' not in result
+        assert 'alice:<redacted>@example.com' in result
 
 
 # ---------------------------------------------------------------------------
@@ -3643,7 +3863,7 @@ class TestCollectClusterSkyletLog:
         assert not errors
 
     def test_uses_relocated_runtime_dir(self, tmp_path):
-        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        """A relocated SKY_RUNTIME_DIR (e.g. on Slurm) is honored because the
         path is resolved on the remote node, not from a Python attribute."""
         runner = mock.Mock()
         runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
@@ -3840,6 +4060,28 @@ class TestResolveRemoteSkyletLogPath:
         """A raising runner.run falls back instead of propagating."""
         runner = mock.Mock()
         runner.run.side_effect = RuntimeError('unreachable')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_passes_overall_timeout(self):
+        """The resolve exec is bounded by an overall timeout, not just a
+        connect timeout, so a connected-but-stalled shell can't hang it."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+
+        debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        _, kwargs = runner.run.call_args
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RESOLVE_TIMEOUT
+
+    def test_falls_back_on_timeout(self):
+        """An overall-timeout (TimeoutExpired) is absorbed by the broad except
+        and the default log path is used -- no raise."""
+        runner = mock.Mock()
+        runner.run.side_effect = subprocess.TimeoutExpired(
+            cmd='echo ...', timeout=debug_utils._SKYLET_LOG_RESOLVE_TIMEOUT)
 
         path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
 
@@ -4129,3 +4371,236 @@ class TestDumpKubeContextsInfo:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'allowed_contexts'
         assert 'boom' in errors[0]['error']
+
+
+# ---------------------------------------------------------------------------
+# Tests for the best-effort overall deadline (FIX 4)
+# ---------------------------------------------------------------------------
+class TestRunWithDeadline:
+    """_run_with_deadline: success / timeout / orphan tracking / no leak."""
+
+    def test_success_returns_result(self):
+        ok, result = debug_utils._run_with_deadline(lambda: 42,
+                                                    timeout=5,
+                                                    component='c',
+                                                    resource='r')
+        assert ok is True
+        assert result == 42
+
+    def test_timeout_records_error_and_orphan(self):
+        """On timeout: (False, None), a partial-failure error, and the still-
+        running op registered in orphans (worker is not killed)."""
+        release = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, result = debug_utils._run_with_deadline(release.wait,
+                                                        timeout=0.05,
+                                                        component='comp',
+                                                        resource='res',
+                                                        errors=errors,
+                                                        orphans=orphans)
+            assert ok is False
+            assert result is None
+            assert len(errors) == 1
+            assert errors[0]['component'] == 'comp'
+            assert len(orphans) == 1
+            assert orphans[0]['resource'] == 'res'
+            # The worker thread is orphaned, still running (not killed).
+            assert not orphans[0]['future'].done()
+        finally:
+            release.set()  # let the orphaned worker exit promptly
+
+    def test_non_timeout_exception_propagates(self):
+        """A non-timeout error from fn propagates (each call site keeps its own
+        handling); the finally still shuts the executor down."""
+
+        def boom():
+            raise ValueError('boom')
+
+        with pytest.raises(ValueError, match='boom'):
+            debug_utils._run_with_deadline(boom,
+                                           timeout=5,
+                                           component='c',
+                                           resource='r')
+
+    def test_log_stragglers_warns_running_skips_done(self, monkeypatch):
+        running: concurrent.futures.Future = concurrent.futures.Future()
+        done: concurrent.futures.Future = concurrent.futures.Future()
+        done.set_result(None)
+        orphans = [
+            {
+                'component': 'still',
+                'resource': 'running',
+                'future': running,
+                'started': time.monotonic() - 2,
+            },
+            {
+                'component': 'already',
+                'resource': 'done',
+                'future': done,
+                'started': time.monotonic() - 2,
+            },
+        ]
+        calls = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: calls.append(a))
+        debug_utils._log_timed_out_stragglers(orphans)
+        # Exactly one warning, for the still-running op; the done one is skipped.
+        assert len(calls) == 1
+        assert 'still' in calls[0] and 'running' in calls[0]
+
+
+class TestOverallDeadlineHelpers:
+    """Unit tests for the small deadline/budget helpers."""
+
+    def test_no_deadline_is_noop(self):
+        assert debug_utils._remaining_budget(None) is None
+        assert debug_utils._deadline_exceeded(None) is False
+        # With no deadline the per-op timeout is unchanged.
+        assert debug_utils._bounded_timeout(120, None) == 120
+
+    def test_remaining_budget_and_exceeded(self):
+        future = time.monotonic() + 100
+        assert debug_utils._remaining_budget(future) > 0
+        assert debug_utils._deadline_exceeded(future) is False
+
+        past = time.monotonic() - 1
+        assert debug_utils._remaining_budget(past) <= 0
+        assert debug_utils._deadline_exceeded(past) is True
+
+    def test_bounded_timeout_clamps_to_remaining(self):
+        # A generous deadline leaves the fixed timeout untouched.
+        assert debug_utils._bounded_timeout(120, time.monotonic() + 1000) == 120
+        # A tight deadline clamps the fixed timeout down.
+        assert debug_utils._bounded_timeout(120, time.monotonic() + 5) <= 5
+
+
+class TestOverallDeadlineDump:
+    """End-to-end tests that the overall deadline yields a partial dump and
+    that the default (no deadline) path is unchanged."""
+
+    _CROSSLINK_FNS = (
+        '_get_managed_jobs_from_clusters',
+        '_populate_recent_context',
+        '_get_managed_jobs_from_requests',
+        '_get_job_clusters_from_managed_jobs',
+        '_get_requests_from_clusters',
+        '_get_requests_from_managed_jobs',
+        '_get_clusters_from_requests',
+        '_get_clusters_from_managed_jobs',
+    )
+    _SECTION_FNS = (
+        '_dump_server_info',
+        '_dump_kube_contexts_info',
+        '_dump_request_id_info',
+        '_dump_cluster_info',
+        '_dump_managed_job_info',
+    )
+
+    @contextlib.contextmanager
+    def _patched_dump(self, tmp_path):
+        """Patch all cross-link + section helpers; yield the section mocks."""
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            section_mocks = {
+                fn:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+                for fn in self._SECTION_FNS
+            }
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            yield section_mocks
+
+    @staticmethod
+    def _read_errors(zip_path):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            name = next(n for n in zf.namelist() if n.endswith('errors.json'))
+            return json.loads(zf.read(name))
+
+    def test_past_deadline_skips_sections_but_still_zips(self, tmp_path):
+        """An already-passed overall_deadline (e.g. the caller spent the whole
+        budget queueing) skips every section with its own recorded reason, yet
+        still produces a real (partial) zip. Exercises the real wall-clock ->
+        monotonic conversion + >=0 clamp, no internal mocking."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() - 1)
+
+        # A partial zip is still produced and returned.
+        assert result.exists()
+        assert zipfile.is_zipfile(result)
+
+        # No section ran (all were skipped before starting).
+        for fn, m in section_mocks.items():
+            assert not m.called, f'{fn} should have been skipped'
+
+        # Every section got its own skip record.
+        errors = self._read_errors(result)
+        skip_records = [
+            e for e in errors
+            if e.get('error') == 'Skipped: overall debug-dump deadline '
+            'exceeded.'
+        ]
+        assert len(skip_records) == len(self._SECTION_FNS)
+        assert all(e['resource'] == 'section' for e in skip_records)
+
+    def test_no_deadline_runs_all_sections(self, tmp_path):
+        """overall_deadline=None == unchanged behavior: every section runs and
+        nothing is skipped."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(cluster_names=['c'],
+                                                   overall_deadline=None)
+
+        assert result.exists()
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'
+
+        errors = self._read_errors(result)
+        skip_records = [
+            e for e in errors
+            if e.get('error', '').startswith('Skipped: overall debug-dump')
+        ]
+        assert not skip_records
+
+    def test_future_deadline_runs_all_sections(self, tmp_path):
+        """A generous future overall_deadline must not spuriously skip: every
+        section runs when there is budget left."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 3600)
+
+        assert result.exists()
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+def test_debug_dump_log_writes_provision_records_once(tmp_path):
+    """The dump's handler sits on both `sky` and `sky.provision`.
+
+    Outside a provision `sky.provision` propagates, so without dedupe a
+    sky.provision.* record would land in debug_dump.log twice. Only the
+    handler wiring runs: the dump body is replaced, so nothing is collected.
+    """
+
+    def build(*args, **kwargs):
+        del args, kwargs
+        logging.getLogger('sky.provision.test').warning('dump-marker-6414')
+
+    provision_logger = logging.getLogger('sky.provision')
+    original = provision_logger.propagate
+    provision_logger.propagate = True
+    try:
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')), \
+             mock.patch('sky.utils.debug_utils._build_debug_dump',
+                        side_effect=build):
+            result = debug_utils.create_debug_dump()
+    finally:
+        provision_logger.propagate = original
+    with zipfile.ZipFile(result, 'r') as zf:
+        log_name = next(
+            n for n in zf.namelist() if n.endswith('debug_dump.log'))
+        assert zf.read(log_name).decode().count('dump-marker-6414') == 1

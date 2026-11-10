@@ -2,12 +2,16 @@
 
 import asyncio
 import concurrent.futures
+import os
 import sys
 import threading
-from typing import Callable, Set, TypeVar
+from typing import Callable, Optional, Set, TypeVar
+
+import prometheus_client as prom
 
 from sky import exceptions
 from sky import sky_logging
+from sky.metrics import utils as metrics_utils
 from sky.utils import atomic
 
 # pylint: disable=ungrouped-imports
@@ -46,6 +50,20 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         self._shutdown_lock: threading.Lock = threading.Lock()
         self._threads: Set[threading.Thread] = set()
         self._threads_lock: threading.Lock = threading.Lock()
+        # Cache the labeled metric children to avoid the label lookup on
+        # every submit/complete.
+        self._active_gauge: Optional[prom.Gauge] = None
+        self._exhausted_counter: Optional[prom.Counter] = None
+        if metrics_utils.METRICS_ENABLED:
+            pid = os.getpid()
+            self._active_gauge = (
+                metrics_utils.SKY_APISERVER_THREADS_ACTIVE.labels(pid=pid,
+                                                                  name=name))
+            self._exhausted_counter = (
+                metrics_utils.SKY_APISERVER_THREADS_EXHAUSTED_TOTAL.labels(
+                    name=name))
+            metrics_utils.SKY_APISERVER_THREADS_MAX.labels(
+                pid=pid, name=name).set(max_workers)
 
     def _cleanup_thread(self, thread: threading.Thread):
         with self._threads_lock:
@@ -85,6 +103,8 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 fut.set_exception(e)
         finally:
             self.running.decrement()
+            if self._active_gauge is not None:
+                self._active_gauge.dec()
             self._cleanup_thread(threading.current_thread())
 
     def check_available(self, borrow: bool = False) -> int:
@@ -98,6 +118,8 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         count = self.running.increment()
         if count > self.max_workers:
             self.running.decrement()
+            if self._exhausted_counter is not None:
+                self._exhausted_counter.inc()
             raise exceptions.ConcurrentWorkerExhaustedError(
                 f'Maximum concurrent workers {self.max_workers} of threads '
                 f'executor [{self.name}] reached')
@@ -112,6 +134,8 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
             count = self.check_available(borrow=True)
+            if self._active_gauge is not None:
+                self._active_gauge.inc()
             fut: concurrent.futures.Future = concurrent.futures.Future()
             # Name is assigned for debugging purpose, duplication is fine
             thread = threading.Thread(target=self._task_wrapper,
@@ -125,6 +149,8 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 thread.start()
             except Exception as e:
                 self.running.decrement()
+                if self._active_gauge is not None:
+                    self._active_gauge.dec()
                 self._cleanup_thread(thread)
                 fut.set_exception(e)
                 raise

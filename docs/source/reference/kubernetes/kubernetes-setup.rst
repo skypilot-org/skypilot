@@ -175,7 +175,7 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
 Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
+If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with (on an API server with user management, only admins can run it by default):
 
 .. code-block:: console
 
@@ -413,7 +413,9 @@ For a multi-node cluster, SkyPilot additionally enforces that **every pod of the
 
 .. note::
 
-    OCI OKE RoCE clusters (launched with ``network_tier: best`` on OCI bare-metal GPU shapes) require host networking to reach the RDMA fabric, so SkyPilot enables it for them automatically — you do **not** set ``hostNetwork: true`` yourself. The same probe and one-pod-per-node behavior described above (including the multi-node node-count requirement in the warning) applies to those clusters.
+    OCI OKE RoCE clusters (launched with ``network_tier: best`` on OCI bare-metal GPU shapes) reach the RDMA fabric through the node's own devices, so SkyPilot enables host networking for them automatically — you do **not** set ``hostNetwork: true`` yourself. The same probe and one-pod-per-node behavior described above (including the multi-node node-count requirement in the warning) applies to those clusters.
+
+    This is the right default for OKE clusters set up the way Oracle documents for bare-metal RDMA. If instead your OKE cluster delivers RDMA NICs as SR-IOV virtual functions, pods keep their own network namespace — set :ref:`kubernetes.rdma.mode: sriov <config-yaml-kubernetes-rdma>` and SkyPilot will skip host networking, the ``/dev/infiniband`` mount, and the privileged container for that context.
 
 .. _kubernetes-observability:
 

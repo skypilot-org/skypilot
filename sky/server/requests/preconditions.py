@@ -136,6 +136,42 @@ class Precondition(abc.ABC):
             await asyncio.sleep(self.check_interval)
 
 
+class RequestSucceededPrecondition(Precondition):
+    """Met once another request has SUCCEEDED.
+
+    Chains a follow-up request behind the request it depends on. If the
+    awaited request ends FAILED or CANCELLED, or no longer exists, `check`
+    raises so the follow-up request is marked FAILED with that reason rather
+    than running against state the awaited request never produced.
+
+    Args:
+        request_id: The request ID of the follow-up request that this
+            precondition gates.
+        awaited_request_id: The request ID that must SUCCEED first.
+    """
+
+    def __init__(self, request_id: str, awaited_request_id: str, **kwargs):
+        super().__init__(request_id=request_id, **kwargs)
+        self.awaited_request_id = awaited_request_id
+
+    async def check(self) -> Tuple[bool, Optional[str]]:
+        awaited = await api_requests.get_request_async(self.awaited_request_id,
+                                                       fields=['status'])
+        if awaited is None:
+            raise exceptions.RequestCancelled(
+                f'Skipped: request {self.awaited_request_id} was not found.')
+        status = awaited.status
+        if status == api_requests.RequestStatus.SUCCEEDED:
+            return True, None
+        if status in (api_requests.RequestStatus.FAILED,
+                      api_requests.RequestStatus.CANCELLED):
+            raise exceptions.RequestCancelled(
+                f'Skipped: request {self.awaited_request_id} ended '
+                f'{status.value}.')
+        return False, (f'Waiting for request {self.awaited_request_id} '
+                       'to finish')
+
+
 class ClusterStartCompletePrecondition(Precondition):
     """Whether the start process of a cluster is complete.
 

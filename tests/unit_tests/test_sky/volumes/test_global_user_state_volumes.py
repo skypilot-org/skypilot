@@ -5,13 +5,18 @@ that is necessary for PostgreSQL compatibility. See issue #8178 and PR #8179.
 """
 
 import pickle
+import sqlite3
 from unittest import mock
 
 import pytest
+import sqlalchemy
+import sqlalchemy.orm
 
 from sky import global_user_state
 from sky import models
+from sky.skylet import constants
 from sky.utils import status_lib
+from sky.utils.db import db_utils
 
 
 class TestVolumeIsEphemeralHandling:
@@ -262,3 +267,114 @@ class TestVolumeIsEphemeralHandling:
                                 'status'] == expected_status.value
                             # Verify last_attached_at is set
                             assert call_kwargs['last_attached_at'] == 1234567890
+
+
+class TestVolumeResizeColumnsRoundTrip:
+    """The resize fields against a real database, not a mocked session.
+
+    Every other test here mocks the SQLAlchemy session, so nothing proves the
+    three columns exist: they arrive with a migration, and the target revision
+    is pinned rather than resolved to the newest one, so a migration that is
+    written but not pinned leaves the code writing columns the database does
+    not have. That is a runtime failure a mocked session cannot see.
+    """
+
+    @pytest.fixture
+    def fresh_db(self, tmp_path, monkeypatch):
+        """A state database built the way production builds it."""
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+        monkeypatch.setattr(
+            global_user_state,
+            '_db_manager',
+            db_utils.DatabaseManager(
+                'state',
+                global_user_state.create_table,
+                post_init_fn=lambda _: global_user_state.
+                _sqlite_supports_returning(),
+            ),
+        )
+        monkeypatch.setattr(global_user_state.common_utils, 'get_current_user',
+                            lambda: models.User(id='user123', name='user'))
+        monkeypatch.setattr(global_user_state.skypilot_config,
+                            'get_active_workspace', lambda: 'default')
+
+    def _add_volume(self, name='test-volume'):
+        global_user_state.add_volume(
+            name=name,
+            config=models.VolumeConfig(
+                name=name,
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region='my-context',
+                zone=None,
+                size='10',
+                config={},
+                name_on_cloud='test-pvc',
+            ),
+            status=status_lib.VolumeStatus.READY,
+        )
+
+    def test_a_resize_in_flight_survives_the_database(self, fresh_db):
+        self._add_volume()
+
+        global_user_state.update_volume_status(
+            'test-volume',
+            status_lib.VolumeStatus.READY,
+            resize_status=models.VolumeResizeStatus.PENDING_ON_NODE,
+            resize_target_size='25',
+            resize_message='Waiting for a pod.')
+
+        record = global_user_state.get_volume_by_name('test-volume')
+        assert record['resize_status'] == 'pending_on_node'
+        assert record['resize_target_size'] == '25'
+        assert record['resize_message'] == 'Waiting for a pod.'
+        # The size is the capacity the volume has, and a resize does not move
+        # it.
+        assert record['handle'].size == '10'
+
+    @pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35),
+                        reason='ALTER TABLE ... DROP COLUMN needs SQLite 3.35+')
+    def test_a_database_that_predates_the_columns_is_upgraded_into_them(
+            self, fresh_db):
+        """The pinned target revision has to reach the migration that adds them.
+
+        A database created from scratch gets every column from the ORM
+        metadata whatever revision is pinned, so only an upgrade runs the
+        migration -- and the target is pinned rather than resolved to the
+        newest revision, so one that is written but not pinned never runs.
+        """
+        engine = global_user_state._db_manager.get_engine()
+        columns = ('resize_status', 'resize_target_size', 'resize_message')
+        with sqlalchemy.orm.Session(engine) as session:
+            for column in columns:
+                session.execute(
+                    sqlalchemy.text(
+                        f'ALTER TABLE volumes DROP COLUMN {column}'))
+            session.execute(
+                sqlalchemy.text('UPDATE alembic_version_state_db '
+                                "SET version_num = '021'"))
+            session.commit()
+
+        global_user_state.create_table(engine)
+
+        with sqlalchemy.orm.Session(engine) as session:
+            present = session.execute(
+                sqlalchemy.text('SELECT * FROM volumes')).keys()
+        assert set(columns) <= set(present)
+
+    def test_a_finished_resize_clears_what_was_recorded(self, fresh_db):
+        self._add_volume()
+        global_user_state.update_volume_status(
+            'test-volume',
+            status_lib.VolumeStatus.READY,
+            resize_status=models.VolumeResizeStatus.IN_PROGRESS,
+            resize_target_size='25',
+            resize_message='Resizing.')
+
+        global_user_state.update_volume_status('test-volume',
+                                               status_lib.VolumeStatus.READY)
+
+        record = global_user_state.get_volume_by_name('test-volume')
+        assert record['resize_status'] is None
+        assert record['resize_target_size'] is None
+        assert record['resize_message'] is None

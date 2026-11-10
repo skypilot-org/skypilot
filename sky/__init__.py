@@ -106,6 +106,7 @@ from sky.client.sdk import api_status
 from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
+from sky.client.sdk import cluster_job_spec
 from sky.client.sdk import cost_report
 from sky.client.sdk import create_debug_dump
 from sky.client.sdk import down
@@ -115,6 +116,7 @@ from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
 from sky.client.sdk import get
 from sky.client.sdk import get_user_workspace
+from sky.client.sdk import impersonate
 from sky.client.sdk import job_status
 from sky.client.sdk import launch
 from sky.client.sdk import optimize
@@ -237,6 +239,7 @@ __all__ = [
     'tail_logs',
     'download_logs',
     'job_status',
+    'cluster_job_spec',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
@@ -252,6 +255,7 @@ __all__ = [
     'api_start',
     'api_stop',
     'api_server_logs',
+    'impersonate',
     # Debug Dump
     'create_debug_dump',
     'download_debug_dump',

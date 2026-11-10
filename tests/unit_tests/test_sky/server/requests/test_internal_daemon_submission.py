@@ -7,8 +7,6 @@ refreshing env_vars / name / schedule_type on the existing row.
 
 `delete_orphan_internal_daemons_async` removes daemon-shaped rows whose ids
 are no longer in INTERNAL_REQUEST_DAEMONS.
-
-The PG-backed implementation in the HA plugin is tested separately.
 """
 import unittest.mock as mock
 

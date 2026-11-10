@@ -146,8 +146,10 @@ jobs:
           VERSION="${{ needs.extract-version.outputs.version }}"
           echo "Current release version: ${VERSION}"
 
-          # Get all git tags starting with 'v' and sort them
-          ALL_TAGS=$(git tag | grep "^v" | sort -V)
+          # Get all git tags starting with 'v' and sort them. Exclude nightly
+          # tags (v1.0.0.devYYYYMMDD): they version-sort above stable releases
+          # and would otherwise be mis-selected as the previous stable release.
+          ALL_TAGS=$(git tag | grep "^v" | grep -v '\.dev' | sort -V)
           echo "All git tags:"
           echo "$ALL_TAGS"
 

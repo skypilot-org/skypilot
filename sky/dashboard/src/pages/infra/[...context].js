@@ -10,9 +10,8 @@ import { usePluginRoute } from '@/plugins/PluginProvider';
 // decodes `%2F` back to `/`, which the previous single-segment dynamic
 // route could not match.
 //
-// Plugin routes registered under `/infra/...` (e.g. `/infra/cloud`,
-// `/infra/ssh`) are also served from this page so they don't get hidden
-// behind the catch-all.
+// Plugin routes registered under `/infra/...` are also served from this page
+// so they don't get hidden behind the catch-all.
 
 const GPUs = dynamic(
   () => import('@/components/infra').then((mod) => mod.GPUs),

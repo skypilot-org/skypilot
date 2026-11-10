@@ -1,0 +1,9 @@
+# ReadWriteMany volume the trainer and inference engine(s) share for disk-based
+# weight synchronization (the trainer writes updated weights; engines read them).
+# Apply once before launching:  sky volumes apply policy-volume.yaml
+name: slime-policy
+type: k8s-pvc
+size: 100Gi
+infra: kubernetes          # your H100 Kubernetes context, e.g. kubernetes/my-cluster
+config:
+  access_mode: ReadWriteMany

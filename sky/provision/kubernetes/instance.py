@@ -1,12 +1,13 @@
 """Kubernetes instance provisioning."""
 import copy
 import datetime
+import functools
 import json
 import re
 import sys
 import time
-from typing import (Any, Callable, Dict, List, Mapping, Optional, Set, Tuple,
-                    TYPE_CHECKING, Union)
+from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
+                    Set, Tuple, TYPE_CHECKING, Union)
 
 from sky import exceptions
 from sky import global_user_state
@@ -16,9 +17,12 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -31,6 +35,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 if TYPE_CHECKING:
@@ -61,6 +66,48 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 # short user-configured provision_timeout (e.g. the default 10s) would exit
 # the wait loop before any event is emitted, defeating the detection logic.
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
+# A pod held by a scheduling gate (e.g. Kueue's kueue.x-k8s.io/admission) is
+# waiting for an external admission controller to admit it — a quota wait,
+# not a provisioning delay. provision_timeout is tuned for scheduling
+# latency and must not count this phase: an explicitly configured
+# provision_timeout would otherwise silently cap queue waits (e.g. a 30s
+# value kills every queue wait), defeating the point of queueing. While any
+# expected pod is gated, the provisioning clock is paused and the gated wait
+# is bounded separately, by kubernetes.kueue.admission_timeout. This is that
+# knob's default (matching the default provision_timeout applied when a
+# Kueue local queue is configured); -1 waits indefinitely.
+_QUEUE_ADMISSION_TIMEOUT_SECONDS = 24 * 60 * 60  # 24 hours
+# Request timeout for the pod polling loops (_wait_for_pods_to_schedule /
+# _wait_for_pods_to_run): (connect, read) seconds. Without a request timeout,
+# a connection that stops receiving data without being closed (e.g. silently
+# dropped by a NAT/LB after an idle or lifetime limit) blocks the poll
+# forever: the loop stops iterating and the launch hangs until
+# provision_timeout, which can be hours in autoscaling/queueing setups. The
+# read timeout bounds each socket read (idle time), not the whole response,
+# so large pod lists that stream slowly are unaffected.
+_POD_POLL_REQUEST_TIMEOUT = (5, 30)
+# How long a continuous streak of pod-poll transport errors may last before
+# it surfaces as an error. A transient failure (timeout, dropped connection)
+# is treated as a missed poll and retried, but a persistently unreachable API
+# server should still surface instead of retrying silently forever. The
+# budget is wall-clock rather than attempt-based so that fast-failing errors
+# (e.g. connection refused) get the same tolerance as slow read timeouts.
+_POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS = 180
+# How long an expected pod may be continuously missing -- absent from the pod
+# list, or listed with a deletion timestamp -- before provisioning is failed.
+# This is not a recovery window: a pod SkyPilot created and then saw
+# disappear never comes back, because nothing recreates it, and a pod that
+# shows up later under the same name belongs to a different launch. It buys
+# two things that cost nothing to wait for. First, the deleter usually writes
+# down why *after* the deletion: a queue controller records its eviction
+# through an asynchronous event recorder, so failing on the first poll that
+# misses the pod can beat the explanation to the API server and report no
+# cause for something that had one. Second, a single list response that omits
+# the pod -- a caching proxy or a virtual-cluster syncer serving a partial or
+# stale view -- must not by itself fail a launch. Ten seconds covers both, and
+# the census behind this change found nothing that a longer wait would have
+# saved.
+_MISSING_POD_GRACE_SECONDS = 10
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 # Normal-type pod events that represent slow, legitimately-in-flight steps
@@ -72,8 +119,112 @@ _PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
     'WaitForFirstConsumer',  # late-binding storage class
 }
 
+# Warning-type pod events that are emitted once during normal startup and
+# then left on the pod after the condition they describe has resolved. The
+# Warning pass skips them, so the scan falls through to a later Warning or to
+# an allow-listed Normal instead of pinning a healthy launch to a stale
+# complaint.
+_PENDING_REASON_WARNING_EVENT_IGNORELIST = {
+    # Kueue's pod reconciler races the creation of a pod group: it fires on
+    # the first pod it observes, sees fewer live pods than
+    # pod-group-total-count, and emits this Warning. It self-resolves within
+    # seconds once the remaining pods exist, but the event object survives
+    # for its full TTL -- see
+    # https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/troubleshooting_pods/
+    'ErrWorkloadCompose',
+}
+
+# Warning-type pod events (emitted by the kubelet, after scheduling) that
+# indicate a volume attach/mount failure. A pod hit by one of these stays in
+# the uninformative 'ContainerCreating' waiting state, so the failure is only
+# visible through events.
+_MOUNT_FAILURE_EVENT_REASONS = ('FailedMount', 'FailedAttachVolume')
+# How long a pod may continuously report a mount-failure event before
+# provisioning is failed. Mount failures are frequently transient — the
+# kubelet retries with backoff, and e.g. a CSI driver still starting on a
+# freshly scaled-up node or a slow first attach of a network volume resolves
+# on its own — so use a generous window. Persistent failures (mis-configured
+# PVC/storage class, missing secret/configmap) never resolve; without this
+# deadline they would hang provisioning forever with only a spinner update.
+_MOUNT_FAILURE_TIMEOUT_SECONDS = 600
+
+# Reason of the Normal event the scheduler emits when it binds a pod to a node
+# ('Successfully assigned <ns>/<pod> to <node>'). Marks the boundary between
+# the scheduler's warnings and the kubelet's.
+_POD_BOUND_EVENT_REASON = 'Scheduled'
+
+# Synthetic pending reason used when a pod is bound to a node but the kubelet
+# has not reported anything yet (the uninformative 'ContainerCreating' waiting
+# state with no event).
+_CONTAINER_CREATION_REASON = 'container creation'
+# Prefix of the synthetic pending reasons describing an init container that is
+# running, or that the kubelet is still creating.
+_INIT_CONTAINER_REASON_PREFIX = 'init container '
+# Pending reasons that can legitimately persist, unchanged, for a very long
+# time, and so must not count towards the no-progress deadline below:
+#   - the allow-listed Normal events (pulling a large image, an external CSI
+#     provisioner creating a volume, a late-binding storage class),
+#   - 'container creation', which is also what a pod reports while pulling an
+#     image whose 'Pulling' event has already aged out of the event window.
+#     For a pod with init containers this covers the main containers' own
+#     image pull too: the kubelet reports those as 'PodInitializing' rather
+#     than 'ContainerCreating' until they are created, see
+#     _inspect_pod_status,
+#   - a running init container, which may be doing arbitrary user work, and an
+#     init container the kubelet is still creating, which may be pulling a
+#     large image of its own -- the latter only reaches this exemption when no
+#     live Warning event contradicts it, see _inspect_pod_status.
+_STALL_EXEMPT_PENDING_REASONS = frozenset(
+    _PENDING_REASON_NORMAL_EVENT_ALLOWLIST | {_CONTAINER_CREATION_REASON})
+# How long a pod may keep reporting the same non-exempt pending reason before
+# provisioning is failed. Every pod reaching _wait_for_pods_to_run is already
+# bound to a node (_wait_for_pods_to_schedule only returns once all pods are
+# scheduled), so no queue-admission or autoscaling wait remains: what is left
+# is kubelet-side work, and any of it stuck on the same reason for this long is
+# not going to resolve. Without this deadline such a pod hangs the launch
+# forever behind a 'Launching' spinner, with no error, ever.
+_POD_RUN_STALL_TIMEOUT_SECONDS = 600
+
+# How long to wait before first probing the volumes of a pod that is not up
+# yet, and how long between probes after that. A probe costs one GET per claim,
+# plus an event LIST per claim that is still Pending, so it must be much slower
+# than the once-a-second pod poll it rides along with. The first probe is
+# delayed because a claim being Pending right after the pod is created is the
+# normal case, not a signal.
+_PVC_PROBE_INITIAL_DELAY_SECONDS = 10
+_PVC_PROBE_INTERVAL_SECONDS = 15
+# How long a claim's own events must span before provisioning is failed, when
+# the failure cannot be classified (see volume.classify_pvc_failure). A failure
+# the storage backend reports by gRPC code is judged on the code instead, and
+# needs no waiting: this is the fallback for a provisioner that reports
+# something else, where all we have to go on is that it keeps saying it.
+#
+# Measured over the events (see FailureWindow), not over how long we have been
+# watching them: a single warning stays visible for an hour, so a claim that
+# failed once and is now being provisioned normally would otherwise look
+# indistinguishable from one that has been failing throughout.
+#
+# An hour is deliberately far longer than any provisioning that is going to
+# succeed, because getting this wrong fails a launch whose volume was fine. It
+# is therefore only ever reached by a provision_timeout longer than an hour --
+# in practice a queue admission controller's 24h, or one set by hand. Shorter
+# timeouts expire first and report the same claim through the same formatter,
+# which is the behaviour that predates this check.
+_PVC_FAILURE_GRACE_SECONDS = 3600
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
+
+
+class _InitContainerProgress(NamedTuple):
+    """The init container currently holding up a pod's initialization."""
+    name: str
+    position: int  # 1-based, for display against `total`.
+    total: int
+    # True if the container is running its own work; False if the kubelet is
+    # still creating it (typically pulling its image).
+    running: bool
+
 
 logger = sky_logging.init_logger(__name__)
 
@@ -252,69 +403,409 @@ def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
             '\n'.join(debug_lines))
 
 
-def _get_pvc_binding_status(namespace: str, context: Optional[str],
-                            pod: Any) -> Optional[str]:
-    """Check if any PVCs used by a pod are pending/unbound.
+class FailureWindow(NamedTuple):
+    """The period a claim has been reporting a failure over.
 
-    Returns an error message if any PVC is pending, None otherwise.
+    Kubernetes aggregates a repeated event into the existing one, advancing its
+    lastTimestamp, so this widens for as long as a provisioner keeps failing and
+    stays a single instant for a one-off failure it then recovers from. That
+    makes it, and not the number of times we happen to look, the signal for
+    whether waiting is pointless.
     """
-    if pod.spec.volumes is None:
-        return None
+    first: datetime.datetime
+    last: datetime.datetime
 
-    pending_pvcs = []  # List of (pvc_name, details_string)
-    for vol in pod.spec.volumes:
-        pvc_claim = vol.persistent_volume_claim
-        if pvc_claim is None:
-            continue
-        pvc_name = pvc_claim.claim_name
+    def seconds_since(self, start: datetime.datetime) -> float:
+        """How long the failure lasted, ignoring anything before ``start``."""
+        return (self.last - max(self.first, start)).total_seconds()
+
+
+class PendingPvc(NamedTuple):
+    """A PVC a pod needs that has not been bound yet."""
+    name: str
+    # '<name> (phase: Pending)', plus ' - <reason>: <message>' when an event
+    # explains it. For the log and for the error a failure raises, where the
+    # provisioner's own words are what someone reading back needs.
+    detail: str
+    # '<name> - <reason>', for the spinner: one line that has to stay readable
+    # while it is the only thing on screen. The reason is the part of `detail`
+    # that moves (WaitForFirstConsumer -> WaitForPodScheduled ->
+    # ExternalProvisioning), so it says whether the wait is progressing; the
+    # message after it is fixed text that would push the line off the terminal.
+    summary: str
+    # Whether the claim has reported a Warning at all. Not the same as either
+    # of the two below: a failure whose gRPC code says the call may still be
+    # running is deliberately not counted as one, but it is still the most
+    # interesting thing the claim has said, so it is what the spinner shows.
+    warned: bool
+    # Whether the storage backend has reported something that cannot succeed
+    # however long it is retried, e.g. a size its API rejects.
+    terminal: bool
+    # When the claim reported a failure that might yet be one, or None if
+    # nothing has: nothing is wrong, or what is wrong may still resolve. Only
+    # meaningful while `terminal` is False, and only as a fallback for failures
+    # the gRPC code does not classify.
+    failure: Optional[FailureWindow]
+
+
+def _pod_pvc_names(pod: Any) -> List[str]:
+    """The names of the PVCs a pod mounts, in the pod's own order."""
+    if pod.spec.volumes is None:
+        return []
+    names = [
+        vol.persistent_volume_claim.claim_name
+        for vol in pod.spec.volumes
+        if vol.persistent_volume_claim is not None
+    ]
+    # A multi-node cluster mounts the same ReadWriteMany volume on every pod.
+    return list(dict.fromkeys(names))
+
+
+def _utc(timestamp: Any) -> Optional[datetime.datetime]:
+    if timestamp is None:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=datetime.timezone.utc)
+    return timestamp.astimezone(datetime.timezone.utc)
+
+
+def _event_window(
+    event: Any
+) -> Tuple[Optional[datetime.datetime], Optional[datetime.datetime]]:
+    """When an event was first and most recently reported.
+
+    firstTimestamp/lastTimestamp are what client-go's EventRecorder maintains,
+    and what an aggregated repeat advances. An event written through the newer
+    events.k8s.io API carries the same two facts under different names, so read
+    those as well rather than collapsing to creationTimestamp -- both endpoints
+    landing on the same instant would say the failure lasted no time at all, and
+    so could never be judged persistent.
+    """
+    created = _utc(event.metadata.creation_timestamp)
+    series = getattr(event, 'series', None)
+    last = (_utc(event.last_timestamp) or
+            _utc(getattr(series, 'last_observed_time', None)) or
+            _utc(event.event_time) or created)
+    first = _utc(event.first_timestamp) or _utc(event.event_time) or created
+    return first, last
+
+
+def _get_pending_pvcs(
+    namespace: str,
+    context: Optional[str],
+    pvc_names: List[str],
+    failures_since: Optional[datetime.datetime] = None,
+) -> List[PendingPvc]:
+    """Which of the given PVCs are still Pending, and whether they are failing.
+
+    Args:
+        failures_since: ignore failures reported before this. Events outlive the
+            attempt that produced them (the API server keeps them for an hour by
+            default), so without an anchor a warning left behind by an earlier
+            launch would look like this launch's problem. None accepts any
+            warning, which is what the post-timeout path wants -- by then
+            nothing is going to bind the claim regardless of when it broke.
+    """
+    pending_pvcs: List[PendingPvc] = []
+    for pvc_name in pvc_names:
         try:
             pvc = kubernetes.core_api(
                 context).read_namespaced_persistent_volume_claim(
                     name=pvc_name,
                     namespace=namespace,
                     _request_timeout=kubernetes.API_TIMEOUT)
-            if pvc.status.phase == 'Pending':
-                # Get events for the PVC to understand why it's pending
-                sorted_events = kubernetes_utils.get_pvc_events(context,
-                                                                namespace,
-                                                                pvc_name,
-                                                                reverse=False)
-                event_messages = []
-                for event in sorted_events:
-                    if event.type == 'Warning' or event.reason in (
-                            'ProvisioningFailed', 'WaitForFirstConsumer'):
-                        msg = event.message or ''
-                        if msg:
-                            event_messages.append(f'{event.reason}: {msg}')
-                pending_info = f'{pvc_name} (phase: Pending)'
-                if event_messages:
-                    # Take the most recent event message
-                    pending_info += f' - {event_messages[-1]}'
-                pending_pvcs.append((pvc_name, pending_info))
+            if pvc.status.phase != 'Pending':
+                continue
+            # Get events for the PVC to understand why it's pending
+            sorted_events = kubernetes_utils.get_pvc_events(context,
+                                                            namespace,
+                                                            pvc_name,
+                                                            reverse=False)
+            # (reason, message) rather than one string, so the spinner can take
+            # the reason alone while the log and the error keep both.
+            event_explanations: List[Tuple[str, str]] = []
+            warning_explanations: List[Tuple[str, str]] = []
+            terminal = False
+            failure: Optional[FailureWindow] = None
+            for event in sorted_events:
+                is_failure = event.type == 'Warning'
+                # The Normal reasons say why a claim is still pending -- which
+                # pod it is waiting for, which provisioner is working on it --
+                # and are worth reporting even though none of them is a failure.
+                if not is_failure and (event.reason
+                                       not in volume.PVC_PENDING_EVENT_REASONS):
+                    continue
+                msg = event.message or ''
+                if msg:
+                    event_explanations.append((event.reason, msg))
+                if not is_failure:
+                    continue
+                first, last = _event_window(event)
+                if first is None or last is None:
+                    continue
+                if failures_since is not None and last < failures_since:
+                    continue
+                if msg:
+                    warning_explanations.append((event.reason, msg))
+                kind = volume.classify_pvc_failure(msg)
+                if kind == volume.PvcFailure.TERMINAL:
+                    terminal = True
+                elif kind == volume.PvcFailure.IN_PROGRESS:
+                    # The call behind it may still be running, so this says
+                    # nothing about whether the claim will bind. Reported, not
+                    # counted.
+                    continue
+                if failure is None:
+                    failure = FailureWindow(first=first, last=last)
+                else:
+                    failure = FailureWindow(first=min(failure.first, first),
+                                            last=max(failure.last, last))
+            pending_info = f'{pvc_name} (phase: Pending)'
+            summary = pvc_name
+            # Prefer the newest warning when there is one: it is the reason the
+            # claim is failing, and a Normal event can be newer than it.
+            explanations = warning_explanations or event_explanations
+            if explanations:
+                reason, msg = explanations[-1]
+                pending_info += f' - {reason}: {msg}'
+                summary += f' - {reason}'
+            pending_pvcs.append(
+                PendingPvc(name=pvc_name,
+                           detail=pending_info,
+                           summary=summary,
+                           warned=bool(warning_explanations),
+                           terminal=terminal,
+                           failure=failure))
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
-
-    if pending_pvcs:
-        pvc_names = [pvc[0] for pvc in pending_pvcs]
-        pvc_details = ', '.join(pvc[1] for pvc in pending_pvcs)
-        return _format_pvc_binding_error(pvc_details, pvc_names, namespace)
-    return None
+    return pending_pvcs
 
 
-def _raise_pod_scheduling_errors(namespace, context, new_nodes):
+def _get_pvc_binding_status(namespace: str, context: Optional[str],
+                            pod: Any) -> Optional[str]:
+    """Check if any PVCs used by a pod are pending/unbound.
+
+    Returns an error message if any PVC is pending, None otherwise.
+    """
+    pending_pvcs = _get_pending_pvcs(namespace, context, _pod_pvc_names(pod))
+    if not pending_pvcs:
+        return None
+    return _format_pvc_binding_error(
+        pvc_details=', '.join(pvc.detail for pvc in pending_pvcs),
+        pvc_names=[pvc.name for pvc in pending_pvcs],
+        namespace=namespace)
+
+
+class _PendingVolumeProbe:
+    """Watches the volumes of pods that have not been scheduled yet.
+
+    Kubernetes surfaces a claim that will not bind only through events: the pod
+    sits unschedulable and nothing in its status says why. The scheduling wait
+    loop otherwise learns of it by running out of provision_timeout, which is
+    24 hours with a queue admission controller configured, so a deterministic
+    failure can cost a day to report. Probing decouples the two: a failure that
+    persists fails provisioning whatever the timeout is, and a claim that is
+    merely slow says so instead of spinning silently.
+    """
+
+    def __init__(self, namespace: str, context: Optional[str],
+                 cluster_name: str, pods_created_at: datetime.datetime):
+        self._namespace = namespace
+        self._context = context
+        self._cluster_name = cluster_name
+        self._pods_created_at = pods_created_at
+        self._next_probe_at = time.time() + _PVC_PROBE_INITIAL_DELAY_SECONDS
+        # Failures reported at or before this are not this launch's problem
+        # any more, keyed by PVC name. Only set while failures are held: a
+        # failure seen during a scale-up may have been caused by the missing
+        # node, so the claim gets the grace period afresh once one arrives.
+        self._failures_before: Dict[str, datetime.datetime] = {}
+        # What the last completed probe found, so that callers polling faster
+        # than the probe interval keep reporting it between probes.
+        self._message: Optional[str] = None
+        # The same, in full, so that the log fires on any change rather than
+        # only on the part the spinner shows.
+        self._detail: Optional[str] = None
+
+    def probe(self,
+              pods: List[Any],
+              hold_failures: bool = False) -> Optional[str]:
+        """Probes the volumes of ``pods``, unless a probe is not due yet.
+
+        Cheap enough to call on every iteration of a wait loop. Returns a
+        message describing the claims that are still being provisioned, for the
+        caller to surface, or None once there are none. Between probes it
+        repeats what the last one found.
+
+        Args:
+            hold_failures: report claims but never fail on them, and discount
+                the failures seen while doing so. For when a node is on its way:
+                a provisioner that needs a node it does not have yet reports the
+                same failure as one that will never succeed (a topology-aware
+                CSI driver in a cluster scaled to zero, for instance), and
+                waiting really is the right thing to do until the node arrives.
+
+        Raises:
+            config_lib.KubernetesError: the storage backend reported something
+                that cannot succeed however long it is retried, or a failure it
+                does not classify has persisted for
+                _PVC_FAILURE_GRACE_SECONDS. This is a provisioning failure, so
+                it can fail over to another region -- unlike a volume already
+                known to be unusable before the launch, which is refused
+                outright.
+        """
+        now = time.time()
+        if now < self._next_probe_at:
+            return self._message
+        self._next_probe_at = now + _PVC_PROBE_INTERVAL_SECONDS
+
+        pvc_names: List[str] = []
+        for pod in pods:
+            pvc_names += _pod_pvc_names(pod)
+        pvc_names = list(dict.fromkeys(pvc_names))
+        if not pvc_names:
+            self._message = None
+            return None
+
+        pending_pvcs = _get_pending_pvcs(self._namespace,
+                                         self._context,
+                                         pvc_names,
+                                         failures_since=self._pods_created_at)
+        pending_by_name = {pvc.name: pvc for pvc in pending_pvcs}
+        for pvc_name in pvc_names:
+            pending = pending_by_name.get(pvc_name)
+            # A claim that is gone, bound or not failing clears its history. An
+            # unreadable claim lands here too, so an API server that is erroring
+            # intermittently keeps the fast-failure path from ever triggering --
+            # which is the right bias, but it does mean it can be starved.
+            if pending is None or (not pending.terminal and
+                                   pending.failure is None):
+                self._failures_before.pop(pvc_name, None)
+                continue
+            if hold_failures:
+                logger.debug(
+                    f'Volume {pvc_name} is reporting a failure while '
+                    f'launching {self._cluster_name}, but a node is on '
+                    f'its way, so it is being discounted: '
+                    f'{pending.detail}')
+                if pending.failure is not None:
+                    self._failures_before[pvc_name] = pending.failure.last
+                continue
+            if not pending.terminal and pending.failure is not None:
+                # Nothing said this cannot succeed, so all there is to go on is
+                # how long it has been saying it.
+                failing_for = pending.failure.seconds_since(
+                    self._failures_before.get(pvc_name, self._pods_created_at))
+                if failing_for < _PVC_FAILURE_GRACE_SECONDS:
+                    logger.debug(
+                        f'Volume {pvc_name} has been reporting an unclassified '
+                        f'failure for {failing_for:.0f}s while launching '
+                        f'{self._cluster_name}; giving it until '
+                        f'{_PVC_FAILURE_GRACE_SECONDS}s: {pending.detail}')
+                    continue
+            raise config_lib.KubernetesError(
+                _format_pvc_binding_error(pvc_details=pending.detail,
+                                          pvc_names=[pvc_name],
+                                          namespace=self._namespace))
+
+        message = None
+        detail = None
+        if pending_pvcs:
+            # The spinner gets one claim and one reason. A pod can mount
+            # several claims -- an auto-mounted volume, an inline one, the
+            # cluster's own -- and each provisioner's message runs to a
+            # paragraph, which together do not fit on a line.
+            #
+            # Show one that is complaining if there is one. A claim that is
+            # merely waiting says the same thing for minutes, while a warning
+            # is the reason someone is watching this line at all. A warning
+            # bad enough to be fatal has already raised by here, so what this
+            # surfaces is the kind that may yet resolve.
+            shown = next((pvc for pvc in pending_pvcs if pvc.warned),
+                         pending_pvcs[0])
+            summary = shown.summary
+            if len(pending_pvcs) > 1:
+                summary += f', +{len(pending_pvcs) - 1} more'
+            message = f'waiting for volume(s): {summary}'
+            detail = ('waiting for volume(s) to be provisioned: ' +
+                      ', '.join(pvc.detail for pvc in pending_pvcs))
+        if detail != self._detail:
+            # Log what the spinner leaves out, on change only: the spinner is
+            # gone by the time anyone reads back why a launch took as long as
+            # it did. Keyed on the full text, so a change the spinner does not
+            # show is still recorded.
+            state = detail if detail is not None else 'volume(s) provisioned'
+            logger.info(f'Launching {self._cluster_name}: {state}')
+        self._detail = detail
+        self._message = message
+        return message
+
+
+def _raise_pod_scheduling_errors(
+        namespace,
+        context,
+        new_nodes,
+        cluster_name: Optional[str] = None,
+        pods_created_at: Optional[datetime.datetime] = None,
+        last_seen_pods: Optional[Dict[str, Any]] = None):
     """Raise pod scheduling failure reason.
 
     When a pod fails to schedule in Kubernetes, the reasons for the failure
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
+
+    ``cluster_name`` is only used to describe a pod that turns out to have
+    been deleted; it is optional so that callers which only have the node
+    objects can still use the scheduling-event path. A deleted pod's reason is
+    derived from events no older than the pod itself, so that it cannot come
+    out of the events of whatever held the same pod name before it;
+    ``pods_created_at`` is the fallback bound for a node object the API server
+    left without a creation timestamp (see _pod_events_since).
+    ``last_seen_pods`` maps a pod name to the object the caller last saw on
+    its way out: a pod the API server has since dropped reads back as a 404
+    here, and that object is then the only remaining copy of the condition its
+    deleter left on it.
     """
     timeout_err_msg = ('Timed out while waiting for nodes to start. '
                        'Cluster may be out of resources or '
                        'may be too slow to autoscale.')
+    events_since = _pod_events_since(new_nodes, pods_created_at)
     for new_node in new_nodes:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            new_node.metadata.name, namespace)
+        expected_pod_name = new_node.metadata.name
+        try:
+            pod = kubernetes.core_api(context).read_namespaced_pod(
+                expected_pod_name,
+                namespace,
+                _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status != 404:
+                raise
+            # The pod no longer exists, so it has no status and no scheduler
+            # events to report -- it was deleted while we waited for it to be
+            # scheduled. Letting the 404 propagate would get wrapped by the
+            # caller into 'An error occurred while trying to fetch the reason
+            # for pod scheduling failure', which hides the one thing that did
+            # happen.
+            deleted_pods: Dict[str, Optional[Any]] = {
+                expected_pod_name: (last_seen_pods or {}).get(expected_pod_name)
+            }
+            raise _deleted_pods_error(context=context,
+                                      namespace=namespace,
+                                      cluster_name=cluster_name,
+                                      deleted_pods=deleted_pods,
+                                      since=events_since) from None
+        if pod.metadata.deletion_timestamp is not None:
+            # A pod that is being deleted is just as lost as one that is
+            # already unreadable -- it is never going to be scheduled -- and
+            # the condition its deleter left on it says far more than 'Pod
+            # status: Pending' ever could. The wait loop fails these fast, but
+            # its grace window can still be running when the deadline fires.
+            raise _deleted_pods_error(context=context,
+                                      namespace=namespace,
+                                      cluster_name=cluster_name,
+                                      deleted_pods={expected_pod_name: pod},
+                                      since=events_since)
         pod_status = pod.status.phase
         # When there are multiple pods involved while launching instance,
         # there may be a single pod causing issue while others are
@@ -326,7 +817,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'
-                            'involvedObject.kind=Pod'))
+                            'involvedObject.kind=Pod'),
+            _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
         # Events created in the past hours are kept by
         # Kubernetes python client and we want to surface
         # the latest event message
@@ -480,7 +972,9 @@ def _detect_cluster_event_reason_occurred(namespace, context, search_start,
         return None
 
     events = kubernetes.core_api(context).list_namespaced_event(
-        namespace=namespace, field_selector=f'reason={reason}')
+        namespace=namespace,
+        field_selector=f'reason={reason}',
+        _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
     for event in events.items:
         ts = _get_event_timestamp(event)
         if ts and _convert_to_utc(ts) > search_start:
@@ -553,9 +1047,42 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 
 @timeline.event
-def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
+def _is_transport_error(e: Exception) -> bool:
+    """See api_errors.is_transport_error."""
+    return api_errors.is_transport_error(e)
+
+
+def _count_transport_error(e: Exception, first_error_time: Optional[float],
+                           cluster_name: str) -> float:
+    """Account a pod-poll transport error; raise once the streak persists.
+
+    Treats the error as a missed poll: debug-log, sleep out the tick, and
+    return the start time of the current failure streak (callers pass the
+    returned value back in, and reset it to None on the next success). Once
+    a streak lasts _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS, raise
+    KubernetesError instead.
+    """
+    now = time.time()
+    if first_error_time is None:
+        first_error_time = now
+    if now - first_error_time >= _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS:
+        raise config_lib.KubernetesError(
+            'Lost connectivity to the Kubernetes API server while waiting '
+            f'for the pods of {cluster_name}: '
+            f'{common_utils.format_exception(e)}') from e
+    logger.debug(f'Transient error polling the pods of {cluster_name}: '
+                 f'{common_utils.format_exception(e)}. Retrying.')
+    time.sleep(1)
+    return first_error_time
+
+
+def _wait_for_pods_to_schedule(namespace,
+                               context,
+                               new_nodes,
+                               timeout: int,
                                cluster_name: str,
-                               create_pods_start: datetime.datetime):
+                               create_pods_start: datetime.datetime,
+                               admission_timeout: Optional[int] = None):
     """Wait for all pods to be scheduled.
 
     Wait for all pods including jump pod to be scheduled, and if it
@@ -572,6 +1099,9 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
     if not new_nodes:
         return
     expected_pod_names = {node.metadata.name for node in new_nodes}
+    # Where each expected pod's own event history starts, for explaining one
+    # that goes away.
+    events_since = _pod_events_since(new_nodes, create_pods_start)
     start_time = time.time()
 
     # Variables for autoscaler detection
@@ -608,12 +1138,48 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
         timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
 
-    original_deadline = start_time + timeout
+    # Queue-admission gating (e.g. Kueue): a pod held by a scheduling gate is
+    # waiting for an external admission controller to admit it (a quota
+    # wait), not failing to provision. While any expected pod is gated, the
+    # provisioning clock is paused: provision_timeout starts counting from
+    # the moment all expected pods are ungated (admitted). The gated wait
+    # itself is bounded by kubernetes.kueue.admission_timeout (default
+    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely). The cluster
+    # YAML carries the value resolved at launch time (task config overrides
+    # and workspace scope included); fall back to the request config for
+    # cluster YAMLs written before that field existed.
+    if admission_timeout is None:
+        admission_timeout = skypilot_config.get_effective_region_config(
+            cloud='ssh' if is_ssh_node_pool else 'kubernetes',
+            region=context,
+            keys=('kueue', 'admission_timeout'),
+            default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
+    pods_are_gated = False
+    last_gated_pod_names: List[str] = []
+    # When each expected pod was first found missing -- absent from the pod
+    # list, or listed with a deletion timestamp -- in its current streak. A
+    # pod that is listed again, and not being deleted, drops out, so every pod
+    # gets the whole grace window to itself.
+    deleted_since: Dict[str, float] = {}
+    # The last object seen for a pod that was on its way out, by pod name.
+    # Once the API server stops listing the pod, this is the only place the
+    # condition its deleter left on it still exists.
+    terminating_pods: Dict[str, Any] = {}
+    # Start of the provisioning clock; slides to the admission moment when
+    # pods leave the gated state.
+    provision_clock_start = start_time
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
+        # While pods are held by scheduling gates, provision_timeout does
+        # not apply; the admission wait is bounded separately.
+        if pods_are_gated:
+            if admission_timeout < 0:
+                return True
+            return time.time() < start_time + admission_timeout
+        original_deadline = provision_clock_start + timeout
         # If autoscaling has been detected, extend the deadline from the
         # detection moment. Use max(...) so an explicitly long user timeout
         # is never shortened by this extension.
@@ -625,37 +1191,158 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             deadline = original_deadline
         return time.time() < deadline
 
+    volume_probe = _PendingVolumeProbe(namespace=namespace,
+                                       context=context,
+                                       cluster_name=cluster_name,
+                                       pods_created_at=create_pods_start)
+    last_volume_status_text: Optional[str] = None
     iteration = 0
+    transport_error_since: Optional[float] = None
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
         cluster_name_on_cloud = new_nodes[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
-        pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=
-            f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
-        ).items
+        try:
+            pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace,
+                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                f'{cluster_name_on_cloud}'),
+                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            transport_error_since = None
+        except (kubernetes.api_exception(),
+                kubernetes.urllib3_http_error()) as e:
+            # Treat a transport failure as a missed poll and retry within
+            # the deadline above; see _POD_POLL_REQUEST_TIMEOUT for why the
+            # call must be bounded rather than left to block indefinitely.
+            if not _is_transport_error(e):
+                raise
+            transport_error_since = _count_transport_error(
+                e, transport_error_since, cluster_name)
+            continue
 
-        # Get the set of found pod names and check if we have all expected pods
-        found_pod_names = {pod.metadata.name for pod in pods}
-        missing_pods = expected_pod_names - found_pod_names
-        if missing_pods:
-            logger.info('Retrying waiting for pods: '
-                        f'Missing pods: {missing_pods}')
+        # An expected pod counts as deleted when the API server stops listing
+        # it, or lists it with a deletion timestamp: something outside
+        # SkyPilot -- a queue controller evicting the workload, preemption, a
+        # node failure, an operator, a plain `kubectl delete` -- removed a pod
+        # we created.
+        # Neither state recovers, so do not sit here until provision_timeout
+        # (up to hours with a queue-admission controller configured) and then
+        # report a 404 from the pod we no longer have; give the list a short
+        # grace window for a stale read and then fail with the real reason.
+        pods_by_name = {pod.metadata.name: pod for pod in pods}
+        deleted_pods: Dict[str, Optional[Any]] = {}
+        for expected_name in expected_pod_names:
+            listed_pod = pods_by_name.get(expected_name)
+            if listed_pod is None:
+                # Whoever deleted the pod may have written down why on the pod
+                # itself before it went away; that object is the only copy, so
+                # keep the one an earlier poll of this streak saw.
+                deleted_pods[expected_name] = terminating_pods.get(
+                    expected_name)
+            elif listed_pod.metadata.deletion_timestamp is not None:
+                terminating_pods[expected_name] = listed_pod
+                deleted_pods[expected_name] = listed_pod
+        now = time.time()
+        # A pod that is listed again, and not being deleted, starts over:
+        # whatever we saw before was a stale read.
+        for returned_name in set(deleted_since) - set(deleted_pods):
+            del deleted_since[returned_name]
+            terminating_pods.pop(returned_name, None)
+        if deleted_pods:
+            newly_deleted = sorted(set(deleted_pods) - set(deleted_since))
+            for deleted_name in newly_deleted:
+                deleted_since[deleted_name] = now
+            if newly_deleted:
+                # Logged once per pod per streak rather than per poll: the
+                # wait is bounded now, and the detail belongs in the error.
+                logger.info(
+                    f'Pod(s) {newly_deleted} are missing or being '
+                    'deleted while waiting for them to be scheduled; '
+                    f'retrying for up to {_MISSING_POD_GRACE_SECONDS}s.')
+            if any(now - first_deleted_at >= _MISSING_POD_GRACE_SECONDS
+                   for first_deleted_at in deleted_since.values()):
+                raise _deleted_pods_error(context=context,
+                                          namespace=namespace,
+                                          cluster_name=cluster_name,
+                                          deleted_pods=deleted_pods,
+                                          since=events_since)
             time.sleep(0.5)
             continue
+
+        # A pod with scheduling gates is invisible to the kube-scheduler
+        # until an external controller (e.g. Kueue on admission) removes the
+        # gates. Pause the provisioning clock while any expected pod is
+        # gated — this is a quota/queue wait, not a scheduling delay — and
+        # skip scheduling checks and autoscaler detection, which are
+        # meaningless for gated pods.
+        gated_pod_names = [
+            pod.metadata.name
+            for pod in pods
+            if pod.metadata.name in expected_pod_names and
+            pod.spec.scheduling_gates
+        ]
+        if gated_pod_names:
+            if not pods_are_gated:
+                pods_are_gated = True
+                logger.info(f'Pod(s) {sorted(gated_pod_names)} are held by '
+                            'scheduling gates, waiting for queue admission; '
+                            'provision_timeout will apply after admission.')
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                        'Launching (waiting for queue admission)',
+                        cluster_name=cluster_name))
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason='Launching (waiting for queue admission)',
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
+            last_gated_pod_names = gated_pod_names
+            # Keep calling the per-poll spinner update while gated, as the
+            # ungated loop below does. The message set above is written
+            # once, on entering the gated state, and the wait that follows
+            # can last hours.
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
+            iteration += 1
+            time.sleep(1)
+            continue
+        if pods_are_gated:
+            # All expected pods were just admitted (gates removed) — start
+            # the provisioning clock now.
+            pods_are_gated = False
+            provision_clock_start = time.time()
+            logger.info('All pods admitted (scheduling gates removed); '
+                        f'waiting up to {timeout}s for scheduling.')
+            # Record the transition: the latest LAUNCH_PROGRESS event is
+            # surfaced as the status detail of a provisioning SkyServe
+            # replica / pool worker, so it must stop reading as a queue
+            # wait once the pods are admitted.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                new_status=None,
+                reason='Launching (admitted by queue, waiting for scheduling)',
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                nop_if_duplicate=True,
+            )
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the
         # kubelet to populate container_statuses here -- that can lag and is
         # handled by _wait_for_pods_to_run, which has no provision_timeout.
-        all_scheduled = all(
-            _pod_is_scheduled(pod)
-            for pod in pods
-            if pod.metadata.name in expected_pod_names)
+        unscheduled_pods = [
+            pod for pod in pods if pod.metadata.name in expected_pod_names and
+            not _pod_is_scheduled(pod)
+        ]
 
-        if all_scheduled:
+        if not unscheduled_pods:
             return
 
         # Check if cluster is autoscaling and update spinner message.
@@ -693,20 +1380,88 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                     LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
-        if not is_autoscaling:
-            _update_spinner_message(iteration=iteration,
-                                    pods=pods,
-                                    context=context,
-                                    namespace=namespace,
-                                    cluster_name_on_cloud=cluster_name_on_cloud,
-                                    cluster_name=cluster_name)
+
+        # An unbound claim keeps a pod unschedulable, so check whether that is
+        # what we are waiting on rather than only finding out at the deadline.
+        # Gated pods never reach here (the branch above continues), which is
+        # what we want: their claims are not being provisioned yet either.
+        #
+        # Failures are held while a node is on its way, for the same reason the
+        # deadline is extended then (see the hold_failures argument), and for
+        # exactly as long: past that window the deadline no longer believes a
+        # node is coming either. Bounding it matters because
+        # autoscale_detected_time is never cleared, and the event it is set
+        # from is looked up namespace-wide, so an unrelated pod's scale-up
+        # would otherwise suppress this check for the rest of the wait.
+        scale_up_in_flight = (autoscale_detected_time is not None and
+                              time.time() < autoscale_detected_time +
+                              _AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
+        volume_wait_msg = volume_probe.probe(unscheduled_pods,
+                                             hold_failures=scale_up_in_flight)
+
+        if volume_wait_msg is not None:
+            # Name the volume being waited on. A bare spinner leaves no way to
+            # tell a slow volume from a broken one. This takes precedence over
+            # the autoscaling message above, which is both less specific and
+            # already recorded as its own cluster event -- and which a pod held
+            # up by a volume triggers by itself where the autoscaler is detected
+            # heuristically, from FailedScheduling.
+            #
+            # Only on change: this runs every second, and for a whole wait --
+            # 24 hours of it, with a queue admission controller configured.
+            # nop_if_duplicate would collapse the rows, but it reads the last
+            # event to do so, so it is a query per second.
+            volume_status_text = f'Launching ({volume_wait_msg})'
+            if volume_status_text != last_volume_status_text:
+                last_volume_status_text = volume_status_text
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(volume_status_text,
+                                             cluster_name=cluster_name))
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason=volume_status_text,
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
+        else:
+            # Nothing is waiting on a volume any more, so a later one that is
+            # must be reported again even if it reads the same. Outside the
+            # autoscaling check: the message can clear while a scale-up is in
+            # progress too.
+            last_volume_status_text = None
+            if not is_autoscaling:
+                _update_spinner_message(
+                    iteration=iteration,
+                    pods=pods,
+                    context=context,
+                    namespace=namespace,
+                    cluster_name_on_cloud=cluster_name_on_cloud,
+                    cluster_name=cluster_name)
 
         iteration += 1
         time.sleep(1)
 
+    # Pods still gated at the admission deadline: the queue never admitted
+    # them. _raise_pod_scheduling_errors inspects scheduler events, which
+    # gated pods do not have — raise a queue-specific error instead.
+    if pods_are_gated:
+        raise config_lib.KubernetesError(
+            f'Pod(s) {sorted(last_gated_pod_names)} were still held by '
+            f'scheduling gates after waiting {admission_timeout} seconds '
+            'for queue admission. Check the queue status and quotas (e.g. '
+            '`kubectl describe workload` for Kueue), adjust the requested '
+            'resources, or raise kubernetes.kueue.admission_timeout.')
+
     # Handle pod scheduling errors
     try:
-        _raise_pod_scheduling_errors(namespace, context, new_nodes)
+        _raise_pod_scheduling_errors(namespace,
+                                     context,
+                                     new_nodes,
+                                     cluster_name=cluster_name,
+                                     pods_created_at=create_pods_start,
+                                     last_seen_pods=terminating_pods)
     except config_lib.KubernetesError:
         raise
     except Exception as e:
@@ -714,6 +1469,32 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             'An error occurred while trying to fetch the reason '
             'for pod scheduling failure. '
             f'Error: {common_utils.format_exception(e)}') from None
+
+
+def _reason_is_exempt_from_stall(reason: Optional[str]) -> bool:
+    """Whether a pending reason is allowed to persist indefinitely.
+
+    A reason of None is not exempt: a pod that is neither running nor able to
+    say why is exactly the case the no-progress deadline exists to catch.
+
+    The _INIT_CONTAINER_REASON_PREFIX exemption is only as good as the reason
+    reaching it: an init container the kubelet is failing to start looks
+    exactly like one it is slowly starting, so _inspect_pod_status resolves
+    that ambiguity against the pod's events before a reason gets here.
+    """
+    if reason is None:
+        return False
+    if reason in _STALL_EXEMPT_PENDING_REASONS:
+        return True
+    return reason.startswith(_INIT_CONTAINER_REASON_PREFIX)
+
+
+def _stall_timeout_seconds(reason: Optional[str]) -> int:
+    """The no-progress deadline for a pending reason, in seconds."""
+    if reason in _MOUNT_FAILURE_EVENT_REASONS:
+        # Mount failures get their own window; see the constant.
+        return _MOUNT_FAILURE_TIMEOUT_SECONDS
+    return _POD_RUN_STALL_TIMEOUT_SECONDS
 
 
 @timeline.event
@@ -729,16 +1510,19 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
 
-    def _check_init_containers(pod) -> Optional[Tuple[str, int, int]]:
-        """Check init containers for errors and return running container info.
+    def _check_init_containers(pod) -> Optional[_InitContainerProgress]:
+        """Check init containers for errors and return the one holding up pod
+        initialization.
 
-        Returns (name, 1-based index, total) of the currently running init
-        container, or None if none is running.
+        Returns the first init container that is running, else the first one
+        the kubelet is still creating (pulling its image), else None -- no
+        init container accounts for the pod being uninitialized.
         Raises KubernetesError if any init container failed.
         """
         init_statuses = pod.status.init_container_statuses
         total = len(init_statuses)
-        running_info: Optional[Tuple[str, int, int]] = None
+        running_info: Optional[_InitContainerProgress] = None
+        starting_info: Optional[_InitContainerProgress] = None
         for idx, init_status in enumerate(init_statuses):
             init_terminated = init_status.state.terminated
             if init_terminated:
@@ -750,22 +1534,31 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
             if (init_status.state.running is not None and running_info is None):
-                running_info = (init_status.name, idx + 1, total)
+                running_info = _InitContainerProgress(init_status.name, idx + 1,
+                                                      total, True)
             init_waiting = init_status.state.waiting
-            if (init_waiting is not None and init_waiting.reason
-                    not in ['ContainerCreating', 'PodInitializing']):
-                # TODO(romilb): There may be more states to check for. Add
-                #  them as needed.
-                msg = init_waiting.message if (
-                    init_waiting.message) else str(init_waiting)
-                unmasked = _unmask_crashloopbackoff_reason(init_status)
-                reason_text = (unmasked if unmasked is not None else
-                               (init_waiting.reason or 'Unknown'))
-                raise config_lib.KubernetesError(
-                    f'Failed to create init container for pod '
-                    f'{pod.metadata.name}. Error details: '
-                    f'{reason_text}: {msg}.')
-        return running_info
+            if init_waiting is not None:
+                if init_waiting.reason in ('ContainerCreating',
+                                           'PodInitializing'):
+                    # The kubelet is creating it -- most often pulling its
+                    # image, which is legitimately slow. Recorded so the
+                    # no-progress deadline does not mistake it for a stall.
+                    if starting_info is None:
+                        starting_info = _InitContainerProgress(
+                            init_status.name, idx + 1, total, False)
+                else:
+                    # TODO(romilb): There may be more states to check for. Add
+                    #  them as needed.
+                    msg = init_waiting.message if (
+                        init_waiting.message) else str(init_waiting)
+                    unmasked = _unmask_crashloopbackoff_reason(init_status)
+                    reason_text = (unmasked if unmasked is not None else
+                                   (init_waiting.reason or 'Unknown'))
+                    raise config_lib.KubernetesError(
+                        f'Failed to create init container for pod '
+                        f'{pod.metadata.name}. Error details: '
+                        f'{reason_text}: {msg}.')
+        return running_info if running_info is not None else starting_info
 
     def _inspect_pod_status(pod):
         # Check if pod is terminated/preempted/failed (unchanged).
@@ -796,6 +1589,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # via _unmask_crashloopbackoff_reason when the waiting state is
             # CrashLoopBackOff. msg body (waiting.message) is always preserved.
             init_reason: Optional[str] = None
+            # Whether init_reason is an assumption about what the kubelet is
+            # doing rather than something it reported -- see below.
+            init_reason_is_assumed = False
             if container_statuses is not None:
                 for container_status in container_statuses:
                     if not container_status.state:
@@ -803,13 +1599,32 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     waiting = container_status.state.waiting
                     if waiting is not None:
                         if waiting.reason == 'PodInitializing':
-                            running_init = _check_init_containers(pod)
-                            if running_init is not None:
-                                name, idx, total = running_init
-                                init_reason = (f'init container {name!r} '
-                                               f'running ({idx}/{total})')
-                            else:
-                                init_reason = 'init container running'
+                            # PodInitializing with no init container running
+                            # or being created means they have all terminated
+                            # successfully and the kubelet is on to the main
+                            # containers. That is not a stuck pod: whenever a
+                            # pod has init containers, the kubelet reports its
+                            # main containers as 'PodInitializing' instead of
+                            # 'ContainerCreating' for the whole of their own
+                            # image pull, and only moves off it once the
+                            # container is created. So it is the same state a
+                            # pod without init containers shows as
+                            # 'ContainerCreating', and gets the same handling
+                            # by leaving init_reason unset: the events tier
+                            # below reports a live 'Pulling', or a live
+                            # Warning that the no-progress deadline bounds,
+                            # and 'container creation' is the exempt fallback.
+                            init_progress = _check_init_containers(pod)
+                            if init_progress is not None:
+                                verb = ('running' if init_progress.running else
+                                        'starting')
+                                init_reason = (
+                                    f'{_INIT_CONTAINER_REASON_PREFIX}'
+                                    f'{init_progress.name!r} {verb} '
+                                    f'({init_progress.position}/'
+                                    f'{init_progress.total})')
+                                init_reason_is_assumed = (
+                                    not init_progress.running)
                         elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
@@ -841,6 +1656,26 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     context, namespace, pod.metadata.name)
                 if pending_reason is not None:
                     reason, event_message = pending_reason
+            elif init_reason_is_assumed:
+                # 'init container ... starting' says only that the kubelet has
+                # not started the container yet; that this is legitimately slow
+                # work (an image pull of its own) is an assumption, and it is
+                # the assumption that makes the reason stall-exempt. The same
+                # state is what a pod shows when the kubelet cannot get as far
+                # as starting the container at all -- a sandbox it cannot
+                # create, a volume it cannot mount -- which is reported only
+                # through events. So let a live Warning, one the pod has not
+                # already moved past, replace the assumption: it is both the
+                # truer reason and, unlike the init label, bounded by the
+                # no-progress deadline. An allow-listed Normal is not consulted
+                # -- it is exempt either way, and the init label names which
+                # container the pod is waiting on.
+                pending_reason = _get_pod_pending_reason(context,
+                                                         namespace,
+                                                         pod.metadata.name,
+                                                         warnings_only=True)
+                if pending_reason is not None:
+                    reason, event_message = pending_reason
             if reason is None and _pod_is_scheduled(pod):
                 # A freshly-bound pod that the kubelet has not picked up yet
                 # (and the uninformative 'ContainerCreating' state) has no
@@ -850,7 +1685,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 # creation)') instead of a bare 'Launching'. Gate on
                 # _pod_is_scheduled so an unbound pod still waiting for
                 # capacity is not mislabeled as creating a container.
-                reason = 'container creation'
+                reason = _CONTAINER_CREATION_REASON
             if reason is not None:
                 log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
                 if event_message:
@@ -863,17 +1698,60 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         # returned (False, None) silently, masking OOMKilled etc.
         return False, container_reason
 
+    # The pending reason each pod is currently being timed against, and when
+    # that reason was first seen, keyed by pod name. Reset whenever the reason
+    # changes (progress) or the pod starts running, so a deadline is always
+    # measured from the most recent onset of a single reason.
+    stalled_since: Dict[str, Tuple[Optional[str], float]] = {}
+
+    def _raise_stalled(pod_name: str, reason: Optional[str]) -> None:
+        # Re-fetch the newest event for the full kubelet message — the wait
+        # loop only tracks the bare reason (e.g. 'FailedMount').
+        detail = ''
+        pending_reason = _get_pod_pending_reason(context, namespace, pod_name)
+        if pending_reason is not None and pending_reason[0] == reason:
+            detail = f': {pending_reason[1]}'
+        minutes = _stall_timeout_seconds(reason) // 60
+        if reason in _MOUNT_FAILURE_EVENT_REASONS:
+            raise config_lib.KubernetesError(
+                f'Pod {pod_name} has failed to attach or mount volumes for '
+                f'over {minutes} minutes: {reason}{detail}')
+        if reason is None:
+            raise config_lib.KubernetesError(
+                f'Pod {pod_name} has not started running after {minutes} '
+                'minutes and reports no reason why. Run '
+                f'`sky logs --provision {cluster_name}` and '
+                f'`kubectl describe pod {pod_name}` for more details.')
+        raise config_lib.KubernetesError(
+            f'Pod {pod_name} has been stuck on the same condition for over '
+            f'{minutes} minutes: {reason}{detail}. Run '
+            f'`sky logs --provision {cluster_name}` for more details.')
+
     missing_pods_retry = 0
+    transport_error_since: Optional[float] = None
     last_status_msg: Optional[str] = None
     while True:
         # Get all pods in a single API call
         cluster_name_on_cloud = new_pods[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
-        all_pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=
-            f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
-        ).items
+        try:
+            all_pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace,
+                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                f'{cluster_name_on_cloud}'),
+                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            transport_error_since = None
+        except (kubernetes.api_exception(),
+                kubernetes.urllib3_http_error()) as e:
+            # Same missed-poll treatment as in _wait_for_pods_to_schedule.
+            # This loop has no deadline, so the transport-error grace window
+            # is what keeps a persistently unreachable API server from
+            # turning into an endless silent retry loop.
+            if not _is_transport_error(e):
+                raise
+            transport_error_since = _count_transport_error(
+                e, transport_error_since, cluster_name)
+            continue
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}
@@ -889,17 +1767,36 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # instead of hardcoding the number of retries?
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
                 first_pod = True
-                for pod_name in missing_pod_names:
+                missing_pod_reasons: List[str] = []
+                for pod_name in sorted(missing_pod_names):
                     reason = _get_pod_missing_reason(context, namespace,
                                                      cluster_name, pod_name,
                                                      first_pod)
                     logger.warning(f'Pod {pod_name} missing: {reason}')
+                    if reason is not None:
+                        missing_pod_reasons.append(f'{pod_name}: {reason}')
                     first_pod = False
+                # Surface whatever the events said. Without this the only
+                # signal is the generic sentence below, which reads the same
+                # whether the pod was evicted, deleted by another controller,
+                # or rejected by the API server before it ever started.
+                if missing_pod_reasons:
+                    missing_detail = '; '.join(missing_pod_reasons)
+                else:
+                    # A reason of None does not mean the pod had no events:
+                    # _get_pod_missing_reason also returns None when the events
+                    # were all seen on an earlier pass, and when they simply do
+                    # not name one of the causes it recognises. Say only what
+                    # was established -- that no cause could be derived.
+                    missing_detail = (
+                        f'{sorted(missing_pod_names)} may have been terminated '
+                        'or failed unexpectedly, and no cause could be derived '
+                        'from their events — the pod may have been deleted, or '
+                        'rejected by the API server before it started')
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
-                    f'retries. Some pods may have been terminated or failed '
-                    f'unexpectedly. Run `sky logs --provision {cluster_name}` '
-                    'for more details.')
+                    f'retries: {missing_detail}. Run '
+                    f'`sky logs --provision {cluster_name}` for more details.')
             logger.info('Retrying running pods check: '
                         f'Missing pods: {missing_pod_names}')
             time.sleep(0.5)
@@ -916,12 +1813,36 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
 
         all_pods_running = True
         pending_reasons_count: Dict[str, int] = {}
-        for is_running, pending_reason in pod_statuses:
+        now = time.time()
+        for pod, (is_running, pending_reason) in zip(pods_to_check,
+                                                     pod_statuses):
             if not is_running:
                 all_pods_running = False
             if pending_reason is not None:
                 pending_reasons_count[pending_reason] = (
                     pending_reasons_count.get(pending_reason, 0) + 1)
+            # Escalate a pod that keeps reporting the same condition to a
+            # provisioning error. Some kubelet-level failures raise from
+            # _inspect_pod_status as soon as they are seen, but the ones that
+            # only leave the container in 'ContainerCreating' (a mount
+            # failure, a pod sandbox that cannot be created) or that are
+            # normal in isolation (a container restart) are invisible there —
+            # without this deadline such a pod spins here forever with only a
+            # spinner update.
+            # This reads "the reason did not change" as "the pod made no
+            # progress", which holds only because _get_pod_pending_reason will
+            # not keep reporting a Warning the pod has already moved past; see
+            # its docstring.
+            pod_name = pod.metadata.name
+            if is_running or _reason_is_exempt_from_stall(pending_reason):
+                stalled_since.pop(pod_name, None)
+            else:
+                previous = stalled_since.get(pod_name)
+                if previous is None or previous[0] != pending_reason:
+                    stalled_since[pod_name] = (pending_reason, now)
+                elif (now - previous[1] >=
+                      _stall_timeout_seconds(pending_reason)):
+                    _raise_stalled(pod_name, pending_reason)
 
         if all_pods_running:
             break
@@ -1187,21 +2108,109 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
                 f'Force delete of terminating pod {pod_name} failed: {e}')
 
 
+# How long pod creation keeps retrying while an admission webhook on the
+# cluster cannot be called. A webhook whose service has no ready endpoints
+# (e.g. its controller is restarting) fails every pod create with a 500, and
+# such outages are often intermittent.
+_WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
+# Kept under its old name for callers outside this module.
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
+
+
+def _create_namespaced_pod_retrying_webhook_errors(
+        namespace: str, pod_spec: dict, context: Optional[str]) -> Any:
+    """Creates a Pod, retrying while an admission webhook cannot be called.
+
+    Raises:
+        config_lib.KubernetesError: an admission webhook still could not be
+            called after _WEBHOOK_UNAVAILABLE_RETRY_SECONDS.
+        kubernetes.api_exception(): any other pod creation error.
+    """
+    deadline = time.time() + _WEBHOOK_UNAVAILABLE_RETRY_SECONDS
+    backoff = common_utils.Backoff(initial_backoff=2, max_backoff_factor=5)
+    while True:
+        try:
+            return kubernetes.core_api(context).create_namespaced_pod(
+                namespace, pod_spec)
+        except kubernetes.api_exception() as e:
+            webhook = api_errors.unavailable_webhook(e)
+            if webhook is None:
+                raise
+            error_message = api_errors.status_message(e)
+            # The last sleep is cut short so a final attempt lands on the
+            # deadline.
+            sleep_seconds = min(backoff.current_backoff(),
+                                deadline - time.time())
+            if sleep_seconds <= 0:
+                raise config_lib.KubernetesError(
+                    f'Pod creation in context {context!r} was rejected '
+                    f'because admission webhook {webhook!r} could not be '
+                    f'called (retried for up to '
+                    f'{_WEBHOOK_UNAVAILABLE_RETRY_SECONDS}s). This is a '
+                    'problem with the webhook\'s service on the cluster, not '
+                    'a lack of resources: check that the pods serving the '
+                    f'webhook are running and ready. Details: {error_message}'
+                ) from e
+            logger.warning(f'Admission webhook {webhook!r} could not be '
+                           'called while creating a pod in context '
+                           f'{context!r}; retrying in {sleep_seconds:.1f}s.')
+            time.sleep(sleep_seconds)
+
+
+# Kept under its old name for callers outside this module.
+_invalid_pod_spec_message = api_errors.invalid_pod_spec_message
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
 
+    See _create_namespaced_pod_handling_known_errors for the errors that are
+    retried or worked around.
+
+    Raises:
+        exceptions.ProvisionUnsupportedError: the API server rejected the pod
+            spec as invalid, which retrying the same spec cannot fix.
+
+    Returns: The created Pod object.
+    """
+    try:
+        return _create_namespaced_pod_handling_known_errors(
+            namespace, pod_spec, context)
+    except kubernetes.api_exception() as e:
+        invalid_message = _invalid_pod_spec_message(e)
+        if invalid_message is None:
+            raise
+        # Not a ResourcesUnavailableError: failover still tries the other
+        # candidates (another context may render a valid spec), but a caller
+        # waiting for capacity, such as a managed job, stops when this is the
+        # only kind of failure (see ProvisionUnsupportedError).
+        raise exceptions.ProvisionUnsupportedError(
+            f'Kubernetes rejected the pod spec in context {context!r} as '
+            f'invalid: {invalid_message}. Retrying the same spec cannot '
+            'succeed; fix the pod spec (e.g. kubernetes.pod_config in the '
+            'task or in the config for this context) and launch again.') from e
+
+
+def _create_namespaced_pod_handling_known_errors(namespace: str, pod_spec: dict,
+                                                 context: Optional[str]) -> Any:
+    """Creates a Pod, handling the errors we know how to work around.
+
     Currently, we handle errors due to the AppArmor annotation and retry if
     it fails due to the `FieldValueForbidden` error.
     See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+    On every create attempt, an admission webhook that cannot be called is
+    retried for a while and then raised as a KubernetesError naming the
+    webhook.
 
     Returns: The created Pod object.
     """
     try:
         # Attempt to create the Pod with the AppArmor annotation
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod = _create_namespaced_pod_retrying_webhook_errors(
+            namespace, pod_spec, context)
         return pod
     except kubernetes.api_exception() as e:
         try:
@@ -1238,8 +2247,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
             # Retry Pod creation without the AppArmor annotation
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'without AppArmor annotation.')
                 return pod
@@ -1279,8 +2288,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # the old object around; _force_remove_terminating_pod clears both.
             _force_remove_terminating_pod(pod_name, namespace, context)
             try:
-                pod = kubernetes.core_api(context).create_namespaced_pod(
-                    namespace, pod_spec)
+                pod = _create_namespaced_pod_retrying_webhook_errors(
+                    namespace, pod_spec, context)
                 logger.info(f'Pod {pod.metadata.name} created successfully '
                             'after force-removing the terminating pod.')
                 return pod
@@ -1349,15 +2358,49 @@ def _configure_runtime_class(pod_spec: Dict[str,
         spec['runtimeClassName'] = 'nvidia'
 
 
+def inject_ephemeral_volumes(
+        pod_spec: Dict[str, Any],
+        ephemeral_volumes: List[volume_utils.VolumeInfo]) -> None:
+    """Add provisioned ephemeral volumes to a Kubernetes pod spec."""
+    containers = pod_spec['spec']['containers']
+    if not containers:
+        raise ValueError('Cannot mount ephemeral volumes without a container.')
+    volumes = pod_spec['spec'].setdefault('volumes', [])
+    volume_mounts = containers[0].setdefault('volumeMounts', [])
+    for ephemeral_volume in ephemeral_volumes:
+        volume_entry = {
+            'name': ephemeral_volume.name,
+            'persistentVolumeClaim': {
+                'claimName': ephemeral_volume.volume_name_on_cloud,
+            },
+        }
+        if volume_entry not in volumes:
+            volumes.append(volume_entry)
+        volume_mount = {
+            'name': ephemeral_volume.name,
+            'mountPath': ephemeral_volume.path,
+        }
+        if volume_mount not in volume_mounts:
+            volume_mounts.append(volume_mount)
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
+    # Closes the provision-setup segment of this launch attempt and opens the
+    # admission-wait one. The same reference point _wait_for_pods_to_schedule
+    # measures from, so the two agree. Write-once, so a resumed launch
+    # re-entering here keeps the original time rather than restarting the wait
+    # at admission.
+    global_user_state.record_launch_milestone_for_cluster(
+        cluster_name, global_user_state.LaunchMilestone.INSTANCES_REQUESTED,
+        create_pods_start.timestamp())
 
     to_create_deployment = 'deployment_spec' in pod_spec
     if to_create_deployment:
@@ -1381,25 +2424,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    if kai.uses_kai(provider_config):
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
-        for ephemeral_volume in ephemeral_volumes:
-            # Update the volumes and volume mounts in the pod spec
-            if 'volumes' not in pod_spec['spec']:
-                pod_spec['spec']['volumes'] = []
-            pod_spec['spec']['volumes'].append({
-                'name': ephemeral_volume.name,
-                'persistentVolumeClaim': {
-                    'claimName': ephemeral_volume.volume_name_on_cloud,
-                },
-            })
-            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
-                pod_spec['spec']['containers'][0]['volumeMounts'] = []
-            pod_spec['spec']['containers'][0]['volumeMounts'].append({
-                'name': ephemeral_volume.name,
-                'mountPath': ephemeral_volume.path,
-            })
+        inject_ephemeral_volumes(pod_spec, ephemeral_volumes)
 
     # Docker sidecar cache volume injection: if a SkyPilot volume was
     # specified for the enable_docker cache, look up the PVC name. The actual
@@ -1485,6 +2517,52 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
+    # hostNetwork port blocks, assigned per pod BEFORE the parallel dispatch
+    # below. Head and workers are created concurrently, so a worker cannot read
+    # the head's ports off a live head pod that may not exist yet -- but it
+    # needs the head's GCS port to join. So the server resolves every pod's
+    # block up front and hands the head's GCS port to all of them.
+    #
+    # Per pod rather than per cluster: podAntiAffinity already keeps
+    # same-cluster pods off one node, so sharing a block buys nothing, while a
+    # shared block means one pod that cannot schedule can never be given a
+    # different one without moving a healthy head.
+    host_network_port_blocks: Dict[str, Dict[str, int]] = {}
+    head_gcs_port: Optional[int] = None
+    if pod_spec.get('spec', {}).get('hostNetwork', False):
+        head_name = f'{cluster_name_on_cloud}-head'
+        # Only the head needs a ConfigMap fallback. A cluster created before
+        # this change declares no ports, so its head's block is only knowable
+        # from what the old probe published -- and a new worker that guesses
+        # instead would be handed a GCS port the head is not listening on.
+        # Workers need no fallback: an existing one is not recreated, and a
+        # new one is new.
+        #
+        # This is reached by RECOVERY, not by scaling: `sky launch --num-nodes`
+        # against an existing cluster is refused before provisioning, by
+        # check_resources_fit_cluster ("specify a new cluster name, or down
+        # the existing cluster first"). The live path is a pod lost to node
+        # failure or manual termination, where a launch at the SAME node count
+        # recreates it against a Running head -- the case the comment at the
+        # parallel dispatch below describes. Do not read "you cannot scale a
+        # cluster" as "a worker is never created next to an existing head".
+        head_pod = running_pods.get(head_name)
+        head_block = host_network_ports.resolve_block(
+            head_pod,
+            # Only a live pre-change head can be served by the ConfigMap, so
+            # there is nothing to read when there is no head pod -- and every
+            # post-change launch would otherwise pay for the lookup.
+            _head_block_from_configmap(cluster_name_on_cloud, namespace,
+                                       context, head_name)
+            if head_pod is not None else None,
+            context)
+        host_network_port_blocks[head_name] = head_block
+        head_gcs_port = head_block['gcs']
+        for i in range(1, config.count):
+            name = f'{cluster_name_on_cloud}-worker{i}'
+            host_network_port_blocks[name] = host_network_ports.resolve_block(
+                running_pods.get(name), configmap_ports=None, context=context)
+
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
     try:
@@ -1501,6 +2579,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     needs_gpus = False
     needs_gpus_nvidia = False
+    needs_neuron = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
@@ -1508,6 +2587,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                 0) > 0
         needs_gpus_nvidia = limits.get(
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
+        # AWS Neuron (Trainium/Inferentia) uses its own resource key.
+        needs_neuron = limits.get(kubernetes_utils.NEURON_RESOURCE_KEY, 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -1541,6 +2622,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if host_network_port_blocks:
+            assert head_gcs_port is not None
+            # Read the name back off the spec rather than tracking it in a
+            # second variable: only the worker branch above binds pod_name,
+            # while both branches set metadata.name.
+            this_pod = pod_spec_copy['metadata']['name']
+            host_network_ports.apply_to_pod_spec(
+                pod_spec_copy, host_network_port_blocks[this_pod],
+                head_gcs_port, context)
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -1615,7 +2706,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
@@ -1631,9 +2723,25 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 gpu_toleration
+            ]
+        # Add Neuron toleration if AWS Neuron (Trainium/Inferentia) is requested.
+        # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
+        # to keep non-Neuron workloads off them; tolerate it like the GPU case.
+        if needs_neuron:
+            neuron_toleration = {
+                'key': kubernetes_utils.NEURON_RESOURCE_KEY,
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            }
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                neuron_toleration
             ]
 
         # Apply allowed_nodes scheduling constraints to restrict pods to
@@ -1740,8 +2848,19 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout,
-                               cluster_name, create_pods_start)
+    _wait_for_pods_to_schedule(
+        namespace,
+        context,
+        pods,
+        provision_timeout,
+        cluster_name,
+        create_pods_start,
+        admission_timeout=provider_config.get('queue_admission_timeout'))
+    if kai.uses_kai(provider_config):
+        # A no-op for a new cluster. A resize adds pods to a running gang, and
+        # a higher minMember before they are bound lets KAI evict the gang.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud,
+                          config.count)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -1848,11 +2967,118 @@ def _delete_cluster_services(cluster_name: str, namespace: str,
                        f'{cluster_name}: {e}')
 
 
+def _pod_has_resource_claims(pod: Any) -> bool:
+    """Whether the pod requests devices via dynamic resource allocation (DRA).
+
+    ``spec.resourceClaims`` is only modelled by kubernetes client 26.1.0 and
+    later, so on an older client the attribute is missing and every pod reads
+    as claim-free, keeping the force-delete path below. That is acceptable:
+    ``dependencies.py`` floors the client at 20.0.0, but the range is unpinned
+    and has no lock file, so an install resolves to the newest allowed version
+    (published images are many major versions past 26.1.0), and a client old
+    enough to lack the field predates DRA anyway.
+
+    Deliberately not the other way around: reading an unmodellable field as
+    "may have claims" would put *every* pod on the graceful path for those
+    clients, which is the teardown slowdown this check exists to avoid.
+    """
+    pod_spec = getattr(pod, 'spec', None)
+    return bool(getattr(pod_spec, 'resource_claims', None))
+
+
+def _force_delete_pod(namespace: str, context: Optional[str],
+                      pod_name: str) -> None:
+    """Delete a pod with a zero grace period.
+
+    Some misbehaving pods do not terminate gracefully if they have open file
+    descriptors, which used to make teardown hang for many minutes, so this is
+    the default path for pod deletion.
+    """
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT,
+            grace_period_seconds=0),
+        resource_type='pod',
+        resource_name=pod_name)
+
+
+def _wait_for_pod_gone(namespace: str, context: Optional[str],
+                       pod_name: str) -> bool:
+    """Polls until the pod object is gone. False if it is still there."""
+    start_time = time.time()
+    while time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION:
+        try:
+            kubernetes.core_api(context).read_namespaced_pod(
+                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return True
+            # A transient API error should not short-circuit the wait into a
+            # force delete; keep polling until the timeout.
+            logger.debug(f'Error while waiting for pod {pod_name} to '
+                         f'terminate: {e}')
+        time.sleep(POLL_INTERVAL)
+    return False
+
+
+def _delete_pod(namespace: str, context: Optional[str], pod_name: str,
+                graceful: bool) -> None:
+    """Deletes a pod, optionally waiting for the kubelet to finish with it.
+
+    A zero grace period removes the pod object from etcd immediately, without
+    waiting for the kubelet to confirm that the pod is gone. That is what we
+    want for most pods (see ``_force_delete_pod``), but it is unsafe for pods
+    holding DRA resource claims: the kubelet unprepares a pod's claims after
+    its containers stop and *before* it reports the terminal pod status,
+    precisely so that the cleanup happens while the pod still exists in the
+    API. Deleting the object out from under it lets the resourceclaim
+    controller drop the claim's ``reservedFor`` entry and finalizer while the
+    kubelet may still be unpreparing, which can strand device state on the node
+    and leave claims allocated to a pod that no longer exists.
+
+    So for those pods, delete with the pod's own
+    ``terminationGracePeriodSeconds`` and wait for the object to disappear --
+    the kubelet only lets that happen once termination is complete. The wait is
+    bounded (and independent of ``terminationGracePeriodSeconds``) so that a
+    pod the container runtime cannot stop still cannot hang teardown: on
+    timeout we fall back to the force delete.
+    """
+    if not graceful:
+        _force_delete_pod(namespace, context, pod_name)
+        return
+
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
+
+    if _wait_for_pod_gone(namespace, context, pod_name):
+        return
+
+    logger.warning(f'Pod {pod_name} did not finish terminating within '
+                   f'{_TIMEOUT_FOR_POD_TERMINATION}s. Force deleting it - '
+                   'devices held by the pod may have to be reclaimed by their '
+                   'driver before they can be used again.')
+    _force_delete_pod(namespace, context, pod_name)
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
-                    is_head: bool = False) -> None:
-    """Terminate a pod and its associated services."""
+                    is_head: bool = False,
+                    has_resource_claims: bool = False) -> None:
+    """Terminate a pod and its associated services.
+
+    Args:
+        has_resource_claims: whether the pod requests DRA devices, in which
+            case it is deleted gracefully rather than force deleted. See
+            ``_delete_pod``.
+    """
     logger.debug(f'terminate_instances: namespace: {namespace}, context: '
                  f'{context}, pod_name: {pod_name}, is_head: {is_head}')
 
@@ -1867,16 +3093,7 @@ def _terminate_node(namespace: str,
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    # Note - some misbehaving pods may not terminate gracefully if they have
-    # open file descriptors. We force delete pods to avoid this.
-    kubernetes_utils.delete_k8s_resource_with_retry(
-        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
-            name=pod_name,
-            namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT,
-            grace_period_seconds=0),
-        resource_type='pod',
-        resource_name=pod_name)
+    _delete_pod(namespace, context, pod_name, graceful=has_resource_claims)
 
 
 def _terminate_deployment(cluster_name: str, namespace: str,
@@ -1918,7 +3135,7 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pods = kubernetes_utils.filter_pods(namespace, context,
                                         ray_tag_filter(cluster_name_on_cloud),
                                         None)
@@ -1930,12 +3147,20 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    if worker_only and kai.uses_kai(provider_config):
+        # Without this, KAI evicts the head as a gang below its minMember.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud, 1)
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name, _is_head(pod))
+        _terminate_node(namespace,
+                        context,
+                        pod_name,
+                        is_head=_is_head(pod),
+                        has_resource_claims=_pod_has_resource_claims(pod))
 
     # Run pod termination in parallel
     num_threads = max(1, min(_NUM_THREADS, len(pods)))
@@ -1966,8 +3191,10 @@ def cleanup_cluster_resources(
         provider_config: Provider configuration dictionary
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -1976,6 +3203,48 @@ def cleanup_cluster_resources(
 # every status refresh during a pod restart to a multi-minute hang.
 _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
+
+# The names the pre-change probe published (v0.13.0, #9644). Fixed, not derived
+# from HEAD_PORT_NAMES: that list grows (skylet was appended after the move),
+# and a name it gains never appears in an existing ConfigMap.
+_CONFIGMAP_PORT_NAMES = ('gcs', 'dashboard', 'node_manager', 'object_manager',
+                         'ray_client_server', 'dashboard_agent_listen',
+                         'runtime_env_agent', 'metrics_export', 'sshd')
+
+
+def _head_block_from_configmap(cluster_name_on_cloud: str, namespace: str,
+                               context: Optional[str],
+                               head_name: str) -> Optional[Dict[str, int]]:
+    """The head's port block as the pre-change probe published it.
+
+    Kept for one release so a cluster created before ports moved into the pod
+    spec can still be added to. Absent ConfigMap, or a cluster created after
+    the change, returns None and the caller allocates.
+    """
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
+    try:
+        cm = kubernetes.core_api(context).read_namespaced_config_map(
+            name=name, namespace=namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+        return None
+    data = cm.data or {}
+    block: Dict[str, int] = {}
+    for port_name in _CONFIGMAP_PORT_NAMES:
+        key = (f'{host_network_probe.SSHD_KEY_PREFIX}{head_name}'
+               if port_name == 'sshd' else port_name)
+        value = data.get(key)
+        if value is None:
+            return None
+        try:
+            block[port_name] = int(value)
+        except ValueError:
+            logger.warning(f'ConfigMap {namespace}/{name} has a non-integer '
+                           f'value for {key!r}: {value!r}. Ignoring it and '
+                           'allocating a fresh host port block.')
+            return None
+    return block
 
 
 def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
@@ -2035,7 +3304,8 @@ def get_cluster_info(
     del region  # unused
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
 
     running_pods = kubernetes_utils.filter_pods(
         namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
@@ -2049,19 +3319,36 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
-    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
-    # K8s node's own sshd). The SSH config writer needs that port per
-    # pod, so wait for every hostNetwork pod's entry to land in the
-    # ConfigMap before caching the result.
-    host_network_pods = [
-        name for name, pod in running_pods.items() if pod.spec.host_network
-    ]
-    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
-                                                   namespace, context,
-                                                   host_network_pods)
+    # A hostNetwork pod's sshd is not on 22 -- the K8s node's own sshd owns
+    # that -- so the SSH config writer needs the real port per pod. Read it
+    # off the pod, which declares it; a pod created before ports moved into
+    # the spec declares nothing, so fall back to the ConfigMap its probe
+    # published. Same order as the assignment side -- pod first, ConfigMap
+    # second -- but per pod rather than head-only: the ConfigMap carries
+    # sshd_<pod> for every pod, and SSH to a pre-existing *worker* needs its
+    # own entry. (The assignment side only ever needs the head's block, which
+    # is the only full block the ConfigMap holds.)
+    pod_sshd_ports: Dict[str, int] = {}
+    # Only pods that declare a block; the rest run skylet on the default.
+    pod_skylet_ports: Dict[str, int] = {}
+    legacy_pods = []
+    for name, pod in running_pods.items():
+        if not pod.spec.host_network:
+            continue
+        declared = host_network_ports.ports_from_pod(pod, context)
+        if declared is not None:
+            pod_sshd_ports[name] = declared['sshd']
+            pod_skylet_ports[name] = declared['skylet']
+        else:
+            legacy_pods.append(name)
+    if legacy_pods:
+        pod_sshd_ports.update(
+            _read_host_network_sshd_ports(cluster_name_on_cloud, namespace,
+                                          context, legacy_pods))
 
     head_pod_name = None
     cpu_request = None
+    memory_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
         # pod_ip is the K8s node's host IP. SkyPilot injects a required
@@ -2077,6 +3364,7 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=None,
                 ssh_port=pod_sshd_ports.get(pod_name, port),
+                skylet_port=pod_skylet_ports.get(pod_name),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
@@ -2095,6 +3383,8 @@ def get_cluster_info(
             limits = (getattr(resources, 'limits', None) if resources else None)
             cpu_request = ((requests or {}).get('cpu') or
                            (limits or {}).get('cpu'))
+            memory_request = ((requests or {}).get('memory') or
+                              (limits or {}).get('memory'))
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -2134,6 +3424,14 @@ def get_cluster_info(
     # Keep consistent with the logic in clouds/kubernetes.py
     str_cpus = str(max(int(num_cpus), 1))
 
+    # Record the pod's actual resource requests so display paths can show
+    # what the scheduler sees, even when an admin policy has overridden
+    # them via pod_config (bypassing the SkyPilot resources spec).
+    actual_memory_gb = None
+    if memory_request is not None:
+        actual_memory_gb = kubernetes_utils.parse_memory_resource(
+            memory_request, unit='G')
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -2146,7 +3444,9 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config)
+        provider_config=provider_config,
+        actual_cpus=num_cpus,
+        actual_memory_gb=actual_memory_gb)
 
 
 class NodeHealthInfo:
@@ -2155,6 +3455,35 @@ class NodeHealthInfo:
     def __init__(self, issue: str, pods: List[str]):
         self.issue = issue
         self.pods = pods
+
+
+# Lead-ins the reason builders below emit before they know *why* a pod is
+# unhealthy. pod_reason_identifies_cause() parses what those two functions
+# write, so it lives beside them and must stay in sync.
+_POD_NOT_READY_PREFIX = 'pod not ready ('
+_TERMINATION_FALLBACK = 'Terminated unexpectedly'
+_CONTAINER_ERRORS_MARKER = 'Container errors:'
+# Starts the line _get_pod_termination_reason writes after the reason.
+# _termination_reason_line() cuts the text here to read the reason back out.
+_LAST_STATE_MARKER = 'Last known state:'
+
+
+def pod_reason_identifies_cause(reason: Optional[str]) -> bool:
+    """Whether a per-pod reason names an actual cause, or only that it is sick.
+
+    A node that stops heartbeating leaves its pod status stale, so a refresh
+    during the outage can only report "not ready"; once it is back the same
+    code names the real cause. Callers use this to tell the two apart.
+    """
+    if not reason:
+        return False
+    if reason.startswith(_POD_NOT_READY_PREFIX):
+        # Container detail, when found, is appended after '; '.
+        return '; ' in reason
+    if reason.startswith(_TERMINATION_FALLBACK):
+        return _CONTAINER_ERRORS_MARKER in reason
+    # Evicted, Preempted by Kueue, etc. already name the cause.
+    return True
 
 
 def _get_pod_health_issues(pod: Any) -> Optional[str]:
@@ -2220,38 +3549,64 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
     return '; '.join(parts)
 
 
+# A cluster stuck INIT reads its pods' nodes on every status refresh.
+_MAX_NODES_READ = 10
+
+
 def _check_nodes_health(
     context: Optional[str],
     node_names: Set[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
-    Tries the NodeInfoSource plugin first (fast, cached), then falls back
-    to direct Kubernetes API calls.
+    Reads the first _MAX_NODES_READ nodes (by name) from the Kubernetes API;
+    the rest, and any it cannot read, fall back to a registered
+    NodeInfoSource, which knows only NotReady / cordoned.
 
     Args:
         context: Kubernetes context name.
         node_names: Set of node names to check.
+        tolerations: The cluster pods' tolerations; NoExecute taints they
+            tolerate are not reported.
+        since: The cluster's launch; older taints are not reported.
 
     Returns:
-        Dict mapping node_name -> issue description for unhealthy nodes.
+        Dict mapping node_name -> issue description for unhealthy nodes, e.g.
+        'NotReady (NoExecute taint node.kubernetes.io/unreachable)',
+        'tainted (NoExecute taint k=v)' or 'deleted'.
         Healthy nodes are omitted.
     """
     if not node_names:
         return {}
 
     issues: Dict[str, str] = {}
+    names = sorted(node_names)
+    unread = names[_MAX_NODES_READ:]
+    nodes = _inspect_nodes(names[:_MAX_NODES_READ], context, tolerations or [],
+                           since)
+    for name, node in nodes.items():
+        if not node.read:
+            unread.append(name)
+            continue
+        tainted = (f' (NoExecute taint {", ".join(node.taints)})'
+                   if node.taints else '')
+        if node.state == _NODE_GONE:
+            issues[name] = 'deleted'
+        elif node.state == _NODE_NOT_READY:
+            issues[name] = f'NotReady{tainted}'
+        elif node.state == _NODE_CORDONED:
+            issues[name] = f'cordoned{tainted}'
+        elif node.taints:
+            issues[name] = f'tainted{tainted}'
 
-    # Try NodeInfoSource plugin first (node-info-service sidecar).
-    # get() safely returns None when no provider is registered.
-    # Note: if a node is in node_names but not in the cache, it's silently
-    # skipped (we don't fall back to the k8s API for missing entries). This
-    # is acceptable since this is diagnostic-only and doesn't affect the
-    # cluster status transition.
-    node_info = plugin_extensions.NodeInfoSource.get(
-        context) if context is not None else None
+    # Past the cap, or no permission to read nodes: what the plugin's node
+    # cache knows.
+    node_info = (plugin_extensions.NodeInfoSource.get(context)
+                 if unread and context is not None else None)
     if node_info is not None:
-        for name in node_names:
+        for name in unread:
             info = node_info.node_info_dict.get(name)
             if info is None:
                 continue
@@ -2259,32 +3614,6 @@ def _check_nodes_health(
                 issues[name] = 'NotReady'
             elif info.is_cordoned:
                 issues[name] = 'cordoned'
-        return issues
-
-    # Fallback: direct Kubernetes API (parallelized)
-    def _check_single_node(name: str) -> Optional[Tuple[str, str]]:
-        try:
-            node = kubernetes.core_api(context).read_node(
-                name, _request_timeout=kubernetes.API_TIMEOUT)
-            # Check NotReady first (more severe than cordoned)
-            node_status = getattr(node, 'status', None)
-            for condition in (getattr(node_status, 'conditions', None) or []):
-                if condition.type == 'Ready' and condition.status != 'True':
-                    return (name, 'NotReady')
-            # Check if node is cordoned (unschedulable)
-            node_spec = getattr(node, 'spec', None)
-            if getattr(node_spec, 'unschedulable', False):
-                return (name, 'cordoned')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to read node {name}: {e}')
-        return None
-
-    results = subprocess_utils.run_in_parallel(_check_single_node,
-                                               sorted(node_names))
-    for result in results:
-        if result is not None:
-            issues[result[0]] = result[1]
-
     return issues
 
 
@@ -2292,11 +3621,13 @@ def get_node_health_for_cluster(
     cluster_name_on_cloud: str,
     provider_config: Dict[str, Any],
     unhealthy_pod_names: List[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
 ) -> Dict[str, NodeHealthInfo]:
     """Check node health for specific unhealthy pods in a cluster.
 
     Fetches pods to determine which nodes they run on, then checks
-    those nodes' health via NodeInfoSource or the Kubernetes API.
+    those nodes' health via the Kubernetes API (or NodeInfoSource).
 
     Args:
         cluster_name_on_cloud: The cluster name as known to the cloud.
@@ -2307,7 +3638,8 @@ def get_node_health_for_cluster(
         Dict mapping node_name -> NodeHealthInfo for unhealthy nodes.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -2328,7 +3660,7 @@ def get_node_health_for_cluster(
     if not unique_nodes:
         return {}
 
-    node_issues = _check_nodes_health(context, unique_nodes)
+    node_issues = _check_nodes_health(context, unique_nodes, tolerations, since)
     if not node_issues:
         return {}
 
@@ -2342,6 +3674,248 @@ def get_node_health_for_cluster(
             result[node_name].pods.append(pod_name)
 
     return result
+
+
+_NODE_GONE = 'no longer exists'
+_NODE_NOT_READY = 'is NotReady'
+_NODE_CORDONED = 'is cordoned'
+
+
+class _NodeState(NamedTuple):
+    read: bool  # False when the node could not be read; the rest is unknown.
+    state: Optional[str]  # _NODE_GONE / _NODE_NOT_READY / _NODE_CORDONED.
+    taints: List[str]  # NoExecute taints that could have evicted the pods.
+
+
+def _evicting_taints(node: Any, tolerations: List[Dict[str, Any]],
+                     since: Optional[datetime.datetime]) -> List[str]:
+    """The node's NoExecute taints that could have evicted the cluster's pods.
+
+    A taint the pods tolerate cannot have evicted them, except through
+    tolerationSeconds, which only delays the eviction. A taint older than the
+    launch was already there when the pods were placed, so they tolerated it;
+    this also covers tolerations added at pod creation, which ``tolerations``
+    (read from the cluster YAML) does not carry.
+    """
+    tolerating = [t for t in tolerations if t.get('tolerationSeconds') is None]
+    cutoff = (since - datetime.timedelta(
+        seconds=kubernetes_utils.POD_EVENT_CLOCK_SKEW_SECONDS)
+              if since is not None else None)
+    taints = []
+    for taint in (getattr(node.spec, 'taints', None) or []):
+        if taint.effect != 'NoExecute':
+            continue
+        if kubernetes_utils.taint_is_tolerated(
+            {
+                'key': taint.key,
+                'value': taint.value,
+                'effect': taint.effect
+            }, tolerating):
+            continue
+        if (cutoff is not None and taint.time_added is not None and
+                taint.time_added < cutoff):
+            continue
+        taints.append(
+            f'{taint.key}={taint.value}' if taint.value else taint.key)
+    return taints
+
+
+def _inspect_nodes(
+    node_names: List[str],
+    context: Optional[str],
+    tolerations: Optional[List[Dict[str, Any]]] = None,
+    since: Optional[datetime.datetime] = None,
+) -> Dict[str, _NodeState]:
+    """Reads each named node's state. Taints only when ``tolerations`` is set.
+    """
+    unique_names = sorted({name for name in node_names if name})
+
+    def _inspect_node(name: str) -> _NodeState:
+        # One unreadable node must not lose the others: all of it in the try.
+        try:
+            node = kubernetes.core_api(context).read_node(
+                name, _request_timeout=kubernetes.API_TIMEOUT)
+            taints = (_evicting_taints(node, tolerations, since)
+                      if tolerations is not None else [])
+            node_status = getattr(node, 'status', None)
+            for condition in (getattr(node_status, 'conditions', None) or []):
+                if condition.type == 'Ready' and condition.status != 'True':
+                    return _NodeState(True, _NODE_NOT_READY, taints)
+            if getattr(getattr(node, 'spec', None), 'unschedulable', False):
+                return _NodeState(True, _NODE_CORDONED, taints)
+            return _NodeState(True, None, taints)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return _NodeState(True, _NODE_GONE, [])
+            logger.debug(f'Failed to read node {name}: {e}')
+            return _NodeState(False, None, [])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+            return _NodeState(False, None, [])
+
+    results = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
+    return dict(zip(unique_names, results))
+
+
+def get_missing_node_reason(
+        node_names: List[str],
+        provider_config: Dict[str, Any],
+        tolerations: Optional[List[Dict[str, Any]]] = None,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Best-effort reason a cluster lost node(s), from current node state.
+
+    Answers "where did the node go" by asking Kubernetes about the nodes the
+    cluster's pods were placed on, rather than by replaying the pod's event
+    history. A node that no longer exists, that exists but is NotReady or
+    cordoned, or that carries a NoExecute taint the pods could not stay
+    through (only checked when ``tolerations`` is given), explains a pod that
+    vanished from under the cluster.
+
+    Reporting current state (rather than a past event) keeps this idempotent:
+    it returns the same answer on every status refresh, with no dependence on
+    what a previous call already consumed.
+
+    Args:
+        node_names: The Kubernetes node names the cluster's pods were placed
+            on, e.g. from ``ClusterInfo.get_node_names()``.
+        provider_config: The Kubernetes provider config.
+        tolerations: The cluster's pod tolerations; enables the taint check.
+        since: When the cluster was launched; older taints are ignored.
+
+    Returns:
+        A human-readable reason, or None when every node is present and
+        healthy (or none could be checked).
+    """
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
+    nodes = _inspect_nodes(node_names, context, tolerations, since)
+    parts = []
+    for name, node in nodes.items():
+        # NotReady first: it is more severe than a taint or a cordon, and a
+        # NotReady node is tainted by Kubernetes itself.
+        if node.state in (_NODE_GONE, _NODE_NOT_READY):
+            parts.append(f'node {name} {node.state}')
+        elif node.taints:
+            parts.append(
+                f'node {name} has NoExecute taint {", ".join(node.taints)}')
+        elif node.state is not None:
+            parts.append(f'node {name} {node.state}')
+    if not parts:
+        return None
+    return '; '.join(parts)
+
+
+def _as_sentence(text: str) -> str:
+    text = ' '.join(text.split())
+    return text if text.endswith(('.', '!', '?')) else f'{text}.'
+
+
+def get_cluster_termination_cause(
+        provider_config: Dict[str, Any], pod_nodes: Dict[str, Optional[str]], *,
+        tolerations: List[Dict[str, Any]],
+        since: Optional[datetime.datetime]) -> Optional[str]:
+    """Who removed a cluster's pods, and why; None when nothing says.
+
+    For pods that are gone (all of a cluster's, or some). Worded actor
+    first, because a table cell shows only the start of it. Combines the pods'
+    own deletion events (see kubernetes_utils.pod_deletion_event) with the
+    current state of the nodes they ran on. ``pod_nodes`` maps each pod to
+    the node it ran on.
+    """
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+
+    def _pod_events(pod_name: str) -> List[Any]:
+        try:
+            return _get_pod_events(context, namespace, pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    # Every pod's events, head first: the most decisive deletion event of the
+    # whole cluster wins, and a tie goes to the head.
+    event = kubernetes_utils.pod_deletion_event([
+        e for events in subprocess_utils.run_in_parallel(
+            _pod_events, list(pod_nodes)) for e in events
+    ], since)
+    nodes = _inspect_nodes([n for n in pod_nodes.values() if n], context,
+                           tolerations, since)
+    pods = 'Pods' if len(pod_nodes) > 1 else 'Pod'
+
+    def _names(state: Optional[str] = None) -> str:
+        matching = [n for n, node in nodes.items() if node.state == state]
+        return ', '.join(matching if state and matching else nodes) or 'unknown'
+
+    if event is None:
+        # Only what removes pods: a cordon alone does not.
+        sentences = []
+        for name, node in nodes.items():
+            if node.state == _NODE_GONE:
+                sentences.append(f'Node {name} deleted in Kubernetes')
+            elif node.state == _NODE_NOT_READY:
+                sentences.append(f'Node {name} is NotReady')
+            elif node.taints:
+                sentences.append(f'Node {name} has NoExecute taint '
+                                 f'{", ".join(node.taints)}')
+        if not sentences:
+            return None
+        return f'{"; ".join(sentences)}; pods lost.'
+
+    # Explain the event by the node its pod ran on: another node of the
+    # cluster, tainted or recovered, did not remove that pod.
+    event_pod = getattr(getattr(event, 'involved_object', None), 'name', None)
+    event_node = pod_nodes.get(event_pod) if isinstance(event_pod,
+                                                        str) else None
+    if event_node in nodes:
+        nodes = {event_node: nodes[event_node]}
+
+    reason = event.reason
+    message = ' '.join((event.message or '').split())
+    detail = f': {message}' if message else ''
+    if reason == 'TaintManagerEviction':
+        tainted = [(n, node.taints) for n, node in nodes.items() if node.taints]
+        if tainted:
+            where = '; '.join(
+                f'NoExecute taint {", ".join(taints)} on node {name}'
+                for name, taints in tainted)
+            return f'{pods} evicted by Kubernetes: {where}.'
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_GONE)} (node since deleted).')
+        if any(node.state == _NODE_NOT_READY for node in nodes.values()):
+            return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                    f'{_names(_NODE_NOT_READY)}, which is NotReady.')
+        # Claim the taint is gone only when every node was read and is fine.
+        lifted = bool(nodes) and all(
+            node.read and node.state is None for node in nodes.values())
+        removed = ' (since removed)' if lifted else ''
+        return (f'{pods} evicted by Kubernetes: NoExecute taint on node '
+                f'{_names()}{removed}.')
+    if reason == 'DeletingNode':
+        return f'Node {_names(_NODE_GONE)} deleted in Kubernetes; pods lost.'
+    if reason == 'NodeNotReady':
+        # A node that went NotReady and was then deleted is reported as
+        # deleted: that is what the user will find when they look for it.
+        if any(node.state == _NODE_GONE for node in nodes.values()):
+            return (f'Node {_names(_NODE_GONE)} deleted in Kubernetes; '
+                    'pods lost.')
+        return f'Node {_names(_NODE_NOT_READY)} became NotReady; pods lost.'
+    if reason == 'Evicted':
+        # Drain controllers and node autoscalers emit 'Evicted' as well as the
+        # kubelet, so name whoever reported it rather than assume.
+        source = getattr(event, 'source', None)
+        reporter = (getattr(event, 'reporting_component', None) or
+                    getattr(source, 'component', None))
+        by = f' by {reporter}' if reporter else ''
+        return _as_sentence(f'{pods} evicted{by}{detail}')
+    if reason == 'Preempted':
+        return _as_sentence(f'{pods} preempted by Kubernetes scheduler{detail}')
+    if reason == 'Stopped':
+        return _as_sentence(f'{pods} stopped by Kueue{detail}')
+    if reason == 'ExcessPodDeleted':
+        return _as_sentence(
+            f'{pods} deleted by Kueue (excess pod in group){detail}')
+    return _as_sentence(f'{pods} deleted in Kubernetes ({reason}){detail}')
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
@@ -2373,9 +3947,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 termination_reason += f' ({message})'
         # Generic disruption.
         elif condition.type == 'DisruptionTarget':
-            termination_reason = f'Disrupted: {reason}'
-            if message:
-                termination_reason += f' ({message})'
+            termination_reason = kubernetes_utils.disruption_reason(
+                reason, message, pod)
 
         if condition.last_transition_time is not None:
             latest_timestamp = max(latest_timestamp,
@@ -2394,7 +3967,7 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
             termination_reason += f' ({pod_status_message})'
 
     pod_reason = (f'{termination_reason}.\n'
-                  f'Last known state: {ready_state}.')
+                  f'{_LAST_STATE_MARKER} {ready_state}.')
 
     # Check container statuses for exit codes/errors
     if pod.status and pod.status.container_statuses:
@@ -2411,7 +3984,11 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
-                container_reasons.append(reason)
+                # An OOM with no memory limit is a node-level OOM, not the
+                # container overrunning its own cap; the hints differ.
+                container_reasons.append(
+                    kubernetes_utils.annotate_oom_reason(
+                        reason, pod, container_status.name))
                 if terminated.finished_at is not None:
                     latest_timestamp = max(latest_timestamp,
                                            terminated.finished_at)
@@ -2459,47 +4036,53 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reverse=True)
 
 
-# kubelet pod-event reasons that carry a terminal failure cause which is not
-# always reflected in pod.status in time -- notably an eviction for
-# ephemeral-storage / disk / memory pressure, where the kubelet emits the event
-# while pod.status.phase is still 'Running' and status.reason/message lag.
-_FAILURE_EVENT_REASONS = ('Evicted',)
-
-# Substrings that already name a specific failure cause; when a status-derived
-# reason contains one, consulting events would add nothing. Every reason we
+# Tokens that already name a specific failure cause; when a status-derived
+# reason names one, consulting events would add nothing. Every reason we
 # carry a remediation hint for is specific by definition, so derive those from
 # the canonical hint table; add the few specific reasons that have no hint
 # (CrashLoopBackOff and the Kueue/disruption conditions).
-_SPECIFIC_FAILURE_REASON_SUBSTRINGS = tuple(
+_SPECIFIC_FAILURE_REASON_TOKENS = tuple(
     kubernetes_utils.get_failure_hint_reasons()) + ('CrashLoopBackOff',
                                                     'Preempted', 'Disrupted')
 
 
 def _reason_lacks_specific_cause(reason: Optional[str]) -> bool:
     """Whether `reason` does not already name a specific failure cause."""
-    return not reason or not any(s in reason
-                                 for s in _SPECIFIC_FAILURE_REASON_SUBSTRINGS)
+    # Matched as whole tokens, like the hint table these come from: a reason
+    # such as 'WorkloadEvictedDueToPodsReadyTimeout' contains 'Evicted' but
+    # does not name a kubelet eviction, and events may still have more to say.
+    return not reason or not any(
+        kubernetes_utils.reason_matches_failure_token(reason, token)
+        for token in _SPECIFIC_FAILURE_REASON_TOKENS)
 
 
-def _get_pod_failure_reason_from_events(context: Optional[str], namespace: str,
-                                        pod_name: str) -> Optional[str]:
-    """Best-effort failure reason from the pod's most recent kubelet event.
+def _get_pod_failure_reason_from_events(
+        context: Optional[str],
+        namespace: str,
+        pod_name: str,
+        *,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Best-effort failure reason from the pod's own events.
 
-    Some failures (notably evictions for ephemeral-storage / disk / memory
-    pressure) are recorded in pod events before they propagate to
-    pod.status.reason / phase. Returns '<reason>: <message>' for the most
-    recent event whose reason is in ``_FAILURE_EVENT_REASONS``, else None.
-    Never raises -- this is additive diagnostics.
+    Some failures reach the events before -- or instead of -- pod.status: the
+    kubelet records an eviction for ephemeral-storage / disk / memory pressure
+    while the phase is still 'Running' and status.reason/message lag, and a
+    pod something else deleted leaves nothing else behind at all. Returns
+    '<Reason>: <message>', the same shape a status-derived reason has, or
+    None. Never raises -- this is additive diagnostics.
+
+    ``since`` is where this pod's own history starts: when it was created
+    (see _pod_created_at) for a caller holding the pod object, and when the
+    cluster was launched for one that has only pod names. Pod names are a
+    function of the cluster name and Kubernetes keeps Events for an hour, so
+    without it a pod inherits the deletion of whatever held its name before
+    it; every caller that can work out a bound should pass one.
     """
     try:
         events = _get_pod_events(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
-    for event in events:  # most recent first
-        if event.reason in _FAILURE_EVENT_REASONS:
-            message = (event.message or '').strip()
-            return f'{event.reason}: {message}'.rstrip(': ')
-    return None
+    return kubernetes_utils.reason_from_pod_events(events, since)
 
 
 def _get_pod_failure_reason_from_status(context: Optional[str], namespace: str,
@@ -2537,9 +4120,14 @@ def _first_pod_failure_reason(
     Resolves namespace/context from the provider config and probes each pod in
     order. Used when a cluster is abnormal but the live per-pod status did not
     name a cause. Best-effort -- per_pod_fn is expected to never raise.
+
+    Only pod names reach here. A per_pod_fn that needs to know how far back
+    its evidence may reach (see _get_pod_failure_reason_from_events) is handed
+    that bound by its caller, with functools.partial, before it gets here.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     for pod_name in pod_names:
         reason = per_pod_fn(context, namespace, pod_name)
         if reason is not None:
@@ -2548,15 +4136,26 @@ def _first_pod_failure_reason(
 
 
 def get_cluster_failure_reason_from_events(
-        provider_config: Dict[str, Any], pod_names: List[str]) -> Optional[str]:
-    """First pod eviction reason from kubelet events (status lags), or None.
+        provider_config: Dict[str, Any],
+        pod_names: List[str],
+        *,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """First pod deletion reason from its own events, or None.
 
     An eviction (ephemeral-storage / disk / memory pressure) is emitted as a
     pod event while the pod can still report Running/Ready and status.reason
-    has not caught up. See _get_pod_failure_reason_from_events.
+    has not caught up; a pod something else deleted may leave nothing but its
+    events behind. See _get_pod_failure_reason_from_events.
+
+    ``since`` is when the cluster whose pods these are was launched. Pod names
+    are a function of the cluster name and Kubernetes keeps Events for an
+    hour, so without it a cluster can be told why the pods of the cluster that
+    held its name before it were deleted. Callers that know when the cluster
+    was launched should always pass it.
     """
-    return _first_pod_failure_reason(provider_config, pod_names,
-                                     _get_pod_failure_reason_from_events)
+    return _first_pod_failure_reason(
+        provider_config, pod_names,
+        functools.partial(_get_pod_failure_reason_from_events, since=since))
 
 
 def get_cluster_failure_reason_from_pods(provider_config: Dict[str, Any],
@@ -2593,7 +4192,8 @@ def emit_autostop_event_best_effort(provider_config: Dict[str, Any],
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         k8s_client = kubernetes.kubernetes.client
         now = datetime.datetime.now(datetime.timezone.utc)
         # The event references the head pod, whose name is exactly
@@ -2646,7 +4246,8 @@ def get_cluster_autostop_event(
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
@@ -2754,17 +4355,52 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
     return None
 
 
-def _get_pod_pending_reason(context: Optional[str], namespace: str,
-                            pod_name: str) -> Optional[Tuple[str, str]]:
+def _get_pod_pending_reason(
+        context: Optional[str],
+        namespace: str,
+        pod_name: str,
+        warnings_only: bool = False) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
 
     Two-pass scan over the event list (sorted newest-first by _get_pod_events):
-      1. Tier 2 -- return the newest event with event.type == 'Warning'.
-      2. Tier 3 -- return the newest event whose reason is in
+      1. Tier 2 -- the newest event with event.type == 'Warning' whose reason
+         is not in _PENDING_REASON_WARNING_EVENT_IGNORELIST.
+      2. Tier 3 -- the newest event whose reason is in
          _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
-    Warnings always beat allow-listed Normals, regardless of timestamp ordering
-    in the event window -- a FailedScheduling Warning is a more truthful pending
-    reason than a Pulling Normal from a doomed retry.
+    A Warning beats an allow-listed Normal -- a FailedScheduling Warning is a
+    more truthful pending reason than a Pulling Normal from a doomed retry --
+    but only while the Warning still describes the pod. Kubernetes keeps events
+    for the API server's event TTL (~1h), so a resolved Warning outlives the
+    condition that produced it by a long way, and reporting a stale one is not
+    just a mislabeled spinner: the reason then never changes while the pod
+    makes progress, which is exactly what the no-progress deadline in
+    _wait_for_pods_to_run reads as a stall. Three independent checks demote one:
+
+      a. A Warning last observed before the pod was bound cannot describe what
+         the kubelet is doing, because every caller of this function observes
+         the pod only after the bind. This covers the pod that waited on an
+         autoscaler and carries a FailedScheduling for the next hour, whether
+         or not any Normal event follows it.
+      b. A Warning observed less recently than the allow-listed Normal has
+         been overtaken by it -- e.g. a mount the kubelet retried successfully,
+         whose FailedMount predates the image pull now under way.
+      c. A Warning whose reason is in _PENDING_REASON_WARNING_EVENT_IGNORELIST
+         is never reported, whatever its timestamps: it is emitted once during
+         normal startup and re-emitted while the condition it names resolves
+         itself, so neither (a) nor (b) can catch it.
+
+    (a) and (b) compare last-observed times, not creation times: kubernetes
+    folds a repeated event back into the original object, bumping
+    count/last_timestamp while creation_timestamp stays pinned to the first
+    occurrence. So a live Warning being re-emitted survives both checks, and an
+    event that cannot be dated is never treated as stale. Ordering *within* a
+    tier is left to _get_pod_events' newest-first creation order.
+
+    With warnings_only, tier 3 is answered with None rather than the Normal
+    event: the caller has a reason already and is asking the narrower question
+    of whether the pod is actively failing. The tiering still runs in full --
+    a Normal that demotes a stale Warning under (b) must still demote it here,
+    or the caller would be handed the very Warning the pod has moved past.
 
     Returns a (reason, message) tuple, or None if neither pass matches.
     """
@@ -2777,17 +4413,43 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
-    # Tier 2: Warning events.
-    for event in pod_events:
-        if event.type == 'Warning':
-            return event.reason or 'Unknown', event.message or ''
+    # (a) The bind, read from the pod's own events. Absent once it has aged
+    # out of the event window -- by which point every pre-bind Warning has
+    # aged out ahead of it, so there is nothing left to demote.
+    bound_at = next((kubernetes_utils.event_last_observed(e)
+                     for e in pod_events
+                     if e.reason == _POD_BOUND_EVENT_REASON), None)
+
+    def _describes_pod_now(event: Any) -> bool:
+        if event.reason in _PENDING_REASON_WARNING_EVENT_IGNORELIST:
+            return False
+        if bound_at is None:
+            return True
+        observed_at = kubernetes_utils.event_last_observed(event)
+        return observed_at is None or observed_at >= bound_at
+
+    # Tier 2: Warning events, minus the ones known to go stale in place.
+    warning = next((
+        e for e in pod_events if e.type == 'Warning' and _describes_pod_now(e)),
+                   None)
 
     # Tier 3: allow-listed Normal events.
-    for event in pod_events:
-        if event.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST:
-            return event.reason, event.message or ''
+    normal = next((e for e in pod_events
+                   if e.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST), None)
 
-    return None
+    chosen = warning if warning is not None else normal
+    # (b) Cross-tier recency.
+    if warning is not None and normal is not None:
+        warning_at = kubernetes_utils.event_last_observed(warning)
+        normal_at = kubernetes_utils.event_last_observed(normal)
+        if (warning_at is not None and normal_at is not None and
+                normal_at > warning_at):
+            chosen = normal
+    if chosen is None:
+        return None
+    if warnings_only and chosen.type != 'Warning':
+        return None
+    return chosen.reason or 'Unknown', chosen.message or ''
 
 
 def _format_pod_missing_reason(
@@ -2816,25 +4478,78 @@ def _format_pod_missing_reason(
     return event_str, event_type
 
 
-def _get_pod_missing_reason(context: Optional[str], namespace: str,
-                            cluster_name: str, pod_name: str,
-                            first_pod: bool) -> Optional[str]:
-    """Get events for missing pod and write to cluster events."""
+def _event_pod_uid(event: Any) -> Optional[str]:
+    uid = getattr(getattr(event, 'involved_object', None), 'uid', None)
+    return uid if isinstance(uid, str) else None
+
+
+def _record_pod_missing_events(context: Optional[str], namespace: str,
+                               cluster_name: str, pod_name: str,
+                               first_pod: bool) -> Tuple[List[Any], bool]:
+    """Record a deleted pod's events (and its last node's) as cluster events.
+
+    Returns the pod's own events since the cluster was provisioned, newest
+    first, and whether any event -- pod or node -- had not been recorded
+    before.
+
+    Recording is kept separate from deriving a reason because the two have
+    different callers. A status refresh must not re-report a failure it has
+    already reported, so it gates on the flag; a launch that is about to fail
+    needs the events whether or not they have been seen before.
+    """
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
+    # A relaunch reuses the pod name, and the previous pod's events outlive it
+    # for about an hour: only events since this cluster's first event (its
+    # provisioning start) are recorded. Not launched_at: it is rewritten when
+    # provisioning finishes, after the pod's own early events.
+    since = None
+    try:
+        first = global_user_state.get_cluster_events(
+            cluster_name,
+            None,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            include_timestamps=True)
+        if first:
+            since = datetime.datetime.fromtimestamp(
+                int(first[0]['transitioned_at']), datetime.timezone.utc)
+    except ValueError:  # No record for the cluster.
+        pass
+    bounded = kubernetes_utils.events_since(pod_events, since)
+    # The clock-skew allowance can still admit a predecessor that went just
+    # before this launch; its events carry another pod UID. The current pod is
+    # the one scheduled since this launch began (a predecessor was scheduled
+    # before it; a reconnecting kubelet can post a late event for the old pod,
+    # never a Scheduled one). Unscheduled: the newest event's.
+    uids = [_event_pod_uid(e) for e in bounded]
+    known = [(e, u) for e, u in zip(bounded, uids) if u is not None]
+    uid = next((u for e, u in known if e.reason == 'Scheduled' and
+                (since is None or e.metadata.creation_timestamp >= since)),
+               known[0][1] if known else None)
+    current = {
+        id(e)
+        for e, u in zip(bounded, uids)
+        if u is None or uid is None or u == uid
+    }
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
     inserted_pod_events = 0
+    # Kubernetes can emit identical events within one second, which share a
+    # cluster_events key. Only a key recorded by an earlier walk means the
+    # rest is recorded too; a repeat within this walk is skipped.
+    seen: Set[Tuple[str, int]] = set()
 
     for event in pod_events:
-        if event.reason == 'Scheduled':
+        # Newest first, so the first one is the current pod's.
+        if (event.reason == 'Scheduled' and last_scheduled_node is None and
+                id(event) in current):
             pattern = r'Successfully assigned (\S+) to (\S+)'
             match = re.search(pattern, event.message)
             if match:
                 scheduled_node = match.group(2)
                 last_scheduled_node = scheduled_node
-        if insert_new_pod_event:
+        if insert_new_pod_event and id(event) in current:
             # Try inserting the latest events first. If the event is a
             # duplicate, it means the event (and any previous events) have
             # already been inserted - so do not insert further events.
@@ -2846,6 +4561,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                 first_pod=first_pod,
                 cluster_name=cluster_name,
                 transitioned_at=transitioned_at)
+            if (event_str, transitioned_at) in seen:
+                continue
+            seen.add((event_str, transitioned_at))
             try:
                 global_user_state.add_cluster_event(
                     cluster_name,
@@ -2875,7 +4593,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             field_selector=node_field_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
         node_events = sorted(
-            node_events,
+            kubernetes_utils.events_since(node_events, since),
             key=lambda event: event.metadata.creation_timestamp,
             # latest event appears first
             reverse=True)
@@ -2886,14 +4604,20 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                 # Try inserting the latest events first. If the event is a
                 # duplicate, it means the event (and any previous events) have
                 # already been inserted - so do not insert further events.
+                event_str = (f'[kubernetes node {last_scheduled_node}] '
+                             f'{event.reason} {event.message}')
+                transitioned_at = int(
+                    event.metadata.creation_timestamp.timestamp())
+                if (event_str, transitioned_at) in seen:
+                    continue
+                seen.add((event_str, transitioned_at))
                 try:
                     global_user_state.add_cluster_event(
                         cluster_name,
-                        None, f'[kubernetes node {last_scheduled_node}] '
-                        f'{event.reason} {event.message}',
+                        None,
+                        event_str,
                         global_user_state.ClusterEventType.DEBUG,
-                        transitioned_at=int(
-                            event.metadata.creation_timestamp.timestamp()),
+                        transitioned_at=transitioned_at,
                         expose_duplicate_error=True)
                     logger.debug(
                         f'[pod {pod_name}] encountered new node event: '
@@ -2913,11 +4637,17 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         logger.debug(f'[pod {pod_name}] could not determine the node '
                      'the pod was scheduled to')
 
-    if not new_event_inserted:
-        # If new event is not inserted, there is no useful information to
-        # return. Return None.
-        return None
+    return [e for e in pod_events if id(e) in current], new_event_inserted
 
+
+def _derive_missing_pod_reason_from_cluster_events(
+        cluster_name: str) -> Optional[str]:
+    """Scan the cluster's recorded events for a node-level deletion cause.
+
+    Reads everything recorded for the cluster rather than only what the last
+    call inserted: the node events that explain a pod vanishing with its node
+    are recorded against the cluster, not against the pod.
+    """
     # Analyze the events for failure
     failure_reason = None
     failure_decisiveness = 0
@@ -2938,13 +4668,294 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
 
         if event.startswith('NodeNotReady '):
             _record_failure_reason(event[len('NodeNotReady '):], 1)
-        elif event.startswith('TaintManagerEviction '):
+        elif (event.startswith('TaintManagerEviction ') and
+              not kubernetes_utils.is_cancelled_taint_eviction(
+                  'TaintManagerEviction',
+                  event[len('TaintManagerEviction '):])):
             # usually the event message for TaintManagerEviction is not useful
             # so we record a more generic message.
             _record_failure_reason('pod was evicted by taint manager', 2)
         elif event.startswith('DeletingNode '):
             _record_failure_reason(event[len('DeletingNode '):], 3)
     return failure_reason
+
+
+def _get_pod_missing_reason(context: Optional[str], namespace: str,
+                            cluster_name: str, pod_name: str,
+                            first_pod: bool) -> Optional[str]:
+    """Get events for missing pod and write to cluster events."""
+    pod_events, new_event_inserted = _record_pod_missing_events(
+        context, namespace, cluster_name, pod_name, first_pod)
+    if not new_event_inserted:
+        # If new event is not inserted, there is no useful information to
+        # return. Return None.
+        return None
+    reason = _derive_missing_pod_reason_from_cluster_events(cluster_name)
+    if reason is None:
+        # The cluster-event scan only recognises node-level causes. The pod's
+        # own events also name a deletion by a queue controller, by the
+        # kubelet or by the taint manager, which would otherwise be reported
+        # as no cause at all. Only events that name a deletion cause count
+        # here: callers take whatever comes back as an identified cause (see
+        # pod_reason_identifies_cause), so a complaint that merely preceded
+        # the deletion -- the scheduler's, or a volume mount's -- must not be
+        # dressed up as the reason the pod went away.
+        #
+        # Bounded by the cluster's launch, not the pod's creation: this path
+        # is entered with a pod name and no object. Events of a same-named
+        # predecessor are dropped by _record_pod_missing_events.
+        reason = kubernetes_utils.reason_from_pod_events(pod_events)
+    return reason
+
+
+def _termination_reason_line(text: str) -> str:
+    """The reason out of what _get_pod_termination_reason wrote, on one line.
+
+    Cuts the text at the last-known-state line that follows the reason rather
+    than at the first newline, because the reason itself ends up holding a
+    condition or status message copied straight off the pod, and a message
+    that spans lines would otherwise be cut mid-sentence -- after an opening
+    parenthesis that never closes. What is left is flattened to one line and
+    loses the single period that ends it, since the caller reads it into a
+    sentence of its own.
+
+    Falls back to the first line when the text does not have the shape that
+    helper writes, which is what a wrapper around it may return.
+    """
+    reason, marker, _ = text.partition(f'\n{_LAST_STATE_MARKER}')
+    if not marker:
+        reason = text.split('\n', 1)[0]
+    reason = ' '.join(reason.split())
+    return reason[:-1] if reason.endswith('.') else reason
+
+
+def _get_pod_deletion_reason(
+        *,
+        context: Optional[str],
+        namespace: str,
+        cluster_name: Optional[str],
+        pod_name: str,
+        pod: Optional[Any] = None,
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Why a pod SkyPilot created was deleted, in one line; None if unknown.
+
+    The counterpart of _get_pod_termination_reason for a pod whose object may
+    no longer exist. The object is consulted first, through that same helper,
+    so a pod caught on its way out reads the same here as it does in the
+    run-phase wait and in `sky status`; when the object is no longer there, or
+    says only that it terminated, the pod's own events answer instead.
+    Kubernetes keeps Events for an hour by default, so they outlive the pod
+    they describe -- which is what makes this usable at all on the path where
+    the pod is precisely the thing that is missing.
+
+    What _get_pod_termination_reason returns for the pod is passed through
+    unchanged (the reason is the part it writes ahead of the pod's last known
+    state), so a wrapper that rewrites that text sees its own wording in the
+    launch error too.
+
+    Never raises: it runs on a launch that is already failing, and what the
+    user needs to hear is that their pod was deleted, not a transport error
+    from the lookup that went after the cause.
+
+    Args:
+        cluster_name: the SkyPilot cluster. None skips recording the pod's
+            events against it, for callers that have no cluster to record
+            them against; the reason is derived either way.
+        pod: the pod object, as last seen on its way out (a deletion
+            timestamp, or a Failed phase). None when the pod was only ever
+            seen missing.
+        since: where this pod's own history starts; events from before it
+            describe whatever held the same pod name previously.
+    """
+    if pod is not None:
+        candidate: Optional[str] = None
+        try:
+            if cluster_name is not None:
+                # Records the full reason as a cluster event, the way the
+                # run-phase wait does for a pod it finds on its way out.
+                # The recording is what this call is for, so it stands on its
+                # own rather than as an argument of the log line below, which
+                # a later move to lazy logging would stop evaluating.
+                termination_reason = _get_pod_termination_reason(
+                    pod, cluster_name)
+                logger.debug(f'Pod {pod_name} terminated: '
+                             f'{termination_reason}')
+                # What that helper writes ahead of the last known state
+                # is the reason itself; that state and the container errors
+                # after it belong in the cluster event it just wrote and not
+                # in a one-line reason. Preferred over the condensed status
+                # below because it is exactly the text the status refresh
+                # reports for the same pod (see query_instances), so a user
+                # who sees this launch fail and then runs `sky status` is
+                # told the same thing twice rather than two differently
+                # worded things.
+                candidate = _termination_reason_line(termination_reason)
+                if candidate.startswith(_TERMINATION_FALLBACK):
+                    # It found no cause; the condensed status may still hold
+                    # container-level detail (an OOM kill, say).
+                    candidate = None
+            if candidate is None:
+                condensed = _condensed_pod_reason(pod)
+                if condensed != _TERMINATION_FALLBACK:
+                    candidate = condensed
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the status of pod {pod_name}: '
+                         f'{common_utils.format_exception(e)}')
+        else:
+            # A pod deleted while it was still Pending has no container
+            # statuses, so unless its deleter left a condition on it the
+            # object says only that it was deleted -- which the caller knows
+            # already. Let the events speak in that case.
+            if candidate is not None:
+                return candidate
+    try:
+        if cluster_name is None:
+            pod_events = _get_pod_events(context, namespace, pod_name)
+        else:
+            # Keeps recording the pod's events against the cluster, so that
+            # `sky logs --provision` still has them after the launch fails.
+            pod_events, _ = _record_pod_missing_events(context,
+                                                       namespace,
+                                                       cluster_name,
+                                                       pod_name,
+                                                       first_pod=True)
+        # Derived from the events themselves, not from whether they were newly
+        # recorded: this runs where reporting nothing because the same events
+        # were seen a moment ago is the failure mode being fixed.
+        reason = kubernetes_utils.reason_from_pod_events(pod_events, since)
+        if reason is None and cluster_name is not None:
+            # The events that explain a pod vanishing with its node belong to
+            # the node, and are recorded against the cluster, not the pod.
+            reason = _derive_missing_pod_reason_from_cluster_events(
+                cluster_name)
+        return reason
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to look up why pod {pod_name} was deleted: '
+                     f'{common_utils.format_exception(e)}')
+        return None
+
+
+def _pod_created_at(
+    pod: Any,
+    fallback: Optional[datetime.datetime] = None
+) -> Optional[datetime.datetime]:
+    """When a pod object was created, in UTC; ``fallback`` when unstamped.
+
+    A pod's events are only evidence about it from its own creation onwards,
+    which is what this bounds. It is the pod object's creation time rather
+    than the moment a launch started, because relaunching a cluster that is
+    still INIT reuses a pod an earlier request created, and that pod's events
+    are exactly the ones that explain it.
+    """
+    created_at = getattr(pod.metadata, 'creation_timestamp', None)
+    if not isinstance(created_at, datetime.datetime):
+        created_at = fallback
+    return _utc(created_at)
+
+
+def _pod_events_since(
+    nodes: List[Any], fallback: Optional[datetime.datetime]
+) -> Dict[str, Optional[datetime.datetime]]:
+    """Where each pod's own history starts, by pod name.
+
+    See _pod_created_at; ``fallback`` -- when this launch created its pods --
+    is used for an object the API server left unstamped.
+    """
+    return {
+        node.metadata.name: _pod_created_at(node, fallback) for node in nodes
+    }
+
+
+def _deleted_pods_error(
+    *,
+    context: Optional[str],
+    namespace: str,
+    cluster_name: Optional[str],
+    deleted_pods: Dict[str, Optional[Any]],
+    since: Dict[str, Optional[datetime.datetime]],
+) -> config_lib.KubernetesError:
+    """Build the error for pods deleted while waiting for them to schedule.
+
+    ``deleted_pods`` maps every deleted pod name to the pod object last seen
+    on its way out (a deletion timestamp set on it), or to None when the pod
+    was only ever seen missing. ``since`` maps a pod name to where its own
+    history starts; see _pod_events_since.
+    """
+
+    def _one_line(text: str) -> str:
+        # Reasons carry whatever message the deleter wrote, which may span
+        # lines; this goes into a single-sentence error.
+        return ' '.join(text.split()).rstrip(' .')
+
+    pod_names = sorted(deleted_pods)
+    details: List[str] = []
+    any_unexplained = False
+    for pod_name in pod_names:
+        reason = _get_pod_deletion_reason(context=context,
+                                          namespace=namespace,
+                                          cluster_name=cluster_name,
+                                          pod_name=pod_name,
+                                          pod=deleted_pods[pod_name],
+                                          since=since.get(pod_name))
+        if reason is not None:
+            details.append(f'{pod_name}: {_one_line(reason)}')
+            continue
+        any_unexplained = True
+        # Re-reads the pod's events, one list call more than the reason lookup
+        # that ran before it: that one returns a reason rather than the events
+        # it read, so that _get_pod_deletion_reason stays the single place a
+        # reason can be rewritten.
+        try:
+            pod_events = _get_pod_events(context, namespace, pod_name)
+        except Exception as e:  # pylint: disable=broad-except
+            # Nothing was read, so there is nothing to say about what the
+            # events hold; say that the lookup failed instead, which points at
+            # a different problem than a pod nobody left a reason for.
+            error = common_utils.format_exception(e)
+            logger.debug(
+                f'Failed to read the events of pod {pod_name}: {error}')
+            details.append(
+                f'{pod_name}: the cause could not be looked up ({error})')
+            continue
+        last_event = kubernetes_utils.last_pod_event_context(
+            pod_events, since.get(pod_name))
+        if last_event is None:
+            details.append(
+                f'{pod_name}: no cause could be derived from its events')
+        else:
+            # Offered as context, not as an answer: an unschedulable pod
+            # always carries the scheduler's complaint, and that is not why
+            # anybody deleted it.
+            details.append(f'{pod_name}: no cause could be derived from its '
+                           'events, whose last entry before it disappeared '
+                           f'was {_one_line(last_event)}')
+    of_cluster = f' of cluster {cluster_name!r}' if cluster_name else ''
+    message = (f'Pod(s) {pod_names}{of_cluster} were deleted while SkyPilot '
+               'was waiting for them to be scheduled: '
+               f'{"; ".join(details)}.')
+    if any_unexplained:
+        message += (' The pod(s) may have been deleted by another controller '
+                    'or user, or by another cluster launch whose name maps to '
+                    'the same pod name.')
+    if cluster_name is not None:
+        message += (f' Run `sky logs --provision {cluster_name}` for more '
+                    'details.')
+        try:
+            # One summary row next to the raw pod events the reason lookup
+            # recorded, so the cause survives in the cluster's event history.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                None,
+                message,
+                global_user_state.ClusterEventType.DEBUG,
+                nop_if_duplicate=True,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            # Recording the summary is a nicety; the error is the point.
+            logger.debug(f'Failed to record the cluster event for the deleted '
+                         f'pod(s) {pod_names}: '
+                         f'{common_utils.format_exception(e)}')
+    return config_lib.KubernetesError(message)
 
 
 def list_namespaced_pod(context: Optional[str], namespace: str,
@@ -3027,9 +5038,8 @@ def query_instances(
     # Mapping from pod phase to skypilot status. These are the only valid pod
     # phases.
     # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
-    # ``status_map_overrides`` lets callers (e.g. plugin provisioners whose
-    # pods don't follow the ray-cluster lifecycle) selectively remap a
-    # subset of phases without duplicating this whole function.
+    # ``status_map_overrides`` lets callers selectively remap a subset of
+    # phases without duplicating this whole function.
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
@@ -3042,7 +5052,7 @@ def query_instances(
 
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -3090,7 +5100,18 @@ def query_instances(
         # reason, so healthy pods incur no extra events API call.
         if reason is not None and _reason_lacks_specific_cause(reason):
             event_reason = _get_pod_failure_reason_from_events(
-                context, namespace, pod.metadata.name)
+                context,
+                namespace,
+                pod.metadata.name,
+                # This pod is in hand, so bound its events by its own
+                # creation: a relaunch under the same cluster name must not
+                # be told why the pod it replaced was deleted.
+                since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:
@@ -3134,7 +5155,7 @@ def get_command_runners(
     instances = cluster_info.instances
     namespace = kubernetes_utils.get_namespace_from_config(
         cluster_info.provider_config)
-    context = kubernetes_utils.get_context_from_config(
+    context = kubernetes_utils.get_execution_context_from_config(
         cluster_info.provider_config)
 
     runners: List[command_runner.CommandRunner] = []

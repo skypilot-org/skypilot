@@ -92,6 +92,7 @@ MULTI_WORD_TERMS = {
     # Providers/brands
     'Prime Intellect',
     'Hugging Face',
+    'Hugging Face Hub',
     'Cloudflare Zero Trust',
     'CoreWeave Object Storage',
 }

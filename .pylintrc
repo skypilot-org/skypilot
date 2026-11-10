@@ -11,6 +11,13 @@
 ignore=third_party,ray_patches,providers
 
 # Files or directories matching the regex patterns are skipped. The regex
+# matches against full paths, unlike `ignore` above, so this also covers a
+# file passed explicitly (as pre-commit does).
+# monkey_patches holds templates with {} placeholders, which read as
+# undefined variables; mypy already excludes the same directory.
+ignore-paths=.*sky/backends/monkey_patches/.*
+
+# Files or directories matching the regex patterns are skipped. The regex
 # matches against base names, not paths.
 ignore-patterns=
 

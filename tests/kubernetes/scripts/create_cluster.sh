@@ -20,6 +20,45 @@ case "$PROVIDER" in
     ZONE=${3:-"us-central1-a"}
     NODE_COUNT=${4:-1}
     MACHINE_TYPE=${5:-"e2-standard-8"}
+    # Pick the pod range instead of letting GKE auto-allocate a /14 from
+    # 10.0.0.0/9: that space holds only 32 /14 blocks and runs out when the
+    # project has many other clusters or Filestore instances. 100.64.0.0/10
+    # (RFC 6598) is supported by GKE for pods and is not used by default-mode
+    # subnets or Filestore. Use the first /14 there that no existing cluster
+    # in the project overlaps. Override with GKE_CLUSTER_IPV4_CIDR if needed.
+    POD_CIDR=${GKE_CLUSTER_IPV4_CIDR:-}
+    if [ -z "$POD_CIDR" ]; then
+      USED_BLOCKS=" "
+      # Separate assignment so set -e stops on a failed listing instead of
+      # treating every block as free.
+      EXISTING_CIDRS=$(gcloud container clusters list --project="$PROJECT_ID" \
+          --format='value(clusterIpv4Cidr)')
+      for cidr in $EXISTING_CIDRS; do
+        IFS='./' read -r o1 o2 _ _ prefix <<< "$cidr"
+        if [ "$o1" != "100" ] || [ "$o2" -lt 64 ] || [ "$o2" -gt 127 ]; then
+          continue
+        fi
+        first=$(( (o2 - 64) / 4 ))
+        count=1
+        if [ "$prefix" -lt 14 ]; then
+          count=$(( 1 << (14 - prefix) ))
+          first=$(( first / count * count ))
+        fi
+        for ((b = first; b < first + count; b++)); do
+          USED_BLOCKS+="$b "
+        done
+      done
+      for ((b = 0; b < 16; b++)); do
+        if [[ "$USED_BLOCKS" != *" $b "* ]]; then
+          POD_CIDR="100.$((64 + b * 4)).0.0/14"
+          break
+        fi
+      done
+      if [ -z "$POD_CIDR" ]; then
+        echo "No free /14 pod range left in 100.64.0.0/10; set GKE_CLUSTER_IPV4_CIDR."
+        exit 1
+      fi
+    fi
 
     echo "Creating GKE cluster..."
     echo "Cluster Name: $CLUSTER_NAME"
@@ -27,13 +66,15 @@ case "$PROVIDER" in
     echo "Zone: $ZONE"
     echo "Node Count: $NODE_COUNT"
     echo "Machine Type: $MACHINE_TYPE"
+    echo "Pod CIDR: $POD_CIDR"
 
     gcloud container clusters create "$CLUSTER_NAME" \
         --project="$PROJECT_ID" \
         --zone="$ZONE" \
         --num-nodes="$NODE_COUNT" \
         --machine-type="$MACHINE_TYPE" \
-        --enable-ip-alias
+        --enable-ip-alias \
+        --cluster-ipv4-cidr="$POD_CIDR"
 
     echo "Getting cluster credentials..."
     gcloud container clusters get-credentials "$CLUSTER_NAME" --zone="$ZONE" --project="$PROJECT_ID"

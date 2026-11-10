@@ -57,6 +57,14 @@ class Dag:
         # Can be a string like "30s" (applies to all auxiliary tasks) or
         # a dict like {"default": "30s", "replay-buffer": "1m"}.
         self.termination_delay: Optional[Union[str, Dict[str, str]]] = None
+        # Whether tasks in a job group need to reach each other by hostname.
+        # When enabled (the default), all tasks must be placed on a single
+        # infrastructure where in-group service discovery works, and failure
+        # to set up networking fails the job. When disabled, no in-group
+        # networking is set up and tasks may be placed on different
+        # infrastructures (e.g. different Kubernetes clusters).
+        # None means unset (treated as enabled).
+        self.inter_connection: Optional[bool] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
@@ -99,6 +107,16 @@ class Dag:
     def set_execution(self, execution: 'DagExecution') -> None:
         """Configure this DAG with the given execution mode."""
         self.execution = execution
+
+    def inter_connection_enabled(self) -> bool:
+        """Whether in-group networking is required for this job group.
+
+        Defaults to True when inter_connection is unset. Consumers should
+        use this instead of reading the raw tri-state attribute; the raw
+        attribute exists so that only user-specified values round-trip
+        through YAML serialization.
+        """
+        return self.inter_connection is not False
 
     def get_termination_delay_secs(self, task_name: str) -> int:
         """Get termination delay in seconds for a specific task.

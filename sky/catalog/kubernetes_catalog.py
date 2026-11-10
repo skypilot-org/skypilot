@@ -17,6 +17,7 @@ from sky.catalog import CloudFilter
 from sky.catalog import common
 from sky.clouds import cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import plugin_extensions
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -115,6 +116,10 @@ def _list_accelerators(
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
 
+    If realtime is True and a NodeInfoSource snapshot provider serves the
+    context, nodes and pods are read from its snapshot instead of the
+    Kubernetes API.
+
     Returns:
         A tuple of three dictionaries:
         - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
@@ -145,26 +150,42 @@ def _list_accelerators(
             # If context is None and we are running in a kubernetes pod, use the
             # in-cluster context as the current context.
             context = kubernetes.in_cluster_context_name()
+        # Never fall back to a context the active workspace does not allow.
+        allowed = sky_clouds.Kubernetes.existing_allowed_contexts(silent=True)
+        if context not in allowed:
+            context = next((c for c in allowed if c is not None), None)
     else:
         context = region_filter
     if context is None:
         return {}, {}, {}
 
-    # Verify that the credentials are still valid.
-    if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
-        return {}, {}, {}
+    snapshot = (plugin_extensions.NodeInfoSource.get_snapshot(
+        context, kubernetes_utils.get_node_snapshot_label_keys(context))
+                if realtime else None)
+    snapshot_inputs = (kubernetes_utils.read_node_snapshot(context, snapshot)
+                       if snapshot is not None else None)
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    if snapshot_inputs is not None:
+        nodes, gpu_resource_key, allocated_qty_by_node = snapshot_inputs
+    else:
+        # Verify that the credentials are still valid.
+        if not kubernetes_utils.check_credentials(context,
+                                                  cloud='kubernetes')[0]:
+            return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
-    if not has_gpu:
-        return {}, {}, {}
+        has_gpu = kubernetes_utils.detect_accelerator_resource(context)
+        if not has_gpu:
+            return {}, {}, {}
 
-    lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)
+
+    lf, _ = kubernetes_utils.detect_gpu_label_formatter_from_nodes(nodes)
     if not lf:
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
-    nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
 
     # Check if any nodes have accelerators before fetching pods
     has_accelerator_nodes = False
@@ -177,9 +198,8 @@ def _list_accelerators(
             break
 
     # Only fetch pods if we have accelerator nodes and realtime is requested
-    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     error_on_get_allocated_gpu_qty_by_node = False
-    if realtime and has_accelerator_nodes:
+    if snapshot_inputs is None and realtime and has_accelerator_nodes:
         # Get the allocated GPU quantity by each node
         try:
             allocated_qty_by_node = (
@@ -194,6 +214,7 @@ def _list_accelerators(
                 error_on_get_allocated_gpu_qty_by_node = True
             else:
                 raise
+
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -222,7 +243,7 @@ def _list_accelerators(
         for key in keys:
             if key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
-                    node.metadata.labels.get(key))
+                    node.metadata.labels[key])
 
                 # Heterogenous cluster may have some nodes with empty labels.
                 if not accelerator_name:
@@ -243,31 +264,52 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
-                        context, node.status.allocatable))
+                        context,
+                        node.status.allocatable,
+                        gpu_resource_key=gpu_resource_key))
+                # Physical device count for the TOTAL column: capacity keeps
+                # devices the device plugin has withdrawn from scheduling,
+                # matching get_kubernetes_node_info's total so the show-gpus
+                # summary and the per-node rows agree on degraded nodes. The
+                # requestable-quantity ladder and availability stay
+                # allocatable-based - only schedulable devices can be
+                # requested.
+                accelerator_capacity = max(
+                    kubernetes_utils.get_node_accelerator_count(
+                        context,
+                        node.status.capacity,
+                        gpu_resource_key=gpu_resource_key), accelerator_count)
 
-                if accelerator_count > 0:
+                # The quantity ladder describes the node's hardware shape
+                # (what request sizes fit on it), so it derives from capacity
+                # like the total: a node with every device temporarily
+                # withdrawn still advertises its shape, with availability
+                # (below) carrying the live signal. Otherwise such a node
+                # contributes capacity but no quantities, rendering a blank
+                # QTY column in `sky show-gpus`.
+                if accelerator_capacity > 0:
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
                     if kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
-                            (accelerator_name, accelerator_count))
+                            (accelerator_name, accelerator_capacity))
                     else:
                         count = 1
-                        while count <= accelerator_count:
+                        while count <= accelerator_capacity:
                             accelerators_qtys.add((accelerator_name, count))
                             count *= 2
                         # Add the accelerator count if it's not already in the
                         # set (e.g., if there's 12 GPUs, we should have qtys 1,
                         # 2, 4, 8, 12)
-                        if accelerator_count not in accelerators_qtys:
+                        if accelerator_capacity not in accelerators_qtys:
                             accelerators_qtys.add(
-                                (accelerator_name, accelerator_count))
+                                (accelerator_name, accelerator_capacity))
 
-                if accelerator_count >= min_quantity_filter:
+                if accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
-                        (accelerator_count // min_quantity_filter))
+                        (accelerator_capacity // min_quantity_filter))
                     if accelerator_name not in total_accelerators_capacity:
                         total_accelerators_capacity[
                             accelerator_name] = quantized_count

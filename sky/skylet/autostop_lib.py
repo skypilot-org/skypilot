@@ -44,6 +44,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# Process names whose PTY ancestry marks a terminal as an SSH session.
+_SSH_DAEMON_PROCESS_NAMES = frozenset({'sshd', 'dropbear'})
+
 _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 _HOOKS_CONFIG_KEY = 'lifecycle_hooks'
 
@@ -371,7 +374,7 @@ def set_last_active_time_to_now() -> None:
 
 
 def has_active_ssh_sessions() -> bool:
-    """Check if any PTY traces back to sshd in the process tree."""
+    """Check for active SSH sessions visible to the host process namespace."""
     try:
         # psutil memoizes /dev/{tty*,pts/*} -> rdev at first call to
         # Process.terminal() with no TTL (psutil._psposix.get_terminal_map).
@@ -392,11 +395,22 @@ def has_active_ssh_sessions() -> bool:
         # pylint: enable=protected-access
         pts_to_pid: dict[str, int] = {}
         all_terminal_procs: list = []
-        for proc in psutil.process_iter(['pid', 'name', 'terminal']):
+        for proc in psutil.process_iter(['pid', 'name', 'terminal', 'cmdline']):
+            name = proc.info.get('name')
+            cmdline = proc.info.get('cmdline') or []
+            # Slurm containers have a private devpts mount, but share the host
+            # PID namespace. Dropbear marks each authenticated session with
+            # the -2 process-title argument, which remains visible to skylet.
+            if name == 'dropbear' and any(
+                    token == '-2' for arg in cmdline for token in arg.split()):
+                logger.debug(
+                    f'[has_active_ssh] authenticated dropbear session found '
+                    f'for pid={proc.info["pid"]} -> returning True')
+                return True
+
             terminal = proc.info['terminal']
             if terminal:
-                all_terminal_procs.append(
-                    (proc.info['pid'], proc.info.get('name'), terminal))
+                all_terminal_procs.append((proc.info['pid'], name, terminal))
             if terminal and terminal.startswith('/dev/pts/'):
                 pts_to_pid.setdefault(terminal, proc.info['pid'])
         logger.debug(f'[has_active_ssh] processes with non-None terminal: '
@@ -406,9 +420,9 @@ def has_active_ssh_sessions() -> bool:
         for terminal, pid in pts_to_pid.items():
             try:
                 for parent in psutil.Process(pid).parents():
-                    if parent.name() == 'sshd':
+                    if parent.name() in _SSH_DAEMON_PROCESS_NAMES:
                         logger.debug(
-                            f'[has_active_ssh] sshd ancestor found for '
+                            f'[has_active_ssh] SSH daemon ancestor found for '
                             f'pid={pid} on {terminal} -> returning True')
                         return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):

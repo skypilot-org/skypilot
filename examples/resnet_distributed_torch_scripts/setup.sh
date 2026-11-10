@@ -16,7 +16,16 @@ pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://do
 mkdir -p data
 mkdir -p saved_models
 cd data
-wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz \
-    || wget --quiet -O cifar-10-python.tar.gz \
-        "https://web.archive.org/web/20241225200100im_/https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
-tar -xvzf cifar-10-python.tar.gz
+# CIFAR-10 is served from a SkyPilot-maintained GCS mirror because the
+# upstream host (cs.toronto.edu) is often slow or unavailable. The md5
+# check guards against truncated downloads (a truncated file can leave
+# wget exiting 0, which would otherwise skip the fallback and fail in tar).
+CIFAR_MD5=c58f30108f718f92721af3b95e74349a
+cifar_ok() { echo "${CIFAR_MD5}  cifar-10-python.tar.gz" | md5sum -c --status; }
+timeout 90s wget -c --quiet --timeout=30 --tries=2 https://storage.googleapis.com/skypilot-example-data/datasets/cifar-10-python.tar.gz || true
+if ! cifar_ok; then
+    rm -f cifar-10-python.tar.gz
+    timeout 120s wget --quiet --timeout=30 --tries=2 https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+    cifar_ok
+fi
+tar -xzf cifar-10-python.tar.gz

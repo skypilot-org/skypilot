@@ -62,6 +62,33 @@ def test_task_fits():
     assert serve_utils._task_fits(task_resources, free_resources) is False
 
 
+class TestGetNextClusterName:
+    """Tests for serve_utils.get_next_cluster_name pool-existence handling.
+
+    A missing pool is unrecoverable for the calling job and must raise
+    PoolDoesNotExistError, while a pool with no free worker is a transient
+    condition and must keep returning None (the caller retries).
+    """
+
+    def test_pool_missing_raises(self, monkeypatch):
+        from sky import exceptions
+
+        monkeypatch.setattr(serve_utils, '_get_service_status',
+                            lambda *args, **kwargs: None)
+        with pytest.raises(exceptions.PoolDoesNotExistError):
+            serve_utils.get_next_cluster_name('missing-pool', job_id=1)
+
+    def test_no_free_worker_returns_none(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(serve_utils, '_get_service_status',
+                            lambda *args, **kwargs: {'pool': True})
+        monkeypatch.setattr(serve_utils, 'get_service_filelock_path',
+                            lambda name: str(tmp_path / f'{name}.lock'))
+        monkeypatch.setattr(serve_utils, 'get_free_worker_resources',
+                            lambda name: {})
+        monkeypatch.setattr(serve_utils, 'get_ready_replicas', lambda name: [])
+        assert serve_utils.get_next_cluster_name('busy-pool', job_id=1) is None
+
+
 def test_serve_preemption_skips_autostopping():
     """Verify serve preemption logic treats AUTOSTOPPING like UP (not preempted)."""
     from sky.utils import status_lib

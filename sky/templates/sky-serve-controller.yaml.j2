@@ -69,6 +69,9 @@ run: |
   {%- endif %}
   {%- endif %}
   # Start sky serve service.
+  {%- if file_mounts_blob_id is not none %}
+  export SKYPILOT_SERVE_FILE_MOUNTS_BLOB_ID={{file_mounts_blob_id}}
+  {%- endif %}
   {%- if consolidation_mode_job_id is not none %}
   {{sky_python_cmd}} \
   {%- else %}
@@ -78,6 +81,7 @@ run: |
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
     --entrypoint {{entrypoint}} \
+    --user-hash {{user_hash}} \
     {%- if consolidation_mode_job_id is not none %}
     --job-id {{consolidation_mode_job_id}} \
     {%- else %}

@@ -16,9 +16,10 @@ logger = sky_logging.init_logger(__name__)
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
-# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts.
-# Docker images with Ray 2.48.0+ set this for UV package manager support,
-# but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
+# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts. Docker
+# images with Ray 2.48.0+ set this for UV package manager support, pointing at
+# the image's own Ray rather than the one in SkyPilot's runtime venv, which
+# causes FAILED_DRIVER errors.
 # See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
@@ -48,6 +49,16 @@ INSTALL_AWS_CLI_CMD = (
     '-o "/tmp/awscliv2.zip" && '
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+# The Azure CLI is only needed when pulling a private ACR image with the
+# VM's managed identity, so keep the install lazy.
+INSTALL_AZURE_CLI_CMD = ('command -v az || '
+                         '(curl -fsSL https://aka.ms/InstallAzureCLIDeb | '
+                         'sudo bash)')
+
+# The documented username for `docker login` with an ACR access token. See:
+# https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication#az-acr-login-with---expose-token  # pylint: disable=line-too-long
+ACR_TOKEN_USERNAME = '00000000-0000-0000-0000-000000000000'
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _DOCKER_USER_PATTERN = re.compile(r'SKYPILOT_DOCKER_USER: ([^\s\n]+)')
@@ -89,7 +100,8 @@ class DockerLoginConfig:
         )
 
 
-# Copied from ray.autoscaler._private.ray_constants
+# Copied from ray._private.ray_constants (both values unchanged as of
+# ray 2.56.1).
 # The default maximum number of bytes to allocate to the object store unless
 # overridden by the user.
 DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
@@ -176,7 +188,7 @@ def docker_start_cmds(
 
 def _with_interactive(cmd):
     force_interactive = (
-        f'source ~/.bashrc; '
+        f'[ -f ~/.bashrc ] && source ~/.bashrc; '
         f'export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore && ({cmd})')
     return ['bash', '--login', '-c', '-i', shlex.quote(force_interactive)]
 
@@ -346,6 +358,46 @@ class DockerInitializer:
                 self._run('sudo gcloud auth configure-docker '
                           f'{shlex.quote(docker_login_config.server)} '
                           '--quiet || true')
+            elif (docker_login_config.server.endswith('.azurecr.io') and
+                  self.docker_config.get('azure_use_managed_identity', False)):
+                # Only Azure VMs can use managed identity. Other clouds may
+                # pull anonymously from ACR without invoking the Azure CLI.
+                # On Azure, an empty password means the VM's managed
+                # identity is the credential, mirroring the ECR branch
+                # above. Feed the minted token to `{docker_cmd} login` so
+                # the credential lands in the docker config the sudo'd
+                # docker commands read (plain `az acr login` writes the SSH
+                # user's ~/.docker/config.json instead — see #8906).
+                self._run(INSTALL_AZURE_CLI_CMD, wait_for_docker_daemon=False)
+                identity = self.docker_config.get('azure_managed_identity',
+                                                  None)
+                # With no explicit identity, `az login --identity` uses the
+                # VM's only identity. New Azure CLI releases accept a resource
+                # ID via --resource-id; LTS releases use --username for the
+                # same value. Detect the supported spelling to work with an
+                # Azure CLI already present on a custom image.
+                identity_flag = ''
+                if identity is not None:
+                    identity_flag = (
+                        ' $(az login --help | grep -q -- "--resource-id" && '
+                        'printf %s --resource-id || printf %s --username) '
+                        f'{shlex.quote(identity)}')
+                registry_name = docker_login_config.server.split('.', 1)[0]
+                # An isolated, throwaway AZURE_CONFIG_DIR keeps the MSI
+                # login from clobbering any `az` account state of the SSH
+                # user (initialize() re-runs on every `sky start`).
+                self._run(
+                    'export AZURE_CONFIG_DIR=$(mktemp -d) && '
+                    'trap \'rm -rf "$AZURE_CONFIG_DIR"\' EXIT && '
+                    f'az login --identity{identity_flag} '
+                    '--allow-no-subscriptions --output none && '
+                    f'az acr login --name {shlex.quote(registry_name)} '
+                    '--expose-token --output tsv --query accessToken | '
+                    f'{self.docker_cmd} login '
+                    f'{shlex.quote(docker_login_config.server)} '
+                    f'--username {ACR_TOKEN_USERNAME} '
+                    '--password-stdin',
+                    wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
@@ -423,7 +475,14 @@ class DockerInitializer:
             'exec 200>/var/tmp/sky_apt.lock; '
             'flock -x -w 120 200 || exit 1; '
             'export DEBIAN_FRONTEND=noninteractive; '
-            'apt-get -yq update && '
+            # `apt-get update` fails as a whole when any one configured
+            # repository is unusable -- an expired release file on an
+            # end-of-life suite, say -- even though the packages below all
+            # resolve from the suites that did refresh. Keep going and let
+            # the install be what decides: it fails loudly, and with the
+            # name of the package it could not get.
+            '{ apt-get -yq update || echo "apt-get update failed; '
+            'continuing with the existing package index"; } && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.

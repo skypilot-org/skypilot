@@ -111,3 +111,153 @@ def test_empty_file(log_path):
     lines, end_pos = log_lib.tail_lines_from_end(log_path, 10)
     assert lines == []
     assert end_pos == 0
+
+
+def _write_bytes(path: str, data: bytes) -> None:
+    with open(path, 'wb') as f:
+        f.write(data)
+
+
+@pytest.mark.parametrize('tail', [1, 7, 5000])
+@pytest.mark.parametrize('offset', [0, 3, 4000])
+def test_mixed_line_breaks_match_splitlines(log_path, tail, offset):
+    """``\\n``, ``\\r`` and ``\\r\\n`` each end one line."""
+    rng = random.Random(7)
+    parts = []
+    for i in range(20_000):
+        parts.append(f'{i:05d}' + 'p' * rng.randint(0, 40))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = ''.join(parts).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)
+    if offset > 0:
+        expected = expected[:-offset]
+    actual, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+    assert actual == expected[-tail:]
+
+
+def test_crlf_split_across_blocks_is_one_break(log_path):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    # The last two blocks are b'w...wx\r' and b'\ny...y\n'.
+    split_line = b'w' * (block - 2) + b'x\r\n'
+    last_line = b'y' * (block - 2) + b'\n'
+    _write_bytes(log_path, b'head\n' * 100 + split_line + last_line)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 2)
+    assert lines == [split_line.decode(), last_line.decode()]
+
+
+class _CountingFile:
+    """Binary file wrapper that records how many bytes were read."""
+
+    def __init__(self, f, reads: list):
+        self._f = f
+        self._reads = reads
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self._f.close()
+
+    def seek(self, *args):
+        return self._f.seek(*args)
+
+    def tell(self):
+        return self._f.tell()
+
+    def read(self, size=-1):
+        out = self._f.read(size)
+        self._reads.append(len(out))
+        return out
+
+
+def test_carriage_return_progress_reads_one_block(log_path, monkeypatch):
+    _write_bytes(log_path, b'start\n' + b'step\r' * 100_000)
+    reads: list = []
+    monkeypatch.setattr(
+        log_lib,
+        'open',
+        lambda *args, **kwargs: _CountingFile(open(*args, **kwargs), reads),
+        raising=False)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 10)
+    assert lines == ['step\r'] * 10
+    assert sum(reads) < 2 * log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize('block_size', [1, 2, 7])
+@pytest.mark.parametrize('last_line', ['', 'no break at EOF'])
+def test_small_blocks_match_splitlines(log_path, monkeypatch, block_size,
+                                       last_line):
+    """Block boundaries fall everywhere, including inside ``\\r\\n``."""
+    monkeypatch.setattr(log_lib, '_TAIL_BLOCK_SIZE', block_size)
+    rng = random.Random(block_size)
+    parts = []
+    for _ in range(300):
+        parts.append('x' * rng.randint(0, 5))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = (''.join(parts) + last_line).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)
+    for tail in [1, 2, 5, 50, 1000]:
+        for offset in [0, 1, 3, 100, 299, 300, 400]:
+            actual, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+            kept = expected[:-offset] if offset > 0 else expected
+            assert actual == kept[-tail:], (tail, offset)
+
+
+def test_read_stops_at_max_bytes(log_path, monkeypatch):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 4 * block)
+    data = b'old\n' * 10 + b'z' * (20 * block) + b'\nlast line\n'
+    _write_bytes(log_path, data)
+    lines, end_pos = log_lib.tail_lines_from_end(log_path, 5)
+    assert lines == ['last line\n']
+    assert end_pos == len(data)
+
+
+def test_offset_lines_beyond_max_bytes(log_path, monkeypatch):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 16 * block)
+    content = [f'{i:03d}' + 'x' * block + '\n' for i in range(100)]
+    _write_lines(log_path, content)
+    lines, _ = log_lib.tail_lines_from_end(log_path, 10, offset=40)
+    assert lines == content[50:60]
+
+
+@pytest.mark.parametrize('offset', [3, 1000, 15_000, 19_995, 20_000])
+def test_offset_beyond_max_bytes_matches_splitlines(log_path, monkeypatch,
+                                                    offset):
+    block = log_lib._TAIL_BLOCK_SIZE  # pylint: disable=protected-access
+    monkeypatch.setattr(log_lib, '_TAIL_MAX_BYTES', 2 * block)
+    rng = random.Random(11)
+    parts = []
+    for i in range(20_000):
+        parts.append(f'{i:05d}' + 'q' * rng.randint(0, 40))
+        parts.append(rng.choice(['\n', '\r', '\r\n']))
+    data = ''.join(parts).encode()
+    _write_bytes(log_path, data)
+    expected = data.decode().splitlines(keepends=True)[:-offset]
+    actual, _ = log_lib.tail_lines_from_end(log_path, 10, offset)
+    assert actual == expected[-10:]
+
+
+@pytest.mark.parametrize('tail', [1, 3, 50])
+def test_offset_pages_keep_other_separators(log_path, tail):
+    """Only ``\\n``, ``\\r`` and ``\\r\\n`` end lines, in pages and offsets."""
+    rng = random.Random(5)
+    separators = [
+        '\n', '\r', '\r\n', '\x0b', '\x0c', '\x1c', '\x85', '\u2028', '\u2029'
+    ]
+    text = 'one\ntwo\x0cthree\nfour\n' + ''.join(
+        'w' * rng.randint(0, 6) + rng.choice(separators) for _ in range(3000))
+    _write_bytes(log_path, text.encode())
+    pages = []
+    offset = 0
+    while True:
+        lines, _ = log_lib.tail_lines_from_end(log_path, tail, offset)
+        if not lines:
+            break
+        assert len(lines) <= tail
+        pages.insert(0, ''.join(lines))
+        offset += len(lines)
+    assert ''.join(pages) == text

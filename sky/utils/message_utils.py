@@ -60,6 +60,11 @@ def decode_payload(
     Returns:
         A tuple of (bool, Any). The bool indicates whether it is a payload
         string. The Any is the decoded payload, which is a str, dict or list.
+
+        With `raise_for_mismatch=False` this is a question about arbitrary
+        text, so it always answers: a payload-shaped line whose body will not
+        parse is not a payload, and comes back as (False, the whole original
+        line) for the caller to treat as content.
     """
     matched = _PAYLOAD_PATTERN.findall(payload_str)
     if not matched:
@@ -68,12 +73,21 @@ def decode_payload(
         else:
             return False, payload_str
 
-    for payload_type_str, payload_str in matched:
+    for payload_type_str, body_str in matched:
         if payload_type is None or payload_type == payload_type_str:
             if raise_for_mismatch:
-                return json.loads(payload_str)
-            else:
-                return True, json.loads(payload_str)
+                return json.loads(body_str)
+            try:
+                decoded = json.loads(body_str)
+            except (ValueError, RecursionError):
+                # A question, so it must answer rather than raise: the log
+                # streamer asks it of every line a task wrote, and task
+                # output can be payload-shaped by accident. Raising escaped
+                # the streaming generator and truncated the log. Broad on
+                # purpose -- bad syntax, the recursion limit and the integer
+                # digit limit are only the failures we know of.
+                return False, payload_str
+            return True, decoded
 
     if raise_for_mismatch:
         raise ValueError(f'Invalid payload string: \n{payload_str}')
