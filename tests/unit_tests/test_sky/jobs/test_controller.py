@@ -4579,22 +4579,42 @@ class TestJobCostUnits:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('reported,expected', [(1, 1), (None, 5)])
-    async def test_launch_sets_the_cost_of_the_cluster(self, reported,
-                                                       expected):
+    @pytest.mark.parametrize('parked', [False, True])
+    async def test_launch_sets_the_cost_of_the_cluster(self, reported, expected,
+                                                       parked):
         job_costs = {1: 3}
         jc = self._job_controller(job_costs)
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'cost_units',
+             patch.object(runtime, 'parked_cost_units' if parked else 'cost_units',
                           return_value=reported) as hook, \
              patch.object(controller_module.global_user_state,
                           'get_handle_from_cluster_name',
                           return_value='handle'), \
              patch.object(controller_module.controller_utils,
                           'JOB_COST_UNITS', 5):
-            await jc._update_cost_units('cluster')
+            await jc._update_cost_units('cluster', parked=parked)
         hook.assert_called_once_with('handle')
         assert job_costs == {1: expected}
+
+    @pytest.mark.asyncio
+    async def test_park_discount_is_replaced_by_full_cost_on_resume(self):
+        full = controller_module.controller_utils.JOB_COST_UNITS
+        job_costs = {1: full}
+        jc = self._job_controller(job_costs)
+        jc._strategy_executor = MagicMock(cluster_name='cluster')
+        runtime = controller_module.managed_job_runtime
+        with patch.object(runtime, 'is_registered', return_value=True), \
+             patch.object(runtime, 'parked_cost_units', return_value=full // 5), \
+             patch.object(controller_module.global_user_state,
+                          'get_handle_from_cluster_name', return_value='handle'):
+            await jc._on_launch_wait(True)
+            assert job_costs == {1: full // 5}
+            # Re-entering the parked state is an assignment, not a decrement.
+            await jc._on_launch_wait(True)
+            assert job_costs == {1: full // 5}
+            await jc._on_launch_wait(False)
+            assert job_costs == {1: full}
 
     @pytest.mark.asyncio
     async def test_launch_keeps_the_cost_when_the_lookup_fails(self):
@@ -4623,14 +4643,16 @@ class TestJobCostUnits:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('pool,job_group', [('pool', False), (None, True)])
+    @pytest.mark.parametrize('parked', [False, True])
     async def test_pools_and_job_groups_keep_the_full_cost(
-            self, pool, job_group):
+            self, pool, job_group, parked):
         job_costs = {1: 5}
         jc = self._job_controller(job_costs, pool=pool, job_group=job_group)
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'cost_units', return_value=1) as hook:
-            await jc._update_cost_units('cluster')
+             patch.object(runtime, 'parked_cost_units' if parked else 'cost_units',
+                          return_value=1) as hook:
+            await jc._update_cost_units('cluster', parked=parked)
         hook.assert_not_called()
         assert job_costs == {1: 5}
 

@@ -230,14 +230,16 @@ async def create_background_task(coro: typing.Coroutine) -> asyncio.Task:
     return task
 
 
-def _cluster_cost_units(cluster_name: str) -> int:
-    """The cost units of a job running on this cluster, or the full cost.
+def _cluster_cost_units(cluster_name: str, *, parked: bool = False) -> int:
+    """The runtime cost of a running or parked job, or the full cost.
 
     Reads the cluster's handle and asks the runtime that owns it. Blocking
     (database reads), so async callers run it in a thread.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    return _job_cost_units(managed_job_runtime.cost_units(handle))
+    hook = (managed_job_runtime.parked_cost_units
+            if parked else managed_job_runtime.cost_units)
+    return _job_cost_units(hook(handle))
 
 
 def _job_cost_units(units: Optional[int]) -> int:
@@ -940,14 +942,17 @@ class JobController:
             if self._job_id in self._job_costs:
                 self._job_costs[self._job_id] = controller_utils.JOB_COST_UNITS
 
-    async def _update_cost_units(self, cluster_name: str) -> None:
+    async def _update_cost_units(self,
+                                 cluster_name: str,
+                                 *,
+                                 parked: bool = False) -> None:
         """Count this job at the cost its runtime reports for its cluster.
 
-        A job counts in full while it launches, a pipeline's next task
-        launches, or a recovery relaunches it (_count_in_full); once the
-        launch brings its cluster up, or if it already had one when this
-        process claimed it, it counts at that cluster's cost. A lower cost
-        lets this process claim more jobs; a higher one holds off new claims
+        A job counts in full during an active launch, including a pipeline's
+        next task or recovery. While the launch is parked it can report a
+        separate cost; once up it counts at the running cluster's cost. A
+        lower cost lets this process claim more jobs; a higher one holds off
+        new claims
         until the process is back under its cap. Pools and job groups keep
         the full cost: their clusters are shared or several.
         """
@@ -956,7 +961,9 @@ class JobController:
                 not managed_job_runtime.is_registered()):
             return
         try:
-            units = await asyncio.to_thread(_cluster_cost_units, cluster_name)
+            units = await asyncio.to_thread(_cluster_cost_units,
+                                            cluster_name,
+                                            parked=parked)
         except Exception as e:  # pylint: disable=broad-except
             # Keep the current cost; it is a capacity estimate, not a reason
             # to fail the job.
@@ -969,6 +976,16 @@ class JobController:
                 logger.info(f'Job {self._job_id} now counts for {units} of '
                             f'{controller_utils.JOB_COST_UNITS} cost units.')
                 self._job_costs[self._job_id] = units
+
+    async def _on_launch_wait(self, parked: bool) -> None:
+        """Use the parked runtime cost only while a launch yields its worker."""
+        if not parked:
+            await self._count_in_full()
+            return
+        assert self._strategy_executor is not None
+        cluster_name = self._strategy_executor.cluster_name
+        if cluster_name is not None:
+            await self._update_cost_units(cluster_name, parked=True)
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -1092,7 +1109,8 @@ class JobController:
             self.starting,
             self.starting_lock,
             self.starting_signal,
-            file_mounts_blob_id=file_mounts_blob_id)
+            file_mounts_blob_id=file_mounts_blob_id,
+            launch_wait_callback=self._on_launch_wait)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:

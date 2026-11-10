@@ -65,6 +65,7 @@ def test_is_oom_failure_still_reads_the_reason_before_the_output():
 def _make_bare_executor():
     executor = recovery_strategy.StrategyExecutor.__new__(
         recovery_strategy.StrategyExecutor)
+    executor.launch_wait_callback = None
     return executor
 
 
@@ -371,6 +372,45 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
             in patches.set_backoff_pending.await_args.kwargs['reason'])
     # The task was set back to STARTING on resume.
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('exit_kind', ['resume', 'vanished', 'error', 'cancel'])
+async def test_parked_cost_is_restored_on_every_wait_exit(
+        monkeypatch, exit_kind):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    transitions = []
+
+    async def on_wait(parked):
+        # Both transitions happen outside the scarce launch slot.
+        assert executor.job_id not in executor.starting
+        transitions.append(parked)
+
+    async def wait_for_request(request_id):
+        assert transitions == [True]
+        if exit_kind == 'error':
+            raise RuntimeError('request store unavailable')
+        if exit_kind == 'cancel':
+            raise asyncio.CancelledError()
+        return None if exit_kind == 'vanished' else request_id
+
+    executor.launch_wait_callback = on_wait
+    executor._wait_for_parked_request = wait_for_request
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        recovery_strategy._LaunchRequestParked('req-123', 'queued'), None
+    ])
+    if exit_kind == 'error':
+        with pytest.raises(RuntimeError, match='request store unavailable'):
+            await executor._launch(max_retry=1, raise_on_failure=True)
+    elif exit_kind == 'cancel':
+        with pytest.raises(asyncio.CancelledError):
+            await executor._launch(max_retry=1, raise_on_failure=True)
+    else:
+        assert await executor._launch(max_retry=1,
+                                      raise_on_failure=True) == 123.45
+    assert transitions == [True, False]
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
 

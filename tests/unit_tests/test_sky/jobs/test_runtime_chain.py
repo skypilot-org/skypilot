@@ -476,3 +476,19 @@ class TestCostUnits:
         assert runtime_chain.cost_units(_make_handle(has_ray=True)) is None
         assert runtime_chain.cost_units(None) is None
         owner.cost_units.assert_not_called()
+
+
+def test_parked_cost_dispatch_does_not_need_provisioned_metadata():
+    # A parked launch has a rendered provider config but may still have the
+    # default Ray metadata. Each hook checks its own provider config.
+    old = _OldRuntime()
+    first = types.SimpleNamespace(parked_cost_units=mock.Mock(
+        return_value=None))
+    second = types.SimpleNamespace(parked_cost_units=mock.Mock(return_value=2))
+    for runtime in (old, first, second):
+        runtime_chain.register(runtime)
+    handle = _make_handle(has_ray=True)
+    assert runtime_chain.parked_cost_units(handle) == 2
+    first.parked_cost_units.assert_called_once_with(handle)
+    second.parked_cost_units.assert_called_once_with(handle)
+    assert runtime_chain.parked_cost_units(None) is None

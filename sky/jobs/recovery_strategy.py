@@ -348,6 +348,9 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         self.file_mounts_blob_id = file_mounts_blob_id
+        self.launch_wait_callback: Optional[Callable[[bool],
+                                                     Coroutine[Any, Any,
+                                                               None]]] = None
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -459,8 +462,15 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         file_mounts_blob_id: Optional[str] = None,
+        launch_wait_callback: Optional[Callable[[bool],
+                                                Coroutine[Any, Any,
+                                                          None]]] = None,
     ) -> 'StrategyExecutor':
-        """Create a strategy from a task."""
+        """Create a strategy from a task.
+
+        launch_wait_callback receives True on entering a parked launch wait
+        and False on every exit, before the launch acquires another slot.
+        """
 
         # TODO(cooperc): Consider defaulting to FAILOVER if using k8s with a
         # single context, since there are not multiple clouds/regions to
@@ -518,6 +528,7 @@ class StrategyExecutor:
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
         executor.set_strategy_config(strategy_config)
+        executor.launch_wait_callback = launch_wait_callback
         return executor
 
     async def launch(self) -> float:
@@ -1397,17 +1408,30 @@ class StrategyExecutor:
                             reason=parked_reason,
                             code=_CODE_LAUNCH_PARKED)
                         parked_reason = None
-                    resumed_request_id = await self._wait_for_parked_request(
-                        parked_request_id)
-                    if (resumed_request_id is None and
-                            parked_stream_task is not None):
+                    # Parking released the launch slot and executor worker.
+                    # Let the controller account for this cheaper wait, then
+                    # restore the active-launch cost before acquiring a slot
+                    # or leaving the wait through cancellation or an error.
+                    callback = self.launch_wait_callback
+                    # Pylint infers only the initial None, not make's callback.
+                    # pylint: disable=not-callable
+                    try:
+                        if callback is not None:
+                            await callback(True)
+                        resumed_id = await self._wait_for_parked_request(
+                            parked_request_id)
+                    finally:
+                        if callback is not None:
+                            await callback(False)
+                    # pylint: enable=not-callable
+                    if (resumed_id is None and parked_stream_task is not None):
                         # The request vanished; its carried stream will fail
                         # or finish on its own - consume its result and make
                         # a fresh launch attempt.
                         parked_stream_task.add_done_callback(
                             _consume_task_exception)
                         parked_stream_task = None
-                    parked_request_id = resumed_request_id
+                    parked_request_id = resumed_id
                 async with scheduler.scheduled_launch(
                         self.job_id,
                         self.starting,
