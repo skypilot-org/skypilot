@@ -2921,8 +2921,9 @@ def stop_instances(
     Note: a pod's ephemeral (non-PV) filesystem is lost on stop.
 
     Raises:
-        NotImplementedError: `kubernetes.allow_unmanaged_cluster_destructive_stop`
-            is off for the context, or the cluster is high-availability. The
+        NotImplementedError: The
+            `kubernetes.allow_unmanaged_cluster_destructive_stop` flag is off
+            for the context, or the cluster is high-availability. The
             provisioner's failover turns this into StopFailoverError and keeps
             the pods.
     """
