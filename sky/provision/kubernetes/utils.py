@@ -3054,6 +3054,11 @@ def check_instance_fits(
         # if so, check if CPU and memory requirements on the specific node are
         # met.
         assert acc_count is not None, (acc_type, acc_count)
+        if is_tpu_on_gke(acc_type):
+            # Nodes carry the GKE label value (e.g. tpu-v6e-slice), so a GCP
+            # TPU name (e.g. tpu-v6e-4) must be normalized before the label
+            # lookup below, or no node matches.
+            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
         try:
             gpu_label_key, gpu_label_values, _, _ = (
                 get_accelerator_label_key_values(context, acc_type, acc_count))
@@ -3075,7 +3080,6 @@ def check_instance_fits(
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
             fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason

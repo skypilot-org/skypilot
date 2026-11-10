@@ -1256,10 +1256,8 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_label_key_values):
         """Both spellings of a GKE TPU request put the requested chip count
         and its slice topology on the pod: tpu-v6e-slice:N keeps N."""
-        from sky.provision.kubernetes.utils import (
-            KubernetesHighPerformanceNetworkType)
         mock_detect_network_type.return_value = (
-            KubernetesHighPerformanceNetworkType.NONE, None)
+            kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None)
         mock_get_current_context.return_value = 'my-k8s-cluster'
         mock_get_namespace.return_value = 'default'
         mock_get_accelerator_label_keys.return_value = []

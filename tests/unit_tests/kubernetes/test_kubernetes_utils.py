@@ -1126,6 +1126,30 @@ def test_check_instance_fits_tpu_chip_count(instance_type):
         assert fits is expected, (instance_type, nodes[0].metadata.name, reason)
 
 
+@pytest.mark.parametrize('instance_type', [
+    '4CPU--16GB--tpu-v6e-slice:4',
+    '4CPU--16GB--tpu-v6e-4:1',
+])
+def test_check_instance_fits_tpu_real_label_lookup(instance_type):
+    """Without an autoscaler, the label lookup reads the nodes' GKE label
+    (tpu-v6e-slice), so both spellings must match a 4-chip node. Only the
+    cluster reads are mocked; the label lookup itself runs."""
+    nodes = [_gke_tpu_node('n-2x2', '2x2', 4)]
+    node_labels = {
+        n.metadata.name: list(n.metadata.labels.items()) for n in nodes
+    }
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=nodes), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource',
+                    return_value=(True, {'google.com/tpu'})), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+                    return_value=(utils.GKELabelFormatter(), node_labels)), \
+         mock.patch('sky.skypilot_config.get_effective_region_config',
+                    return_value=None):
+        fits, reason = utils.check_instance_fits('test-context', instance_type)
+    assert fits is True, (instance_type, reason)
+
+
 @pytest.mark.parametrize('accelerator', ['tpu-v6e-slice:4', 'tpu-v6e-4:1'])
 def test_gke_autoscaler_node_pool_tpu_chip_count(accelerator):
     """A single-host 4-chip v6e node pool (ct6e-standard-4t) can create a
