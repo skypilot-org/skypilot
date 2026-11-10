@@ -373,6 +373,21 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
+def normalize_tpu_accelerator(accelerator: str,
+                              count: Optional[float]) -> Tuple[str, int]:
+    """Normalize a TPU request to the GKE label value and its chip count.
+
+    A GCP TPU name carries the chip count in the name, and that count wins
+    (``tpu-v6e-8`` -> ``('tpu-v6e-slice', 8)``). A GKE label value such as
+    ``tpu-v6e-slice`` has no count in the name, so the requested count is
+    kept (``tpu-v6e-slice:4`` -> ``('tpu-v6e-slice', 4)``).
+    """
+    normalized, count_in_name = normalize_tpu_accelerator_name(accelerator)
+    if normalized != accelerator or count is None:
+        return normalized, count_in_name
+    return normalized, int(count)
+
+
 # Kept under their old names: callers inside and outside this repo use them.
 # The definitions live in api_errors, with the other API-error classifiers.
 _is_cloudflare_403_error = api_errors.is_cloudflare_403
@@ -1347,8 +1362,9 @@ class GKEAutoscaler(Autoscaler):
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
-                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
-                        requested_acc_type)
+                    requested_acc_type, requested_acc_count = (
+                        normalize_tpu_accelerator(requested_acc_type,
+                                                  requested_acc_count))
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -3059,7 +3075,7 @@ def check_instance_fits(
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
             fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
