@@ -3297,6 +3297,79 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
 
+# Tags get_cluster_info() puts on the pods of a multi-host TPU slice; the
+# task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
+# TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
+_GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
+
+
+def _multi_host_tpu_vms_per_slice(pod: Any) -> int:
+    """VMs per slice for a pod of a multi-host GKE TPU slice, else 0.
+
+    Such a pod selects the whole slice's topology and the chips of one VM,
+    and the topology has more chips than the VM.
+    """
+    node_selector = getattr(pod.spec, 'node_selector', None)
+    if not isinstance(node_selector, dict):
+        return 0
+    formatter = kubernetes_utils.GKELabelFormatter
+    topology = node_selector.get(formatter.TPU_TOPOLOGY_LABEL_KEY)
+    chips_per_vm = node_selector.get(formatter.ACCELERATOR_COUNT_LABEL_KEY)
+    if not topology or not chips_per_vm or not chips_per_vm.isdigit():
+        return 0
+    chips_in_slice = kubernetes_utils.reduce_tpu_topology(topology)
+    if chips_in_slice <= int(chips_per_vm):
+        return 0
+    return chips_in_slice // int(chips_per_vm)
+
+
+def _tag_tpu_multi_host_workers(
+        cluster_name_on_cloud: str, context: Optional[str],
+        running_pods: Dict[str,
+                           Any], pods: Dict[str,
+                                            List[common.InstanceInfo]]) -> None:
+    """Tags each pod of a multi-host TPU slice with its worker ID.
+
+    GKE does not inject TPU_WORKER_ID / TPU_WORKER_HOSTNAMES into plain pods
+    (only into JobSet and Indexed Job pods), and which slice a pod lands on is
+    decided by the scheduler, not by the pod's index. A multi-host GKE TPU
+    node pool is exactly one slice, so the pods are grouped by the node pool
+    of the node each one runs on. Within a slice, worker IDs follow the node
+    name order, and the worker hostnames are the pod IPs in worker ID order.
+    """
+    slice_pods: Dict[str, List[str]] = {}
+    vms_per_slice = 0
+    for pod_name, pod in running_pods.items():
+        vms = _multi_host_tpu_vms_per_slice(pod)
+        if not vms:
+            continue
+        vms_per_slice = vms
+        node_name = getattr(pod.spec, 'node_name', None)
+        if node_name is None:
+            continue
+        node = kubernetes.core_api(context).read_node(
+            node_name, _request_timeout=kubernetes.API_TIMEOUT)
+        node_pool = (node.metadata.labels or {}).get(_GKE_NODEPOOL_LABEL,
+                                                     node_name)
+        slice_pods.setdefault(node_pool, []).append(pod_name)
+    for node_pool, members in slice_pods.items():
+        if len(members) != vms_per_slice:
+            logger.warning(f'Node pool {node_pool!r} runs {len(members)} pods '
+                           f'of cluster {cluster_name_on_cloud!r}, but its '
+                           f'TPU slice has {vms_per_slice} VMs.')
+        members.sort(key=lambda name: running_pods[name].spec.node_name)
+        hostnames = ','.join(
+            running_pods[name].status.pod_ip or '' for name in members)
+        for worker_id, pod_name in enumerate(members):
+            info = pods[pod_name][0]
+            tags = dict(info.tags or {})
+            tags[kubernetes_utils.TPU_WORKER_ID_TAG] = str(worker_id)
+            tags[kubernetes_utils.TPU_WORKER_HOSTNAMES_TAG] = hostnames
+            tags[kubernetes_utils.TPU_SLICE_NAME_TAG] = (
+                f'{cluster_name_on_cloud}-{node_pool}')
+            info.tags = tags
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -3389,6 +3462,9 @@ def get_cluster_info(
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
                            ' or not Running, check the Pod status')
+
+    _tag_tpu_multi_host_workers(cluster_name_on_cloud, context, running_pods,
+                                pods)
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.

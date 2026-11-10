@@ -2013,6 +2013,9 @@ class RetryingVmProvisioner(object):
             assert task in self._dag.tasks, 'Internal logic error.'
             assert best_resources is not None, task
             to_provision = best_resources
+            # A multi-host TPU slice on Kubernetes has one node per VM.
+            num_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
+                to_provision)
         return config_dict
 
 
@@ -3343,7 +3346,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # matching (resize) while still reporting the user's real num_nodes
         # in any error message below.
         fit_num_nodes = (handle.launched_nodes
-                         if skip_num_nodes_check else task.num_nodes)
+                         if skip_num_nodes_check else task.num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(launched_resources))
         for resource in task.resources:
             if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
@@ -4731,8 +4735,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
-        # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
+        num_actual_nodes = (
+            task.num_nodes * handle.num_ips_per_node *
+            kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
+        # Case: task_lib.Task(run, num_nodes=N), TPU VM Pods, or multi-host
+        # TPU slices on Kubernetes (one cluster node per VM of the slice)
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
         else:
@@ -6701,7 +6708,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
-            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
+            num_nodes = (task.num_nodes *
+                         kubernetes_utils.tpu_vms_per_slice(to_provision)
+                         if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
@@ -6759,7 +6768,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
             to_provision,
-            task.num_nodes,
+            # A multi-host TPU slice on Kubernetes has one node per VM.
+            task.num_nodes * kubernetes_utils.tpu_vms_per_slice(to_provision),
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,
@@ -7233,11 +7243,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
-        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips.
+        # A multi-host TPU slice on Kubernetes has one cluster node per VM.
+        num_actual_nodes = (
+            task.num_nodes * handle.num_ips_per_node *
+            kubernetes_utils.tpu_vms_per_slice(handle.launched_resources))
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
         codegen = self._get_task_codegen_class(handle)
+        # Each VM of a multi-host TPU slice on Kubernetes gets its worker
+        # identity, which the provisioner recorded on the node.
+        if handle.cached_cluster_info is not None:
+            tpu_env_by_ip: Dict[str, Dict[str, str]] = {}
+            for infos in handle.cached_cluster_info.instances.values():
+                for info in infos:
+                    env = kubernetes_utils.tpu_worker_env_vars(info.tags)
+                    if env:
+                        tpu_env_by_ip[info.internal_ip] = env
+            codegen.set_per_ip_env_vars(tpu_env_by_ip)
 
         codegen.add_prologue(job_id)
         codegen.add_setup(

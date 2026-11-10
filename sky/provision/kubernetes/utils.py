@@ -388,6 +388,111 @@ def normalize_tpu_accelerator(accelerator: str,
     return normalized, int(count)
 
 
+# Multi-host TPU slices on GKE: chips in the slice -> slice topology. A
+# multi-host slice is one GKE node pool whose VMs each carry
+# ``chips_per_vm`` chips and the whole slice's topology label.
+GKE_TPU_MULTI_HOST_TOPOLOGIES: Dict[str, Dict[int, str]] = {
+    'tpu-v6e-slice': {
+        8: '2x4',
+        16: '4x4',
+        32: '4x8',
+        64: '8x8',
+        128: '8x16',
+        256: '16x16',
+    },
+}
+GKE_TPU_MULTI_HOST_CHIPS_PER_VM: Dict[str, int] = {'tpu-v6e-slice': 4}
+# The only slice that exists both as one VM and as a multi-host slice:
+# TPU v6e with 8 chips is one ct6e-standard-8t VM, or two ct6e-standard-4t
+# VMs on one 2x4 slice. ``resources.enforce_multi_host`` selects the latter.
+ENFORCE_MULTI_HOST_SHAPES: Set[Tuple[str, int]] = {('tpu-v6e-slice', 8)}
+
+
+@dataclasses.dataclass(frozen=True)
+class TPUMultiHostShape:
+    """A multi-host GKE TPU slice: one pod per VM, each taking its VM's chips.
+    """
+    accelerator: str  # GKE label value, e.g. 'tpu-v6e-slice'.
+    chips_in_slice: int
+    topology: str
+    chips_per_vm: int
+
+    @property
+    def vms_per_slice(self) -> int:
+        return self.chips_in_slice // self.chips_per_vm
+
+
+def get_tpu_multi_host_shape(
+        accelerator: Optional[str], count: Optional[float],
+        enforce_multi_host: Optional[bool]) -> Optional[TPUMultiHostShape]:
+    """Return the multi-host slice a GKE TPU request maps to, or None.
+
+    The request names a slice by its chip count (``tpu-v6e-16`` or
+    ``tpu-v6e-slice:16``). Sizes with a single-host VM (1, 4 and 8 chips on
+    v6e) stay single-host unless ``enforce_multi_host`` is True; larger sizes
+    exist only as multi-host slices.
+    """
+    if not accelerator or not is_tpu_on_gke(accelerator):
+        return None
+    acc_type, chips = normalize_tpu_accelerator(accelerator, count)
+    topologies = GKE_TPU_MULTI_HOST_TOPOLOGIES.get(acc_type, {})
+    if chips not in topologies:
+        return None
+    has_single_host = chips in GKELabelFormatter.GKE_TPU_TOPOLOGIES.get(
+        acc_type, {})
+    if has_single_host and enforce_multi_host is not True:
+        return None
+    return TPUMultiHostShape(
+        accelerator=acc_type,
+        chips_in_slice=chips,
+        topology=topologies[chips],
+        chips_per_vm=GKE_TPU_MULTI_HOST_CHIPS_PER_VM[acc_type])
+
+
+# Tags the Kubernetes provisioner puts on the pods of a multi-host TPU slice
+# (see instance._tag_tpu_multi_host_workers()).
+TPU_WORKER_ID_TAG = 'skypilot-tpu-worker-id'
+TPU_WORKER_HOSTNAMES_TAG = 'skypilot-tpu-worker-hostnames'
+TPU_SLICE_NAME_TAG = 'skypilot-tpu-slice-name'
+
+
+def tpu_worker_env_vars(tags: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """TPU runtime env vars for one VM of a multi-host TPU slice.
+
+    The TPU runtime on GKE reads the slice shape from env vars GKE injects
+    (TPU_TOPOLOGY, TPU_HOST_BOUNDS, ...), but GKE injects the worker's
+    identity only into JobSet and Indexed Job pods. These are set from the
+    node's provisioner tags; empty for any other node.
+    """
+    if not tags or TPU_WORKER_ID_TAG not in tags:
+        return {}
+    return {
+        'TPU_WORKER_ID': tags[TPU_WORKER_ID_TAG],
+        'TPU_WORKER_HOSTNAMES': tags.get(TPU_WORKER_HOSTNAMES_TAG, ''),
+        'TPU_NAME': tags.get(TPU_SLICE_NAME_TAG, ''),
+    }
+
+
+def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
+    """Cluster nodes per task node for ``resources``.
+
+    1 unless ``resources`` is a multi-host GKE TPU slice on Kubernetes. There
+    each node of the task (``num_nodes``) is one slice, and the cluster gets
+    one node (pod) per VM of the slice, so a task with ``num_nodes: K`` runs
+    on K x vms_per_slice cluster nodes.
+    """
+    if resources is None or not resources.accelerators:
+        return 1
+    if (resources.cloud is None or
+            resources.cloud.canonical_name() != 'kubernetes'):
+        return 1
+    if len(resources.accelerators) != 1:
+        return 1
+    acc, count = next(iter(resources.accelerators.items()))
+    shape = get_tpu_multi_host_shape(acc, count, resources.enforce_multi_host)
+    return shape.vms_per_slice if shape is not None else 1
+
+
 # Kept under their old names: callers inside and outside this repo use them.
 # The definitions live in api_errors, with the other API-error classifiers.
 _is_cloudflare_403_error = api_errors.is_cloudflare_403
@@ -1120,13 +1225,18 @@ class Autoscaler:
 
     @classmethod
     # pylint: disable=unused-argument
-    def can_create_new_instance_of_type(cls, context: str,
-                                        instance_type: str) -> bool:
+    def can_create_new_instance_of_type(
+            cls,
+            context: str,
+            instance_type: str,
+            tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None) -> bool:
         """Returns if the Kubernetes context has an autoscaler
         that can create a new node that satisfies the instance type.
         Args:
             context: The Kubernetes context to check.
             instance_type: The instance type to check.
+            tpu_multi_host_shape: Set when the request is a multi-host GKE
+                TPU slice; the instance type then describes one VM of it.
         Returns:
             bool: True if the Kubernetes context has an autoscaler that can
                 create a new node satisfying the instance type,
@@ -1156,8 +1266,11 @@ class GKEAutoscaler(Autoscaler):
 
     @classmethod
     @annotations.lru_cache(scope='request', maxsize=10)
-    def can_create_new_instance_of_type(cls, context: str,
-                                        instance_type: str) -> bool:
+    def can_create_new_instance_of_type(
+            cls,
+            context: str,
+            instance_type: str,
+            tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None) -> bool:
         """Looks at each node pool in the cluster and checks if
         it can create a new node that satisfies the instance type.
         If the context does not match standard GKE context naming convention,
@@ -1236,7 +1349,7 @@ class GKEAutoscaler(Autoscaler):
                              f'satisfying {instance_type}')
                 try:
                     if cls._check_instance_fits_gke_autoscaler_node_pool(
-                            instance_type, node_pool):
+                            instance_type, node_pool, tpu_multi_host_shape):
                         return True
                 except KeyError:
                     logger.debug('encountered KeyError while checking if '
@@ -1336,7 +1449,10 @@ class GKEAutoscaler(Autoscaler):
 
     @classmethod
     def _check_instance_fits_gke_autoscaler_node_pool(
-        cls, instance_type: str, node_pool: dict
+        cls,
+        instance_type: str,
+        node_pool: dict,
+        tpu_multi_host_shape: Optional['TPUMultiHostShape'] = None
     ) -> bool:  # check if there are any spare capacity in the autoscaler.
         node_pool_name = node_pool['name']
         logger.debug(
@@ -1361,7 +1477,10 @@ class GKEAutoscaler(Autoscaler):
                 logger.debug(
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
-                if 'resourceLabels' in node_config:
+                if tpu_multi_host_shape is not None:
+                    accelerator_exists = cls._node_pool_is_tpu_slice(
+                        node_pool, tpu_multi_host_shape)
+                elif 'resourceLabels' in node_config:
                     requested_acc_type, requested_acc_count = (
                         normalize_tpu_accelerator(requested_acc_type,
                                                   requested_acc_count))
@@ -1461,6 +1580,28 @@ class GKEAutoscaler(Autoscaler):
         # must exactly match the TPU count in the instance.
         return (node_tpu_type == requested_tpu_type and
                 tpu_chip_count == requested_tpu_count)
+
+    @classmethod
+    def _node_pool_is_tpu_slice(cls, node_pool: dict,
+                                shape: 'TPUMultiHostShape') -> bool:
+        """Whether a node pool is one multi-host TPU slice of ``shape``.
+
+        A multi-host GKE TPU node pool is exactly one slice: its placement
+        policy carries the slice topology, and its machine type the chips on
+        each VM.
+        """
+        node_config = node_pool.get('config', {})
+        resource_labels = node_config.get('resourceLabels', {})
+        if not cls._is_node_multi_host_tpu(resource_labels):
+            return False
+        if resource_labels.get('goog-gke-accelerator-type') != (
+                shape.accelerator):
+            return False
+        topology = node_pool.get('placementPolicy', {}).get('tpuTopology')
+        chips_per_vm = cls._tpu_chip_count_from_instance_type(
+            node_config.get('machineType', ''))
+        return (topology == shape.topology and
+                chips_per_vm == shape.chips_per_vm)
 
     @classmethod
     def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
@@ -2958,9 +3099,10 @@ def adjust_resources_to_allocatable(
 
 
 def check_instance_fits(
-        context: Optional[str],
-        instance: str,
-        ephemeral_storage_gb: Optional[float] = None
+    context: Optional[str],
+    instance: str,
+    ephemeral_storage_gb: Optional[float] = None,
+    tpu_multi_host_shape: Optional[TPUMultiHostShape] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
@@ -3049,7 +3191,29 @@ def check_instance_fits(
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
     acc_count = k8s_instance_type.accelerator_count
-    if acc_type is not None:
+    if tpu_multi_host_shape is not None:
+        # A multi-host slice request runs one pod per VM of the slice, so
+        # look for ready VMs of a slice of that shape.
+        shape = tpu_multi_host_shape
+        candidate_nodes = [
+            node for node in nodes
+            if node.is_ready() and node.metadata.labels.get(
+                GKELabelFormatter.TPU_LABEL_KEY) == shape.accelerator and
+            node.metadata.labels.get(GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY)
+            == shape.topology and node.metadata.labels.get(
+                GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY) == str(
+                    shape.chips_per_vm)
+        ]
+        if not candidate_nodes:
+            return False, (
+                f'No ready nodes of a multi-host {shape.accelerator} '
+                f'{shape.topology} slice ({shape.chips_per_vm} '
+                'chips per VM) found in the cluster.')
+        not_fit_reason_prefix = (
+            f'Nodes of the {shape.topology} {shape.accelerator} slice do not '
+            f'have enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
+            f'memory (>= {k8s_instance_type.memory} G). ')
+    elif acc_type is not None:
         # If GPU/TPUs are requested, check if GPU/TPU type is available, and
         # if so, check if CPU and memory requirements on the specific node are
         # met.
@@ -3179,6 +3343,7 @@ def get_node_selector(
     spot_label_key: Optional[str],
     spot_label_value: Optional[str],
     enable_flex_start: bool,
+    tpu_chips_per_vm: Optional[int] = None,
 ) -> Optional[Dict[str, str]]:
     """Builds the pod ``nodeSelector``.
 
@@ -3200,6 +3365,9 @@ def get_node_selector(
         spot_label_value: Value ``spot_label_key`` carries on preemptible
             nodes, or None.
         enable_flex_start: Whether the pod schedules onto flex-start nodes.
+        tpu_chips_per_vm: For a multi-host GKE TPU slice, the chips on each
+            VM. Pins the pod to the slice's VMs, since the topology label
+            alone also matches a single-host VM of the same shape.
 
     Returns:
         A ``nodeSelector`` dict, or None when no entry applies.
@@ -3211,6 +3379,9 @@ def get_node_selector(
         node_selector[spot_label_key] = spot_label_value
     if enable_flex_start:
         node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    if tpu_chips_per_vm is not None:
+        node_selector[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY] = str(
+            tpu_chips_per_vm)
     return node_selector or None
 
 
@@ -3247,6 +3418,8 @@ def get_pod_fields(
     spot_label_key: Optional[str],
     spot_label_value: Optional[str],
     enable_flex_start: bool,
+    tpu_chips_per_vm: Optional[int] = None,
+    same_node_pool_cluster: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3262,6 +3435,11 @@ def get_pod_fields(
         spot_label_key: See get_node_selector() and get_spot_toleration().
         spot_label_value: See get_node_selector() and get_spot_toleration().
         enable_flex_start: See get_node_selector().
+        tpu_chips_per_vm: See get_node_selector().
+        same_node_pool_cluster: When set, every pod of this cluster
+            (``skypilot-cluster`` label) must run in the same GKE node pool.
+            Used for a single multi-host TPU slice, where one node pool is
+            one slice and a pod on another pool would join another slice.
 
     Returns:
         A partial pod manifest, empty when no field applies.
@@ -3269,13 +3447,24 @@ def get_pod_fields(
     spec: Dict[str, Any] = {}
     node_selector = get_node_selector(topology_label_key, topology_label_value,
                                       spot_label_key, spot_label_value,
-                                      enable_flex_start)
+                                      enable_flex_start, tpu_chips_per_vm)
     if node_selector is not None:
         spec['nodeSelector'] = node_selector
     node_affinity = get_node_affinity(acc_label_key, acc_label_values,
                                       avoid_label_keys)
     if node_affinity is not None:
         spec['affinity'] = {'nodeAffinity': node_affinity}
+    if same_node_pool_cluster is not None:
+        spec.setdefault('affinity', {})['podAffinity'] = {
+            'requiredDuringSchedulingIgnoredDuringExecution': [{
+                'labelSelector': {
+                    'matchLabels': {
+                        'skypilot-cluster': same_node_pool_cluster
+                    }
+                },
+                'topologyKey': 'cloud.google.com/gke-nodepool',
+            }]
+        }
     spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
     if spot_toleration is not None:
         spec['tolerations'] = [spot_toleration]

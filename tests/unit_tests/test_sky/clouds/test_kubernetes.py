@@ -1315,6 +1315,95 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
                 self.assertEqual(deploy_vars['k8s_resource_key'],
                                  kubernetes_utils.TPU_RESOURCE_KEY)
 
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_gke_tpu_multi_host_slice_pods(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_label_key_values):
+        """A multi-host slice request builds one pod per VM: each pod takes
+        the VM's 4 chips and selects the slice topology and 4 chips per VM.
+        A single slice also keeps all pods in one node pool."""
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'my-k8s-cluster'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-image:latest'
+
+        formatter = kubernetes_utils.GKELabelFormatter
+        k8s_cloud = kubernetes.Kubernetes()
+        # (instance type, enforce_multi_host, num_nodes, topology,
+        #  single node pool)
+        cases = [
+            ('16CPU--64GB--tpu-v6e-8:1', True, 2, '2x4', True),
+            ('16CPU--64GB--tpu-v6e-slice:8', True, 4, '2x4', False),
+            ('16CPU--64GB--tpu-v6e-16:1', None, 4, '4x4', True),
+            ('16CPU--64GB--tpu-v6e-slice:256', None, 64, '16x16', True),
+        ]
+        for instance_type, enforce, num_nodes, topology, one_pool in cases:
+            with self.subTest(instance_type=instance_type, num_nodes=num_nodes):
+                self.resources.instance_type = instance_type
+                self.resources.enforce_multi_host = enforce
+                deploy_vars = k8s_cloud.make_deploy_resources_variables(
+                    resources=self.resources,
+                    cluster_name=resources_utils.ClusterName(
+                        display_name=self.cluster_name,
+                        name_on_cloud=self.cluster_name),
+                    region=self.region,
+                    zones=None,
+                    num_nodes=num_nodes,
+                    dryrun=False)
+                self.assertEqual(deploy_vars['accelerator_count'], '4')
+                self.assertTrue(deploy_vars['tpu_requested'])
+                self.assertEqual(deploy_vars['k8s_resource_key'],
+                                 kubernetes_utils.TPU_RESOURCE_KEY)
+                self.assertEqual(deploy_vars['k8s_acc_label_values'],
+                                 ['tpu-v6e-slice'])
+                spec = deploy_vars['pod_fields']['spec']
+                self.assertEqual(
+                    spec['nodeSelector'], {
+                        formatter.TPU_TOPOLOGY_LABEL_KEY: topology,
+                        formatter.ACCELERATOR_COUNT_LABEL_KEY: '4',
+                    })
+                pod_affinity = spec.get('affinity', {}).get('podAffinity')
+                if one_pool:
+                    term = pod_affinity[
+                        'requiredDuringSchedulingIgnoredDuringExecution'][0]
+                    self.assertEqual(term['topologyKey'],
+                                     'cloud.google.com/gke-nodepool')
+                    self.assertEqual(term['labelSelector']['matchLabels'],
+                                     {'skypilot-cluster': self.cluster_name})
+                else:
+                    self.assertIsNone(pod_affinity)
+        # The slice shape comes from the request, not from node labels.
+        mock_get_label_key_values.assert_not_called()
+
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
