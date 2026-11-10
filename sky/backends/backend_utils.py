@@ -3819,9 +3819,14 @@ def _update_cluster_status(
                 cluster_name,
                 include_user_info=include_user_info,
                 summary_response=summary_response)
-        if kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
-                handle.launched_resources.region,
-                workspace=record.get('workspace')):
+        # Autodown deletes the pods from the skylet, which also reads as no
+        # pods; it asked for termination, so it takes the terminate path. A
+        # refresh mid-autodown resets to_down, hence the breadcrumb check in
+        # _get_cluster_loss_cause.
+        stop = False
+        if (not record['to_down'] and
+                kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+                    handle.launched_resources.region)):
             try:
                 cause, autodowned = _get_cluster_loss_cause(
                     record, handle, launched_resources,
@@ -3830,13 +3835,7 @@ def _update_cluster_status(
                 logger.debug(f'Failed to explain why the pods of '
                              f'{cluster_name!r} are gone: {e}')
                 cause, autodowned = _NO_TERMINATION_CAUSE, False
-            # Autodown deletes the pods from the skylet, which also reads as
-            # no pods; it asked for termination, so it takes the terminate
-            # path. A refresh mid-autodown resets to_down, hence the
-            # breadcrumb check in _get_cluster_loss_cause.
-            stop = not (record['to_down'] or autodowned)
-        else:
-            stop = False
+            stop = not autodowned
         if stop:
             global_user_state.add_cluster_event(
                 cluster_name,

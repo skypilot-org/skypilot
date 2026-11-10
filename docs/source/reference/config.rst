@@ -2041,9 +2041,8 @@ preemption) is also marked ``STOPPED`` instead of removed, so its volumes
 survive. Autodown still terminates the cluster. Autostop stays unsupported.
 High-availability clusters cannot be stopped.
 
-Read from the API server's config (and its workspace config) only. A value in
-a client's config has no effect, because the server's background status
-refresh never sees it.
+Read from the API server's config only. A value in a client's config has no
+effect, because the server's background status refresh never sees it.
 
 Turning the flag off later keeps already-stopped clusters, so they can still
 be started or torn down.

@@ -1711,9 +1711,7 @@ def get_allowed_nodes_config(
                                                        default_value=None)
 
 
-def allow_unmanaged_cluster_destructive_stop(context: Optional[str],
-                                             workspace: Optional[str] = None
-                                            ) -> bool:
+def allow_unmanaged_cluster_destructive_stop(context: Optional[str]) -> bool:
     """Whether `sky stop` may delete a cluster's pods in this context.
 
     Read from server config only. The background status refresh has no client
@@ -1722,15 +1720,13 @@ def allow_unmanaged_cluster_destructive_stop(context: Optional[str],
 
     Args:
         context: Kubernetes context, for `context_configs` overrides.
-        workspace: Workspace of the cluster. None means the active workspace.
     """
     return bool(
         skypilot_config.get_server_workspace_region_config(
             cloud='kubernetes',
             region=context,
             keys=('allow_unmanaged_cluster_destructive_stop',),
-            default_value=False,
-            workspace=workspace))
+            default_value=False))
 
 
 def get_configured_tolerations(
