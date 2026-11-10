@@ -118,8 +118,9 @@ def get_all_pools() -> Dict[str, Any]:
 
 # Keys in a pool config, at the pool level and inside each `hosts` entry, that
 # hold a credential or point at one. `prepare_hosts_info` writes the sudo
-# password into every host entry, so both levels have to be covered. Key paths
-# are hidden for the same reason GET /ssh_node_pools/keys is admin-only.
+# password into every host entry, so both levels have to be covered. Key
+# locations are hidden for the same reason the key inventory
+# (GET /ssh_node_pools/keys) is admin-only.
 _SECRET_POOL_KEYS = frozenset({'password', 'identity_file'})
 
 
