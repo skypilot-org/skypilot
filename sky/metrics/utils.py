@@ -406,6 +406,11 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
 
+SKY_APISERVER_MEMORY_RELEASES_TOTAL = prom.Counter(
+    'sky_apiserver_memory_releases_total',
+    'Memory releases after requests in executor processes, by result '
+    '(released or skipped)', ['result'])
+
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
     # NOT keystroke latency. Read the whole string before alerting on it.
