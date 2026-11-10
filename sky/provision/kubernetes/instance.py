@@ -2945,7 +2945,11 @@ def stop_instances(
         # `_terminate_node` deletes the pod and its services but never deletes
         # PersistentVolumeClaims, which is exactly the stop semantics we want.
         logger.debug(f'stop_instances: deleting pod {pod_name}')
-        _terminate_node(namespace, context, pod_name, _is_head(pod))
+        _terminate_node(namespace,
+                        context,
+                        pod_name,
+                        is_head=_is_head(pod),
+                        has_resource_claims=_pod_has_resource_claims(pod))
 
     subprocess_utils.run_in_parallel(_stop_pod_thread, list(pods.items()),
                                      _NUM_THREADS)

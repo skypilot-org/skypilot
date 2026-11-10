@@ -7280,6 +7280,7 @@ def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
                         lambda *a, **k: False)
     head_pod = mock.MagicMock()
     head_pod.metadata.name = 'test-cluster-head'
+    head_pod.spec.resource_claims = None
     monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
                         lambda *a, **k: {'test-cluster-head': head_pod})
     monkeypatch.setattr(instance, '_is_head', lambda pod: True)
@@ -7293,6 +7294,42 @@ def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
     assert core_api_mock.delete_namespaced_pod.called
     # ... but the PersistentVolumeClaim is retained for restart.
     assert not core_api_mock.delete_namespaced_persistent_volume_claim.called
+
+
+@pytest.mark.parametrize(('resource_claims', 'expected_claims'), [
+    ([mock.MagicMock()], True),
+    (None, False),
+])
+def test_stop_instances_passes_claim_state_to_terminate(monkeypatch,
+                                                        resource_claims,
+                                                        expected_claims):
+    """Stop deletes DRA-claim pods gracefully, like terminate does."""
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    pod = mock.MagicMock()
+    pod.spec.resource_claims = resource_claims
+    monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                        lambda *a, **k: {'test-cluster-head': pod})
+    monkeypatch.setattr(instance, '_is_head', lambda pod: True)
+    monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                        lambda fn, items, n: [fn(i) for i in items])
+    monkeypatch.setattr(instance, '_delete_cluster_services',
+                        lambda *a, **k: None)
+    recorded = {}
+    monkeypatch.setattr(
+        instance, '_terminate_node',
+        lambda *a, **kw: recorded.update(claims=kw['has_resource_claims']))
+
+    instance.stop_instances('test-cluster-on-cloud',
+                            provider_config={'namespace': 'default'})
+
+    assert recorded['claims'] is expected_claims
 
 
 def test_stop_instances_high_availability_raises(monkeypatch):

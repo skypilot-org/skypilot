@@ -408,7 +408,8 @@ class TestUpdateClusterStatusBareHandle:
 
 def _run_update_status_pod_loss(record_status,
                                 flag_enabled,
-                                pod_loss_reason='SystemOOM victim: python'):
+                                pod_loss_reason='SystemOOM victim: python',
+                                to_down=False):
     """Drive _update_cluster_status for a Kubernetes cluster whose pods are
     gone (empty node_statuses). Returns (events, post_teardown_mock).
 
@@ -417,6 +418,7 @@ def _run_update_status_pod_loss(record_status,
     """
     handle = _make_handle()
     record = _make_record(handle, status=record_status)
+    record['to_down'] = to_down
     events = []
 
     def _capture_event(cluster_name, new_status, message, event_type, **kwargs):
@@ -485,6 +487,21 @@ class TestKubernetesDestructiveStop:
         _, post_teardown = _run_update_status_pod_loss(
             status_lib.ClusterStatus.STOPPED, flag_enabled=True)
         post_teardown.assert_not_called()
+
+    def test_stopped_cluster_preserved_after_flag_disabled(self):
+        # Turning the flag off must not drop a stopped cluster's record and
+        # leave its PVCs unreachable by `sky start` / `sky down`.
+        _, post_teardown = _run_update_status_pod_loss(
+            status_lib.ClusterStatus.STOPPED, flag_enabled=False)
+        post_teardown.assert_not_called()
+
+    def test_autodown_terminates_even_with_flag_enabled(self):
+        # Autodown removes the pods itself; it still means termination.
+        events, post_teardown = _run_update_status_pod_loss(
+            status_lib.ClusterStatus.UP, flag_enabled=True, to_down=True)
+        post_teardown.assert_called_once()
+        assert post_teardown.call_args.kwargs.get('terminate') is True
+        assert not any(s == status_lib.ClusterStatus.STOPPED for s, _ in events)
 
     def test_generic_cause_when_no_reason_detected(self):
         # Container cgroup OOMKill leaves no recoverable signal; fall back to
