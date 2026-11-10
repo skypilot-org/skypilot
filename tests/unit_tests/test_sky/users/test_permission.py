@@ -2920,22 +2920,41 @@ class TestProbeThrottle:
             worker._probe_unknown_principal('ghost')
         assert worker._probe_cooldown_until > time.time() - 1
 
+    @pytest.mark.parametrize('pgcode', ['55P03', '57014'])
     def test_a_reload_cut_off_by_the_auth_deadline_is_re_raised(
-            self, policy_db):
+            self, policy_db, pgcode):
         """A deadline is the middleware's retryable 503, not a 403 "no roles":
         swallowing it would deny a principal who does have a role because the
         database was slow for a moment."""
         worker = policy_db()
         worker.enforcer.load_policy()
-        error = sqlalchemy.exc.OperationalError('stmt', {},
-                                                _pg_error('55P03'))
+        error = sqlalchemy.exc.OperationalError('stmt', {}, _pg_error(pgcode))
+        db_deadline.set_deadline(time.monotonic() + 5)
+        try:
+            with mock.patch.object(worker,
+                                   '_load_policy_no_lock',
+                                   side_effect=error):
+                with pytest.raises(sqlalchemy.exc.OperationalError):
+                    worker._probe_unknown_principal('ghost')
+        finally:
+            db_deadline.clear_deadline()
+        # The cooldown is still set (finally), so a slow DB is not hammered.
+        assert worker._probe_cooldown_until > time.time() - 1
+
+    def test_without_an_auth_deadline_a_timeout_still_answers_no_roles(
+            self, policy_db):
+        """Off the auth path (the request executor's seed check, the repair
+        worker) nothing maps a raised timeout to a 503, and a 57014 there
+        comes from some other bound (a server default, a bound on the policy
+        load itself), so the probe keeps answering "no roles"."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        error = sqlalchemy.exc.OperationalError('stmt', {}, _pg_error('57014'))
+        assert db_deadline.get_deadline() is None
         with mock.patch.object(worker,
                                '_load_policy_no_lock',
                                side_effect=error):
-            with pytest.raises(sqlalchemy.exc.OperationalError):
-                worker._probe_unknown_principal('ghost')
-        # The cooldown is still set (finally), so a slow DB is not hammered.
-        assert worker._probe_cooldown_until > time.time() - 1
+            assert worker._probe_unknown_principal('ghost') == []
 
 
 class TestBoundedClaimCache:
