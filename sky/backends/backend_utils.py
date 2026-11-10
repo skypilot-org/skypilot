@@ -3810,10 +3810,11 @@ def _update_cluster_status(
     # no nodes. VM clouds still report a STOPPED instance; here an empty
     # result is ambiguous between "stopped" and "terminated".
     if to_terminate and isinstance(launched_resources.cloud, clouds.Kubernetes):
-        # Only `sky stop` puts a Kubernetes cluster in STOPPED: the pod query
-        # never reports it. Keep the record whatever the flag says now, or
-        # turning the flag off would drop the record and leave its PVCs with
-        # nothing that can `sky start` or `sky down` them.
+        # The pod query never reports STOPPED; only a stop (`sky stop`,
+        # failover, or the pod-loss branch below) sets it. Keep the record
+        # whatever the flag says now, or turning the flag off would drop the
+        # record and leave its PVCs with nothing that can `sky start` or
+        # `sky down` them.
         if record['status'] == status_lib.ClusterStatus.STOPPED:
             return global_user_state.get_cluster_from_name(
                 cluster_name,

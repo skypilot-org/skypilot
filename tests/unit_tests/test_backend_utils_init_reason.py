@@ -472,7 +472,7 @@ def _stopped_messages(events):
 
 class TestKubernetesDestructiveStop:
     """`kubernetes.allow_unmanaged_cluster_destructive_stop` behavior when a
-    cluster's pods disappear (e.g. OOM / eviction / node loss)."""
+    cluster's pods disappear (e.g. eviction, node loss, preemption)."""
 
     def test_pod_loss_stops_cluster_when_flag_enabled(self):
         # Flag on + pods gone => STOP (terminate=False), keep the record/PVC.
