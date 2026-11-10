@@ -1332,8 +1332,6 @@ def _users_and_tokens(tmp_path, monkeypatch):
         sqlalchemy_adapter.Adapter(engine,
                                    db_class=sqlalchemy_adapter.CasbinRule))
     monkeypatch.setattr(permission, 'permission_service', service)
-    monkeypatch.setattr(service, 'invalidate_workspace_permission_cache',
-                        lambda workspace_name: None)
 
     for user_id, role in [('admin', 'admin'),
                           ('alice', 'user'), ('bob', 'user'), ('carol', 'user'),

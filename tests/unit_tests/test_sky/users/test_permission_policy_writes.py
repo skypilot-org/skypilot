@@ -7,6 +7,7 @@ import contextlib
 import copy
 import os
 import sqlite3
+import time
 from unittest import mock
 
 import casbin
@@ -67,9 +68,6 @@ def service(engine, monkeypatch):
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
     monkeypatch.setattr(permission, '_enforcer_instance', None)
     monkeypatch.setattr(permission.rbac, 'get_default_role', lambda: 'user')
-    for name in ('invalidate_user_permission_cache',
-                 'invalidate_workspace_permission_cache'):
-        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
     service = permission.PermissionService()
     service._lazy_initialize()
     return service
@@ -179,13 +177,11 @@ def test_member_update_commits_once_and_keeps_staying_members(service, engine):
 
 def test_unchanged_members_write_nothing(service, engine):
     service.update_workspace_policy('ws', ['alice', 'bob'])
-    service.invalidate_workspace_permission_cache.reset_mock()
 
     with _policy_commits(engine) as counts:
         service.update_workspace_policy('ws', ['bob', 'alice'])
 
     assert counts['commits'] == 0
-    service.invalidate_workspace_permission_cache.assert_not_called()
 
 
 def test_member_sync_leaves_other_rows_alone(service, engine):
@@ -230,16 +226,11 @@ def test_batch_role_update_commits_once(service, engine):
     users = [f'u{i}' for i in range(50)]
     service.update_roles({user: 'user' for user in users})
 
-    service.invalidate_user_permission_cache.reset_mock()
     with _policy_commits(engine) as counts:
         service.update_roles({user: 'viewer' for user in users})
 
     assert counts['commits'] == 1
     assert _rows(engine, 'g') == {(user, 'viewer') for user in users}
-    assert {
-        call.args[0]
-        for call in service.invalidate_user_permission_cache.call_args_list
-    } == set(users)
 
 
 def test_add_workspace_policy_adds_only_missing_members(service, engine):
@@ -260,9 +251,6 @@ def test_writes_land_in_the_enforcers_own_database(tmp_path, monkeypatch):
     monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
                         mock.Mock(side_effect=AssertionError('wrong database')))
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
-    for name in ('invalidate_user_permission_cache',
-                 'invalidate_workspace_permission_cache'):
-        monkeypatch.setattr(permission.PermissionService, name, mock.Mock())
 
     service.update_role('alice', 'user')
     service.update_workspace_policy('ws', ['alice'])
@@ -272,27 +260,34 @@ def test_writes_land_in_the_enforcers_own_database(tmp_path, monkeypatch):
     assert _members(engine, 'ws') == {'alice'}
 
 
-def test_cache_is_cleared_when_the_reload_after_a_write_fails(
-        service, engine, monkeypatch):
+def test_a_failed_reload_after_a_write_keeps_the_write(service, engine,
+                                                       monkeypatch):
     service.update_workspace_policy('ws', ['alice'])
-    service.invalidate_workspace_permission_cache.reset_mock()
     monkeypatch.setattr(service, '_load_policy_no_lock',
                         mock.Mock(side_effect=RuntimeError('reload failed')))
 
     service.update_workspace_policy('ws', ['bob'])
 
     assert _members(engine, 'ws') == {'bob'}
-    service.invalidate_workspace_permission_cache.assert_called_once_with('ws')
 
 
-@pytest.mark.parametrize('cache_fails', [False, True])
-def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch,
-                                                cache_fails):
+def test_member_check_sees_a_write_made_elsewhere(service, engine, monkeypatch):
+    # Another process, an older replica or manual SQL: nothing in this
+    # process is told about the write.
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+    assert not service.check_workspace_permission('alice', 'ws')
+
+    _insert(engine, 'p', ('alice', 'ws', '*'))
+    assert service.check_workspace_permission('alice', 'ws')
+
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text('DELETE FROM casbin_rule WHERE v0 = \'alice\''))
+    assert not service.check_workspace_permission('alice', 'ws')
+
+
+def test_new_user_resync_adds_the_missing_grant(service, engine, monkeypatch):
     service.add_workspace_policy('ws-a', ['alice'])
-    if cache_fails:
-        # The grant is committed; a failed clear must not fail the caller.
-        service.invalidate_user_permission_cache.side_effect = RuntimeError(
-            'cache down')
     workspaces = {
         name: {
             'private': True,
@@ -394,34 +389,77 @@ def test_delete_user_keeps_the_record(service, engine):
     assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
 
 
-@pytest.mark.parametrize('write', [
-    'delete_user', 'delete_user_and_record', 'add_workspace_policy',
-    'remove_workspace_policy'
-])
-def test_a_failed_cache_clear_does_not_fail_a_committed_write(
-        service, engine, write):
-    """A raise after the commit would report a done write as failed, and a
-    retry of a delete then finds no user."""
-    _add_user_row(engine, 'bob')
-    service.update_role('bob', 'user')
-    service.add_workspace_policy('ws', ['alice'])
-    for name in ('invalidate_user_permission_cache',
-                 'invalidate_workspace_permission_cache'):
-        getattr(service, name).side_effect = RuntimeError('cache down')
+_LEGACY_CACHE_WRITES = {
+    'update_workspace_policy': lambda service: service.update_workspace_policy(
+        'ws', ['bob']),
+    'add_workspace_policy': lambda service: service.add_workspace_policy(
+        'ws', ['bob']),
+    'remove_workspace_policy': lambda service: service.remove_workspace_policy(
+        'ws'),
+    'update_role': lambda service: service.update_role('alice', 'admin'),
+    'add_user_if_not_exists': lambda service: service.add_user_if_not_exists(
+        'carol'),
+    'delete_user': lambda service: service.delete_user('alice'),
+    'delete_user_and_record': lambda service: service.delete_user_and_record(
+        'alice'),
+}
 
-    if write == 'add_workspace_policy':
-        service.add_workspace_policy('ws', ['bob'])
-        assert _members(engine, 'ws') == {'alice', 'bob'}
-        service.invalidate_workspace_permission_cache.assert_called_with('ws')
-    elif write == 'remove_workspace_policy':
-        service.remove_workspace_policy('ws')
-        assert _members(engine, 'ws') == set()
-        service.invalidate_workspace_permission_cache.assert_called_with('ws')
-    else:
-        getattr(service, write)('bob')
-        assert _rows(engine, 'g', 'AND v0 = \'bob\'') == set()
-        assert _user_row_exists(engine, 'bob') == (write == 'delete_user')
-        service.invalidate_user_permission_cache.assert_called_with('bob')
+
+@pytest.mark.parametrize('write', sorted(_LEGACY_CACHE_WRITES))
+@pytest.mark.parametrize('clear_fails', [False, True])
+def test_every_policy_write_clears_older_servers_member_cache(
+        service, engine, monkeypatch, write, clear_fails):
+    """Older servers trust a cached member check for an hour; during a rolling
+    update or after a rollback only this clear keeps them current. A failed
+    clear must not fail the committed write."""
+    _add_user_row(engine, 'alice')
+    service.update_role('alice', 'user')
+    service.add_workspace_policy('ws', ['alice'])
+    versions = []
+
+    def clear(prefix):
+        versions.append((prefix, _rows(engine, 'g') | _rows(engine, 'p')))
+        if clear_fails:
+            raise RuntimeError('cache down')
+
+    monkeypatch.setattr(permission.kv_cache, 'delete_cache_entries_by_prefix',
+                        clear)
+    before = _rows(engine, 'g') | _rows(engine, 'p')
+    _LEGACY_CACHE_WRITES[write](service)
+    after = _rows(engine, 'g') | _rows(engine, 'p')
+
+    assert after != before
+    # After the commit: the clear saw the written rows.
+    assert versions and versions[-1] == ('perm:ws:', after)
+
+
+def test_startup_clears_older_servers_member_cache_even_if_unchanged(
+        service, monkeypatch):
+    """A rollback right after this server starts must not find entries an
+    older server cached before the upgrade."""
+    _startup_patches(monkeypatch, service, rules_complete=True)
+    service._maybe_initialize_policies()
+    cleared = []
+    monkeypatch.setattr(permission.kv_cache, 'delete_cache_entries_by_prefix',
+                        cleared.append)
+    service._maybe_initialize_policies()  # Nothing left to change.
+    assert cleared == ['perm:ws:']
+
+
+def test_legacy_member_cache_clear_drops_only_member_checks(
+        service, monkeypatch, tmp_path):
+    kv_engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/kv_cache.db')
+    permission.kv_cache.create_table(kv_engine)
+    monkeypatch.setattr(permission.kv_cache._db_manager, '_engine', kv_engine)
+    expires = time.time() + 3600
+    for key in ('perm:ws:ws:alice', 'perm:ws:other:bob', 'other:perm:ws:x'):
+        permission.kv_cache.add_or_update_cache_entry(key, '1', expires)
+
+    service.add_workspace_policy('ws', ['alice'])
+
+    assert permission.kv_cache.get_cache_entry('perm:ws:ws:alice') is None
+    assert permission.kv_cache.get_cache_entry('perm:ws:other:bob') is None
+    assert permission.kv_cache.get_cache_entry('other:perm:ws:x') == '1'
 
 
 def test_delete_user_and_record_is_one_transaction(service, engine):
