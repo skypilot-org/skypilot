@@ -38,6 +38,80 @@ def test_get_kubernetes_nodes():
             utils.get_kubernetes_nodes(context='test')
 
 
+@pytest.fixture
+def unreachable_checks(monkeypatch):
+    checks = []
+    monkeypatch.setattr(utils, '_CONTEXT_UNREACHABLE_CHECKS', checks)
+    return checks
+
+
+def _proxy_down(context):
+    return 'proxy is down' if context == 'down' else None
+
+
+def _api_call_recorder():
+    calls = []
+
+    @utils._retry_on_error()
+    def list_things(*, context):
+        calls.append(context)
+        if context == 'flaky' and len(calls) == 1:
+            raise kubernetes.client.rest.ApiException(status=503)
+        return ['thing']
+
+    return list_things, calls
+
+
+def test_known_unreachable_context_fails_at_once(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        with pytest.raises(exceptions.KubeAPIUnreachableError,
+                           match="'down' is unreachable: proxy is down"):
+            list_things(context='down')
+    assert calls == []
+    mock_sleep.assert_not_called()
+
+
+def test_call_without_context_is_attempted(unreachable_checks, monkeypatch):
+    utils.register_context_unreachable_check(_proxy_down)
+    monkeypatch.setattr(utils, 'get_current_kube_config_context_name',
+                        lambda: 'down')
+    list_things, calls = _api_call_recorder()
+    assert list_things(context=None) == ['thing']
+    assert calls == [None]
+
+
+def test_other_contexts_are_still_retried(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        assert list_things(context='flaky') == ['thing']
+    assert calls == ['flaky', 'flaky']
+    mock_sleep.assert_called_once()
+
+
+def test_failing_unreachable_check_is_skipped(unreachable_checks):
+
+    def broken_check(context):
+        raise RuntimeError('state unavailable')
+
+    utils.register_context_unreachable_check(broken_check)
+    list_things, calls = _api_call_recorder()
+    assert list_things(context='down') == ['thing']
+    assert calls == ['down']
+
+
+def test_register_context_unreachable_check_is_idempotent(unreachable_checks):
+
+    def check(context):
+        return None
+
+    utils.register_context_unreachable_check(check)
+    utils.register_context_unreachable_check(check)
+    assert unreachable_checks == [check]
+
+
 @pytest.mark.parametrize('status,headers,expected', [
     (500, None, True),
     (503, None, True),

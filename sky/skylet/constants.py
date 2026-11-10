@@ -952,7 +952,7 @@ ENV_VAR_SERVER_JOBS_CONTROLLERS = (
 # Memory one API server (uvicorn) worker process is expected to hold, in GB,
 # overriding the built-in estimate. Used only with
 # SKYPILOT_MEMORY_AWARE_WORKER_SIZING; raise it when requests run in the
-# server processes (`executor.register_in_process_request`).
+# server processes (`executor.set_execution_policy`).
 ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}UVICORN_WORKER_MEM_GB')
 
