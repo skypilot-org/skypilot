@@ -47,15 +47,6 @@ logger = sky_logging.init_logger(__name__)
 
 # The chunk size for downloading the logs from the API server.
 _DOWNLOAD_CHUNK_BYTES = 8192
-# The chunk size for the zip file to be uploaded to the API server. We split
-# the zip file into chunks to avoid network issues for large request body that
-# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
-# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MB
-# (not 100MiB; 100MB = 100,000,000 bytes):
-# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
-# We use 95MB to leave headroom for HTTP headers and request overhead.
-_UPLOAD_CHUNK_BYTES = 95 * 1000 * 1000
-
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
 _FILE_UPLOAD_LOCK_DIR = '~/.sky/locks/file_uploads'
@@ -184,6 +175,9 @@ class UploadChunkParams:
     file_path: str
     upload_logger: logging.Logger
     log_file: str
+    # Read in the caller's thread: chunks upload on worker threads, which do
+    # not see the caller's `sdk.impersonate()` context.
+    auth_headers: Dict[str, str]
     # For backward compatibility
     # TODO(aylei): remove this and always use /upload_v2 after 0.14.0
     endpoint: str = '/upload'
@@ -201,7 +195,6 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
-    sa_headers = service_account_auth.get_service_account_headers()
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
@@ -212,11 +205,12 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                     'chunk_index': str(params.chunk_index),
                     'total_chunks': str(params.total_chunks),
                 },
-                content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
+                content=FileChunkIterator(f,
+                                          server_constants.UPLOAD_CHUNK_BYTES,
                                           params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
-                    **sa_headers,
+                    **params.auth_headers,
                 },
                 cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
@@ -407,7 +401,8 @@ def upload_mounts_to_api_server(
                         status: rich_utils.GeneralStatus,
                         upload_logger: logging.Logger):
             zip_file_size = os.path.getsize(zip_file_path)
-            total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
+            total_chunks = int(
+                math.ceil(zip_file_size / server_constants.UPLOAD_CHUNK_BYTES))
             timeout = httpx.Timeout(None, read=180.0)
             status.update(
                 ux_utils.spinner_message(
@@ -416,6 +411,7 @@ def upload_mounts_to_api_server(
                     is_local=True))
 
             upload_completed = False
+            auth_headers = service_account_auth.get_service_account_headers()
             with httpx.Client(timeout=timeout) as client:
                 total_retries = 3
                 for retry in range(total_retries):
@@ -427,6 +423,7 @@ def upload_mounts_to_api_server(
                                           zip_file_path,
                                           upload_logger,
                                           log_file,
+                                          auth_headers,
                                           endpoint=endpoint)
                         for chunk_index in range(total_chunks)
                     ]
@@ -476,6 +473,7 @@ def upload_mounts_to_api_server(
                         params={
                             'user_hash': common_utils.get_user_hash(),
                             'blob_id': blob_id,
+                            'size_bytes': os.path.getsize(temp_zip_file.name),
                         })
                     if resp.status_code != 200:
                         raise RuntimeError(f'Failed to check blob existence: '

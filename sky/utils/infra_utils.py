@@ -1,11 +1,30 @@
 """Utility functions for handling infrastructure specifications."""
 import dataclasses
-from typing import Optional
+from typing import Optional, Tuple
 
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
 _REGION_OR_ZONE_TRUNCATION_LENGTH = 25
+
+# SSH node pools are served by the Kubernetes code paths, but are configured
+# under their own cloud and are named without this prefix in the config.
+_SSH_CONTEXT_PREFIX = 'ssh-'
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context.
+
+    A Kubernetes context named ``ssh-<pool>`` is an SSH node pool, whose config
+    lives under ``ssh.context_configs.<pool>`` -- so both the cloud to read and
+    the name to look it up under differ from the raw context.
+    """
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith(_SSH_CONTEXT_PREFIX):
+        cloud_str = 'ssh'
+        context = common_utils.removeprefix(context, _SSH_CONTEXT_PREFIX)
+    return context, cloud_str
 
 
 @dataclasses.dataclass

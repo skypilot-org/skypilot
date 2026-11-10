@@ -11,7 +11,26 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-website-id', '4223d017-a3d2-4b92-b191-ea4d425a23c3');
        script.setAttribute('data-project-name', 'SkyPilot');
        script.setAttribute('data-project-color', '#4C4C4D');
-       script.setAttribute('data-project-logo', 'https://avatars.githubusercontent.com/u/109387420?s=100&v=4');
+       // Follow the docs theme toggle (pydata-sphinx-theme sets
+       // html[data-theme="dark"]) so the widget switches with the site.
+       script.setAttribute('data-color-scheme-selector', "html[data-theme='dark']");
+       // Light mode: solid white launcher button with black text, no shadow.
+       script.setAttribute('data-launcher-button-background-color', '#FFFFFF');
+       script.setAttribute('data-launcher-button-hover-background-color', '#FFFFFF');
+       script.setAttribute('data-launcher-button-border', 'none');
+       script.setAttribute('data-launcher-button-color', '#000000');
+       script.setAttribute('data-launcher-button-text-shadow', 'none');
+       script.setAttribute('data-launcher-button-label-color', '#000000');
+       script.setAttribute('data-launcher-button-label-text-shadow', 'none');
+       // Dark mode: dark launcher surface with white text.
+       script.setAttribute('data-launcher-button-background-color-dark', '#1F242C');
+       script.setAttribute('data-launcher-button-hover-background-color-dark', '#1F242C');
+       script.setAttribute('data-launcher-button-border-dark', 'none');
+       script.setAttribute('data-launcher-button-color-dark', '#FFFFFF');
+       script.setAttribute('data-launcher-button-text-shadow-dark', 'none');
+       script.setAttribute('data-launcher-button-label-color-dark', '#FFFFFF');
+       script.setAttribute('data-launcher-button-label-text-shadow-dark', 'none');
+       script.setAttribute('data-project-logo', 'https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/_static/skypilot-icon.png');
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
        script.setAttribute('data-button-position-bottom', '100px');
@@ -51,17 +70,47 @@ document.addEventListener('DOMContentLoaded', function () {
     document.head.appendChild(script);
 })();
 
+// Website analytics
+!function(t,e){var o,n,p,r;e.__SV||(window.posthog && window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}p||((p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",p.onerror=function(){p=null},(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r));var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],Object.defineProperty(u,"toString",{configurable:!0,enumerable:!0,writable:!0,value:function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}}),Object.defineProperty(u.people,"toString",{configurable:!0,enumerable:!0,writable:!0,value:function(){return u.toString(1)+".people (stub)"}}),o="mu yu bu Su init Vu Gu zu Uu Ku il Wu Yu ju rh oh ah uh hh dh capture getExtension Zu pu gh calculateEventProperties ph register register_once register_for_session unregister unregister_for_session Hu mh getFeatureFlag getFeatureFlagPayload getFeatureFlagResult getAllFeatureFlags isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey cancelPendingSurvey canRenderSurvey canRenderSurveyAsync wh identify setPersonProperties unsetPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset kh shutdown setIdentity clearIdentity get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException addExceptionStep captureLog startExceptionAutocapture stopExceptionAutocapture loadToolbar get_property getSessionProperty yh ih createPersonProfile setInternalOrTestUser bh xu Cu opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing get_explicit_consent_status is_capturing clear_opt_in_out_capturing th debug nl Os getPageViewId captureTraceFeedback captureTraceMetric Du".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+posthog.init('phc_pGpUpdoeTRfbjMHFjzgrjtpXCbnzh7UPVM53FYhp8L9k', {
+    api_host: 'https://usage-v3.skypilot.co',
+    ui_host: 'https://us.posthog.com',
+    defaults: '2026-05-30',
+    person_profiles: 'identified_only',
+});
+
+// Platform CTA clicks: the navbar "Try SkyPilot Platform" button and the
+// "SkyPilot Platform" sidebar entry, both outbound to skypilot.ai/platform.
+// sendBeacon so the event survives the same-tab navigation of the sidebar link.
+document.addEventListener('DOMContentLoaded', () => {
+    const ctas = [
+        { selector: 'a.sky-cta', location: 'navbar', label: 'Try SkyPilot Platform' },
+        { selector: '.toctree-l1 > a[href^="https://skypilot.ai/platform"]', location: 'sidebar', label: 'SkyPilot Platform' },
+    ];
+    ctas.forEach(({ selector, location, label }) => {
+        document.querySelectorAll(selector).forEach((el) => {
+            el.addEventListener('click', () => {
+                window.posthog.capture('platform_cta_clicked', {
+                    location,
+                    label,
+                    href: el.href,
+                    page: window.location.pathname,
+                }, { send_instantly: true, transport: 'sendBeacon' });
+            });
+        });
+    });
+});
+
 // New items: add 'new-item' class for for new items.
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
-        { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Platform' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
-        { selector: '.toctree-l2 > a', text: 'Sandboxes' },
+        { selector: '.toctree-l1 > a', text: 'Sandboxes' },
         { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
         { selector: '.toctree-l1 > a', text: 'SkyPilot Endpoints' },
     ];
@@ -71,18 +120,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.classList.add('new-item');
             }
         });
-    });
-});
-
-// Auto-expand the "For Frontier AI" section so its nested items (and their
-// "New" badges) are visible in the sidebar without a manual click.
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.toctree-l1').forEach((li) => {
-        const link = li.querySelector(':scope > a');
-        if (link && link.textContent.includes('For Frontier AI')) {
-            const checkbox = li.querySelector(':scope > input.toctree-checkbox');
-            if (checkbox) checkbox.checked = true;
-        }
     });
 });
 

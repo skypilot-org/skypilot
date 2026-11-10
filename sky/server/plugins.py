@@ -16,6 +16,7 @@ from sky.utils import config_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from sky.server.auth import impersonation as impersonation_mod
     from sky.server.blob import blob_storage as blob_storage_mod
     from sky.server.requests import log_provider as log_provider_mod
     from sky.server.requests import storage as storage_mod
@@ -108,12 +109,9 @@ class ExtensionContext:
 
     Attributes:
         app: The FastAPI application instance.
-        rbac_rules: List of RBAC rules registered by the plugin.
-        Example:
-        [
-            ('user', RBACRule(path='/plugins/api/xx/*', method='POST')),
-            ('user', RBACRule(path='/plugins/api/xx/*', method='DELETE'))
-        ]
+
+    RBAC rules are declared through ``BasePlugin.rbac_rules``, not here: the
+    server collects them before any plugin is installed.
     """
 
     def __init__(
@@ -124,7 +122,6 @@ class ExtensionContext:
     ):
         self.context = context
         self.app = app
-        self.rbac_rules: List[Tuple[str, RBACRule]] = []
         self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
 
     def register_managed_secrets_provider(
@@ -174,39 +171,26 @@ class ExtensionContext:
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
 
-    def register_rbac_rule(self,
-                           path: str,
-                           method: str,
-                           description: Optional[str] = None,
-                           role: str = 'user') -> None:
-        """Register an RBAC rule for this plugin.
+    def register_impersonation_policy(
+        self,
+        policy: 'impersonation_mod.ImpersonationPolicy',
+    ) -> None:
+        """Register who may act as whom through the impersonation header.
 
-        This method allows plugins to declare which endpoints should be
-        restricted to admin users during the install phase.
-
-        Args:
-            path: The path pattern to restrict (supports wildcards with
-                  keyMatch2).
-                  Example: '/plugins/api/credentials/*'
-            method: The HTTP method to restrict. Example: 'POST', 'DELETE'
-            description: Optional description of what this rule protects.
-            role: The role to add this rule to (default: 'user').
-                  Rules added to 'user' role block regular users but allow
-                  admins.
-
-        Example:
-            def install(self, ctx: ExtensionContext):
-                # Only admin can upload credentials
-                ctx.register_rbac_rule(
-                    path='/plugins/api/credentials/*',
-                    method='POST',
-                    description='Only admin can upload credentials'
-                )
+        Replaces the default policy (admin service accounts, when
+        `rbac.allow_impersonation` is on). The policy is called on a worker
+        thread with the authenticated caller and the resolved target user, and
+        returns None to allow or the reason for refusing. The server still
+        refuses callers that are not service accounts, service accounts and
+        built-in users as targets, targets whose role outranks the caller's,
+        endpoints the caller's own role denies, and changes to users or
+        service account tokens. A plugin endpoint that issues a session or
+        token for the authenticated user must refuse when
+        `request.state.impersonator` is set.
         """
-        rule = RBACRule(path=path, method=method, description=description)
-        self.rbac_rules.append((role, rule))
-        logger.debug(f'Registered RBAC rule for {role}: {method} {path}'
-                     f'{f" - {description}" if description else ""}')
+        # pylint: disable=import-outside-toplevel
+        from sky.server.auth import impersonation
+        impersonation.set_policy(policy)
 
 
 @dataclasses.dataclass
@@ -308,6 +292,18 @@ class BasePlugin(abc.ABC):
         the strictly-read-only `viewer` role.  Endpoints NOT declared
         here are denied for viewers by default.
 
+        IMPORTANT -- dual contract: this list also classifies an endpoint as
+        read-only for *workspace access* (see
+        `sky.server.requests.workspace_access` /
+        `rbac.get_read_only_endpoints`). An endpoint declared here therefore
+        (a) becomes callable by the viewer role AND (b) needs only *read* on
+        the caller's active workspace, which lets a non-member of a read-only
+        workspace call it. Only declare endpoints that genuinely read; never
+        list one that creates or mutates a workspace-scoped resource, or a
+        non-member could reach it. Endpoints omitted here default to requiring
+        active-workspace *write* (the fail-safe direction), so a plugin's
+        mutating endpoints need no extra declaration to be gated.
+
         Path patterns use the same Casbin `keyMatch2` syntax as
         `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
 
@@ -333,6 +329,35 @@ class BasePlugin(abc.ABC):
     def install(self, extension_context: ExtensionContext):
         """Hook called by API server to let the plugin install itself."""
         raise NotImplementedError
+
+    def install_late(self, extension_context: ExtensionContext):
+        """Second install pass, run after every plugin's `install`.
+
+        For middleware that must sit *inside* the middleware other plugins
+        register — anything that reads state an earlier middleware populates,
+        `request.state.auth_user` above all.
+
+        Middleware order is install order: `add_middleware_last` appends to
+        `app.user_middleware`, and the stack is built by wrapping that list in
+        reverse, so an entry appended earlier ends up further out. A plugin
+        registering an authorization middleware in `install` therefore runs
+        outside the authentication middleware of any plugin that happens to be
+        listed after it in the server config, sees no identity, and — since
+        "no identity" conventionally means "local caller, allow" — fails open.
+        Registering it here instead makes it innermost regardless of the
+        configured plugin order.
+
+        Only for that ordering need. Everything else belongs in `install`.
+
+        A middleware that sets `request.state.auth_user` must first ensure the
+        user's row in the users table and its role: requests from an
+        authenticated user run without upserting either.
+
+        Raising here aborts the load, exactly as raising from `install` does:
+        plugins are infrastructure, and a half-installed one is not something
+        to serve requests with. "Second pass" does not mean optional.
+        """
+        del extension_context  # Unused by the default no-op.
 
     def shutdown(self):
         """Hook called by API server to let the plugin shutdown."""
@@ -507,6 +532,7 @@ def load_plugins(extension_context: ExtensionContext):
         _plugins_loaded = True
         return
 
+    installed_now: List[Tuple[str, BasePlugin]] = []
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
         logger.debug(f'Loading plugins: {class_path}')
@@ -535,6 +561,26 @@ def load_plugins(extension_context: ExtensionContext):
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+        installed_now.append((class_path, plugin))
+
+    # Second pass, after every plugin has installed: see
+    # `BasePlugin.install_late`. A plugin whose middleware must be innermost
+    # (because it reads what another plugin's middleware sets) cannot get
+    # there from `install`, where its position depends on where it happens to
+    # sit in the configured plugin list.
+    #
+    # Over what this call installed, not over `_PLUGINS`: that dict is
+    # module-global and never cleared, so in a process that loads plugins more
+    # than once (MAIN, then UVICORN in-process) it still holds instances from
+    # the earlier load — including ones whose `load_contexts` excludes the
+    # context we are in now. Those must not get a late install here.
+    for class_path, plugin in installed_now:
+        try:
+            plugin.install_late(extension_context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Plugin {class_path} failed its late install pass: '
+                         f'{common_utils.format_exception(e)}')
+            raise
 
     _plugins_loaded = True
 

@@ -997,6 +997,19 @@ class Storage(object):
                     'config.mount can only be specified when '
                     f'mode is {StorageMode.MOUNT.value}. '
                     f'Got mode={self.mode.value}.')
+        # _bucket_sub_path comes from the task YAML and ends up in shell
+        # commands that sync, mount and delete the bucket, so only allow a
+        # plain relative path. Stores strip leading/trailing slashes.
+        sub_path = (_bucket_sub_path.strip('/')
+                    if _bucket_sub_path is not None else '')
+        if sub_path and (not re.fullmatch(constants.SUB_PATH_PATTERN, sub_path)
+                         or '..' in sub_path.split('/')):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'Invalid _bucket_sub_path: {_bucket_sub_path!r}. Must be '
+                    'a relative path containing only alphanumeric characters, '
+                    'dots, slashes, underscores and hyphens, and must not '
+                    'contain directory traversal (..).')
 
     def resolve_mount_cached_config(self) -> Optional[MountCachedConfig]:
         """Resolve file_mount_type + overrides into a final MountCachedConfig.
@@ -2275,7 +2288,7 @@ class S3CompatibleStore(AbstractStore):
             # Build AWS CLI command with provider-specific configuration
             cmd_parts = ['aws s3 sync --no-follow-symlinks --exclude="*"']
             cmd_parts.append(f'{includes} {base_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}')
+            cmd_parts.append(shlex.quote(f's3://{self.name}{sub_path}'))
 
             # Add provider-specific arguments
             if self.config.get_endpoint_url:
@@ -2327,7 +2340,8 @@ class S3CompatibleStore(AbstractStore):
 
             cmd_parts = ['aws s3 sync --no-follow-symlinks']
             cmd_parts.append(f'{excludes} {src_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}/{dest_dir_name}')
+            cmd_parts.append(
+                shlex.quote(f's3://{self.name}{sub_path}/{dest_dir_name}'))
 
             if self.config.get_endpoint_url:
                 cmd_parts.append(
@@ -2521,7 +2535,8 @@ class S3CompatibleStore(AbstractStore):
 
     def _delete_bucket_sub_path(self, bucket_name: str, sub_path: str) -> bool:
         """Delete objects in the sub path from the bucket."""
-        cmd_parts = [f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive']
+        sub_path_url = shlex.quote(f's3://{bucket_name}/{sub_path}/')
+        cmd_parts = [f'aws s3 rm {sub_path_url} --recursive']
 
         if self.config.aws_profile:
             cmd_parts.append(f'--profile={self.config.aws_profile}')
@@ -2797,8 +2812,11 @@ class GcsStore(AbstractStore):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         sub_path = (f'/{self._bucket_sub_path}'
                     if self._bucket_sub_path else '')
-        sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
-                        f'cp -e -n -r -I gs://{self.name}{sub_path}')
+        dest_url = shlex.quote(f'gs://{self.name}{sub_path}')
+        # copy_list holds client-controlled paths, so it is quoted as a single
+        # shell argument (the quoting keeps the embedded newlines).
+        sync_command = (f'{alias_gen}; echo {shlex.quote(copy_list)} | '
+                        f'{gsutil_alias} cp -e -n -r -I {dest_url}')
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
         sync_path = f'{source_message} -> gs://{self.name}{sub_path}/'
@@ -2837,24 +2855,34 @@ class GcsStore(AbstractStore):
                     if self._bucket_sub_path else '')
 
         def get_file_sync_command(base_dir_path, file_names):
+            # file_names are client-controlled (they are the names of the
+            # uploaded files), so the regex is built first and then quoted as a
+            # single shell argument.
             sync_format = '|'.join(file_names)
+            exclude_pattern = shlex.quote(f'^(?!{sync_format}$).*')
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
+            dest_url = shlex.quote(f'gs://{self.name}{sub_path}')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
-                            f'{base_dir_path} gs://{self.name}{sub_path}')
+                            f'rsync -e -x {exclude_pattern} '
+                            f'{base_dir_path} {dest_url}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             # we exclude .git directory from the sync
             excluded_list.append(r'^\.git/.*$')
+            # excluded_list is derived from client-controlled file names, so the
+            # regex is built first and then quoted as a single shell argument.
             excludes = '|'.join(excluded_list)
+            exclude_pattern = shlex.quote(f'({excludes})')
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
+            dest_url = shlex.quote(
+                f'gs://{self.name}{sub_path}/{dest_dir_name}')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
-                            f'gs://{self.name}{sub_path}/{dest_dir_name}')
+                            f'rsync -e -r -x {exclude_pattern} {src_dir_path} '
+                            f'{dest_url}')
             return sync_command
 
         # Generate message for upload
@@ -3065,9 +3093,9 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (
-                    f'{alias_gen};{gsutil_alias} '
-                    f'rm -r gs://{bucket_name}{command_suffix}')
+                remove_url = shlex.quote(f'gs://{bucket_name}{command_suffix}')
+                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
+                                      f'rm -r {remove_url}')
                 subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True,
@@ -3687,11 +3715,12 @@ class AzureBlobStore(AbstractStore):
                           if self._bucket_sub_path else self.container_name)
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
-            # shlex.quote is not used for file_names as 'az storage blob sync'
-            # already handles file names with empty spaces when used with
-            # '--include-pattern' option.
+            # file_names are client-controlled, so the ';'-joined pattern is
+            # built first and then quoted as a single shell argument. 'az
+            # storage blob sync' still receives the literal pattern (including
+            # any spaces) via '--include-pattern'.
             includes_list = ';'.join(file_names)
-            includes = f'--include-pattern "{includes_list}"'
+            includes = f'--include-pattern {shlex.quote(includes_list)}'
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
@@ -3699,28 +3728,32 @@ class AzureBlobStore(AbstractStore):
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {container_path}')
+                            f'--container {shlex.quote(container_path)}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/')
+            # excluded_list is derived from client-controlled file names, so the
+            # ';'-joined pattern is built first and then quoted as a single
+            # shell argument.
             excludes_list = ';'.join(
                 [file_name.rstrip('*') for file_name in excluded_list])
-            excludes = f'--exclude-path "{excludes_list}"'
+            excludes = f'--exclude-path {shlex.quote(excludes_list)}'
             src_dir_path = shlex.quote(src_dir_path)
             if dest_dir_name:
                 dest_dir_name = f'/{dest_dir_name}'
             else:
                 dest_dir_name = ''
+            dest_container = shlex.quote(f'{container_path}{dest_dir_name}')
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '
-                            f'--container {container_path}{dest_dir_name}')
+                            f'--container {dest_container}')
             return sync_command
 
         # Generate message for upload
@@ -4213,10 +4246,10 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
+            dest_path = shlex.quote(f'{self.rclone_profile_name}:{self.name}'
+                                    f'{sub_path}/{dest_dir_name}')
             sync_command = ('rclone copy --exclude ".git/*" '
-                            f'{src_dir_path} '
-                            f'{self.rclone_profile_name}:{self.name}{sub_path}'
-                            f'/{dest_dir_name}')
+                            f'{src_dir_path} {dest_path}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -4242,9 +4275,10 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
+            dest_path = shlex.quote(
+                f'{self.rclone_profile_name}:{self.name}{sub_path}')
             sync_command = ('rclone copy '
-                            f'{includes} {base_dir_path} '
-                            f'{self.rclone_profile_name}:{self.name}{sub_path}')
+                            f'{includes} {base_dir_path} {dest_path}')
             return sync_command
 
         # Generate message for upload
@@ -4664,15 +4698,21 @@ class OciStore(AbstractStore):
 
         @oci.with_oci_env
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            # file_names are client-controlled, so each is quoted as a single
+            # shell argument.
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             prefix_arg = ''
             if sub_path:
-                prefix_arg = f'--object-prefix "{sub_path.strip("/")}"'
+                prefix_arg = ('--object-prefix '
+                              f'{shlex.quote(sub_path.strip("/"))}')
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--region {self.region} --src-dir "{base_dir_path}" '
+                f'--region {self.region} '
+                f'--src-dir {shlex.quote(base_dir_path)} '
                 f'{prefix_arg} '
                 f'{includes}')
 
@@ -4690,13 +4730,14 @@ class OciStore(AbstractStore):
                 for file_name in excluded_list
             ])
 
+            object_prefix = shlex.quote(f'{sub_path}{dest_dir_name}')
             # we exclude .git directory from the sync
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--region {self.region} '
-                f'--object-prefix "{sub_path}{dest_dir_name}" '
-                f'--src-dir "{src_dir_path}" {excludes}')
+                f'--object-prefix {object_prefix} '
+                f'--src-dir {shlex.quote(src_dir_path)} {excludes}')
 
             return sync_command
 

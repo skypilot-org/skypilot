@@ -2,6 +2,7 @@
 import os
 import subprocess
 import tempfile
+from unittest import mock
 
 from sky import task as task_lib
 from sky.utils import dag_utils
@@ -57,6 +58,16 @@ class TestWorkdirGitCommit:
         with tempfile.TemporaryDirectory() as d:
             t = task_lib.Task(workdir=d)
             t.expand_and_validate_workdir()
+            assert t.metadata.get('git_commit') is None
+
+    def test_workdir_without_git_executable(self):
+        """Git commit is None when the Git executable is unavailable."""
+        with tempfile.TemporaryDirectory() as d:
+            t = task_lib.Task(workdir=d)
+            error = FileNotFoundError(2, 'No such file or directory', 'git')
+            with mock.patch('sky.utils.common_utils.subprocess.run',
+                            side_effect=error):
+                t.expand_and_validate_workdir()
             assert t.metadata.get('git_commit') is None
 
     def test_no_workdir(self):

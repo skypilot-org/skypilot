@@ -1,5 +1,9 @@
 """Unit tests for check_results accessors in global_user_state."""
+import pytest
+
 from sky import global_user_state
+from sky import models
+from sky.clouds import cloud
 from sky.skylet import constants
 from sky.utils.db import db_utils
 
@@ -26,6 +30,35 @@ def _fresh_db(tmp_path, monkeypatch):
         ),
     )
     return tmp_path / '.sky' / 'state.db'
+
+
+@pytest.mark.parametrize(
+    'slurm_config,expected',
+    [
+        ({}, False),
+        ({
+            'submit_as_user': True
+        }, True),
+        ({
+            'cluster_configs': {
+                'cluster-a': {
+                    'submit_as_user': True
+                }
+            }
+        }, True),
+        ({
+            'cluster_configs': {
+                'cluster-a': {
+                    'submit_as_user': False
+                }
+            }
+        }, False),
+    ],
+)
+def test_detects_submit_as_user_config(monkeypatch, slurm_config, expected):
+    monkeypatch.setattr(global_user_state.skypilot_config, 'get_nested',
+                        lambda *args, **kwargs: slurm_config)
+    assert global_user_state._slurm_submit_as_user_enabled() is expected
 
 
 def test_get_returns_empty_when_no_row(tmp_path, monkeypatch):
@@ -56,6 +89,72 @@ def test_set_then_get_full_run(tmp_path, monkeypatch):
     global_user_state.set_check_results(results,
                                         workspace='default',
                                         is_full_workspace_run=True)
+    assert global_user_state.get_cached_check_results('default') == results
+
+
+def test_check_results_and_enabled_clouds_are_user_scoped(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    current_user = [models.User(id='alice-id', name='alice@example.com')]
+    monkeypatch.setattr(global_user_state, '_slurm_submit_as_user_enabled',
+                        lambda: True)
+    monkeypatch.setattr(global_user_state.common_utils, 'get_current_user',
+                        lambda: current_user[0])
+    alice_results = {
+        'Slurm': {
+            'cluster-a': {
+                'enabled': True,
+                'reason': 'alice home is shared'
+            }
+        }
+    }
+    global_user_state.set_check_results(alice_results,
+                                        workspace='default',
+                                        is_full_workspace_run=True)
+    global_user_state.set_enabled_clouds(['Slurm'],
+                                         cloud.CloudCapability.COMPUTE,
+                                         workspace='default')
+
+    current_user[0] = models.User(id='bob-id', name='bob@example.com')
+    assert global_user_state.get_cached_check_results('default') == {}
+    assert global_user_state.get_cached_enabled_clouds(
+        cloud.CloudCapability.COMPUTE, workspace='default') == []
+
+    bob_results = {
+        'Slurm': {
+            'cluster-a': {
+                'enabled': True,
+                'reason': 'bob home is not shared'
+            }
+        }
+    }
+    global_user_state.set_check_results(bob_results,
+                                        workspace='default',
+                                        is_full_workspace_run=True)
+
+    current_user[0] = models.User(id='alice-id', name='alice@example.com')
+    assert global_user_state.get_cached_check_results(
+        'default') == alice_results
+    assert [
+        repr(c) for c in global_user_state.get_cached_enabled_clouds(
+            cloud.CloudCapability.COMPUTE, workspace='default')
+    ] == ['Slurm']
+
+
+def test_check_results_remain_workspace_scoped_when_submit_user_disabled(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    current_user = [models.User(id='alice-id', name='alice@example.com')]
+    monkeypatch.setattr(global_user_state, '_slurm_submit_as_user_enabled',
+                        lambda: False)
+    monkeypatch.setattr(global_user_state.common_utils, 'get_current_user',
+                        lambda: current_user[0])
+    results = {'AWS': {'': {'enabled': True, 'reason': 'enabled'}}}
+    global_user_state.set_check_results(results,
+                                        workspace='default',
+                                        is_full_workspace_run=True)
+
+    current_user[0] = models.User(id='bob-id', name='bob@example.com')
     assert global_user_state.get_cached_check_results('default') == results
 
 

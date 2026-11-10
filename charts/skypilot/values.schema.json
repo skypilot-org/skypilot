@@ -729,6 +729,12 @@
                                     "type": "string"
                                 }
                             },
+                            "resourceNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
                             "resources": {
                                 "type": "array",
                                 "items": {

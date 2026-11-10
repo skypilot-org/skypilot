@@ -30,6 +30,35 @@ function getPaginationFetch() {
   return typeof window !== 'undefined' ? window.__skyPaginationFetch : null;
 }
 
+/**
+ * Count clusters owned by users other than `currentUser`.
+ *
+ * Used to gate the "View all clusters" empty-state CTA when the
+ * current-user scope has no rows. When the pagination extension is
+ * available, ask it for the all-users total with a single-row page
+ * instead of fetching every row just to count them (mirrors the jobs
+ * page's empty-state probe). That total includes the caller's own
+ * clusters, but callers only use this when the current user's view is
+ * empty, so the difference is nil.
+ */
+export async function getOtherUsersClustersCount(currentUser) {
+  if (isPaginationPluginAvailable()) {
+    const pluginFetch = getPaginationFetch();
+    const result = await dashboardCache.get(pluginFetch, [
+      { page: 1, limit: 1, allUsers: true },
+    ]);
+    return result?.total || 0;
+  }
+  const all = (await dashboardCache.get(getClusters)) || [];
+  if (!currentUser) {
+    return all.length;
+  }
+  return all.filter(
+    (item) =>
+      item.user_hash !== currentUser.id && item.user !== currentUser.name
+  ).length;
+}
+
 const DEFAULT_TAIL_LINES = 5000;
 
 /**
@@ -132,6 +161,7 @@ export async function getClusters({
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        workspace_name: cluster.workspace_name || cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
@@ -209,6 +239,24 @@ export async function getClusterHistory(
         cloud = cluster.resources.cloud;
       }
 
+      // Mirror `InfraInfo.formatted_str()`: prefer the zone over the region
+      // for the infra display, EXCEPT for Slurm, where the zone is the
+      // partition — partition names commonly collide across Slurm clusters,
+      // so show the cluster name (region) instead. Falls back to the region
+      // when the cluster was launched in a cloud without zones (or the
+      // record predates zone capture in the history DB).
+      let regionOrZone =
+        (cloud === 'Slurm' ? cluster.region : cluster.zone) ||
+        cluster.region ||
+        cluster.zone ||
+        '';
+      // For SSH Node Pools, strip the 'ssh-' prefix from region display
+      // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)",
+      // matching the active-cluster connector.
+      if (cloud === 'SSH' && regionOrZone.startsWith('ssh-')) {
+        regionOrZone = regionOrZone.substring(4);
+      }
+
       // Get user name - need to look up from user_hash if needed
       let user_name = cluster.user_name || '-';
 
@@ -223,9 +271,9 @@ export async function getClusterHistory(
         user_hash: cluster.user_hash,
         cluster_hash: cluster.cluster_hash,
         cloud: cloud,
-        region: '',
-        infra: cloud,
-        full_infra: cloud,
+        region: cluster.region || '',
+        infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
+        full_infra: regionOrZone ? `${cloud} (${regionOrZone})` : cloud,
         resources_str: cluster.resources_str,
         resources_str_full: cluster.resources_str_full,
         time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
@@ -235,6 +283,10 @@ export async function getClusterHistory(
         workspace: cluster.workspace || 'default',
         autostop: -1,
         last_event: cluster.last_event,
+        // Why a terminated cluster went away, for the Details column.
+        details: cluster.status
+          ? null
+          : cluster.last_event || 'No termination reason recorded.',
         to_down: false,
         cluster_name_on_cloud: null,
         node_names: cluster.node_names || null,
@@ -427,6 +479,25 @@ export async function getClusterJobs({ clusterName, workspace }) {
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
     throw error;
+  }
+}
+
+// Returns {task_yaml, entrypoint, submitted_at} for a cluster job, or null when
+// none was recorded (jobs submitted by an older API server, or a server that
+// does not have the endpoint yet).
+export async function getClusterJobSpec({ clusterName, jobId, workspace }) {
+  try {
+    const spec = await apiClient.fetch('/cluster_job_spec', {
+      cluster_name: clusterName,
+      job_id: Number(jobId),
+      override_skypilot_config: {
+        active_workspace: workspace || 'default',
+      },
+    });
+    return spec && !Array.isArray(spec) ? spec : null;
+  } catch (error) {
+    console.error('Error fetching cluster job spec:', error);
+    return null;
   }
 }
 

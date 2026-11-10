@@ -33,6 +33,11 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  GitAuthor,
+  getRecipeOwnerLabel,
+  isGitSourced,
+} from '@/components/elements/RecipeSource';
 import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
@@ -78,12 +83,26 @@ import {
   usePluginRoutes,
   usePluginRecipeTypes,
 } from '@/plugins/PluginProvider';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 
-// Define filter options for the YAML filter dropdown
-const RECIPE_PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Type', value: 'recipe_type' },
-  { label: 'Owner', value: 'user_name' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// key into the typeahead's option lists; `label` is what lands on a chip.
+const RECIPE_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'text' },
+  { key: 'owner', label: 'Owner', kind: 'text' },
+];
+
+const RECIPE_PROPERTY_OPTIONS = RECIPE_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Every recipe property is single-valued, so a second chip on one property
+// replaces the first rather than stacking.
+const addRecipeFilter = (prevFilters, property, value) => [
+  ...prevFilters.filter((f) => f.property !== property),
+  { property, operator: ':', value },
 ];
 
 // Generate URL slug from recipe
@@ -168,14 +187,18 @@ function RecipeCard({ recipe, onPin }) {
               </p>
 
               {/* Authored by */}
-              <div className="text-sm text-gray-500 truncate">
+              <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
                 Authored by{' '}
-                <UserName name={recipe.user_name || recipe.user_id} />
+                {isGitSourced(recipe) ? (
+                  <GitAuthor />
+                ) : (
+                  <UserName name={recipe.user_name || recipe.user_id} />
+                )}
               </div>
 
               {/* Last updated info - always render line for consistent height */}
               <div
-                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+                className={`text-sm text-gray-500 truncate ${!((recipe.is_editable || isGitSourced(recipe)) && recipe.user_name !== 'local') ? 'invisible' : ''}`}
               >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
@@ -252,7 +275,8 @@ function TemplateRow({
 function AllRecipesSection({ recipes, onPin, onDelete }) {
   const pluginRecipeTypes = usePluginRecipeTypes();
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(RECIPE_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: 'updated_at',
     direction: 'descending',
@@ -267,14 +291,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
     recipes.forEach((r) => {
       if (r.name) names.add(r.name);
       if (r.recipe_type) types.add(r.recipe_type);
-      if (r.user_name) owners.add(r.user_name);
-      else if (r.user_id) owners.add(r.user_id);
+      const owner = getRecipeOwnerLabel(r);
+      if (owner) owners.add(owner);
     });
 
     return {
       name: Array.from(names).sort(),
-      recipe_type: Array.from(types).sort(),
-      user_name: Array.from(owners).sort(),
+      type: Array.from(types).sort(),
+      owner: Array.from(owners).sort(),
     };
   }, [recipes]);
 
@@ -307,7 +331,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
           if (propertyKey === 'name') itemValue = item.name || '';
           else if (propertyKey === 'type') itemValue = item.recipe_type || '';
           else if (propertyKey === 'owner')
-            itemValue = item.user_name || item.user_id || '';
+            itemValue = getRecipeOwnerLabel(item);
 
           if (!itemValue.toLowerCase().includes(filter.value.toLowerCase())) {
             return false;
@@ -317,6 +341,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
       });
     }
 
+    // The owner column shows getRecipeOwnerLabel, so sort by that too.
+    if (sortConfig.key === 'user_name') {
+      return sortData(
+        result.map((r) => ({ ...r, owner_label: getRecipeOwnerLabel(r) })),
+        'owner_label',
+        sortConfig.direction
+      );
+    }
     return sortData(result, sortConfig.key, sortConfig.direction);
   }, [recipes, filters, sortConfig]);
 
@@ -441,12 +473,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Link
-                          href={`/recipes/${slug}`}
-                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                        >
-                          {recipe.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/recipes/${slug}`}
+                            className="text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            {recipe.name}
+                          </Link>
+                        </div>
                       </TableCell>
                       <TableCell
                         className="text-gray-600 max-w-[400px]"
@@ -455,7 +489,11 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         <span className="cursor-default">{truncatedDesc}</span>
                       </TableCell>
                       <TableCell className="text-gray-600">
-                        <UserName name={recipe.user_name || recipe.user_id} />
+                        {isGitSourced(recipe) ? (
+                          <GitAuthor />
+                        ) : (
+                          <UserName name={recipe.user_name || recipe.user_id} />
+                        )}
                       </TableCell>
                       <TableCell className="text-gray-600">
                         {recipe.updated_by_name || recipe.user_name ? (
@@ -521,7 +559,9 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                             }`}
                             title={
                               recipe.is_editable === false
-                                ? 'Default recipes cannot be deleted'
+                                ? isGitSourced(recipe)
+                                  ? undefined
+                                  : 'Default recipes cannot be deleted'
                                 : 'Delete recipe'
                             }
                           >
@@ -693,14 +733,9 @@ const RecipeFilterDropdown = ({
       property: getPropertyLabel(propertyValue),
       value: option,
     });
-    setFilters((prevFilters) => [
-      ...prevFilters,
-      {
-        property: getPropertyLabel(propertyValue),
-        operator: ':',
-        value: option,
-      },
-    ]);
+    setFilters((prevFilters) =>
+      addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), option)
+    );
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -712,14 +747,9 @@ const RecipeFilterDropdown = ({
         property: getPropertyLabel(propertyValue),
         value: value,
       });
-      setFilters((prevFilters) => [
-        ...prevFilters,
-        {
-          property: getPropertyLabel(propertyValue),
-          operator: ':',
-          value: value,
-        },
-      ]);
+      setFilters((prevFilters) =>
+        addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), value)
+      );
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {

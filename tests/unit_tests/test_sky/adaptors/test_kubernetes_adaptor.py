@@ -2,16 +2,20 @@
 
 import concurrent.futures
 import gc
+import http.server
 import logging
 import os
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.server import common as server_common
 from sky.utils import annotations
 
 
@@ -308,6 +312,84 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
         os.unlink(config_file)
 
 
+def test_get_api_client_requests_gzip(monkeypatch):
+    """The API client advertises gzip so the server compresses responses.
+
+    Requesting ``Accept-Encoding: gzip`` lets the API server compress large
+    LIST responses (e.g. nodes/pods on big clusters); urllib3 transparently
+    decompresses them. This substantially cuts transfer time on high-latency
+    or low-bandwidth connections to the API server.
+    """
+    config_file = _create_test_kubeconfig(num_contexts=1)
+    try:
+        monkeypatch.setattr(kubernetes, '_get_config_file', lambda: config_file)
+        client = kubernetes._get_api_client('context-0')  # pylint: disable=protected-access
+        assert client.default_headers.get('Accept-Encoding') == 'gzip'
+    finally:
+        os.unlink(config_file)
+
+
+class _SlowKeepAliveHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    peak = 0
+    active = 0
+    lock = threading.Lock()
+
+    def do_GET(self):  # pylint: disable=invalid-name
+        cls = type(self)
+        with cls.lock:
+            cls.active += 1
+            cls.peak = max(cls.peak, cls.active)
+        time.sleep(0.2)
+        with cls.lock:
+            cls.active -= 1
+        self.send_response(200)
+        self.send_header('Content-Length', '2')
+        self.end_headers()
+        self.wfile.write(b'{}')
+
+    def log_message(self, *args):  # pylint: disable=arguments-differ
+        del args
+
+
+def test_api_client_keeps_at_most_pool_maxsize_idle_connections(monkeypatch):
+    """Connections opened for a burst do not stay open after it.
+
+    A process that keeps one client for its whole life (e.g. a jobs
+    controller) would otherwise hold every connection it opened at peak
+    concurrency open and idle.
+    """
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
+                                             _SlowKeepAliveHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_address[1]}'
+    config_file = _create_test_kubeconfig(num_contexts=1)
+    try:
+        monkeypatch.setattr(kubernetes, '_get_config_file', lambda: config_file)
+        client = kubernetes._get_api_client('context-0')  # pylint: disable=protected-access
+        assert (client.configuration.connection_pool_maxsize ==
+                kubernetes.CONNECTION_POOL_MAXSIZE)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(lambda _: client.rest_client.GET(url), range(16)))
+        assert _SlowKeepAliveHandler.peak > kubernetes.CONNECTION_POOL_MAXSIZE
+        pool = client.rest_client.pool_manager.connection_from_url(url)
+        kept = [conn for conn in list(pool.pool.queue) if conn is not None]
+        assert len(kept) <= kubernetes.CONNECTION_POOL_MAXSIZE
+    finally:
+        server.shutdown()
+        os.unlink(config_file)
+
+
+def test_in_cluster_api_client_uses_pool_maxsize(monkeypatch):
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
+    monkeypatch.setenv('KUBERNETES_SERVICE_PORT', '443')
+    monkeypatch.setattr(kubernetes.kubernetes.config, 'load_incluster_config',
+                        lambda config: None)
+    client = kubernetes._get_api_client(None)  # pylint: disable=protected-access
+    assert (client.configuration.connection_pool_maxsize ==
+            kubernetes.CONNECTION_POOL_MAXSIZE)
+
+
 def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
     """API getters suppress urllib3 warnings with rare setLevel() calls.
 
@@ -318,16 +400,19 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
       just once per process.
     - Pre-Python-3.13 fork deadlock
       (https://github.com/python/cpython/pull/109462): Logger.setLevel()
-      acquires logging's process-wide lock, so the adaptor must not call it
-      on every API call — only when a client construction reset the level.
+      AND logging.getLogger() both acquire logging's process-wide lock, so
+      the adaptor must call neither on every API call — setLevel() only
+      when a client construction reset the level, and getLogger() only at
+      decoration time.
     """
     api_client_mock = MagicMock()
+    urllib3_logger = logging.getLogger('urllib3')
 
     def stomping_get_api_client(context=None):
         # Mimic kubernetes.client.Configuration.__init__, which resets the
         # urllib3 logger to WARNING (via the `debug` property setter) every
         # time a client is constructed.
-        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        urllib3_logger.setLevel(logging.WARNING)
         return api_client_mock
 
     monkeypatch.setattr(kubernetes, '_get_api_client', stomping_get_api_client)
@@ -342,7 +427,6 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
         lambda api_client=None: SimpleNamespace(api_client=api_client),
     )
 
-    urllib3_logger = logging.getLogger('urllib3')
     original_level = urllib3_logger.level
     original_set_level = urllib3_logger.setLevel
     original_set_level(logging.NOTSET)
@@ -355,9 +439,22 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
 
     monkeypatch.setattr(urllib3_logger, 'setLevel', counting_set_level)
 
+    # logging.getLogger() also acquires logging's process-wide lock on
+    # Python < 3.13, so API calls must not resolve the urllib3 logger anew
+    # each time — the adaptor resolves it once at decoration time.
+    real_get_logger = logging.getLogger
+    resolved_names = []
+
+    def counting_get_logger(name=None):
+        resolved_names.append(name)
+        return real_get_logger(name)
+
+    monkeypatch.setattr(logging, 'getLogger', counting_get_logger)
+
     try:
         annotations.clear_request_level_cache()
         kubernetes.core_api()
+        assert 'urllib3' not in resolved_names
 
         # Despite the construction-time reset to WARNING, warnings must be
         # suppressed on the child loggers urllib3 actually emits through
@@ -386,3 +483,70 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
     finally:
         annotations.clear_request_level_cache()
         original_set_level(original_level)
+
+
+def _write_kubeconfig(path, server):
+    path.write_text(f"""apiVersion: v1
+kind: Config
+current-context: ctx
+clusters:
+- name: c
+  cluster:
+    server: {server}
+users:
+- name: u
+  user:
+    token: t
+contexts:
+- name: ctx
+  context:
+    cluster: c
+    user: u
+""")
+
+
+def test_sync_refresh_keeps_clients_while_kubeconfig_is_unchanged(
+        tmp_path, monkeypatch):
+    """Rebuilding every client on each sync handler's refresh costs tens of ms."""
+    path = tmp_path / 'kubeconfig'
+    _write_kubeconfig(path, 'https://127.0.0.1:6443')
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    monkeypatch.setattr(skypilot_config, 'safe_reload_config', lambda: None)
+    monkeypatch.setattr(kubernetes, '_last_refresh_fingerprint', None)
+    monkeypatch.setattr(kubernetes, '_clients_cleared_at', 0.0)
+    # A clock of our own for the adaptor's max-age check only.
+    clock = [1000.0]
+    monkeypatch.setattr(
+        kubernetes, 'time',
+        SimpleNamespace(monotonic=lambda: clock[0],
+                        time=time.time,
+                        sleep=time.sleep))
+    annotations.clear_request_level_cache()
+    refresh = server_common.refresh_workspace_state_for_sync_handler
+    try:
+        # The first refresh has no fingerprint to compare with: it clears and
+        # records one.
+        refresh()
+        first = kubernetes.core_api('ctx')
+        refresh()
+        assert kubernetes.core_api('ctx') is first
+        refresh()
+        assert kubernetes.core_api('ctx') is first
+        # A rewritten kubeconfig (e.g. rotated credentials) gets a new client.
+        _write_kubeconfig(path, 'https://127.0.0.2:6443')
+        refresh()
+        second = kubernetes.core_api('ctx')
+        assert second is not first
+        assert second.api_client.configuration.host == 'https://127.0.0.2:6443'
+        # The cap counts from the last clear (the rewrite above), not from the
+        # last refresh: keeping must not move it, or refreshes under 60 s
+        # apart would keep a client forever.
+        clock[0] += 30
+        refresh()
+        assert kubernetes.core_api('ctx') is second
+        clock[0] += 31
+        refresh()
+        assert kubernetes.core_api('ctx') is not second
+    finally:
+        # A client built from the tmp kubeconfig must not outlive the test.
+        annotations.clear_request_level_cache()

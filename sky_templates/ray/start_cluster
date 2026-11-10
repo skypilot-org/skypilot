@@ -6,11 +6,17 @@
 # This allows users to run their own Ray applications independently of
 # SkyPilot's internal Ray cluster.
 #
+# The dashboard agent listen port defaults to 52366 instead of Ray's
+# default (52365), since SkyPilot's system Ray cluster already occupies
+# 52365 on every node. Without this, the user Ray cluster's dashboard
+# agents fail to start their HTTP server and `ray job submit` fails with
+# "No available agent to submit job".
+#
 # Environment Variables:
 #   RAY_HEAD_PORT=6379                     - Ray head node port
 #   RAY_DASHBOARD_PORT=8265                - Ray dashboard port
 #   RAY_DASHBOARD_HOST=127.0.0.1           - Dashboard host (set to 0.0.0.0 to expose externally)
-#   RAY_DASHBOARD_AGENT_LISTEN_PORT=       - (Optional) Dashboard agent listen port
+#   RAY_DASHBOARD_AGENT_LISTEN_PORT=52366  - Dashboard agent listen port
 #   RAY_HEAD_IP_ADDRESS=                   - (Optional) Node IP address
 #   RAY_CMD=ray                            - (Optional) Command to invoke Ray (e.g., "uv run ray")
 #
@@ -37,7 +43,9 @@ NC='\033[0m' # No Color
 RAY_HEAD_PORT=${RAY_HEAD_PORT:-6379}
 RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
 RAY_DASHBOARD_HOST=${RAY_DASHBOARD_HOST:-127.0.0.1}
-RAY_DASHBOARD_AGENT_LISTEN_PORT=${RAY_DASHBOARD_AGENT_LISTEN_PORT:-}
+# Default to 52366 to avoid colliding with the dashboard agent of
+# SkyPilot's system Ray cluster, which listens on Ray's default 52365.
+RAY_DASHBOARD_AGENT_LISTEN_PORT=${RAY_DASHBOARD_AGENT_LISTEN_PORT:-52366}
 RAY_HEAD_IP_ADDRESS=${RAY_HEAD_IP_ADDRESS:-}
 
 RAY_CMD=${RAY_CMD:-ray}
@@ -111,17 +119,13 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
         --port=${RAY_HEAD_PORT} \
         --dashboard-port=${RAY_DASHBOARD_PORT} \
         --dashboard-host=${RAY_DASHBOARD_HOST} \
+        --dashboard-agent-listen-port=${RAY_DASHBOARD_AGENT_LISTEN_PORT} \
         --disable-usage-stats \
         --include-dashboard=True"
 
     # Add --num-gpus only if > 0
     if [ "${SKYPILOT_NUM_GPUS_PER_NODE}" -gt 0 ]; then
         RAY_START_CMD="${RAY_START_CMD} --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE}"
-    fi
-
-    # Add optional dashboard agent listen port if specified
-    if [ -n "${RAY_DASHBOARD_AGENT_LISTEN_PORT}" ]; then
-        RAY_START_CMD="${RAY_START_CMD} --dashboard-agent-listen-port=${RAY_DASHBOARD_AGENT_LISTEN_PORT}"
     fi
 
     # Add optional node IP address if specified
@@ -179,7 +183,12 @@ else
     done
 
     echo -e "${GREEN}Head node is healthy. Starting worker node...${NC}"
-    WORKER_CMD="start --address=${RAY_ADDRESS} --disable-usage-stats"
+    # The dashboard agent listen port must also be set on workers: the
+    # head's job submission server proxies through per-node agents, and
+    # workers otherwise collide with SkyPilot's system Ray agent on 52365.
+    WORKER_CMD="start --address=${RAY_ADDRESS} \
+        --dashboard-agent-listen-port=${RAY_DASHBOARD_AGENT_LISTEN_PORT} \
+        --disable-usage-stats"
 
     # Add --num-gpus only if > 0
     if [ "${SKYPILOT_NUM_GPUS_PER_NODE}" -gt 0 ]; then

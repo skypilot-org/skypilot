@@ -1,0 +1,17 @@
+# JobGroup contradiction: inter_connection: true requires Kubernetes, but
+# a job pins non-Kubernetes infra. Submission must fail fast.
+---
+name: {{name}}
+execution: parallel
+inter_connection: true
+---
+name: pinned-aws
+resources:
+  cpus: 2
+  infra: aws
+run: echo hi
+---
+name: flexible
+resources:
+  cpus: 2
+run: echo hi

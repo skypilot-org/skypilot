@@ -261,7 +261,7 @@ sky check
 
 ## What's next
     
-* [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
+* [AI on Kubernetes Without the Pain](https://skypilot.ai/blog/ai-on-kubernetes)
 * [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
 * [SkyPilot Docs](https://docs.skypilot.co)
 * [SkyPilot GitHub](https://github.com/skypilot-org/skypilot)

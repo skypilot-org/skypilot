@@ -1,13 +1,16 @@
 """Unit tests for sky/server/requests/threads.py."""
 
 import concurrent.futures
+import os
 import queue
 import threading
 import time
 
+import prometheus_client
 import pytest
 
 from sky import exceptions
+from sky.metrics import utils as metrics_utils
 from sky.server.requests.threads import OnDemandThreadExecutor
 
 
@@ -129,5 +132,63 @@ def test_on_demand_executor_threads_dict_cleanup():
         assert fut.result(timeout=5) is True
         assert len(executor._threads) == 0
         assert executor.running.get() == 0
+    finally:
+        executor.shutdown()
+
+
+def _gauge_value(name: str, executor_name: str) -> float:
+    value = prometheus_client.REGISTRY.get_sample_value(name, {
+        'pid': str(os.getpid()),
+        'name': executor_name
+    })
+    assert value is not None
+    return value
+
+
+def test_on_demand_executor_metrics(monkeypatch):
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    name = 'metrics_test'
+    executor = OnDemandThreadExecutor(name=name, max_workers=2)
+    release_event = threading.Event()
+    try:
+        # The gauges must use 'liveall': the multiprocess collector strips
+        # any label named 'pid' for the aggregating modes (livesum etc.) and
+        # merges all processes into one series, hiding per-process
+        # exhaustion. This registry-level test cannot catch that (the
+        # multiprocess merge only runs when PROMETHEUS_MULTIPROC_DIR is
+        # set), so pin the mode directly.
+        # pylint: disable=protected-access
+        assert (metrics_utils.SKY_APISERVER_THREADS_ACTIVE._multiprocess_mode ==
+                'liveall')
+        assert (metrics_utils.SKY_APISERVER_THREADS_MAX._multiprocess_mode ==
+                'liveall')
+        # pylint: enable=protected-access
+
+        assert _gauge_value('sky_apiserver_threads_max', name) == 2
+        assert _gauge_value('sky_apiserver_threads_active', name) == 0
+
+        f1 = executor.submit(blocking_task, release_event)
+        f2 = executor.submit(blocking_task, release_event)
+        assert _gauge_value('sky_apiserver_threads_active', name) == 2
+
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(blocking_task, release_event)
+        assert prometheus_client.REGISTRY.get_sample_value(
+            'sky_apiserver_threads_exhausted_total', {'name': name}) == 1
+        # The rejected submit must not leak into the active gauge.
+        assert _gauge_value('sky_apiserver_threads_active', name) == 2
+
+        release_event.set()
+        concurrent.futures.wait([f1, f2], timeout=5)
+        assert f1.result() is True
+        assert f2.result() is True
+        # The gauge is decremented in the worker thread after the future
+        # resolves; poll briefly to avoid racing that final decrement.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if _gauge_value('sky_apiserver_threads_active', name) == 0:
+                break
+            time.sleep(0.01)
+        assert _gauge_value('sky_apiserver_threads_active', name) == 0
     finally:
         executor.shutdown()

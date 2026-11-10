@@ -12,6 +12,8 @@ SkyPilot automatically detects and displays four types of links:
 3. **Admin-configured custom URLs**: Administrators can register a list of labeled regex patterns in the SkyPilot config. Matching URLs that appear in job logs (job detail page) or cluster provision logs (cluster detail page) are rendered as clickable, labeled links.
 4. **Admin-configured URL templates**: Administrators can register labeled URL templates that are built from cluster/job metadata (e.g., ``https://ray.internal.example.com/dashboard/${cluster_name}``) and rendered on every cluster and job detail page, without needing the URL to appear in logs.
 
+Admin-configured entries can optionally be restricted to cluster or job pages with a ``scope`` field; see :ref:`external-links-scope`.
+
 .. image:: ../images/examples/external-links/job-page-wandb.png
   :width: 800
   :alt: Managed jobs external links
@@ -99,6 +101,8 @@ Each entry takes:
 - ``regex``: A Python-style regex matched against whitespace-delimited
   tokens in streamed log output. Each pattern resolves to at most one URL
   per cluster or job (the first match wins).
+- ``scope`` (optional): The pages the link may appear on; see
+  :ref:`external-links-scope`.
 
 After updating the config, restart the API server
 (``sky api stop && sky api start``) so the new entries are loaded.
@@ -142,6 +146,8 @@ Each entry takes:
 - ``url``: A URL template. ``${variable}`` placeholders are substituted
   with URI-encoded values from the page being viewed. An entry must have
   either ``url`` or ``regex``, never both.
+- ``scope`` (optional): The pages the link may appear on; see
+  :ref:`external-links-scope`.
 
 Supported template variables:
 
@@ -172,3 +178,48 @@ entry referencing ``${job_id}`` appears on job detail pages but not on
 cluster detail pages, while an entry referencing only ``${cluster_name}``
 appears on both. Templates referencing unknown variables are rejected at
 config load time.
+
+.. _external-links-scope:
+
+Restricting links to specific pages with ``scope``
+--------------------------------------------------
+
+By default, an entry appears on every page where it can be produced: a
+``regex`` entry appears wherever a matching URL is found in the scanned
+logs, and a ``url`` entry appears wherever all of its template variables
+resolve. For example, a template referencing only ``${cluster_name}``
+shows up on the cluster detail page and on job detail pages (where it
+resolves against the job's backing cluster).
+
+To pin a link to specific pages, add an optional ``scope`` list to the
+entry:
+
+.. code-block:: yaml
+
+  dashboard:
+    external_links:
+      # Only on the cluster detail page, even though ${cluster_name} also
+      # resolves on job pages.
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        scope: [cluster]
+      # Only on job detail pages.
+      - label: "Experiment Platform"
+        url: 'https://exp.internal.example.com/jobs/${job_id}'
+        scope: [jobs]
+      # Log-scanned links can be scoped too.
+      - label: "Grafana"
+        regex: 'https://grafana\.internal\.example\.com/d/[a-z0-9]+.*'
+        scope: [jobs]
+
+Valid scope values:
+
+- ``cluster``: The cluster detail page.
+- ``jobs``: Job detail pages, both managed jobs and jobs submitted to a
+  cluster with ``sky exec`` / ``sky launch``.
+
+An entry without ``scope`` keeps the default behavior described above.
+Unknown scope values are rejected at config load time. Note that a link's
+template variables must still resolve on an in-scope page: ``scope`` only
+further restricts where a link may appear; it cannot make a
+``${job_id}`` link render on the cluster page.

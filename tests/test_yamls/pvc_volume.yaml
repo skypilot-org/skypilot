@@ -1,12 +1,15 @@
 name: min
 resources:
   cpus: 0.1+
+# The volume names are prefixed with the test run's id, passed in as
+# VOL_PREFIX: `volumes:` substitutes task envs, and fixed names would be shared
+# with any concurrent run.
 volumes:
-  /mnt/data0: pvc0
+  /mnt/data0: ${VOL_PREFIX}-pvc0
   /mnt/data1:
-    name: existing0
+    name: ${VOL_PREFIX}-existing0
     sub_path: subdir/path
-  /mnt/data5: vol-existing1
+  /mnt/data5: ${VOL_PREFIX}-vol-existing1
   /mnt/data2:
     size: 1Gi
     labels:

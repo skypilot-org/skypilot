@@ -138,14 +138,21 @@ class OktaAutoLogin:
                 return False
             logger.info("⏱️  fill_credentials: %.2fs", time.monotonic() - _t1)
 
-            # Step 3: Wait for redirect to dashboard. Read the URL via JS
-            # (document.location.href) as the primary signal: the Selenium
-            # current_url command returns None mid-navigation (full-page
-            # /dashboard/ -> /dashboard/clusters commit), which the stock
+            # Step 3: Confirm OAuth landed us on the authenticated dashboard.
+            #
+            # Success = we are served *any* /dashboard* page rather than being
+            # bounced back to the identity provider. We intentionally do NOT
+            # wait for the client-side redirect to /dashboard/clusters: that
+            # in-app navigation is cosmetic and can occasionally stall (e.g. a
+            # dynamically-imported chunk fails to load under load), whereas
+            # being served /dashboard at all already proves the OAuth session
+            # is valid -- which is what this test verifies. We read the URL via
+            # JS (document.location.href) as the primary signal: the Selenium
+            # current_url command returns None mid-navigation, which the stock
             # EC.url_contains turns into a fatal TypeError. We record BOTH the
             # JS href and current_url each poll so a slow step / a broken
             # current_url is visible in CI logs.
-            logger.info("Step 3: Waiting for redirect to dashboard...")
+            logger.info("Step 3: Waiting for authenticated dashboard...")
             _t2 = time.monotonic()
 
             def _at_dashboard(driver):
@@ -161,14 +168,29 @@ class OktaAutoLogin:
                 _trace.append((round(time.monotonic() - _t2, 2), href, cur))
                 url = (href if isinstance(href, str) and
                        not href.startswith('<jserr:') else cur)
-                return isinstance(url, str) and '/dashboard/clusters' in url
+                # On the dashboard app itself, not the IdP login pages.
+                return (isinstance(url, str) and '/dashboard' in url and
+                        'okta.com' not in url and '/oauth2/' not in url)
 
             WebDriverWait(self.driver, 60,
                           poll_frequency=0.25).until(_at_dashboard)
             logger.info(
                 "⏱️  wait_for_dashboard: %.2fs poll_trace(t,href,cur)=%s",
                 time.monotonic() - _t2, _trace)
-            logger.info("✅ Successfully redirected to dashboard")
+            try:
+                _reached_url = self.driver.current_url
+            except Exception:  # pylint: disable=broad-except
+                # current_url can raise / return None mid-navigation (see the
+                # Step 3 comment above); it is only used for logging here.
+                _reached_url = '<unavailable>'
+            logger.info("✅ Reached authenticated dashboard: %s", _reached_url)
+
+            # Navigate to the target page directly instead of relying on the
+            # in-app /dashboard -> /dashboard/clusters redirect. A full-page
+            # load re-fetches assets from a clean slate and is served directly
+            # for the authenticated session, so a one-off stalled client-side
+            # redirect does not fail the login check.
+            self.driver.get(f'{self.endpoint}/dashboard/clusters')
 
             # Step 4: Verify SkyPilot logo is present
             logger.info("Step 4: Verifying SkyPilot logo...")

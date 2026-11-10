@@ -182,6 +182,8 @@ Use high-performance networking
 
           num_nodes: 2
 
+        By default SkyPilot uses host networking to reach the RDMA fabric, matching Oracle's bare-metal RDMA setup. If your OKE cluster instead hands out RDMA NICs as SR-IOV virtual functions, set :ref:`kubernetes.rdma.mode: sriov <config-yaml-kubernetes-rdma>` for that context.
+
 
 Using Ray with SkyPilot
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -643,7 +645,7 @@ Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
-* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
+* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://skypilot.ai/blog/large-scale-vector-database>`__
 * `Qwen <https://docs.skypilot.co/en/latest/examples/models/qwen.html>`__
 * PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__

@@ -1,7 +1,8 @@
 """Shared helpers for debug dump data serialization.
 
 These helpers are used by both sky.utils.debug_utils (API server side) and
-sky.jobs.utils (controller side) to serialize cluster records and events.
+sky.jobs.utils (controller side) to serialize cluster records and events and
+to redact credentials.
 Extracted to avoid a circular import:
   debug_utils -> jobs.server.core -> jobs.utils -> debug_utils
 """
@@ -11,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
 from sky import task as task_lib
+from sky.server import common as server_common
+from sky.skylet import constants
 from sky.utils import config_utils
 from sky.utils import yaml_utils
 
@@ -20,6 +23,23 @@ _SENSITIVE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('api_server', 'endpoint'),
     ('api_server', 'service_account_token'),
 ]
+
+# Env vars whose values are credentials.
+SENSITIVE_ENV_VARS = {
+    'SKYPILOT_DB_CONNECTION_URI',
+    'SKYPILOT_INITIAL_BASIC_AUTH',
+    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
+    'SKYPILOT_DOCKER_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_ACCESS_KEY_ID',
+    'AZURE_CLIENT_SECRET',
+}
+
+# Task/DAG YAML fields of a managed job record. dag_yaml_content carries the
+# secrets injected at launch, including the job's API server token.
+_MANAGED_JOB_YAML_FIELDS = ('user_yaml', 'original_user_yaml_content',
+                            'dag_yaml_content')
 
 
 def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,6 +54,29 @@ def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if val is not None:
             config_copy.set_nested(field_path, '<redacted>')
     return dict(**config_copy)
+
+
+def redact_env_vars(env_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of env_vars with credential values redacted.
+
+    Values of SENSITIVE_ENV_VARS become '<redacted>', and the basic-auth
+    password in the API server endpoint is masked.
+    """
+    redacted = dict(env_vars)
+    for k, v in redacted.items():
+        if k in SENSITIVE_ENV_VARS:
+            redacted[k] = '<redacted>'
+        elif k == constants.SKY_API_SERVER_URL_ENV_VAR and isinstance(v, str):
+            redacted[k] = server_common.redact_url_password(v)
+    return redacted
+
+
+def redact_managed_job_record(record: Dict[str, Any]) -> None:
+    """Redact the task YAML fields of a managed job record in place."""
+    for field in _MANAGED_JOB_YAML_FIELDS:
+        value = record.get(field)
+        if isinstance(value, str):
+            record[field] = redact_task_yaml(value)
 
 
 def epoch_to_human(epoch: Optional[float]) -> Optional[str]:
@@ -58,8 +101,20 @@ def redact_task_yaml(yaml_str: str) -> str:
         return '<parse error, redacted>'
     for doc in docs:
         if isinstance(doc, dict):
-            task_lib.redact_task_yaml_dict(doc)
+            _redact_task_yaml_doc(doc)
     return yaml_utils.dump_yaml_str(docs)
+
+
+def _redact_task_yaml_doc(doc: Dict[str, Any]) -> None:
+    task_lib.redact_task_yaml_dict(doc)
+    # Task.to_yaml_config() embeds the raw YAML the user wrote, inline secret
+    # values included.
+    user_specified_yaml = doc.get('_user_specified_yaml')
+    if isinstance(user_specified_yaml, str):
+        doc['_user_specified_yaml'] = redact_task_yaml(user_specified_yaml)
+    envs = doc.get('envs')
+    if isinstance(envs, dict):
+        doc['envs'] = redact_env_vars(envs)
 
 
 def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:

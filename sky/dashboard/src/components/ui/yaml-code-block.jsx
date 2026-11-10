@@ -11,6 +11,8 @@ import {
   yamlHighlightStyle,
   yamlGutterTheme,
   yamlTextCursorTheme,
+  yamlSearchPanelTheme,
+  yamlSearchTop,
 } from './yaml-editor';
 
 // In read-only mode, suppress CodeMirror's drawn caret so the viewer
@@ -48,6 +50,8 @@ export function YamlCodeBlock({
         extensions={[
           yaml(),
           yamlGutterTheme,
+          yamlSearchPanelTheme,
+          Prec.high(yamlSearchTop),
           ...(readOnly ? [hideCaretTheme] : [yamlTextCursorTheme]),
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),

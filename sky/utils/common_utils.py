@@ -4,6 +4,7 @@ import base64
 import ctypes
 import difflib
 import enum
+import errno
 import functools
 import gc
 import getpass
@@ -84,8 +85,24 @@ def is_valid_user_hash(user_hash: Optional[str]) -> bool:
         return False
     # Must start with a letter, followed by alphanumeric characters and hyphens
     # This covers both old hex format (e.g., "abc123") and new service account
-    # format (e.g., "sa-abc123-token-xyz")
-    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
+    # format (e.g., "sa-abc123-token-xyz").
+    #
+    # fullmatch, not match with a trailing '$': '$' also matches just before a
+    # final newline, so a value ending in one was accepted and then used as an
+    # identity distinct from the same value without it.
+    return bool(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]*', user_hash))
+
+
+def is_single_path_component(name: Optional[str]) -> bool:
+    """Whether `name` is safe to join as a single path component.
+
+    Rejects a name that is empty, '.', '..', or contains a path separator or
+    NUL byte, i.e. anything that would not stay directly inside the directory
+    it is joined under. Used to validate a client-supplied user id before it
+    becomes a directory under the API server's clients dir.
+    """
+    return (name is not None and name not in ('', '.', '..') and
+            not any(c in name for c in ('/', '\\', '\x00')))
 
 
 def generate_user_hash() -> str:
@@ -109,6 +126,10 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
                                 cwd=path,
                                 check=True)
         return result.stdout.strip()
+    except FileNotFoundError as error:
+        if error.filename == 'git':
+            return None
+        raise
     except subprocess.CalledProcessError:
         return None
 
@@ -395,6 +416,38 @@ def get_current_request_id() -> str:
     if value is not None:
         return value
     return 'dummy-request-id'
+
+
+def is_in_request_context() -> bool:
+    """Whether this code runs inside a server-side request execution.
+
+    The API server sets the request context (see ``set_request_context``) for
+    the duration of a request running on an executor worker; it is unset for
+    in-process callers with no request scheduler (e.g. a client, or the jobs
+    controller launching in-process). Long-blocking backend paths use this to
+    decide whether raising ``exceptions.ExecutionRetryableError`` will be
+    handled by the scheduler (parked as WAITING and rescheduled) rather than
+    propagating to a caller that cannot reschedule it.
+    """
+    return context.get_context_var(_REQUEST_ID_KEY) is not None
+
+
+def get_current_request_actor() -> Optional[str]:
+    """Names who is making the current API request, for audit messages.
+
+    Returns e.g. ``alice (request ID: 2f0c8e2b-...)``, suitable for embedding
+    in an event log so a record says who asked for an action and under which
+    request. Returns None outside a server-side request execution (see
+    ``set_request_context``): an in-process caller has no requesting user or
+    request to name.
+    """
+    if not is_in_request_context():
+        return None
+    user = get_current_user()
+    # The hash is the fallback identity: a display name is not guaranteed
+    # (e.g. an identity recorded before names were stored).
+    who = user.name or user.id
+    return f'{who} (request ID: {get_current_request_id()})'
 
 
 def get_current_command() -> str:
@@ -750,8 +803,7 @@ def class_fullname(cls, skip_builtins: bool = True):
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
-                     use_bracket: bool = False) -> str:
+def format_exception(e: BaseException, use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
     Args:
@@ -1251,22 +1303,48 @@ def removeprefix(string: str, prefix: str) -> str:
     return string
 
 
-def release_memory():
+# jemalloc's MALLCTL_ARENAS_ALL: the arena index that addresses all arenas.
+_JEMALLOC_PURGE_ALL_ARENAS = b'arena.4096.purge'
+
+
+@functools.lru_cache(maxsize=1)
+def _get_free_memory_returner() -> Optional[Callable[[], int]]:
+    """Returns a function that returns freed heap memory to the OS.
+
+    Uses jemalloc's purge when jemalloc is the process allocator (e.g.
+    preloaded via LD_PRELOAD), where glibc's malloc_trim is a no-op, and
+    glibc's malloc_trim otherwise.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    process = ctypes.CDLL(None)
+    mallctl = getattr(process, 'mallctl', None)
+    if mallctl is not None:
+        mallctl.argtypes = [
+            ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_size_t
+        ]
+        mallctl.restype = ctypes.c_int
+        return lambda: mallctl(_JEMALLOC_PURGE_ALL_ARENAS, None, None, None, 0)
+    malloc_trim = getattr(process, 'malloc_trim', None)
+    if malloc_trim is None:
+        # Not glibc, e.g. musl (alpine).
+        return None
+    return lambda: malloc_trim(0)
+
+
+def release_memory() -> None:
     """Release the process memory"""
-    # Do the best effort to release the python heap and let malloc_trim
-    # be more efficient.
+    # Do the best effort to release the python heap first, so that the
+    # allocator has more free memory to return.
     try:
         gc.collect()
-        if sys.platform.startswith('linux'):
-            # Will fail on musl (alpine), but at least it works on our
-            # official docker images.
-            libc = ctypes.CDLL('libc.so.6')
-            return libc.malloc_trim(0)
-        return 0
+        returner = _get_free_memory_returner()
+        if returner is not None:
+            returner()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
-        return 0
 
 
 def base64_url_encode(data: bytes) -> str:
@@ -1413,3 +1491,61 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
                 os.remove(tmp_path)
             except FileNotFoundError:
                 pass
+
+
+# errno values link() raises on a filesystem without hard links.
+_LINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK})
+
+
+def atomic_create_text(path: str, content: str, mode: int = 0o644) -> bool:
+    """Create ``path`` with ``content`` unless it already exists.
+
+    Like ``atomic_write_text``, the content is staged to a sibling tmp file,
+    so a reader never sees a torn file. But the tmp file is linked into
+    place rather than renamed over the destination: ``link()`` fails with
+    EEXIST when the destination exists, so an existing file is never
+    replaced, even when several processes race to create the same path.
+    That matters on a shared filesystem (NFS / EFS): replacing a file, even
+    by rename, fails a reader on another host that holds a handle to the old
+    file (ESTALE) or whose lookup of the path races the replacement.
+
+    On a filesystem without hard links (``link()`` raises EPERM, ENOTSUP,
+    EXDEV, ...) the tmp file is renamed into place if the destination is
+    still absent, which can replace a file created in between.
+
+    Args:
+        path: The destination file path. The parent directory must already
+            exist.
+        content: The text content to write. Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file. Defaults to 0o644.
+
+    Returns:
+        True if this call created the file, False if it already existed.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        try:
+            os.link(tmp_path, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _LINK_UNSUPPORTED_ERRNOS:
+                raise
+            if os.path.exists(path):
+                return False
+            os.rename(tmp_path, path)
+        return True
+    finally:
+        # After a link the tmp name is a second name for the file; after a
+        # rename or a failure it is gone or a fragment. Remove it either way.
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass

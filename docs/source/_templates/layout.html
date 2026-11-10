@@ -1,8 +1,9 @@
 {% extends "pydata_sphinx_theme/layout.html" %}
 
-{% block docs_navbar %}
-{% include "header.html" ignore missing %}
+{% block extrahead %}
 {{ super() }}
+<link rel="icon" type="image/png" sizes="192x192" href="{{ pathto('_static/favicon-192x192.png', 1) }}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ pathto('_static/apple-touch-icon.png', 1) }}">
 {% endblock %}
 
 {% block docs_body %}

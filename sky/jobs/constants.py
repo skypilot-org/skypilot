@@ -1,6 +1,7 @@
 """Constants used for Managed Jobs."""
-import os
 from typing import Any, Dict, Union
+
+from sky.skylet import runtime_utils
 
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
@@ -21,11 +22,13 @@ DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
                               'task_name', 'resources', 'submitted_at',
                               'end_at', 'job_duration', 'recovery_count',
                               'status', 'pool', 'is_primary_in_job_group',
-                              'batch_total_batches', 'batch_completed_batches')
+                              'batch_total_batches', 'batch_completed_batches',
+                              'root_job_id', 'parent_job_id', 'parent_task_id',
+                              'dynamic_task_index')
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
-CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
+CONSOLIDATED_SIGNAL_PATH = runtime_utils.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 
 # The consolidation mode lock ensures that if multiple API servers are running
@@ -46,7 +49,7 @@ CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
 #   - _is_consolidation_mode(pool=True) — sizing-only helper.
 # Reading config directly instead diverges under deploy-mode auto-enable
 # (config stays null while this file is written).
-JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = runtime_utils.runtime_tilde_path(
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
 # Resources as a dict for the jobs controller.
@@ -83,7 +86,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 22  # add submitted_after/submitted_before to job table
+MANAGED_JOBS_VERSION = 27  # include_tree on the job table query
 
 # Emergency recovery: when the job controller hits an unexpected internal
 # error (e.g. external mutation of the job state, or an unhandled exception
@@ -114,11 +117,16 @@ EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
 # discards the job from `starting` (JobController._release_launch_slot) to
 # cover the cases it does not — an error in pre/post-launch bookkeeping, or
 # a pool job (which never enters scheduled_launch's slot accounting). The
-# retry re-adds it when it actually relaunches. (The job's own cluster may
-# be reaped by the 10-minute autodown backstop during a long backoff; that
-# is fine — the retry always relaunches from scratch.)
+# retry re-adds it when it actually relaunches.
 EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
 EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
+# A task that was RUNNING keeps its cluster through the backoff (the retry
+# re-attaches instead of relaunching), and a running job keeps that cluster's
+# idle autodown from firing. If the job finishes during a long backoff, its
+# cluster is autodowned ten minutes later and the retry, finding no cluster,
+# relaunches a job that already completed; managed jobs are idempotent, and
+# that is accepted so that the ladder above stays long enough for a
+# persistent error to be remediated by hand before the budget runs out.
 # If the previous emergency recovery attempt is older than this window, the
 # attempt counter restarts at 1: a long-running job that hits a rare
 # incident every few days should recover every time, while a tight crash
@@ -130,6 +138,12 @@ EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # resetting on success would let a recurring-but-recoverable error relaunch
 # the cluster forever.
 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
+
+# A job's final cleanup and bookkeeping retry transient DB errors in place,
+# backing off between attempts, until this budget is spent.
+JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS = 10
+JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS = 5 * 60
+JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS = 60 * 60
 
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to

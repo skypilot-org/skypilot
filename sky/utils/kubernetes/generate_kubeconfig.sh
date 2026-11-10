@@ -166,6 +166,10 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]   # Required for SkyPilot to inspect its own permissions
     resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]                 # Required for the API server to detect whether this context points back at the cluster it runs in (GPU metrics federation).
+    resources: ["namespaces"]
+    resourceNames: ["kube-system"]  # Only the kube-system namespace UID is read as the cluster identity.
+    verbs: ["get"]
 ---
 # ClusterRoleBinding for the service account
 apiVersion: rbac.authorization.k8s.io/v1

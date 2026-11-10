@@ -70,6 +70,8 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+    # Whether this cluster has previously reached UP (and may have saved state).
+    prev_cluster_ever_up: bool = False
 
     def get_redacted_config(self) -> Dict[str, Any]:
         """Get the redacted config."""
@@ -168,6 +170,9 @@ class InstanceInfo:
     # For Kubernetes: the k8s node name the pod runs on.
     # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
     node_name: Optional[str] = None
+    # skylet's gRPC port when it is not the default: a Kubernetes hostNetwork
+    # pod shares its node's ports, so the server assigns skylet one.
+    skylet_port: Optional[int] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -192,6 +197,14 @@ class ClusterInfo:
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
+    # Actual per-node CPU/memory requests observed on the provisioned
+    # instances (e.g., Kubernetes pod resources.requests). These can diverge
+    # from the launched resources spec when the final node config is mutated
+    # out-of-band, e.g., by an admin policy writing kubernetes.pod_config
+    # directly. Only populated by the Kubernetes provisioner; access with
+    # getattr for handles pickled before these fields existed.
+    actual_cpus: Optional[float] = None
+    actual_memory_gb: Optional[float] = None
 
     @property
     def num_instances(self) -> int:

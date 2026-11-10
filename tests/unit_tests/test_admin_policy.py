@@ -1,6 +1,8 @@
 import contextlib
 import copy
 import importlib
+import io
+import logging
 import os
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import plugin_hooks
 from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
@@ -31,6 +34,19 @@ if not os.path.exists(POLICY_PATH):
     # This is used for GitHub Actions, as we copy the examples to the package.
     POLICY_PATH = os.path.join(os.path.dirname(__file__), 'examples',
                                'admin_policy')
+
+
+@pytest.fixture(autouse=True)
+def _restore_config_env():
+    # Tests here point ENV_VAR_SKYPILOT_CONFIG at temp configs via os.environ;
+    # restore it and reload so later tests on this worker don't inherit them.
+    old = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    yield
+    if old is None:
+        os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    else:
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = old
+    skypilot_config.reload_config()
 
 
 @pytest.fixture
@@ -560,6 +576,49 @@ def test_apply_no_client_version_at_client_side(add_example_policy_paths, task):
         versions.set_remote_version('unknown')
 
 
+def test_apply_surfaces_resolved_active_workspace(add_example_policy_paths,
+                                                  task):
+    """The resolved active workspace is surfaced to the policy's config.
+
+    The active workspace can be resolved into a thread-local context (e.g. by
+    the server-side workspace resolver) rather than being written into the
+    config file. Verify that admin policies still receive it as
+    `active_workspace` instead of `None`.
+    """
+    captured_requests = []
+
+    class CaptureWorkspacePolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                    return_value=CaptureWorkspacePolicy()):
+        # add_labels.yaml does not set active_workspace, so without the fix
+        # the policy would receive `active_workspace: None`.
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+            POLICY_PATH, 'add_labels.yaml')
+        importlib.reload(skypilot_config)
+
+        # Simulate the server-side resolver setting the active workspace in a
+        # thread-local context rather than in the config file.
+        with skypilot_config.local_active_workspace_ctx('team-a'):
+            dag, mutated_config = admin_policy_utils.apply(
+                task,
+                request_name=request_names.AdminPolicyRequestName.
+                CLUSTER_LAUNCH,
+                at_client_side=True)
+
+    assert len(captured_requests) == 1
+    assert captured_requests[0].skypilot_config.get(
+        'active_workspace') == 'team-a', (
+            'Policy should receive the resolved active workspace')
+    assert mutated_config.get('active_workspace') == 'team-a'
+
+
 def test_reject_old_clients_policy(add_example_policy_paths, task):
     """Test RejectOldClientsPolicy rejects old clients."""
     from example_policy.skypilot_policy import RejectOldClientsPolicy
@@ -936,3 +995,173 @@ def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
             server_mutated_request.task.volumes)
     assert client_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
     assert server_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+
+
+def test_mutated_user_request_log_redacts_secrets(add_example_policy_paths,
+                                                  task, tmp_path):
+    """The mutated-request debug log must not carry the API server token.
+
+    MutatedUserRequest holds the whole SkyPilot config, so logging it renders
+    the config as a dict repr -- a different path from the YAML config dumps,
+    and one that leaked the token into CI logs until it was redacted too.
+    """
+    token = 'sky_eyJhbGciOiJIUzI1NiJ9.CANARYTOKENVALUE.sig'
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('admin_policy: example_policy.AddLabelsPolicy\n'
+                           'api_server:\n'
+                           '  endpoint: https://api.example.com\n'
+                           f'  service_account_token: {token}\n')
+
+    # sky loggers do not propagate to root, so caplog cannot see them; attach
+    # a handler to the emitting logger directly.
+    emitter = logging.getLogger('sky.utils.admin_policy_utils')
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    previous_level = emitter.level
+    emitter.addHandler(handler)
+    emitter.setLevel(logging.DEBUG)
+    try:
+        _load_task_and_apply_policy(task, str(config_path))
+    finally:
+        emitter.removeHandler(handler)
+        emitter.setLevel(previous_level)
+
+    logged = stream.getvalue()
+    assert 'Mutated user request:' in logged, (
+        f'expected the debug line to be emitted, got: {logged!r}')
+    assert token not in logged, 'the API token reached a log line'
+    assert '<redacted>' in logged, (
+        'the token should be replaced, not dropped, so the log still shows '
+        'that the field was set')
+
+
+@pytest.fixture
+def applied_hook(monkeypatch):
+    """Registers a recording admin-policy-applied hook on an empty registry."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    hook = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook('test', hook)
+    return hook
+
+
+def test_applied_hook_receives_mutated_request(add_example_policy_paths, task,
+                                               applied_hook):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        dag, config = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    applied_hook.assert_called_once()
+    hook_dag, hook_config, request_name, request_options = (
+        applied_hook.call_args.args)
+    # A copy of the effective request, not the request itself.
+    assert hook_dag is not dag
+    assert [t.name for t in hook_dag.tasks] == [t.name for t in dag.tasks]
+    assert hook_config == config
+    assert hook_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels', 'app'), None) == 'skypilot'
+    assert request_name == (request_names.AdminPolicyRequestName.CLUSTER_LAUNCH)
+    assert request_options.cluster_name == 'test'
+
+
+def test_applied_hook_fires_without_policy(task, applied_hook, tmp_path):
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    applied_hook.assert_called_once()
+    assert applied_hook.call_args.args[0].tasks[0].run == dag.tasks[0].run
+    assert applied_hook.call_args.args[1] == config
+
+
+def test_applied_hook_skipped_at_client_side(add_example_policy_paths, task,
+                                             applied_hook):
+    _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    admin_policy_utils.apply(
+        task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        at_client_side=True)
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_skipped_when_rejected(add_example_policy_paths, task,
+                                            applied_hook):
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy):
+        _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'reject_all.yaml'))
+    applied_hook.assert_not_called()
+
+
+def test_applied_hook_failure_does_not_fail_request(task, monkeypatch,
+                                                    tmp_path):
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    following = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'failing', mock.Mock(side_effect=RuntimeError('hook failed')))
+    plugin_hooks.register_admin_policy_applied_hook('following', following)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    dag, _ = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks
+    following.assert_called_once()
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_applied_hook_mutation_does_not_alter_request(task, monkeypatch,
+                                                      tmp_path, raises):
+    """A callback that mutates its arguments (and maybe then raises) changes
+    neither the request the caller executes nor what later callbacks see."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+
+    def mutate(dag, config, _request_name, request_options):
+        dag.tasks[0].run = 'echo tampered'
+        dag.tasks[0].update_envs({'TAMPERED': '1'})
+        config.set_nested(('allowed_clouds',), ['gcp'])
+        request_options.cluster_name = 'tampered'
+        if raises:
+            raise RuntimeError('hook failed')
+
+    seen = []
+    plugin_hooks.register_admin_policy_applied_hook('mutate', mutate)
+    plugin_hooks.register_admin_policy_applied_hook(
+        'following', lambda dag, config, _name, options: seen.append(
+            (dag.tasks[0].run, dict(dag.tasks[0].envs),
+             config.get_nested(
+                 ('allowed_clouds',), None), options.cluster_name)))
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text('allowed_clouds: [aws]\n')
+    original_run = task.run
+    dag, config = _load_task_and_apply_policy(task, str(config_path))
+    assert dag.tasks[0].run == original_run
+    assert 'TAMPERED' not in dag.tasks[0].envs
+    assert config.get_nested(('allowed_clouds',), None) == ['aws']
+    assert seen == [(original_run, dict(dag.tasks[0].envs), ['aws'], 'test')]
+
+
+def test_applied_hook_observes_only_its_request_names(task, monkeypatch):
+    """A hook registered for some request names is skipped, without copying
+    anything, for the others."""
+    monkeypatch.setattr(plugin_hooks, '_ADMIN_POLICY_APPLIED_HOOKS', {})
+    launches = mock.Mock()
+    everything = mock.Mock()
+    plugin_hooks.register_admin_policy_applied_hook(
+        'launches',
+        launches,
+        request_names=[request_names.AdminPolicyRequestName.CLUSTER_LAUNCH])
+    plugin_hooks.register_admin_policy_applied_hook('everything', everything)
+    dag = sky.Dag()
+    dag.add(task)
+    config = config_utils.Config({'allowed_clouds': ['aws']})
+    deepcopy = mock.Mock(side_effect=copy.deepcopy)
+    monkeypatch.setattr(plugin_hooks.copy, 'deepcopy', deepcopy)
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.OPTIMIZE, None)
+    launches.assert_not_called()
+    everything.assert_called_once()
+    assert deepcopy.call_count == 3  # dag, config, options: one hook only
+
+    plugin_hooks.fire_admin_policy_applied(
+        dag, config, request_names.AdminPolicyRequestName.CLUSTER_LAUNCH, None)
+    launches.assert_called_once()
+    assert everything.call_count == 2
+    assert deepcopy.call_count == 9
