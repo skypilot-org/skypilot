@@ -1706,12 +1706,15 @@ async def enabled_clouds_batch(request: fastapi.Request,
         # Visibility, not usability: reporting a workspace's enabled clouds is a
         # read, so a read-only-visible workspace must survive this filter (the
         # dashboard asks for every workspace it can see at once, and dropping
-        # one would fail the whole batch).
-        workspace_list = list(
-            permission.permission_service.get_accessible_workspace_names(
-                auth_user.id,
-                set(workspace_list),
-                action=workspace_constants.WORKSPACE_ACTION_READ))
+        # one would fail the whole batch). In a thread: it reloads the policy
+        # when it changed, a database read that can also wait for the policy's
+        # write lock, and on the event loop that wait stalls the whole worker.
+        workspace_list = list(await context_utils.to_thread_with_executor(
+            None,
+            permission.permission_service.get_accessible_workspace_names,
+            auth_user.id,
+            set(workspace_list),
+            action=workspace_constants.WORKSPACE_ACTION_READ))
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,

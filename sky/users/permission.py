@@ -9,8 +9,10 @@ import time
 from typing import Dict, Generator, List, Optional, Set, Tuple
 
 import casbin
+from casbin import persist
 from casbin import util as casbin_util
 import sqlalchemy
+from sqlalchemy import orm
 import sqlalchemy_adapter
 
 from sky import global_user_state
@@ -171,11 +173,63 @@ _POLICY_VERSION_PG_QUERY = sqlalchemy.text(
 _POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
     'SELECT version FROM rbac_policy_version WHERE id = 1')
 
+# Bound on the statement that reads the whole policy (casbin_rule), PostgreSQL
+# only. A reload in place runs it while holding the enforcer's write lock, so
+# every enforce() and role lookup in this process waits for it. 10 s rather
+# than the auth path's 5 s: the table grows with users and workspace grants,
+# and a slow database should fail an occasional reload, not every one. A
+# cancelled read raises to the caller and keeps the model this process
+# already has; it is counted as an error on casbin_rule in
+# `sky_apiserver_db_statements_total`.
+#
+# It bounds the database's side only. A read stuck on a connection that never
+# answers is not a statement the server is running, so readers that must not
+# wait at all read `_PolicyVersion.roles` instead of the enforcer.
+_POLICY_LOAD_STATEMENT_TIMEOUT_MS = 10_000
+
+
+def _policy_load_bound_sql() -> str:
+    """Lower statement_timeout for the rest of the transaction, never raise it.
+
+    The same form as `db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL`: a tighter
+    bound from the role, the database or the server configuration is kept.
+    """
+    bound = _POLICY_LOAD_STATEMENT_TIMEOUT_MS
+    return ('SELECT pg_catalog.set_config(\'statement_timeout\', '
+            f'\'{bound}\', true) '
+            'WHERE pg_catalog.current_setting(\'statement_timeout\')'
+            '::interval = interval \'0\' '
+            'OR pg_catalog.current_setting(\'statement_timeout\')'
+            f'::interval > interval \'{bound} ms\'')
+
+
+class _PolicyAdapter(sqlalchemy_adapter.Adapter):
+    """casbin's SQLAlchemy adapter, with the full policy read bounded.
+
+    The read opens its own session rather than the base class's, whose
+    session helper is private, so a change in the adapter cannot silently
+    drop the bound.
+    """
+
+    def __init__(self, engine: sqlalchemy.engine.Engine):
+        super().__init__(engine, db_class=sqlalchemy_adapter.CasbinRule)
+        self._load_engine = engine
+        self._bounded = (
+            engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value)
+
+    def load_policy(self, model) -> None:
+        with orm.Session(self._load_engine) as session, session.begin():
+            if self._bounded:
+                session.execute(sqlalchemy.text(_policy_load_bound_sql()))
+            for rule in session.query(sqlalchemy_adapter.CasbinRule).all():
+                persist.load_policy_line(str(rule), model)
+
 
 class _PolicyVersion:
     """The stored policy version an enforcer last loaded, and how to read it.
 
-    Shared by every PermissionService over one enforcer.
+    Also holds the roles in that enforcer's model, for readers that must not
+    wait for its lock. Shared by every PermissionService over one enforcer.
     """
 
     def __init__(self, enforcer: casbin.SyncedEnforcer,
@@ -196,6 +250,15 @@ class _PolicyVersion:
         # SQLite has no runtime toggle for triggers, so checking once is enough.
         self._sqlite_triggers_ok = (self._is_sqlite and
                                     self._sqlite_triggers_present())
+        # Each principal's direct roles in `enforcer`'s model, as of the last
+        # change this process made to it or loaded into it; None until the
+        # first. Replaced whole and never mutated, so reading it takes no
+        # lock. See `PermissionService.roles_in_memory`. A write made on the
+        # enforcer directly, not through PermissionService, shows up here at
+        # the next reload, as a write from another process does.
+        self.roles: Optional[Dict[str, Tuple[str, ...]]] = None
+        # Serializes `publish_roles`, so an older copy never replaces a newer.
+        self._publish_lock = threading.Lock()
 
     def _sqlite_triggers_present(self) -> bool:
         try:
@@ -232,6 +295,18 @@ class _PolicyVersion:
 
     def is_loaded(self, version: Optional[int]) -> bool:
         return version is not None and version == self.loaded
+
+    def publish_roles(self) -> None:
+        """Replace `roles` with what the model holds now.
+
+        Call after every change to the model, outside the enforcer's write
+        lock: this takes its read lock. In-memory only, no database call.
+        """
+        with self._publish_lock:
+            roles: Dict[str, List[str]] = {}
+            for rule in self.enforcer.get_grouping_policy():
+                roles.setdefault(rule[0], []).append(rule[1])
+            self.roles = {user: tuple(names) for user, names in roles.items()}
 
 
 def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
@@ -330,8 +405,7 @@ class PermissionService:
                 if full_initialize:
                     db_utils.add_all_tables_to_db_sqlalchemy(
                         sqlalchemy_adapter.Base.metadata, engine)
-                adapter = sqlalchemy_adapter.Adapter(
-                    engine, db_class=sqlalchemy_adapter.CasbinRule)
+                adapter = _PolicyAdapter(engine)
                 # Use SyncedEnforcer for thread safety. It uses a
                 # read-write lock internally: concurrent reads (enforce,
                 # get_roles_for_user) take a shared read lock, while
@@ -349,6 +423,7 @@ class PermissionService:
                     with _policy_lock():
                         self._maybe_initialize_policies()
                         self._maybe_initialize_basic_auth_user()
+                self._policy_version.publish_roles()
             else:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
@@ -364,6 +439,12 @@ class PermissionService:
         assert self.enforcer is not None, (
             'Enforcer should be initialized after _lazy_initialize()')
         return self.enforcer
+
+    def _publish_roles(self) -> None:
+        """Make a change to the model's roles visible to `roles_in_memory`."""
+        state = self._policy_version
+        if state is not None and state.enforcer is self.enforcer:
+            state.publish_roles()
 
     def _get_plugin_rbac_rules(self):
         """Get RBAC rules from loaded plugins.
@@ -596,6 +677,7 @@ class PermissionService:
             # `_maybe_initialize_policies` calls once per user in a loop.
             self._load_policy_no_lock()
             if self._add_user_if_not_exists_no_lock(user_id, role):
+                self._publish_roles()
                 # As in `update_role`: a first role can grant workspace access
                 # that was denied and cached while the user had none. Clear
                 # after the write so a reader cannot re-cache the old answer.
@@ -637,6 +719,8 @@ class PermissionService:
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
+            if removed_roles:
+                self._publish_roles()
             # Private-workspace membership is a `p` row (user, workspace, '*').
             # Role names also sit at field 0 of `p` rows (the blocklist rules),
             # so match the '*' action as well instead of field 0 alone: no user
@@ -661,8 +745,12 @@ class PermissionService:
             # and a leftover `admin` would survive a demotion -- silently
             # restoring what the demotion took away, since the blocklist check
             # lets admin win over the other role.
-            enforcer.remove_filtered_grouping_policy(0, user_id)
-            enforcer.add_grouping_policy(user_id, new_role)
+            try:
+                enforcer.remove_filtered_grouping_policy(0, user_id)
+                enforcer.add_grouping_policy(user_id, new_role)
+            finally:
+                # Also when the add failed: the removal already happened.
+                self._publish_roles()
             # Always invalidate: even a first role assignment can grant
             # workspace access that was previously denied and cached.
             self.invalidate_user_permission_cache(user_id)
@@ -700,11 +788,25 @@ class PermissionService:
         roundtrip `get_user_roles` makes. Resolves identities the same way, so
         a caller that reads this cannot reach a different conclusion about a
         principal than one that reads `get_user_roles`.
+
+        Safe on the event loop: it reads the copy of the roles published after
+        each change to the model, never the enforcer, whose lock a reload or a
+        policy write holds across a database call. The copy trails the model
+        only by the moment between a change and its publication, and it moves
+        from one complete state to the next, never through the gap inside a
+        role replacement.
         """
         system_role = _system_role(user_id)
         if system_role is not None:
             return [system_role]
-        return self._ensure_enforcer().get_roles_for_user(user_id)
+        enforcer = self._ensure_enforcer()
+        state = self._policy_version
+        roles = (state.roles
+                 if state is not None and state.enforcer is enforcer else None)
+        if roles is None:
+            # Nothing published yet, or an enforcer set up elsewhere.
+            return enforcer.get_roles_for_user(user_id)
+        return list(roles.get(user_id, ()))
 
     def get_users_for_role(self, role: str) -> List[str]:
         """Get all users for a role."""
@@ -1243,12 +1345,13 @@ class PermissionService:
                 # Nothing to compare a build against: reload in place.
                 enforcer.load_policy()
                 state.loaded = None
-                return
-            # Built without the enforcer's lock, so readers keep the old model
-            # for the whole load instead of waiting for it.
-            _swap_enforcer(enforcer, casbin.Enforcer(_MODEL_PATH,
-                                                     state.adapter), state,
-                           version)
+            else:
+                # Built without the enforcer's lock, so readers keep the old
+                # model for the whole load instead of waiting for it.
+                _swap_enforcer(enforcer,
+                               casbin.Enforcer(_MODEL_PATH, state.adapter),
+                               state, version)
+        state.publish_roles()
 
     def load_policy(self):
         """Load policy from storage with lock."""
