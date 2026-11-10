@@ -1982,6 +1982,39 @@ def test_modal_adaptor_follows_config_file_changes(tmp_path, monkeypatch):
     assert token_id() is None
 
 
+def test_modal_adaptor_first_access_reads_a_config_written_after_import(
+        tmp_path, monkeypatch):
+    # Other code in an API server worker (a plugin, say) can import modal
+    # directly before any token exists; the token is then stored by another
+    # process. This worker's first access through the adaptor must not trust
+    # the config modal read at import.
+    pytest.importorskip('modal')
+    from sky.adaptors import modal as modal_adaptor
+    modal_sdk = modal_adaptor.modal.load_module()
+    path = tmp_path / '.modal.toml'
+    monkeypatch.setattr(modal_sdk.config, 'user_config_path', str(path))
+    # What modal holds after being imported with no config file.
+    monkeypatch.setattr(modal_sdk.config, '_user_config', {})
+    monkeypatch.setattr(modal_sdk.config, '_profile', 'default')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_PROFILE', raising=False)
+    dropped_clients = []
+    monkeypatch.setattr(modal_sdk.Client, 'set_env_client',
+                        dropped_clients.append)
+    path.write_text('[uploaded]\ntoken_id = "ak-uploaded"\nactive = true\n')
+    # pylint: disable=protected-access
+    lazy_modal = modal_adaptor._ModalImport()
+
+    assert lazy_modal.config.config.get('token_id') == 'ak-uploaded'
+    # The active profile and the cached client are refreshed as well.
+    assert modal_sdk.config._profile == 'uploaded'
+    assert dropped_clients == [None]
+    # Nothing was derived from the stale config, so the version is unchanged
+    # and the unchanged file is not reloaded again.
+    assert lazy_modal.config_version() == 0
+    assert dropped_clients == [None]
+
+
 def test_modal_adaptor_keeps_config_if_reload_internals_change(
         tmp_path, monkeypatch):
     # The reload uses private modal internals; if they go away, Modal must

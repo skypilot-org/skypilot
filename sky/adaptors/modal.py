@@ -20,9 +20,10 @@ class _ModalImport(common.LazyImport):
     modal reads ~/.modal.toml (or $MODAL_CONFIG_PATH) once, at import, and
     caches an API client built from it. A long-lived process -- e.g. an API
     server request worker -- would otherwise never see `modal token new` or
-    a token uploaded after it first touched modal. Each access re-stats the
-    file and, when it changed, reloads modal's config and drops the cached
-    client.
+    a token uploaded after it first touched modal. The first access reloads
+    modal's config, since modal may have been imported before the file
+    existed; each later access re-stats the file and, when it changed,
+    reloads the config and drops the cached client.
     """
 
     def __init__(self):
@@ -59,10 +60,10 @@ class _ModalImport(common.LazyImport):
         with self._config_lock:
             if signature == self._config_signature:
                 return
-            if self._config_signature is _UNSET:
-                # modal read this file when it was imported.
-                self._config_signature = signature
-                return
+            # Reload on the first access too. modal reads the file at import,
+            # and other code in this process (a plugin, say) may have imported
+            # modal directly before another process wrote the file.
+            first_access = self._config_signature is _UNSET
             # modal has no public reload API. If these internals change, keep
             # the config modal already loaded rather than break every access.
             try:
@@ -76,7 +77,9 @@ class _ModalImport(common.LazyImport):
                 logger.debug('Failed to reload the Modal config.',
                              exc_info=True)
                 return
-            self._config_version += 1
+            if not first_access:
+                # Nothing was derived from the config before the first access.
+                self._config_version += 1
             # Publish the signature last: other threads skip the lock once it
             # matches, so they must not see it before the reload is done.
             self._config_signature = signature
