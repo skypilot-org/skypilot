@@ -1397,8 +1397,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
                         'requiredDuringSchedulingIgnoredDuringExecution'][0]
                     self.assertEqual(term['topologyKey'],
                                      'cloud.google.com/gke-nodepool')
-                    self.assertEqual(term['labelSelector']['matchLabels'],
-                                     {'skypilot-cluster': self.cluster_name})
+                    self.assertEqual(
+                        term['labelSelector']['matchLabels'],
+                        {'skypilot-cluster-name': self.cluster_name})
                 else:
                     self.assertIsNone(pod_affinity)
         # The slice shape comes from the request, not from node labels.

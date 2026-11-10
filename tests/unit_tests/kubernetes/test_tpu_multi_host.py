@@ -138,7 +138,7 @@ def test_pod_fields_multi_host_slice():
     assert term == {
         'labelSelector': {
             'matchLabels': {
-                'skypilot-cluster': 'c1'
+                'skypilot-cluster-name': 'c1'
             }
         },
         'topologyKey': 'cloud.google.com/gke-nodepool',

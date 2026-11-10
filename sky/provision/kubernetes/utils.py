@@ -3437,9 +3437,9 @@ def get_pod_fields(
         enable_flex_start: See get_node_selector().
         tpu_chips_per_vm: See get_node_selector().
         same_node_pool_cluster: When set, every pod of this cluster
-            (``skypilot-cluster`` label) must run in the same GKE node pool.
-            Used for a single multi-host TPU slice, where one node pool is
-            one slice and a pod on another pool would join another slice.
+            (``skypilot-cluster-name`` label) must run in the same GKE node
+            pool. Used for a single multi-host TPU slice, where one node pool
+            is one slice and a pod on another pool would join another slice.
 
     Returns:
         A partial pod manifest, empty when no field applies.
@@ -3459,7 +3459,7 @@ def get_pod_fields(
             'requiredDuringSchedulingIgnoredDuringExecution': [{
                 'labelSelector': {
                     'matchLabels': {
-                        'skypilot-cluster': same_node_pool_cluster
+                        'skypilot-cluster-name': same_node_pool_cluster
                     }
                 },
                 'topologyKey': 'cloud.google.com/gke-nodepool',
