@@ -3,14 +3,18 @@
 Modal sizes CPU and memory per container, so it has no fixed instance types.
 As on Kubernetes, SkyPilot builds them on the fly from the request, e.g.
 `4CPU--16GB` or `32CPU--128GB--H100:2`, and prices them from the hosted
-pricing table `modal/pricing.csv` (made by
-sky/catalog/data_fetchers/fetch_modal.py). That table has one row per
-resource and region: per-hour rates for a Modal CPU core (2 vCPUs), a GiB of
-memory and each GPU type, plus each GPU's maximum count per container and its
-memory. CPU and memory also carry Modal's non-preemptible rates, which
-CPU-only clusters pay since they run non-preemptible.
+`modal/vms.csv` (made by sky/catalog/data_fetchers/fetch_modal.py). That
+table uses the standard catalog columns, GCP-style, with two kinds of rows
+per region: accelerator rows (no `InstanceType`, one per GPU type and count
+Modal offers per container, priced for that many GPUs, `GpuInfo` with the GPU
+memory), and two rate rows, `InstanceType` `cpu-core` (one Modal core, 2
+vCPUs) and `memory-gib`, whose `Price` is the non-preemptible rate and
+`SpotPrice` the list rate. CPU-only clusters run non-preemptible and pay the
+former; Modal's GPU containers are preemptible and pay the latter for their
+CPU and memory.
 """
 
+import ast
 import math
 import re
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -27,14 +31,18 @@ _DISPLAY_NAME = 'Modal'
 
 AUTO_REGION = 'auto'
 
-# Names of the CPU and memory rows in modal/pricing.csv; every other row is a
-# GPU. Keep in sync with fetch_modal.py.
+# InstanceType of the two rate rows in modal/vms.csv; every other row is an
+# accelerator row. Keep in sync with fetch_modal.py.
 CPU_RESOURCE = 'cpu-core'
 MEMORY_RESOURCE = 'memory-gib'
+# Which column of a rate row to charge: Modal's list rate is its preemptible
+# rate, so it sits in SpotPrice; Price holds the non-preemptible rate.
+_LIST_RATE_COLUMN = 'SpotPrice'
+_NONPREEMPTIBLE_RATE_COLUMN = 'Price'
 
 _PULL_FREQUENCY_HOURS = 24
-_pricing = common.read_catalog('modal/pricing.csv',
-                               pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_df = common.read_catalog('modal/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _DEFAULT_SKY_VCPUS = 4.0
 _DEFAULT_MEMORY_GIB = 16
@@ -42,8 +50,8 @@ _DEFAULT_MEMORY_CPU_RATIO = _DEFAULT_MEMORY_GIB / _DEFAULT_SKY_VCPUS
 # Without a CPU request, GPU containers get 4 vCPUs per GPU, as on Kubernetes
 # (memory follows at _DEFAULT_MEMORY_CPU_RATIO).
 _DEFAULT_SKY_VCPUS_PER_GPU = 4
-# GPU counts shown by `sky gpus list`; a launch may use any count up to the
-# GPU's maximum.
+# GPU counts shown by `sky gpus list`; a launch may use any count the catalog
+# offers.
 _LISTED_GPU_COUNTS = (1, 2, 4, 8)
 
 # Modal validates these bounds when creating a Function. See:
@@ -60,21 +68,35 @@ _VIRTUAL_INSTANCE_TYPE_PATTERN = re.compile(
 
 
 def _gpu_rows() -> pd.DataFrame:
-    """One pricing row per GPU type, with its MaxCount and GpuMemoryGiB."""
-    df = _pricing[~_pricing['Resource'].isin((CPU_RESOURCE, MEMORY_RESOURCE))]
+    """The accelerator rows of the `auto` region: one per GPU type and count."""
+    df = _df[_df['AcceleratorName'].notna()]
     return df[df['Region'] == AUTO_REGION]
 
 
 def _region_names() -> Set[str]:
-    return set(_pricing['Region'])
+    return set(_df['Region'])
 
 
 def _canonical_accelerator(accelerator: str) -> Optional[str]:
     accelerator_lower = accelerator.lower()
-    for supported_accelerator in _gpu_rows()['Resource']:
+    for supported_accelerator in _gpu_rows()['AcceleratorName'].unique():
         if supported_accelerator.lower() == accelerator_lower:
             return supported_accelerator
     return None
+
+
+def _offered_counts(accelerator: str) -> List[int]:
+    """GPU counts per container the catalog lists for this (canonical) GPU."""
+    rows = _gpu_rows()
+    counts = rows[rows['AcceleratorName'] == accelerator]['AcceleratorCount']
+    return sorted(int(count) for count in counts)
+
+
+def _format_counts(counts: List[int]) -> str:
+    if counts and counts == list(range(counts[0], counts[-1] + 1)):
+        return (str(counts[0])
+                if len(counts) == 1 else f'{counts[0]}-{counts[-1]}')
+    return ', '.join(str(count) for count in counts)
 
 
 def get_max_gpu_count(accelerator: str) -> Optional[int]:
@@ -82,13 +104,14 @@ def get_max_gpu_count(accelerator: str) -> Optional[int]:
     canonical = _canonical_accelerator(accelerator)
     if canonical is None:
         return None
-    rows = _gpu_rows()
-    return int(rows[rows['Resource'] == canonical]['MaxCount'].iloc[0])
+    return max(_offered_counts(canonical))
 
 
 def _gpu_memory_gib(accelerator: str) -> int:
     rows = _gpu_rows()
-    return int(rows[rows['Resource'] == accelerator]['GpuMemoryGiB'].iloc[0])
+    gpu_info = ast.literal_eval(
+        rows[rows['AcceleratorName'] == accelerator]['GpuInfo'].iloc[0])
+    return int(gpu_info['Gpus'][0]['MemoryInfo']['SizeInMiB']) // 1024
 
 
 def _format_resource_value(value: float) -> str:
@@ -120,12 +143,12 @@ class ModalInstanceType:
             if canonical_accelerator is None:
                 raise ValueError(
                     f'Unsupported Modal accelerator {accelerator_type!r}.')
-            max_count = get_max_gpu_count(canonical_accelerator)
-            assert max_count is not None
-            if not 1 <= accelerator_count <= max_count:
+            counts = _offered_counts(canonical_accelerator)
+            if accelerator_count not in counts:
                 raise ValueError(
-                    f'Modal offers up to {max_count} {canonical_accelerator} '
-                    f'per container, not {accelerator_count}.')
+                    f'Modal offers {canonical_accelerator} in counts of '
+                    f'{_format_counts(counts)} per container, not '
+                    f'{accelerator_count}.')
             accelerator_type = canonical_accelerator
         self.vcpus = vcpus
         self.memory_mib = memory_mib
@@ -161,31 +184,49 @@ class ModalInstanceType:
                    accelerator_type=match.group('accelerator'))
 
 
-def _rate(region_rates: pd.DataFrame, resource: str, column: str) -> float:
-    rows = region_rates[region_rates['Resource'] == resource]
+def _region_rows(region: str) -> pd.DataFrame:
+    rows = _df[_df['Region'] == region]
+    if rows.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Invalid Modal region {region!r}.')
+    return rows
+
+
+def _rate(region_rows: pd.DataFrame, resource: str, column: str) -> float:
+    """Per-unit hourly rate from a `cpu-core` or `memory-gib` row."""
+    rows = region_rows[region_rows['InstanceType'] == resource]
     if rows.empty:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No Modal price for {resource} in region '
-                             f'{region_rates["Region"].iloc[0]!r}.')
+                             f'{region_rows["Region"].iloc[0]!r}.')
     return float(rows[column].iloc[0])
 
 
-def _compute_price_per_hour(instance: ModalInstanceType, region: str) -> float:
-    """Price of a container from the region's per-hour rates."""
-    region_rates = _pricing[_pricing['Region'] == region]
-    if region_rates.empty:
+def _gpu_price(region_rows: pd.DataFrame, accelerator: str,
+               count: int) -> float:
+    """Hourly price of `count` GPUs, from the matching accelerator row."""
+    rows = region_rows[(region_rows['AcceleratorName'] == accelerator) &
+                       (region_rows['AcceleratorCount'] == count)]
+    if rows.empty:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Invalid Modal region {region!r}.')
+            raise ValueError(f'No Modal price for {accelerator}:{count} in '
+                             f'region {region_rows["Region"].iloc[0]!r}.')
+    return float(rows['Price'].iloc[0])
+
+
+def _compute_price_per_hour(instance: ModalInstanceType, region: str) -> float:
+    """Price of a container from the region's rows."""
+    region_rows = _region_rows(region)
     # GPU containers run preemptible at Modal's list rates; CPU-only
     # containers run non-preemptible.
-    column = ('HourlyPrice' if instance.accelerator_type is not None else
-              'NonPreemptibleHourlyPrice')
-    price = (instance.modal_cpu * _rate(region_rates, CPU_RESOURCE, column) +
-             instance.memory_gib * _rate(region_rates, MEMORY_RESOURCE, column))
+    column = (_LIST_RATE_COLUMN if instance.accelerator_type is not None else
+              _NONPREEMPTIBLE_RATE_COLUMN)
+    price = (instance.modal_cpu * _rate(region_rows, CPU_RESOURCE, column) +
+             instance.memory_gib * _rate(region_rows, MEMORY_RESOURCE, column))
     if instance.accelerator_type is not None:
         assert instance.accelerator_count is not None
-        price += instance.accelerator_count * _rate(
-            region_rates, instance.accelerator_type, 'HourlyPrice')
+        price += _gpu_price(region_rows, instance.accelerator_type,
+                            instance.accelerator_count)
     return price
 
 
@@ -203,7 +244,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
-    return common.validate_region_zone_impl(_CLOUD_NAME, _pricing, region, zone)
+    return common.validate_region_zone_impl(_CLOUD_NAME, _df, region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -347,8 +388,8 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 def _accelerator_offered(accelerator: str, count: int,
                          region: Optional[str]) -> bool:
-    max_count = get_max_gpu_count(accelerator)
-    if max_count is None or not 1 <= count <= max_count:
+    canonical = _canonical_accelerator(accelerator)
+    if canonical is None or count not in _offered_counts(canonical):
         return False
     return region is None or region in _region_names()
 
@@ -408,15 +449,16 @@ def _listed_instances() -> pd.DataFrame:
     """The shapes a launch picks without a CPU or memory request, per region.
 
     `sky gpus list` and region lookups read this standard catalog table,
-    which is built from the pricing rows rather than stored.
+    which is built from the catalog's rate and accelerator rows rather than
+    stored.
     """
     instances = [_resources_from_requests(None, None)]
-    for accelerator, max_count in zip(_gpu_rows()['Resource'],
-                                      _gpu_rows()['MaxCount']):
+    for accelerator in _gpu_rows()['AcceleratorName'].unique():
+        offered = _offered_counts(accelerator)
         instances.extend(
             _gpu_instance(accelerator, count, cpus=None, memory=None)
             for count in _LISTED_GPU_COUNTS
-            if count <= int(max_count))
+            if count in offered)
     rows = []
     for region in sorted(_region_names()):
         for instance in instances:

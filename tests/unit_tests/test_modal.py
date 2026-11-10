@@ -1,5 +1,6 @@
 """Tests for Modal cloud provider."""
 
+import ast
 import contextlib
 import csv
 import pathlib
@@ -76,14 +77,14 @@ def _write_modal_catalog(path, prices=None, keep_row=None):
 
 @pytest.fixture(scope='module')
 def _modal_catalog_df(tmp_path_factory):
-    path = tmp_path_factory.mktemp('modal_catalog') / 'pricing.csv'
+    path = tmp_path_factory.mktemp('modal_catalog') / 'vms.csv'
     return _write_modal_catalog(path)
 
 
 @pytest.fixture(autouse=True)
 def _use_modal_catalog(monkeypatch, _modal_catalog_df):
     """Use a pricing table made by the fetcher instead of the hosted one."""
-    monkeypatch.setattr(modal_catalog, '_pricing', _modal_catalog_df)
+    monkeypatch.setattr(modal_catalog, '_df', _modal_catalog_df)
 
 
 def _provision_config(node_config,
@@ -2080,8 +2081,8 @@ def test_modal_adaptor_publishes_new_config_after_reload(tmp_path, monkeypatch):
 
 def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):
     prices = dict(_MODAL_PRICES, H100=0.002, cpu=0.00002)
-    monkeypatch.setattr(modal_catalog, '_pricing',
-                        _write_modal_catalog(tmp_path / 'pricing.csv', prices))
+    monkeypatch.setattr(modal_catalog, '_df',
+                        _write_modal_catalog(tmp_path / 'vms.csv', prices))
 
     assert modal_catalog.get_hourly_cost(
         '4CPU--16GB--H100:1', region='auto') == (pytest.approx(
@@ -2098,8 +2099,8 @@ def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):
 def test_modal_catalog_gpu_types_and_counts_come_from_catalog(
         tmp_path, monkeypatch):
     monkeypatch.setattr(fetch_modal, 'GPU_MAX_COUNTS', {'H100': 4})
-    monkeypatch.setattr(modal_catalog, '_pricing',
-                        _write_modal_catalog(tmp_path / 'pricing.csv'))
+    monkeypatch.setattr(modal_catalog, '_df',
+                        _write_modal_catalog(tmp_path / 'vms.csv'))
 
     assert modal_catalog.get_max_gpu_count('h100') == 4
     assert modal_catalog.get_max_gpu_count('T4') is None
@@ -2163,8 +2164,8 @@ def test_modal_instance_type_names_round_trip():
         ('modal-h100-8x', 'Invalid Modal instance type'),
         ('4CPU', 'Invalid Modal instance type'),
         ('4CPU--16GB--H100', 'Invalid Modal instance type'),
-        ('4CPU--16GB--H100:0', 'up to 8 H100 per container, not 0'),
-        ('4CPU--16GB--H100:9', 'up to 8 H100 per container, not 9'),
+        ('4CPU--16GB--H100:0', 'H100 in counts of 1-8 per container, not 0'),
+        ('4CPU--16GB--H100:9', 'H100 in counts of 1-8 per container, not 9'),
         ('4CPU--16GB--Foo:1', 'Unsupported Modal accelerator'),
         # Modal's bounds: 0.125-64 cores (0.25-128 vCPUs), 128 MiB-336 GiB.
         ('0.1CPU--16GB', 'CPU request is out of bounds'),
@@ -2384,15 +2385,15 @@ def test_modal_regions_are_cheapest_first():
 def test_modal_catalog_price_missing_in_a_region(tmp_path, monkeypatch):
     """A GPU priced only in `auto` exists but cannot be priced elsewhere."""
     monkeypatch.setattr(
-        modal_catalog, '_pricing',
-        _write_modal_catalog(tmp_path / 'pricing.csv',
-                             keep_row=lambda row: row['Resource'] != 'T4' or
-                             row['Region'] == 'auto'))
+        modal_catalog, '_df',
+        _write_modal_catalog(tmp_path / 'vms.csv',
+                             keep_row=lambda row: row['AcceleratorName'] != 'T4'
+                             or row['Region'] == 'auto'))
 
     assert modal_catalog.instance_type_exists('4CPU--16GB--T4:1')
     assert modal_catalog.get_hourly_cost('4CPU--16GB--T4:1', region='auto') > 0
     with pytest.raises(ValueError,
-                       match="No Modal price for T4 in region 'us'"):
+                       match="No Modal price for T4:1 in region 'us'"):
         modal_catalog.get_hourly_cost('4CPU--16GB--T4:1', region='us')
 
 
@@ -2534,38 +2535,100 @@ def test_fetch_modal_parses_region_multipliers():
         fetch_modal.parse_region_multipliers('<p>no prices</p>')
 
 
-def test_fetch_modal_pricing_rows():
+def test_fetch_modal_catalog_rows():
+    """The standard catalog columns, GCP-style: accelerator rows per GPU and
+    count, plus two per-unit rate rows."""
     rows = fetch_modal.create_catalog(_MODAL_PRICES, _MODAL_REGION_MULTIPLIERS)
-    by_key = {(row['Resource'], row['Region']): row for row in rows}
 
+    assert fetch_modal.COLUMNS == [
+        'InstanceType', 'vCPUs', 'MemoryGiB', 'AcceleratorName',
+        'AcceleratorCount', 'GpuInfo', 'Region', 'AvailabilityZone', 'Price',
+        'SpotPrice'
+    ]
     assert all(set(row) == set(fetch_modal.COLUMNS) for row in rows)
     assert len(rows) == len(_MODAL_REGION_MULTIPLIERS) * (
-        2 + len(fetch_modal.GPU_MAX_COUNTS))
+        2 + sum(fetch_modal.GPU_MAX_COUNTS.values()))
+    assert {row['Region'] for row in rows} == set(_MODAL_REGION_MULTIPLIERS)
+    assert all(row['AvailabilityZone'] is None for row in rows)
     assert (fetch_modal.CPU_RESOURCE,
             fetch_modal.MEMORY_RESOURCE) == (modal_catalog.CPU_RESOURCE,
                                              modal_catalog.MEMORY_RESOURCE)
-    cpu = by_key[('cpu-core', 'us')]
-    assert cpu['HourlyPrice'] == pytest.approx(0.0000131 * 3600 * 1.15)
-    assert cpu['NonPreemptibleHourlyPrice'] == pytest.approx(0.00003942 * 3600 *
-                                                             1.15)
-    assert cpu['MaxCount'] is None
-    memory = by_key[('memory-gib', 'us-west')]
-    assert memory['HourlyPrice'] == pytest.approx(0.00000222 * 3600 * 1.75)
-    h100 = by_key[('H100', 'auto')]
-    assert h100['HourlyPrice'] == pytest.approx(0.001097 * 3600)
-    assert h100['NonPreemptibleHourlyPrice'] is None
-    assert (h100['MaxCount'], h100['GpuMemoryGiB']) == (8, 80)
-    assert by_key[('A10', 'auto')]['MaxCount'] == 4
-    assert {row['Region'] for row in rows} == set(_MODAL_REGION_MULTIPLIERS)
-    # The fetcher's GPU tables name the same GPUs.
     assert set(fetch_modal.GPU_MEMORY_GIB) == set(fetch_modal.GPU_MAX_COUNTS)
     assert {name for names in fetch_modal.GPU_NAMES.values() for name in names
            } == set(fetch_modal.GPU_MAX_COUNTS)
 
+    rates = {(row['InstanceType'], row['Region']): row
+             for row in rows
+             if row['InstanceType'] is not None}
+    cpu = rates[('cpu-core', 'us')]
+    assert (cpu['vCPUs'], cpu['MemoryGiB']) == (2, 0)
+    assert cpu['AcceleratorName'] is None and cpu['GpuInfo'] is None
+    # Price: non-preemptible rate; SpotPrice: Modal's list (preemptible) rate.
+    assert cpu['Price'] == pytest.approx(0.00003942 * 3600 * 1.15)
+    assert cpu['SpotPrice'] == pytest.approx(0.0000131 * 3600 * 1.15)
+    memory = rates[('memory-gib', 'us-west')]
+    assert (memory['vCPUs'], memory['MemoryGiB']) == (0, 1)
+    assert memory['Price'] == pytest.approx(0.00000667 * 3600 * 1.75)
+    assert memory['SpotPrice'] == pytest.approx(0.00000222 * 3600 * 1.75)
+
+    gpus = {(row['AcceleratorName'], row['AcceleratorCount'], row['Region']):
+            row for row in rows if row['InstanceType'] is None}
+    h100x2 = gpus[('H100', 2, 'auto')]
+    assert (h100x2['vCPUs'], h100x2['MemoryGiB']) == (None, None)
+    assert h100x2['Price'] == pytest.approx(2 * 0.001097 * 3600)
+    assert h100x2['SpotPrice'] is None
+    assert ast.literal_eval(h100x2['GpuInfo']) == {
+        'Gpus': [{
+            'Name': 'H100',
+            'Manufacturer': 'NVIDIA',
+            'Count': 2,
+            'MemoryInfo': {
+                'SizeInMiB': 80 * 1024
+            },
+        }],
+        'TotalGpuMemoryInMiB': 2 * 80 * 1024,
+    }
+    assert gpus[('H100', 8,
+                 'us')]['Price'] == pytest.approx(8 * 0.001097 * 3600 * 1.15)
+
+    def counts(name):
+        return sorted(c for n, c, r in gpus if n == name and r == 'auto')
+
+    assert counts('H100') == list(range(1, 9))
+    assert counts('A10') == [1, 2, 3, 4]
+    assert counts('RTX-PRO-6000') == [1]
+
+
+def test_modal_catalog_offers_only_the_listed_gpu_counts(tmp_path, monkeypatch):
+    """Like gcp/vms.csv, each accelerator row is a count Modal offers; a
+    count with no row is rejected even below the maximum."""
+    monkeypatch.setattr(
+        modal_catalog, '_df',
+        _write_modal_catalog(tmp_path / 'vms.csv',
+                             keep_row=lambda row: row['AcceleratorName'] !=
+                             'H100' or row['AcceleratorCount'] in (1, 2, 4)))
+
+    assert modal_catalog.get_max_gpu_count('H100') == 4
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'H100', 2) == (['8CPU--32GB--H100:2'], [])
+    assert modal_catalog.get_instance_type_for_accelerator('H100',
+                                                           3) == ([], [])
+    with pytest.raises(ValueError,
+                       match='H100 in counts of 1, 2, 4 per container, not 3'):
+        modal_catalog.ModalInstanceType.from_instance_type(
+            '12CPU--48GB--H100:3')
+    with pytest.raises(ValueError, match='No accelerator H100:3'):
+        modal_catalog.get_accelerator_hourly_cost('H100', 3)
+    listed = modal_catalog.list_accelerators(gpus_only=True,
+                                             name_filter='^H100$',
+                                             region_filter='^auto$',
+                                             quantity_filter=None)['H100']
+    assert sorted(int(info.accelerator_count) for info in listed) == [1, 2, 4]
+
 
 def test_fetch_modal_main_writes_a_table_the_catalog_reads(
         tmp_path, monkeypatch):
-    """The fetcher's CSV (what skypilot-catalog hosts) round-trips."""
+    """The fetcher's vms.csv (what skypilot-catalog hosts) round-trips."""
     region_page = (
         '<table><tr><td>Broad (e.g. <code>us</code>)</td><td>1.2x</td></tr>'
         '<tr><td>Narrow (e.g. <code>us-west</code>)</td><td>1.8x</td></tr>'
@@ -2575,7 +2638,7 @@ def test_fetch_modal_main_writes_a_table_the_catalog_reads(
         fetch_modal.REGION_SELECTION_URL: region_page,
     }
     monkeypatch.setattr(fetch_modal, '_get', lambda url: pages[url])
-    output = tmp_path / 'modal' / 'pricing.csv'
+    output = tmp_path / 'modal' / 'vms.csv'
     monkeypatch.setattr(sys, 'argv', ['fetch_modal', '--output', str(output)])
 
     assert fetch_modal.main() == 0
@@ -2584,12 +2647,14 @@ def test_fetch_modal_main_writes_a_table_the_catalog_reads(
         rows = list(csv.DictReader(f))
     assert list(rows[0]) == fetch_modal.COLUMNS
     assert len(rows) == len(_MODAL_REGION_MULTIPLIERS) * (
-        2 + len(fetch_modal.GPU_MAX_COUNTS))
-    assert rows[0]['Resource'] == 'cpu-core'
-    assert rows[0]['MaxCount'] == ''  # empty, not 'None'
+        2 + sum(fetch_modal.GPU_MAX_COUNTS.values()))
+    assert rows[0]['InstanceType'] == 'cpu-core'
+    assert rows[0]['AcceleratorName'] == ''  # empty, not 'None'
+    gpu_row = next(row for row in rows if row['AcceleratorName'] == 'A10')
+    assert (gpu_row['InstanceType'], gpu_row['SpotPrice']) == ('', '')
 
     monkeypatch.setattr(
-        modal_catalog, '_pricing',
+        modal_catalog, '_df',
         catalog_common.LazyDataFrame(str(output), lambda: False))
     assert modal_catalog.get_max_gpu_count('A10') == 4
     assert modal_catalog.get_hourly_cost(
