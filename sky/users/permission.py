@@ -173,8 +173,8 @@ _POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
 
 # Fields per rule: `g` is (user, role), `p` is (subject, object, action).
 _RULE_WIDTH = {'g': 2, 'p': 3}
-# Ids per statement in a multi-user write: under SQLite's 999 bind
-# parameters before 3.32, with 3 per inserted role row.
+# Ids per IN list in a multi-user write: under SQLite's 999 bound variables
+# before 3.32.
 _IDS_PER_STATEMENT = 300
 
 
@@ -737,9 +737,9 @@ class PermissionService:
         """Give each user exactly the role mapped to it, in one write.
 
         With `existing_users_only`, users without a record are skipped and
-        returned. The check shares the write's transaction and lock with
-        `delete_user_and_record`, so a user deleted after the caller's own
-        check is not given a role that a recreated user would inherit.
+        returned. The check runs under the policy lock that
+        `delete_user_and_record` also holds, so a user deleted after the
+        caller's own check is not given a role a recreated user would inherit.
         """
         if not roles:
             return []
