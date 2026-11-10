@@ -494,6 +494,12 @@ class Cloud:
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
+        if (resources.enforce_multi_host and
+                self.canonical_name() != 'kubernetes'):
+            return resources_utils.FeasibleResources(
+                resources_list=[],
+                fuzzy_candidate_list=[],
+                hint='`enforce_multi_host` is only supported on Kubernetes.')
         resources_required_features = resources.get_required_cloud_features()
         if num_nodes > 1:
             resources_required_features.add(
