@@ -619,6 +619,13 @@
   color: hsl(var(--blue-fg));
 }
 
+/* The tour has no backdrop. On dark its light shadow disappears and its
+   border matches the table lines behind it, so give it a stronger edge. */
+.dark .shepherd-element {
+  border-color: hsl(var(--line-strong));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
 /* Shepherd colors the glyph itself (translucent gray); lift it on dark. */
 .dark .shepherd-cancel-icon span {
   color: hsl(var(--content-tertiary));
