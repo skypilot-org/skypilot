@@ -11,6 +11,8 @@ import datetime
 import time
 from unittest import mock
 
+import pytest
+
 from sky import backends
 from sky import clouds
 from sky.backends import backend_utils
@@ -408,13 +410,15 @@ class TestUpdateClusterStatusBareHandle:
 
 def _run_update_status_pod_loss(record_status,
                                 flag_enabled,
-                                pod_loss_reason='SystemOOM victim: python',
+                                loss_cause=('Pod evicted by karpenter.', False),
                                 to_down=False):
     """Drive _update_cluster_status for a Kubernetes cluster whose pods are
     gone (empty node_statuses). Returns (events, post_teardown_mock).
 
-    events is a list of (new_status, message) captured from add_cluster_event;
-    post_teardown_mock is the mocked CloudVmRayBackend.post_teardown_cleanup.
+    loss_cause is what _get_cluster_loss_cause returns, or an exception it
+    raises. events is a list of (new_status, message) captured from
+    add_cluster_event; post_teardown_mock is the mocked
+    CloudVmRayBackend.post_teardown_cleanup.
     """
     handle = _make_handle()
     record = _make_record(handle, status=record_status)
@@ -426,17 +430,22 @@ def _run_update_status_pod_loss(record_status,
 
     external_failure = mock.Mock()
     external_failure.get.return_value = None
+    loss_cause_kwargs = ({
+        'side_effect': loss_cause
+    } if isinstance(loss_cause, Exception) else {
+        'return_value': loss_cause
+    })
 
     with mock.patch.object(backend_utils,
                            '_query_cluster_status_via_cloud_api',
                            return_value={}), \
          mock.patch.object(backend_utils, 'ExternalFailureSource',
                            external_failure), \
-         mock.patch.object(backend_utils.skypilot_config,
-                           'get_effective_workspace_region_config',
+         mock.patch.object(backend_utils.kubernetes_utils,
+                           'allow_unmanaged_cluster_destructive_stop',
                            return_value=flag_enabled), \
-         mock.patch.object(backend_utils, '_kubernetes_pod_loss_reason',
-                           return_value=pod_loss_reason), \
+         mock.patch.object(backend_utils, '_get_cluster_loss_cause',
+                           **loss_cause_kwargs), \
          mock.patch.object(backend_utils, '_get_terminated_cluster_reason',
                            return_value='cluster removed by refresh'), \
          mock.patch.object(backend_utils.global_user_state,
@@ -457,6 +466,10 @@ def _run_update_status_pod_loss(record_status,
     return events, mock_backend_cls.return_value.post_teardown_cleanup
 
 
+def _stopped_messages(events):
+    return [m for s, m in events if s == status_lib.ClusterStatus.STOPPED]
+
+
 class TestKubernetesDestructiveStop:
     """`kubernetes.allow_unmanaged_cluster_destructive_stop` behavior when a
     cluster's pods disappear (e.g. OOM / eviction / node loss)."""
@@ -467,12 +480,9 @@ class TestKubernetesDestructiveStop:
             status_lib.ClusterStatus.UP, flag_enabled=True)
         post_teardown.assert_called_once()
         assert post_teardown.call_args.kwargs.get('terminate') is False
-        stopped_msgs = [
-            m for s, m in events if s == status_lib.ClusterStatus.STOPPED
-        ]
+        stopped_msgs = _stopped_messages(events)
         assert stopped_msgs, events
-        # The detected cause is surfaced in the event.
-        assert 'SystemOOM' in stopped_msgs[0]
+        assert stopped_msgs[0].startswith('Pod evicted by karpenter.')
 
     def test_pod_loss_terminates_when_flag_disabled(self):
         # Flag off => existing behavior: terminate (terminate=True).
@@ -495,24 +505,34 @@ class TestKubernetesDestructiveStop:
             status_lib.ClusterStatus.STOPPED, flag_enabled=False)
         post_teardown.assert_not_called()
 
-    def test_autodown_terminates_even_with_flag_enabled(self):
+    @pytest.mark.parametrize(
+        ('to_down', 'autodowned'),
+        [
+            (True, False),
+            # A refresh mid-autodown reset to_down; skylet's breadcrumb
+            # still says autodown.
+            (False, True),
+        ])
+    def test_autodown_terminates_even_with_flag_enabled(self, to_down,
+                                                        autodowned):
         # Autodown removes the pods itself; it still means termination.
-        events, post_teardown = _run_update_status_pod_loss(
-            status_lib.ClusterStatus.UP, flag_enabled=True, to_down=True)
-        post_teardown.assert_called_once()
-        assert post_teardown.call_args.kwargs.get('terminate') is True
-        assert not any(s == status_lib.ClusterStatus.STOPPED for s, _ in events)
-
-    def test_generic_cause_when_no_reason_detected(self):
-        # Container cgroup OOMKill leaves no recoverable signal; fall back to
-        # the generic cause.
         events, post_teardown = _run_update_status_pod_loss(
             status_lib.ClusterStatus.UP,
             flag_enabled=True,
-            pod_loss_reason=None)
+            loss_cause=('Autodowned by SkyPilot after idle timeout.',
+                        autodowned),
+            to_down=to_down)
         post_teardown.assert_called_once()
-        stopped_msgs = [
-            m for s, m in events if s == status_lib.ClusterStatus.STOPPED
-        ]
+        assert post_teardown.call_args.kwargs.get('terminate') is True
+        assert not _stopped_messages(events), events
+
+    def test_stops_when_cause_lookup_fails(self):
+        # Explaining the loss must not decide stop vs terminate.
+        events, post_teardown = _run_update_status_pod_loss(
+            status_lib.ClusterStatus.UP,
+            flag_enabled=True,
+            loss_cause=RuntimeError('k8s API down'))
+        assert post_teardown.call_args.kwargs.get('terminate') is False
+        stopped_msgs = _stopped_messages(events)
         assert stopped_msgs, events
-        assert 'OOM, eviction, or node loss' in stopped_msgs[0]
+        assert stopped_msgs[0].startswith(backend_utils._NO_TERMINATION_CAUSE)

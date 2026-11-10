@@ -7265,7 +7265,33 @@ def test_missing_pod_reason_from_cluster_events_taint_eviction(
         'c') == expected
 
 
-def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
+@pytest.fixture
+def destructive_stop_allowed(monkeypatch):
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        lambda *a, **k: True)
+
+
+def test_stop_instances_refuses_when_flag_off(monkeypatch):
+    """A failover stop must not delete pods unless the flag allows it."""
+    core_api_mock = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.allow_unmanaged_cluster_destructive_stop',
+        lambda *a, **k: False)
+
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={'namespace': 'default'})
+    assert not core_api_mock.delete_namespaced_pod.called
+
+
+def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch,
+                                                   destructive_stop_allowed):
     """`sky stop` on Kubernetes must delete pods/services but never PVCs."""
     core_api_mock = mock.MagicMock()
     monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
@@ -7300,9 +7326,9 @@ def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
     ([mock.MagicMock()], True),
     (None, False),
 ])
-def test_stop_instances_passes_claim_state_to_terminate(monkeypatch,
-                                                        resource_claims,
-                                                        expected_claims):
+def test_stop_instances_passes_claim_state_to_terminate(
+        monkeypatch, destructive_stop_allowed, resource_claims,
+        expected_claims):
     """Stop deletes DRA-claim pods gracefully, like terminate does."""
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.get_namespace_from_config',
@@ -7332,7 +7358,8 @@ def test_stop_instances_passes_claim_state_to_terminate(monkeypatch,
     assert recorded['claims'] is expected_claims
 
 
-def test_stop_instances_high_availability_raises(monkeypatch):
+def test_stop_instances_high_availability_raises(monkeypatch,
+                                                 destructive_stop_allowed):
     """Stopping an HA (Deployment-backed) cluster is not supported."""
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.get_namespace_from_config',

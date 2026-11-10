@@ -3038,6 +3038,36 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
     @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
     @patch('sky.provision.kubernetes.utils.get_spot_label')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    @patch('sky.provision.kubernetes.utils.'
+           'allow_unmanaged_cluster_destructive_stop')
+    def test_destructive_stop_flag_allows_stop(self, mock_allow_stop,
+                                               mock_detect_network_type,
+                                               mock_get_spot_label,
+                                               mock_existing_allowed_contexts):
+        """The flag enables `sky stop` but not autostop."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        mock_get_spot_label.return_value = (None, None)
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        resources = mock.MagicMock()
+        resources.region = 'test-context'
+        resources.network_tier = None
+
+        from sky import clouds
+        for allowed in (True, False):
+            mock_allow_stop.return_value = allowed
+            result = kubernetes.Kubernetes._unsupported_features_for_resources(
+                resources)
+            self.assertEqual(
+                clouds.CloudImplementationFeatures.STOP not in result, allowed)
+            self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+        mock_allow_stop.assert_called_with('test-context')
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_spot_instance_supported(self, mock_detect_network_type,
                                      mock_get_spot_label,
                                      mock_existing_allowed_contexts):

@@ -2696,37 +2696,6 @@ def _query_cluster_status_via_cloud_api(
     return node_status_dict
 
 
-def _kubernetes_pod_loss_reason(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',) -> Optional[str]:
-    """Best-effort reason why a Kubernetes cluster's pods disappeared.
-
-    Returns a human-readable reason derived from the pods'/nodes' Kubernetes
-    events (e.g. an eviction or node-loss message), or None if no specific
-    cause can be recovered -- common once the pod object is fully gone, e.g. a
-    container OOMKill, whose signal is lost with the pod. As a side effect, the
-    underlying query records the pods'/nodes' Kubernetes events as cluster
-    events, surfacing them on the dashboard's cluster events page.
-    """
-    try:
-        ray_config = global_user_state.get_cluster_yaml_dict(
-            handle.cluster_yaml)
-        node_status_dict = provision_lib.query_instances(
-            repr(handle.launched_resources.cloud),
-            handle.cluster_name,
-            handle.cluster_name_on_cloud,
-            ray_config['provider'],
-            non_terminated_only=False)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to query pod-loss reason for '
-                     f'{handle.cluster_name!r}: {e}')
-        return None
-    reasons = sorted(
-        {reason for _, reason in node_status_dict.values() if reason})
-    if not reasons:
-        return None
-    return '; '.join(reasons)
-
-
 def _query_cluster_info_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> provision_common.ClusterInfo:
@@ -2905,11 +2874,27 @@ def _get_terminated_cluster_reason(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         launched_resources: 'resources_lib.Resources',
         external_cluster_failures: Optional[List[Dict[str, Any]]]) -> str:
-    """The event reason for a cluster whose nodes are all gone.
+    """The event reason for a cluster whose nodes are all gone."""
+    cause, _ = _get_cluster_loss_cause(record, handle, launched_resources,
+                                       external_cluster_failures)
+    return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
 
-    Says who or what removed the nodes and why, first: the dashboard's Details
-    cell shows only the start. Best-effort throughout; when nothing explains
-    the removal it says so rather than guess.
+
+def _get_cluster_loss_cause(
+    record: Dict[str, Any],
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    launched_resources: 'resources_lib.Resources',
+    external_cluster_failures: Optional[List[Dict[str, Any]]],
+) -> Tuple[str, bool]:
+    """Why all of a cluster's nodes are gone, and whether autodown did it.
+
+    The cause says who or what removed the nodes and why, first: the
+    dashboard's Details cell shows only the start. Best-effort throughout; when
+    nothing explains the removal it says so rather than guess.
+
+    Returns:
+        (cause, autodowned). autodowned is True only on evidence that SkyPilot
+        autodowned the cluster, not on a configured autodown alone.
     """
     is_k8s = isinstance(launched_resources.cloud, clouds.Kubernetes)
     autostop = record['autostop']
@@ -3029,7 +3014,7 @@ def _get_terminated_cluster_reason(
         if could_autodown and no_autodown_record:
             cause = (f'{cause[:-1]} (autodown was set, but left no '
                      'record).')
-    return f'{cause} {_CLUSTER_REMOVED_BY_REFRESH}'
+    return cause, autodowned
 
 
 def _k8s_pod_tolerations(
@@ -3822,8 +3807,8 @@ def _update_cluster_status(
             summary_response=summary_response)
 
     # Kubernetes clusters delete their pods on stop, so a cloud query returns
-    # no nodes. Unlike VM clouds -- which still report a STOPPED instance --
-    # an empty result is ambiguous between "stopped" and "terminated".
+    # no nodes. VM clouds still report a STOPPED instance; here an empty
+    # result is ambiguous between "stopped" and "terminated".
     if to_terminate and isinstance(launched_resources.cloud, clouds.Kubernetes):
         # Only `sky stop` puts a Kubernetes cluster in STOPPED: the pod query
         # never reports it. Keep the record whatever the flag says now, or
@@ -3834,29 +3819,30 @@ def _update_cluster_status(
                 cluster_name,
                 include_user_info=include_user_info,
                 summary_response=summary_response)
-        allow_unmanaged_cluster_destructive_stop = (
-            skypilot_config.get_effective_workspace_region_config(
-                cloud='kubernetes',
-                region=handle.launched_resources.region,
-                keys=('allow_unmanaged_cluster_destructive_stop',),
-                default_value=False))
-        # Autodown deletes the pods from the skylet, which also reads as no
-        # pods; it asked for termination, so it takes the terminate path.
-        if allow_unmanaged_cluster_destructive_stop and not record['to_down']:
-            # Pods vanished while the cluster was running (OOM, eviction,
-            # preemption, node loss). Stop instead of terminating so the
-            # retained PersistentVolumes can be reattached by `sky start`. A
-            # container OOMKill often leaves no recoverable cause.
-            pod_loss_reason = _kubernetes_pod_loss_reason(handle)
-            cause = (pod_loss_reason
-                     if pod_loss_reason else 'e.g. OOM, eviction, or node loss')
+        if kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+                handle.launched_resources.region,
+                workspace=record.get('workspace')):
+            try:
+                cause, autodowned = _get_cluster_loss_cause(
+                    record, handle, launched_resources,
+                    external_cluster_failures)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to explain why the pods of '
+                             f'{cluster_name!r} are gone: {e}')
+                cause, autodowned = _NO_TERMINATION_CAUSE, False
+            # Autodown deletes the pods from the skylet, which also reads as
+            # no pods; it asked for termination, so it takes the terminate
+            # path. A refresh mid-autodown resets to_down, hence the
+            # breadcrumb check in _get_cluster_loss_cause.
+            stop = not (record['to_down'] or autodowned)
+        else:
+            stop = False
+        if stop:
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.STOPPED,
-                f'Kubernetes pods are no longer present ({cause}). '
-                'Stopping the cluster instead of terminating it; '
-                'persistent volumes are retained so it can be restarted '
-                'with `sky start`.',
+                f'{cause} Stopped the cluster instead of terminating it; '
+                'its persistent volumes are kept for `sky start`.',
                 global_user_state.ClusterEventType.STATUS_CHANGE,
                 nop_if_duplicate=True)
             backend = backends.CloudVmRayBackend()

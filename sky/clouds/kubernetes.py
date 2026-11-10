@@ -475,13 +475,8 @@ class Kubernetes(clouds.Cloud):
             # Allow `sky stop` if the destructive-stop flag is enabled for the
             # context. The pod is deleted on stop; only PersistentVolume-backed
             # state survives and is reattached on restart.
-            allow_unmanaged_cluster_destructive_stop = (
-                skypilot_config.get_effective_workspace_region_config(
-                    cloud=cls._REPR.lower(),
-                    region=context,
-                    keys=('allow_unmanaged_cluster_destructive_stop',),
-                    default_value=False))
-            if allow_unmanaged_cluster_destructive_stop:
+            if kubernetes_utils.allow_unmanaged_cluster_destructive_stop(
+                    context):
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.STOP, None)
             # Allow spot instances if supported by the cluster
