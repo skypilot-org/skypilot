@@ -2002,9 +2002,16 @@ async def validate(validate_body: payloads.ValidateBody,
         # Apply the client's env and config and resolve the active workspace
         # as for a scheduled request. Load the DAG inside, so that nothing
         # reads the client's env vars before they are sanitized.
+        # This thread belongs to the API server process, which other requests
+        # share: sync_refresh keeps the process-wide log handler instead of
+        # rebuilding it at this client's log level, which would otherwise
+        # leak a debug level into every later request served in this process
+        # (e.g. the server's own debug lines at the top of `sky jobs logs`).
         with executor.override_request_env_and_config(
-                validate_body, request.state.request_id,
-                request_names.AdminPolicyRequestName.VALIDATE.value):
+                validate_body,
+                request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value,
+                sync_refresh=True):
             dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
             with admin_policy_utils.apply_and_use_config_in_current_request(
                     dag,

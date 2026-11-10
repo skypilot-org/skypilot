@@ -22,6 +22,7 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.server import constants as server_constants
@@ -464,3 +465,23 @@ class TestReadOnlyWorkspaceColdCache:
             sky_cloud.CloudCapability.COMPUTE, 'ws-ro')
         assert not global_user_state.get_allowed_clouds('ws-ro')
         assert not global_user_state.get_cached_check_results('ws-ro')
+
+
+class TestSharedLogHandler:
+    """`/validate` runs in a thread of the API server process, which other
+    requests share: it must not rebuild the process-wide log handler at the
+    validating client's log level. Before the fix, a `SKYPILOT_DEBUG=1`
+    validate (every `sky jobs launch`) left the handler at DEBUG, and later
+    in-process requests such as the `sky jobs logs` stream carried the
+    server's debug lines."""
+
+    def test_debug_client_keeps_the_shared_handler(self, env):
+        # pylint: disable=protected-access
+        _two_workspaces(env)
+        handler = sky_logging._default_handler
+        level = handler.level
+        with env.record_workspace():
+            assert env.validate(user='bob', extra_env={'SKYPILOT_DEBUG': '1'
+                                                      }) is None
+        assert sky_logging._default_handler is handler
+        assert handler.level == level
