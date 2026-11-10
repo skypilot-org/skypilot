@@ -17,10 +17,12 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_ports
 from sky.provision.kubernetes import host_network_probe
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1046,17 +1048,8 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 @timeline.event
 def _is_transport_error(e: Exception) -> bool:
-    """Whether ``e`` is a failure of the HTTP transport to the API server.
-
-    urllib3 transport errors propagate raw out of the kubernetes client,
-    with one exception: the client wraps ``urllib3.exceptions.SSLError``
-    into an ``ApiException`` with ``status=0`` (no HTTP response was
-    received). An ``ApiException`` with a real HTTP status is an API error
-    response, not a transport failure.
-    """
-    if isinstance(e, kubernetes.api_exception()):
-        return e.status == 0
-    return isinstance(e, kubernetes.urllib3_http_error())
+    """See api_errors.is_transport_error."""
+    return api_errors.is_transport_error(e)
 
 
 def _count_transport_error(e: Exception, first_error_time: Optional[float],
@@ -2126,7 +2119,9 @@ def _force_remove_terminating_pod(pod_name: str, namespace: str,
 # (e.g. its controller is restarting) fails every pod create with a 500, and
 # such outages are often intermittent.
 _WEBHOOK_UNAVAILABLE_RETRY_SECONDS = 60
-_WEBHOOK_UNAVAILABLE_PATTERN = re.compile(r'failed calling webhook "([^"]+)"')
+# Kept under its old name for callers outside this module.
+_WEBHOOK_UNAVAILABLE_PATTERN: 're.Pattern[str]' = (
+    api_errors.WEBHOOK_UNAVAILABLE_PATTERN)
 
 
 def _create_namespaced_pod_retrying_webhook_errors(
@@ -2145,16 +2140,10 @@ def _create_namespaced_pod_retrying_webhook_errors(
             return kubernetes.core_api(context).create_namespaced_pod(
                 namespace, pod_spec)
         except kubernetes.api_exception() as e:
-            if e.status != 500:
+            webhook = api_errors.unavailable_webhook(e)
+            if webhook is None:
                 raise
-            try:
-                error_message = json.loads(e.body).get('message', '')
-            except json.JSONDecodeError:
-                error_message = str(e.body)
-            match = _WEBHOOK_UNAVAILABLE_PATTERN.search(error_message)
-            if match is None:
-                raise
-            webhook = match.group(1)
+            error_message = api_errors.status_message(e)
             # The last sleep is cut short so a final attempt lands on the
             # deadline.
             sleep_seconds = min(backoff.current_backoff(),
@@ -2175,30 +2164,8 @@ def _create_namespaced_pod_retrying_webhook_errors(
             time.sleep(sleep_seconds)
 
 
-def _invalid_pod_spec_message(e: Any) -> Optional[str]:
-    """Returns the API server's message if it rejected the pod as invalid.
-
-    A 422 response with reason `Invalid` is the API server's own validation
-    of the manifest (a duplicate volume name, a malformed field value, ...).
-    It depends only on the manifest and the API server's version, so the same
-    pod spec is rejected the same way on every attempt: no amount of waiting
-    for capacity will get it created. Rejections by an admission webhook are
-    not included: a webhook can decide on state other than the manifest.
-
-    Returns None for any other error.
-    """
-    if getattr(e, 'status', None) != 422:
-        return None
-    try:
-        body = json.loads(e.body)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(body, dict) or body.get('reason') != 'Invalid':
-        return None
-    message = str(body.get('message', ''))
-    if 'admission webhook' in message:
-        return None
-    return message
+# Kept under its old name for callers outside this module.
+_invalid_pod_spec_message = api_errors.invalid_pod_spec_message
 
 
 @timeline.event
@@ -2463,6 +2430,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
+    if kai.uses_kai(provider_config):
+        # Created before the pods so KAI schedules them as one gang.
+        kai.ensure_pod_group(context, namespace, cluster_name_on_cloud,
+                             provider_config, config.node_config, config.count)
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -2891,6 +2862,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name,
         create_pods_start,
         admission_timeout=provider_config.get('queue_admission_timeout'))
+    if kai.uses_kai(provider_config):
+        # A no-op for a new cluster. A resize adds pods to a running gang, and
+        # a higher minMember before they are bound lets KAI evict the gang.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud,
+                          config.count)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
@@ -3177,6 +3153,10 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    if worker_only and kai.uses_kai(provider_config):
+        # Without this, KAI evicts the head as a gang below its minMember.
+        kai.set_gang_size(context, namespace, cluster_name_on_cloud, 1)
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
@@ -3219,6 +3199,8 @@ def cleanup_cluster_resources(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+    if kai.uses_kai(provider_config):
+        kai.delete_pod_group(context, namespace, cluster_name_on_cloud)
 
 
 # The probe runs as soon as ray-installation finishes in step 2 of the
@@ -5131,6 +5113,11 @@ def query_instances(
                 # creation: a relaunch under the same cluster name must not
                 # be told why the pod it replaced was deleted.
                 since=_pod_created_at(pod))
+            if event_reason is None and kai.uses_kai(provider_config):
+                event_reason = kai.eviction_reason(context,
+                                                   namespace,
+                                                   pod.metadata.name,
+                                                   since=_pod_created_at(pod))
             if event_reason is not None:
                 reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:

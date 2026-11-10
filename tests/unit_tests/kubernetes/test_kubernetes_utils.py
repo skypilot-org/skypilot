@@ -25,6 +25,7 @@ from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
 from sky.skylet import constants
+from sky.utils import annotations
 
 
 @pytest.mark.parametrize('quantity,gib', [('1G', 10**9 / 2**30), ('512Mi', 0.5),
@@ -58,6 +59,80 @@ def test_get_kubernetes_nodes():
             status=401)
         with pytest.raises(exceptions.KubeAPIUnreachableError):
             utils.get_kubernetes_nodes(context='test')
+
+
+@pytest.fixture
+def unreachable_checks(monkeypatch):
+    checks = []
+    monkeypatch.setattr(utils, '_CONTEXT_UNREACHABLE_CHECKS', checks)
+    return checks
+
+
+def _proxy_down(context):
+    return 'proxy is down' if context == 'down' else None
+
+
+def _api_call_recorder():
+    calls = []
+
+    @utils._retry_on_error()
+    def list_things(*, context):
+        calls.append(context)
+        if context == 'flaky' and len(calls) == 1:
+            raise kubernetes.client.rest.ApiException(status=503)
+        return ['thing']
+
+    return list_things, calls
+
+
+def test_known_unreachable_context_fails_at_once(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        with pytest.raises(exceptions.KubeAPIUnreachableError,
+                           match="'down' is unreachable: proxy is down"):
+            list_things(context='down')
+    assert calls == []
+    mock_sleep.assert_not_called()
+
+
+def test_call_without_context_is_attempted(unreachable_checks, monkeypatch):
+    utils.register_context_unreachable_check(_proxy_down)
+    monkeypatch.setattr(utils, 'get_current_kube_config_context_name',
+                        lambda: 'down')
+    list_things, calls = _api_call_recorder()
+    assert list_things(context=None) == ['thing']
+    assert calls == [None]
+
+
+def test_other_contexts_are_still_retried(unreachable_checks):
+    utils.register_context_unreachable_check(_proxy_down)
+    list_things, calls = _api_call_recorder()
+    with patch('sky.provision.kubernetes.utils.time.sleep') as mock_sleep:
+        assert list_things(context='flaky') == ['thing']
+    assert calls == ['flaky', 'flaky']
+    mock_sleep.assert_called_once()
+
+
+def test_failing_unreachable_check_is_skipped(unreachable_checks):
+
+    def broken_check(context):
+        raise RuntimeError('state unavailable')
+
+    utils.register_context_unreachable_check(broken_check)
+    list_things, calls = _api_call_recorder()
+    assert list_things(context='down') == ['thing']
+    assert calls == ['down']
+
+
+def test_register_context_unreachable_check_is_idempotent(unreachable_checks):
+
+    def check(context):
+        return None
+
+    utils.register_context_unreachable_check(check)
+    utils.register_context_unreachable_check(check)
+    assert unreachable_checks == [check]
 
 
 @pytest.mark.parametrize('status,headers,expected', [
@@ -552,9 +627,10 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     monkeypatch.setenv('KUBECONFIG', str(first))
     monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: False)
     parses = []
-    real = utils.kubernetes.list_kube_config_contexts
-    monkeypatch.setattr(utils.kubernetes, 'list_kube_config_contexts',
-                        lambda: parses.append(1) or real())
+    config = utils.kubernetes.kubernetes.config
+    real = config.list_kube_config_contexts
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda path: parses.append(1) or real(path))
 
     assert utils.get_all_kube_context_names() == ['ctx-a']
     assert utils.get_all_kube_context_names() == ['ctx-a']
@@ -582,6 +658,160 @@ def test_kube_context_names_are_parsed_again_only_on_change(
     # The caller's list is its own.
     utils.get_all_kube_context_names().append('mutated')
     assert utils.get_all_kube_context_names() == ['ctx-x', 'ctx-y', 'ctx-e']
+
+
+def _kubeconfig_with(*names):
+    return yaml.safe_dump({
+        'apiVersion': 'v1',
+        'kind': 'Config',
+        'current-context': names[0],
+        'clusters': [{
+            'name': 'c',
+            'cluster': {
+                'server': 'https://127.0.0.1:6443'
+            }
+        }],
+        'users': [{
+            'name': 'u',
+            'user': {}
+        }],
+        'contexts': [{
+            'name': n,
+            'context': {
+                'cluster': 'c',
+                'user': 'u'
+            }
+        } for n in names],
+    })
+
+
+def _context_names():
+    contexts, _ = kubernetes_adaptor.list_kube_config_contexts()
+    return [c['name'] for c in contexts]
+
+
+def test_kube_config_contexts_are_copies(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    contexts, current = kubernetes_adaptor.list_kube_config_contexts()
+    contexts[0]['context']['user'] = 'mutated'
+    current['name'] = 'mutated'
+    contexts, current = kubernetes_adaptor.list_kube_config_contexts()
+    assert contexts[0]['context']['user'] == 'u'
+    assert current['name'] == 'ctx-a'
+
+
+@pytest.mark.parametrize('kubeconfig', [None, 'no-current-context'])
+def test_unusable_kubeconfig_raises_on_every_call(tmp_path, monkeypatch,
+                                                  kubeconfig):
+    path = tmp_path / 'kubeconfig'
+    if kubeconfig is not None:
+        content = yaml.safe_load(_kubeconfig_with('ctx-a'))
+        content['current-context'] = ''
+        path.write_text(yaml.safe_dump(content))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+    parses = []
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda p: parses.append(1) or real(p))
+    raised = []
+    for _ in range(2):
+        with pytest.raises(config.config_exception.ConfigException) as e:
+            kubernetes_adaptor.list_kube_config_contexts()
+        raised.append(e.value)
+    assert len(parses) == 1
+    # A fresh exception each time, so tracebacks do not pile up on one.
+    assert raised[0] is not raised[1]
+    # The in-cluster fallback depends on the exception.
+    monkeypatch.setattr(utils, 'is_incluster_config_available', lambda: True)
+    monkeypatch.setattr(utils.kubernetes, 'in_cluster_context_name',
+                        lambda: 'in-cluster')
+    assert utils.get_current_kube_config_context_name() == 'in-cluster'
+
+
+def test_current_context_is_not_parsed_per_request(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a', 'ctx-b'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+    parses = []
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        lambda p: parses.append(1) or real(p))
+    for _ in range(3):
+        # What a sync handler's config refresh does on every request.
+        annotations.clear_request_level_cache()
+        assert utils.get_current_kube_config_context_name() == 'ctx-a'
+    assert len(parses) == 1
+
+
+def test_cached_config_exception_keeps_nothing_alive(tmp_path, monkeypatch):
+    monkeypatch.setenv('KUBECONFIG', str(tmp_path / 'missing'))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+
+    def parse_while_handling_another_error(path):
+        try:
+            raise ValueError('unrelated')
+        except ValueError:
+            return real(path)
+
+    monkeypatch.setattr(config, 'list_kube_config_contexts',
+                        parse_while_handling_another_error)
+    with pytest.raises(config.config_exception.ConfigException):
+        kubernetes_adaptor.list_kube_config_contexts()
+    # pylint: disable-next=protected-access
+    (cached,) = kubernetes_adaptor._contexts_cache.values()
+    assert cached.__traceback__ is None
+    assert cached.__context__ is None
+
+
+@pytest.mark.parametrize('changed_to', ['a:b', 'a'])
+def test_kubeconfig_env_change_after_fingerprint(tmp_path, monkeypatch,
+                                                 changed_to):
+    a = tmp_path / 'a.yaml'
+    a.write_text(_kubeconfig_with('ctx-a'))
+    b = tmp_path / 'b.yaml'
+    b.write_text(_kubeconfig_with('ctx-b'))
+    paths = {'a': str(a), 'a:b': f'{a}:{b}'}
+    before = 'a' if changed_to == 'a:b' else 'a:b'
+    monkeypatch.setenv('KUBECONFIG', paths[before])
+    real = kubernetes_adaptor._fingerprint  # pylint: disable=protected-access
+
+    def fingerprint_then_change_env(config_file):
+        result = real(config_file)
+        os.environ['KUBECONFIG'] = paths[changed_to]
+        return result
+
+    monkeypatch.setattr(kubernetes_adaptor, '_fingerprint',
+                        fingerprint_then_change_env)
+    _context_names()
+    monkeypatch.setattr(kubernetes_adaptor, '_fingerprint', real)
+    # Whatever was stored, each value of KUBECONFIG gets its own contexts.
+    want = {'a': ['ctx-a'], 'a:b': ['ctx-a', 'ctx-b']}
+    for key in (before, changed_to, before):
+        monkeypatch.setenv('KUBECONFIG', paths[key])
+        assert _context_names() == want[key]
+
+
+def test_kubeconfig_rewritten_during_parse_then_reverted(tmp_path, monkeypatch):
+    path = tmp_path / 'kubeconfig'
+    path.write_text(_kubeconfig_with('ctx-a'))
+    monkeypatch.setenv('KUBECONFIG', str(path))
+    config = kubernetes.config
+    real = config.list_kube_config_contexts
+
+    def parse_a_rewrite(config_file):
+        path.write_text(_kubeconfig_with('ctx-b'))
+        return real(config_file)
+
+    monkeypatch.setattr(config, 'list_kube_config_contexts', parse_a_rewrite)
+    assert _context_names() == ['ctx-b']
+    monkeypatch.setattr(config, 'list_kube_config_contexts', real)
+    path.write_text(_kubeconfig_with('ctx-a'))
+    assert _context_names() == ['ctx-a']
 
 
 def test_in_cluster_context_name_is_checked_on_every_call(
@@ -634,8 +864,6 @@ def test_get_all_kube_context_names():
     }]
     mock_current_context = {'name': 'context1'}
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -644,8 +872,6 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['context1', 'context2', 'context3']
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                return_value=(mock_contexts, mock_current_context)), \
@@ -659,8 +885,6 @@ def test_get_all_kube_context_names():
             'context1', 'context2', 'context3', 'in-cluster'
         ]
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -673,8 +897,6 @@ def test_get_all_kube_context_names():
         context_names = utils.get_all_kube_context_names()
         assert context_names == ['in-cluster']
 
-    # Same files, different parse results: drop the cached parse.
-    utils._kubeconfig_context_names = None
     with patch('sky.provision.kubernetes.utils.kubernetes.'
                'list_kube_config_contexts',
                side_effect=utils.kubernetes.kubernetes.config.
@@ -5424,12 +5646,14 @@ def _make_pod(*,
               container_statuses=None,
               reason=None,
               message=None):
-    return kubernetes.client.V1Pod(status=kubernetes.client.V1PodStatus(
-        phase=phase,
-        conditions=conditions,
-        container_statuses=container_statuses,
-        reason=reason,
-        message=message))
+    return kubernetes.client.V1Pod(
+        metadata=kubernetes.client.V1ObjectMeta(name='mypod'),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase,
+            conditions=conditions,
+            container_statuses=container_statuses,
+            reason=reason,
+            message=message))
 
 
 def test_get_condensed_pod_reason_oomkilled():

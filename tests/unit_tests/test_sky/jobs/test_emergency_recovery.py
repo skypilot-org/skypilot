@@ -1165,6 +1165,20 @@ class TestEmergencyRetryLoop:
         assert h.get_budget.await_count == rounds + 1
 
     @pytest.mark.asyncio
+    async def test_bookkeeping_retries_pool_checkout_timeout_until_it_ends(
+            self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        outage = sqlalchemy.exc.TimeoutError('pool exhausted', None, None)
+        rounds = controller._EMERGENCY_BOOKKEEPING_ROUNDS * 3
+        h.get_budget.side_effect = [outage] * rounds + [(0, None)]
+
+        await h.jc.run()
+
+        h.jc._update_failed_task_state.assert_not_called()
+        assert h.jc._run_one_task.call_count == 2
+        assert h.get_budget.await_count == rounds + 1
+
+    @pytest.mark.asyncio
     async def test_bookkeeping_stops_when_job_record_is_gone(self, monkeypatch):
         """A job whose record is gone is failed without any retry: no round
         can record anything for it."""

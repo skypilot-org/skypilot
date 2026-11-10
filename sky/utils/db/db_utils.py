@@ -986,3 +986,8 @@ def get_engine(
                                 f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
     return engine
+
+
+def get_lock_engine() -> sqlalchemy.engine.Engine:
+    """Return the direct, unpooled engine used by advisory locks."""
+    return get_engine(None, direct=True, no_pool=True)

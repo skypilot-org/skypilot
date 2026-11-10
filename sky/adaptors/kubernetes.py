@@ -9,6 +9,7 @@ Set SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS (seconds) to refresh the
 client proactively at a fixed interval so it is rebuilt from the updated
 kubeconfig (e.g. for short-lived certs).
 """
+import copy
 import functools
 import hashlib
 import logging
@@ -18,6 +19,8 @@ import threading
 import time
 import typing
 from typing import Any, Callable, List, Optional, Tuple
+
+import cachetools
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -250,8 +253,12 @@ def kubeconfig_fingerprint() -> Tuple[Any, ...]:
     every stat field unchanged. Reading a kubeconfig costs far less than
     parsing it.
     """
+    return _fingerprint(_get_config_file())
+
+
+def _fingerprint(config_file: str) -> Tuple[Any, ...]:
     fingerprint: List[Tuple[Any, ...]] = []
-    for path in _get_config_file().split(ENV_KUBECONFIG_PATH_SEPARATOR):
+    for path in config_file.split(ENV_KUBECONFIG_PATH_SEPARATOR):
         if not path:
             continue
         path = os.path.expanduser(path)
@@ -291,8 +298,39 @@ def _kubeconfig_unchanged_since_last_refresh() -> bool:
     return keep
 
 
+# kubeconfig fingerprint -> (contexts, current context), or the ConfigException
+# the parse raised. A few entries, since KUBECONFIG can alternate within a
+# process (e.g. a path appended for one request and dropped after it).
+_contexts_cache: 'cachetools.LRUCache[Tuple[Any, ...], Any]' = (
+    cachetools.LRUCache(maxsize=4))
+_contexts_cache_lock = threading.Lock()
+
+
 def list_kube_config_contexts():
-    return kubernetes.config.list_kube_config_contexts(_get_config_file())
+    """(contexts, current context) of the kubeconfig, as copies.
+
+    Parsed again only when a file on KUBECONFIG, or KUBECONFIG itself,
+    changes. A ConfigException (no usable kubeconfig, or no valid current
+    context) is raised again on every call until then.
+    """
+    # Read KUBECONFIG once, so the parse matches the fingerprint's paths.
+    config_file = _get_config_file()
+    fingerprint = _fingerprint(config_file)
+    with _contexts_cache_lock:
+        result = _contexts_cache.get(fingerprint)
+    if result is None:
+        try:
+            result = kubernetes.config.list_kube_config_contexts(config_file)
+        except kubernetes.config.config_exception.ConfigException as e:
+            # A copy never raised: no traceback or context to keep alive.
+            result = type(e)(*e.args)
+        # A file that changed during the parse may hold either version.
+        if _fingerprint(config_file) == fingerprint:
+            with _contexts_cache_lock:
+                _contexts_cache[fingerprint] = result
+    if isinstance(result, Exception):
+        raise type(result)(*result.args)
+    return copy.deepcopy(result)
 
 
 @functools.lru_cache(maxsize=None)

@@ -131,6 +131,12 @@ def base_variables() -> Dict[str, Any]:
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
+        'k8s_kai_queue_name': None,
+        'k8s_kai_preemptibility': None,
+        'k8s_kai_topology': None,
+        'k8s_kai_required_topology_level': None,
+        'k8s_kai_preferred_topology_level': None,
+        'k8s_kai_scheduler_name': 'kai-scheduler',
         'k8s_skypilot_system_namespace': 'skypilot-system',
         'k8s_fusermount_shared_dir': '/var/run/fusermount',
         'k8s_fusermount_setup_command': 'FUSERMOUNT_SETUP_COMMAND',
@@ -322,6 +328,15 @@ CASES: Dict[str, Dict[str, Any]] = {
     'kueue': {
         'k8s_kueue_local_queue_name': 'user-queue',
         'k8s_max_run_duration_seconds': 3600,
+    },
+    'kai': {
+        'k8s_kai_queue_name': 'team-queue',
+        'k8s_kai_preemptibility': 'preemptible',
+        'k8s_kai_topology': 'fabric',
+        'k8s_kai_required_topology_level': 'block',
+        'k8s_kai_preferred_topology_level': 'rack',
+        'priority_class': 'low-priority',
+        'num_nodes': 2,
     },
     'docker_all': {
         'k8s_enable_docker_all': True,
@@ -757,6 +772,63 @@ def test_sriov_pod_is_coherent() -> None:
     assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
     mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
     assert '/dev/infiniband' not in mounts
+
+
+def _ray_node_env(case_name: str) -> Dict[str, Any]:
+    pod = yaml.safe_load(_render(_build_variables(
+        case_name)))['available_node_types']['ray_head_default']['node_config']
+    container = next(
+        c for c in pod['spec']['containers'] if c['name'] == 'ray-node')
+    return {e['name']: e for e in container['env']}
+
+
+def test_tpu_pod_sets_tpu_name_from_pod_name() -> None:
+    """GKE sets the other TPU_* vars but not TPU_NAME, which Ray needs."""
+    assert _ray_node_env('tpu')['TPU_NAME'] == {
+        'name': 'TPU_NAME',
+        'valueFrom': {
+            'fieldRef': {
+                'fieldPath': 'metadata.name'
+            }
+        },
+    }
+    assert 'TPU_NAME' not in _ray_node_env('base_cpu')
+
+
+def test_pod_config_tpu_name_overrides_template() -> None:
+    """A user TPU_NAME (today's workaround) wins and leaves one source."""
+    rendered = yaml.safe_load(_render(_build_variables('tpu')))
+    overrides = {
+        'kubernetes': {
+            'pod_config': {
+                'spec': {
+                    'containers': [{
+                        'name': 'ray-node',
+                        'env': [{
+                            'name': 'TPU_NAME',
+                            'value': 'custom'
+                        }]
+                    }]
+                }
+            }
+        }
+    }
+    merged = kubernetes_utils.combine_pod_config_fields(rendered, overrides)
+    pod = merged['available_node_types']['ray_head_default']['node_config']
+    container = next(
+        c for c in pod['spec']['containers'] if c['name'] == 'ray-node')
+    assert [e for e in container['env'] if e['name'] == 'TPU_NAME'] == [{
+        'name': 'TPU_NAME',
+        'value': 'custom'
+    }]
+
+
+def test_tpu_pod_name_fits_ray_slice_name_limit() -> None:
+    """Ray uses TPU_NAME as a label value (<= 63 chars) and does not check it
+    at `ray start`. Pod names are `<cluster>-head` / `<cluster>-worker<i>`."""
+    longest = ('x' * clouds.Kubernetes._MAX_CLUSTER_NAME_LEN_LIMIT +
+               '-worker9999')
+    assert len(longest) <= 63
 
 
 # Verbs Kubernetes' privilege-escalation prevention does NOT gate on RBAC
