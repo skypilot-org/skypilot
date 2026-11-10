@@ -20,7 +20,16 @@ class TestTailLogsBuffering(unittest.TestCase):
 
     def setUp(self):
         self.service = services.JobsServiceImpl()
-        self.initial_thread_count = threading.active_count()
+        self.initial_threads = set(threading.enumerate())
+
+    def assert_no_thread_leaks(self):
+        # Compare thread identities rather than counts: background threads
+        # started by earlier tests in the same process can exit while this
+        # test runs, which changes the count without any leak here.
+        leaked = [
+            t for t in threading.enumerate() if t not in self.initial_threads
+        ]
+        self.assertEqual(leaked, [])
 
     def test_successful_job(self):
         """Test reading mocked logs of a finished job.
@@ -78,8 +87,7 @@ class TestTailLogsBuffering(unittest.TestCase):
         final_exit_code = responses[-1].exit_code
         self.assertEqual(final_exit_code, JobExitCode.SUCCEEDED)
 
-        # Verify no thread leaks
-        self.assertEqual(threading.active_count(), self.initial_thread_count)
+        self.assert_no_thread_leaks()
 
     def test_in_progress_job(self):
         """Test reading mocked logs of an in-progress job.
@@ -115,8 +123,7 @@ class TestTailLogsBuffering(unittest.TestCase):
         # For follow=True and RUNNING status, exit code should be NOT_FINISHED.
         self.assertEqual(responses[-1].exit_code, JobExitCode.NOT_FINISHED)
 
-        # Verify no thread leaks
-        self.assertEqual(threading.active_count(), self.initial_thread_count)
+        self.assert_no_thread_leaks()
 
 
 if __name__ == '__main__':

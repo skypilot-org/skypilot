@@ -84,9 +84,7 @@ def test_payload_carries_no_timestamps():
     """The payload lands in the cluster YAML.
 
     If it tracked mtimes the config hash would move whenever the checkout was
-    touched -- and, on a multi-replica API server, would differ *between
-    replicas* for the same SkyPilot version, since each installs at its own
-    time. Either way that is a needless re-provision.
+    touched, forcing a needless re-provision.
     """
     raw = base64.b64decode(instance_setup._ray_patches_b64())  # pylint: disable=protected-access
     assert raw[4:8] == b'\x00\x00\x00\x00', 'gzip header carries an mtime'

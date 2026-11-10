@@ -190,13 +190,13 @@ export async function getWorkspaces() {
   }
 }
 
-export async function getEnabledClouds(workspaceName = null, expand = false) {
+export async function getEnabledClouds(workspaceId = null, expand = false) {
   try {
     // Step 1: Call the /enabled_clouds endpoint to schedule the task
     let url = `/enabled_clouds`;
     const params = new URLSearchParams();
-    if (workspaceName) {
-      params.append('workspace', workspaceName);
+    if (workspaceId) {
+      params.append('workspace', workspaceId);
     }
     if (expand) {
       params.append('expand', 'true');
@@ -311,7 +311,7 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
         // which is also a JSON string.
         enabledCloudsData = JSON.parse(resultData.return_value);
         console.log(
-          `Successfully parsed enabled_clouds data for workspace ${workspaceName}:`,
+          `Successfully parsed enabled_clouds data for workspace ${workspaceId}:`,
           enabledCloudsData
         );
       } catch (parseError) {
@@ -357,6 +357,9 @@ async function pollForTaskCompletion(requestId, taskName) {
 
   if (!resultResponse.ok) {
     let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+    // The server-side exception class, when the response carries one, so
+    // callers can tell specific failures apart.
+    let errorType;
     try {
       const errorData = await resultResponse.json();
       console.error(
@@ -372,6 +375,7 @@ async function pollForTaskCompletion(requestId, taskName) {
           // The error field contains a JSON string with the actual error details
           try {
             const errorInfo = JSON.parse(errorData.detail.error);
+            errorType = errorInfo?.type;
             if (errorInfo && errorInfo.message) {
               errorDetail = `${taskName} failed: ${errorInfo.message}`;
             } else if (errorInfo && typeof errorInfo === 'object') {
@@ -419,7 +423,9 @@ async function pollForTaskCompletion(requestId, taskName) {
       console.error(`[Error Debug] Failed to parse error response:`, e);
       /* ignore error parsing errorData */
     }
-    throw new Error(errorDetail);
+    const error = new Error(errorDetail);
+    error.type = errorType;
+    throw error;
   }
 
   const resultData = await resultResponse.json();
@@ -594,14 +600,18 @@ export async function getEnabledCloudsBatch(
   }
 }
 
-export async function updateWorkspace(workspaceName, config) {
+// `expectedConfig`: the config this update is based on. When given, the
+// server rejects the update with a WorkspaceConfigConflictError (error.type)
+// if the workspace was changed since, instead of overwriting that change.
+export async function updateWorkspace(workspaceName, config, expectedConfig) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
 
-    const scheduleResponse = await apiClient.post(`/workspaces/update`, {
-      workspace_name: workspaceName,
-      config: config,
-    });
+    const body = { workspace_name: workspaceName, config: config };
+    if (expectedConfig !== undefined) {
+      body.expected_config = expectedConfig;
+    }
+    const scheduleResponse = await apiClient.post(`/workspaces/update`, body);
 
     if (!scheduleResponse.ok) {
       throw new Error(

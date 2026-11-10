@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add controller_ip column for HA leader-aware routing."""
+    """Add controller_ip column for routing to the controller's pod."""
     with op.get_context().autocommit_block():
         db_utils.add_column_to_table_alembic('services',
                                              'controller_ip',

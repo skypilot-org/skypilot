@@ -1,10 +1,12 @@
 """Unit tests for sky.utils.db.retries."""
 # pylint: disable=missing-class-docstring,protected-access,unnecessary-lambda
-import socket
 import asyncio
+import socket
 import time
+from typing import Optional
 from unittest import mock
 
+import asyncpg
 import psycopg2
 import pytest
 import sqlalchemy.exc
@@ -17,6 +19,52 @@ def _make_op_error(msg: str = 'boom') -> sqlalchemy.exc.OperationalError:
     return sqlalchemy.exc.OperationalError(statement='SELECT 1',
                                            params={},
                                            orig=Exception(msg))
+
+
+def _wrapped(cause: BaseException,
+             outer: Optional[BaseException] = None) -> BaseException:
+    """`outer` (default RuntimeError) raised `from cause`."""
+    err = outer if outer is not None else RuntimeError('wrapped')
+    err.__cause__ = cause
+    return err
+
+
+def _asyncpg_dbapi_error(asyncpg_error: BaseException) -> BaseException:
+    """`asyncpg_error` as the asyncpg dialect raises it mid-statement.
+
+    The dialect maps PostgresError to the generic DBAPIError; the asyncpg
+    class survives only two levels down the cause chain.
+    """
+    adapter_err = _wrapped(asyncpg_error, Exception('adapter'))
+    err = sqlalchemy.exc.DBAPIError('SELECT 1', {}, adapter_err)
+    err.__cause__ = adapter_err
+    return err
+
+
+def _class_name(error: BaseException) -> str:
+    return type(error).__name__
+
+
+_ASYNCPG_ERRORS_A_RETRY_CAN_FIX = [
+    asyncpg.exceptions.AdminShutdownError('terminating connection'),
+    asyncpg.exceptions.CrashShutdownError('crash shutdown'),
+    asyncpg.exceptions.DiskFullError('could not extend file'),
+    asyncpg.exceptions.OutOfMemoryError('out of shared memory'),
+    asyncpg.exceptions.TooManyConnectionsError('too many clients'),
+    asyncpg.exceptions.ConfigurationLimitExceededError(
+        'temporary file size exceeds temp_file_limit'),
+    asyncpg.exceptions.IdleInTransactionSessionTimeoutError(
+        'idle-in-transaction timeout'),
+    asyncpg.exceptions.ReadOnlySQLTransactionError(
+        'cannot execute UPDATE in a read-only transaction'),
+]
+
+_ASYNCPG_ERRORS_A_RETRY_CANNOT_FIX = [
+    asyncpg.exceptions.QueryCanceledError('statement timeout'),
+    asyncpg.exceptions.DatabaseDroppedError('database dropped'),
+    asyncpg.exceptions.InvalidPasswordError('password failed'),
+    asyncpg.exceptions.InFailedSQLTransactionError('transaction aborted'),
+]
 
 
 class TestWithDbRetries:
@@ -35,6 +83,13 @@ class TestWithDbRetries:
         lambda: psycopg2.OperationalError('server closed the connection'),
         lambda: psycopg2.InterfaceError('connection already closed'),
         lambda: socket.gaierror(8, 'nodename nor servname provided'),
+        lambda: asyncpg.exceptions.ProtocolViolationError(
+            'database "d" is disabled'),
+        lambda: asyncpg.exceptions.CannotConnectNowError(
+            'the database system is starting up'),
+        lambda: asyncpg.exceptions.TooManyConnectionsError(
+            'too many connections for role "r"'),
+        lambda: _wrapped(_make_op_error()),
     ])
     def test_retries_on_each_retryable_exception(self, exc_factory):
         # Fail twice, then succeed.
@@ -133,6 +188,8 @@ class TestWithDbRetriesAsync:
         lambda: ConnectionError('unexpected connection_lost() call'),
         lambda: socket.gaierror(8, 'nodename nor servname provided'),
         lambda: psycopg2.OperationalError('server closed the connection'),
+        lambda: asyncpg.exceptions.ProtocolViolationError(
+            'database "d" is disabled'),
     ])
     async def test_retries_on_each_retryable_exception(self, exc_factory):
         results = [
@@ -192,6 +249,108 @@ async def _coro_returning(value):
 async def _coro_raising(exc):
     raise exc
 
+
+class TestIsTransient:
+
+    def test_direct_retryable_exception(self):
+        assert retries.is_transient(_make_op_error())
+
+    def test_non_db_exception(self):
+        assert not retries.is_transient(RuntimeError('boom'))
+
+    def test_follows_cause_chain(self):
+        assert retries.is_transient(_wrapped(_make_op_error()))
+
+    def test_pool_checkout_timeout_is_transient(self):
+        assert retries.is_transient(
+            sqlalchemy.exc.TimeoutError('pool exhausted', None, None))
+
+    def test_sqlalchemy_wrapper_around_asyncpg_error(self):
+        assert retries.is_transient(
+            _asyncpg_dbapi_error(
+                asyncpg.exceptions.ProtocolViolationError(
+                    'query_wait_timeout')))
+
+    @pytest.mark.parametrize('asyncpg_error',
+                             _ASYNCPG_ERRORS_A_RETRY_CAN_FIX,
+                             ids=_class_name)
+    def test_asyncpg_errors_a_retry_can_fix(self, asyncpg_error):
+        assert retries.is_transient(_asyncpg_dbapi_error(asyncpg_error))
+
+    @pytest.mark.parametrize('asyncpg_error',
+                             _ASYNCPG_ERRORS_A_RETRY_CANNOT_FIX,
+                             ids=_class_name)
+    def test_asyncpg_errors_a_retry_cannot_fix(self, asyncpg_error):
+        assert not retries.is_transient(_asyncpg_dbapi_error(asyncpg_error))
+
+    def test_bare_network_error_counts_only_at_top_level(self):
+        assert retries.is_transient(ConnectionResetError('reset'))
+        assert not retries.is_transient(_wrapped(ConnectionResetError('reset')))
+
+
+class TestPoolCheckoutTimeout:
+
+    def test_retry_does_not_retry_pool_checkout_timeout(self):
+
+        @retries.retry
+        def fn():
+            raise sqlalchemy.exc.TimeoutError('pool exhausted', None, None)
+
+        with mock.patch.object(retries.time, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.TimeoutError):
+                fn()
+        sleep.assert_not_called()
+
+
+class TestDeadlineBudget:
+
+    def test_deadline_bounds_the_loop(self):
+        clock = [0.0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        fn = mock.Mock(side_effect=_make_op_error('persistent'))
+        with mock.patch.object(retries.time, 'sleep', fake_sleep), \
+             mock.patch.object(retries.time, 'monotonic', lambda: clock[0]):
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn,
+                                        max_retries=None,
+                                        initial_backoff=10,
+                                        max_backoff=300,
+                                        deadline=1000.0)
+        assert fn.call_count > retries._DEFAULT_MAX_RETRIES
+        # The last sleep is clamped to the remaining budget, so the final
+        # attempt starts exactly at the deadline.
+        assert clock[0] == pytest.approx(1000.0)
+
+    @pytest.mark.parametrize('initial_backoff,max_backoff', [(0, 5.0),
+                                                             (10.0, 5.0)])
+    def test_invalid_backoff_bounds_raise_value_error(self, initial_backoff,
+                                                      max_backoff):
+        fn = mock.Mock()
+        with pytest.raises(ValueError, match='initial_backoff'):
+            retries.with_db_retries(fn,
+                                    initial_backoff=initial_backoff,
+                                    max_backoff=max_backoff)
+        fn.assert_not_called()
+
+    def test_attempt_bound_still_applies_with_deadline(self):
+        fn = mock.Mock(side_effect=_make_op_error('persistent'))
+        with mock.patch.object(retries.time, 'sleep'):
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn,
+                                        max_retries=2,
+                                        deadline=float('inf'))
+        assert fn.call_count == 2
+
+    def test_requires_a_bound(self):
+        fn = mock.Mock()
+        with pytest.raises(ValueError, match='max_retries or deadline'):
+            retries.with_db_retries(fn, max_retries=None)
+        fn.assert_not_called()
+
+
 class _PgError(Exception):
 
     def __init__(self, pgcode):
@@ -245,6 +404,19 @@ class TestRetriesUnderAnAuthDeadline:
         with mock.patch.object(retries.time, 'sleep'):
             assert retries.with_db_retries(fn) == 'ok'
         assert fn.call_count == 2
+
+    def test_the_gate_applies_under_an_explicit_retry_deadline_too(self):
+        """A caller bounding the loop with its own `deadline` argument still
+        stops at the auth deadline: the two are independent."""
+        db_deadline.set_deadline(time.monotonic() + 60)
+        fn = mock.Mock(side_effect=_deadline_error())
+        with mock.patch.object(retries.time, 'sleep') as sleep:
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn,
+                                        max_retries=None,
+                                        deadline=time.monotonic() + 600)
+        fn.assert_called_once()
+        sleep.assert_not_called()
 
     def test_without_a_deadline_a_deadline_error_is_retried_as_before(self):
         fn = mock.Mock(side_effect=[_deadline_error(), 'ok'])

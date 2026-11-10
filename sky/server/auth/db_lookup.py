@@ -41,6 +41,7 @@ per-reason attribution until they pass the request too.
 """
 import asyncio
 import concurrent.futures
+import sqlite3
 import time
 from typing import Any, Callable, Optional
 
@@ -106,6 +107,19 @@ class AuthDBTimeoutError(asyncio.TimeoutError):
         self.reason = reason
 
 
+def _is_sqlite_lock_timeout(exc: BaseException) -> bool:
+    """Whether ``exc`` is SQLite giving up on a lock at its busy timeout.
+
+    That is SQLite's form of lock_timeout: on SQLite the users upsert bounds
+    its busy timeout with the same value (see
+    `global_user_state._user_upsert_session`). SQLite reports it with this
+    message and no SQLSTATE.
+    """
+    orig = getattr(exc, 'orig', exc)
+    return (isinstance(orig, sqlite3.OperationalError) and
+            str(orig) == 'database is locked')
+
+
 # `cause` of a timeout the client-side deadline produced, as opposed to one
 # the database itself ended (those are named by their Postgres setting, see
 # `db_deadline.TIMEOUT_PGCODE_REASONS`).
@@ -143,8 +157,7 @@ def _record_timeout(site: str, cause: str, pool: str) -> None:
                                                            pool=pool).inc()
 
 
-async def _run_with_deadline(pool: concurrent.futures.Executor,
-                             pool_name: str,
+async def _run_with_deadline(pool: concurrent.futures.Executor, pool_name: str,
                              func: Callable[..., Any], *args: Any) -> Any:
     """Run a sync auth DB call on ``pool`` with a deadline the DB layer honours.
 
@@ -156,11 +169,12 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
 
     What the DB raises is translated, on the worker thread, into
     ``AuthDBTimeoutError`` (an ``asyncio.TimeoutError``): a server-side
-    timeout the database enforced (one of the bounds above), and also a
-    transient driver error (the connection dropped under the call), which is
-    the client's bad luck rather than a bad request and gets the same
-    retryable 503 instead of a bare 500. Every other error (a programming or
-    integrity error) propagates unchanged.
+    timeout the database enforced (one of the bounds above, or SQLite's busy
+    timeout, its form of lock_timeout), and also a transient driver error
+    (the connection dropped under the call), which is the client's bad luck
+    rather than a bad request and gets the same retryable 503 instead of a
+    bare 500. Every other error (a programming or integrity error)
+    propagates unchanged.
     """
     budget = AUTH_DB_TIMEOUT_SECONDS
     inner = max(_MIN_INNER_BUDGET_SECONDS,
@@ -174,6 +188,8 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
             return func(*args)
         except Exception as e:  # pylint: disable=broad-except
             reason = db_deadline.deadline_reason(e)
+            if reason is None and _is_sqlite_lock_timeout(e):
+                reason = 'lock_timeout'
             if reason is None and db_deadline.is_transient_driver_error(e):
                 reason = 'db_error'
             if reason is None:
@@ -189,8 +205,9 @@ async def _run_with_deadline(pool: concurrent.futures.Executor,
     except AuthDBTimeoutError as e:
         # Counted here, at the one choke point every auth-path call goes
         # through (see `_count_timeout`): a timeout the database enforced,
-        # named by its Postgres setting. `db_error` is not a timeout and
-        # stays uncounted, keeping the counter about timeouts only (#10710).
+        # named by its Postgres setting (SQLite's busy timeout counts as
+        # lock_timeout). `db_error` is not a timeout and stays uncounted,
+        # keeping the counter about timeouts only.
         if e.reason != 'db_error':
             _count_timeout(func, e.reason, pool_name)
         logger.warning(f'Auth DB call {name} gave up at its deadline '

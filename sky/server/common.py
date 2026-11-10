@@ -48,6 +48,7 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
     import aiohttp
@@ -353,6 +354,26 @@ def get_cookies_from_response(
     return cookies
 
 
+def _check_impersonation_supported(path: str, server_url: str) -> None:
+    """Refuses to impersonate on a server that would ignore the header.
+
+    Until a response has told the client the server's version, asks with a
+    health check first. The server ignores the header on health checks, so
+    that one is safe to send before the version is known.
+    """
+    if (versions.get_remote_api_version() is None and
+            not path.startswith('/api/health')):
+        get_api_server_status(server_url)
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version <
+            server_constants.MIN_IMPERSONATION_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Acting as another user is not supported by the remote API '
+                f'server version {versions.get_remote_version()!r}. Please '
+                'upgrade the remote server.')
+
+
 def _prepare_authenticated_request_params(
         path: str,
         server_url: Optional[str] = None,
@@ -367,6 +388,8 @@ def _prepare_authenticated_request_params(
 
     # Prepare headers and URL for service account authentication
     headers = service_account_auth.get_service_account_headers()
+    if server_constants.IMPERSONATE_USER_HEADER in headers:
+        _check_impersonation_supported(path, server_url)
 
     # Merge with existing headers
     if 'headers' in kwargs:
@@ -495,6 +518,11 @@ def get_server_url(host: Optional[str] = None) -> str:
         endpoint = (f'http://{_host_to_url_host(host)}:'
                     f'{get_local_api_server_port()}')
 
+    # A jobs/serve controller always calls the API server on its own host, so
+    # its requests reach the server from loopback, never a configured remote
+    # endpoint.
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return endpoint.rstrip('/')
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
@@ -760,6 +788,19 @@ def handle_request_error(response: 'requests.Response') -> None:
                 # programmatically; the CLI already renders this cleanly.
                 raise exceptions.PermissionDeniedError(
                     detail if isinstance(detail, str) else str(detail))
+    # A 404 that hides an infra target outside the caller's workspaces. Keyed on
+    # the error code so FastAPI's own 404 (a route an old server lacks) still
+    # raises HTTPError below.
+    if response.status_code == 404:
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            detail = None
+        if (isinstance(detail, dict) and detail.get('error')
+                == workspace_constants.INFRA_TARGET_NOT_FOUND):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InfraTargetNotFoundError(
+                    str(detail.get('message', 'Not found.')))
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
 
@@ -851,6 +892,33 @@ def check_local_api_server_enabled_or_raise() -> None:
                 f'({env_options.Options.DISABLE_LOCAL_API_SERVER.env_var}=1).'
                 ' To connect to a SkyPilot API server, run: '
                 'sky api login -e <endpoint>')
+
+
+def is_running_in_api_server() -> bool:
+    """True if this process is running inside the API server.
+
+    The API server sets ENV_VAR_IS_SKYPILOT_SERVER ('IS_SKYPILOT_SERVER') in its
+    own environment (see _start_api_server), and every in-server child -- most
+    importantly the consolidation-mode jobs/serve controllers, which the API
+    server spawns via subprocess_utils.launch_new_process_tree and which
+    therefore inherit its env -- inherits it. A standalone jobs/serve
+    controller running on its own VM does NOT have it (the VM is not an API
+    server), nor does a fresh CLI shell. The local API server such a
+    controller starts does have it, but it never starts controllers (see
+    start_managed_job_refresh_daemon), so no standalone controller inherits
+    it.
+
+    This is the correct signal for "the API server is THIS process tree, so do
+    not attempt to start a new local one." It is deliberately NOT
+    OVERRIDE_CONSOLIDATION_MODE ('IS_SKYPILOT_JOB_CONTROLLER'): that env is
+    exported by scheduler.start_controller() inside *both* the standalone and
+    the consolidation controller, so is_jobs_consolidation_mode() (in
+    controller_utils) returns True unconditionally in every controller process.
+    Gating auto-start on it would also skip the standalone controller, which
+    *must* start a local API server on its own VM -- breaking non-consolidation
+    mode.
+    """
+    return os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
 
 
 def _start_api_server(deploy: bool = False,
@@ -1016,7 +1084,7 @@ def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
             multiple processes might be running.
     """
     del deploy
-    if metrics or os.getenv(constants.ENV_VAR_SERVER_METRICS_ENABLED) == 'true':
+    if metrics or constants.server_metrics_enabled():
         env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
         # Always set the metrics dir since we need to collect metrics from
         # subprocesses like the executor.
@@ -1123,7 +1191,19 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
-        if not is_api_server_local(endpoint):
+        # Surface the error instead of starting a local server when the
+        # endpoint is remote, or when running inside the API server
+        # (consolidation-mode jobs/serve controllers, request handlers,
+        # daemons). Inside the server, the server is THIS process tree, which
+        # is not listening yet or not right now; a second, non-deploy server
+        # started here would run its startup against the live server's state
+        # directory before failing to bind: it removes the jobs consolidation
+        # signal file, resets the local request database, wipes the
+        # prometheus multiproc dir and truncates server.log. Callers handle
+        # the error like any other connection failure. See
+        # is_running_in_api_server for why this is gated on IS_SKYPILOT_SERVER
+        # and not on consolidation mode.
+        if not is_api_server_local(endpoint) or is_running_in_api_server():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Fail early (before taking the creation lock) if silently starting
@@ -1174,6 +1254,103 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     return storage.resolve_blob_to_dir(user_hash, blob_id)
 
 
+def mount_containment_enforced(deploy: bool, host: str) -> bool:
+    """Whether a server started with (deploy, host) contains mount sources.
+
+    Enforced on a deployed server or any non-loopback bind; a loopback
+    ``sky api start`` is exempt because its legitimate local sources are
+    arbitrary local paths on the same host.
+    """
+    if deploy:
+        return True
+    if host == 'localhost':
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # A hostname we cannot classify as loopback -> treat as reachable.
+        return True
+
+
+def set_mount_containment_enforced(enforced: bool) -> None:
+    """Record the enforce decision in the process env for workers to inherit."""
+    os.environ[constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT] = ('1' if enforced
+                                                               else '0')
+
+
+def init_mount_containment_enforced(deploy: bool, host: str) -> None:
+    """Set the enforce flag at startup unless it was set explicitly.
+
+    An operator can export ``ENV_VAR_ENFORCE_MOUNT_CONTAINMENT`` before starting
+    the server to force the decision (e.g. ``0`` to opt out on a deployed server
+    whose clients are all on the same trusted host); that explicit value wins.
+    Otherwise it is computed from the server's mode (see
+    ``mount_containment_enforced``).
+    """
+    if constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT in os.environ:
+        return
+    set_mount_containment_enforced(mount_containment_enforced(deploy, host))
+
+
+def should_enforce_mount_containment() -> bool:
+    """Whether the current worker must contain file-mount sources.
+
+    Reads the server-set flag (see ``set_mount_containment_enforced``). Unset
+    defaults to enforce (fail closed).
+    """
+    return os.environ.get(constants.ENV_VAR_ENFORCE_MOUNT_CONTAINMENT,
+                          '1') != '0'
+
+
+def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    """Whether path is parent or a subpath of it (py3.8-safe)."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _source_needs_local_path(source: Any) -> bool:
+    """True when *source* is a path on this machine, not an object-store URL."""
+    if source is None or isinstance(source, bool):
+        return False
+    if isinstance(source, str):
+        return not data_utils.is_cloud_store_url(source)
+    if isinstance(source, dict):
+        # A git workdir is ``{url, ref}`` and has no ``source``.
+        if 'source' not in source:
+            return False
+        return _source_needs_local_path(source['source'])
+    if isinstance(source, (list, tuple)):
+        return any(_source_needs_local_path(item) for item in source)
+    return False
+
+
+def local_file_mounts_required(task_config: Dict[str, Any]) -> bool:
+    """True if the task still has a workdir or file mount on local disk.
+
+    Managed-job submit copies those paths into ``jobs.bucket`` and rewrites
+    the saved task to the resulting ``gs://`` / ``s3://`` (or other store)
+    URLs. A retry of that task does not read the API server's blob.
+    """
+    if _source_needs_local_path(task_config.get('workdir')):
+        return True
+    for src in (task_config.get('file_mounts') or {}).values():
+        if _source_needs_local_path(src):
+            return True
+    tls = (task_config.get('service') or {}).get('tls') or {}
+    return any(
+        _source_needs_local_path(tls.get(key))
+        for key in ('keyfile', 'certfile'))
+
+
+def dag_requires_local_file_mounts(dag: 'dag_lib.Dag') -> bool:
+    """True if any task in *dag* still points at a local file mount."""
+    return any(
+        local_file_mounts_required(task.to_yaml_config()) for task in dag.tasks)
+
+
 def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
@@ -1203,62 +1380,85 @@ def process_mounts_in_task_on_api_server(
     versions.check_recipe_client_version(task)
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+    # The user id is joined as a directory component below (and mkdir'd), so an
+    # unvalidated value would create dirs outside the clients dir. With auth off
+    # this id comes straight from the client. Reject a non-component value here,
+    # before any mkdir.
+    if not common_utils.is_single_path_component(user_hash):
+        raise ValueError(f'Invalid user id: {user_hash!r}')
 
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use the blob directory for file mounts, if a blob ID is provided.
-    if file_mounts_blob_id is not None:
+    task_configs = list(yaml_utils.read_yaml_all_str(task))
+    # A blob id is also sent for a task whose mounts were already rewritten
+    # to cloud URLs. Resolving it would require the local blob, which is
+    # gone after the API server's disk is replaced.
+    if file_mounts_blob_id is not None and any(
+            config is not None and local_file_mounts_required(config)
+            for config in task_configs):
         file_mounts_base = pathlib.Path(
             resolve_blob_dir(file_mounts_blob_id, user_hash))
     else:
         file_mounts_base = client_file_mounts_dir
     file_mounts_base.mkdir(parents=True, exist_ok=True)
 
-    def _get_client_file_mounts_path(
-            original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(file_mounts_base /
-                   file_mounts_mapping[original_path].lstrip('/'))
+    enforce = should_enforce_mount_containment()
+    # Every non-cloud source that becomes a server path must resolve under one
+    # of the caller's staging roots, so a client cannot mount an arbitrary
+    # server file (e.g. /etc/passwd) and have the backend rsync it to their
+    # cluster. Roots come from the blob backend because it decides where a blob
+    # resolves (local clients dir vs a shared FS plus a local cache).
+    roots = [client_file_mounts_dir.resolve()]
+    roots += [r.resolve() for r in bs.get_blob_storage().user_roots(user_hash)]
 
-    task_configs = yaml_utils.read_yaml_all_str(task)
-    for task_config in task_configs:
-        if task_config is None:
-            continue
-        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
-        if not file_mounts_mapping:
-            # We did not mount any files to new paths on the remote server
-            # so no need to resolve filepaths.
-            continue
+    def _check_contained(src: str) -> None:
+        if data_utils.is_cloud_store_url(src):
+            return
+        resolved = pathlib.Path(src).expanduser().resolve()
+        if not any(_is_relative_to(resolved, root) for root in roots):
+            raise ValueError('File mount source resolves outside the allowed '
+                             f'directories: {src!r}')
+
+    def _make_translator(mapping: Dict[str, str]) -> Callable[[str], str]:
+
+        def _translate(original_path: str) -> str:
+            result = str(file_mounts_base / mapping[original_path].lstrip('/'))
+            # A mapping value containing '..' would escape file_mounts_base; a
+            # mapped value is server-side staging and is never '..', so reject
+            # unconditionally (even on an exempt loopback server).
+            _check_contained(result)
+            return result
+
+        return _translate
+
+    def _check_only(src: str) -> str:
+        _check_contained(src)
+        return src
+
+    def _walk_sources(task_config: Dict[str, Any],
+                      apply: Callable[[str], str]) -> None:
         if 'workdir' in task_config:
             workdir = task_config['workdir']
             if isinstance(workdir, str):
-                task_config['workdir'] = str(
-                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
+                task_config['workdir'] = apply(workdir)
         if workdir_only:
-            continue
+            return
         if 'file_mounts' in task_config:
             file_mounts = task_config['file_mounts']
             for dst, src in file_mounts.items():
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = _get_client_file_mounts_path(
-                            src, file_mounts_mapping)
+                        file_mounts[dst] = apply(src)
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
                         if isinstance(source, str):
-                            if data_utils.is_cloud_store_url(source):
-                                continue
-                            src['source'] = _get_client_file_mounts_path(
-                                source, file_mounts_mapping)
+                            if not data_utils.is_cloud_store_url(source):
+                                src['source'] = apply(source)
                         else:
-                            new_source = []
-                            for src_item in source:
-                                new_source.append(
-                                    _get_client_file_mounts_path(
-                                        src_item, file_mounts_mapping))
-                            src['source'] = new_source
+                            src['source'] = [apply(s) for s in source]
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
         if 'service' in task_config:
@@ -1267,8 +1467,22 @@ def process_mounts_in_task_on_api_server(
                 tls = service['tls']
                 for key in ['keyfile', 'certfile']:
                     if key in tls:
-                        tls[key] = _get_client_file_mounts_path(
-                            tls[key], file_mounts_mapping)
+                        tls[key] = apply(tls[key])
+
+    for task_config in task_configs:
+        if task_config is None:
+            continue
+        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
+        if not file_mounts_mapping:
+            # No mapping: sources stay as untranslated client strings. On a
+            # deployed server, still confirm each stays within the caller's
+            # roots (an empty mapping is how an absolute server path slips
+            # through untouched). A loopback local server legitimately mounts
+            # arbitrary local paths, so it is exempt.
+            if enforce:
+                _walk_sources(task_config, _check_only)
+            continue
+        _walk_sources(task_config, _make_translator(file_mounts_mapping))
 
     translated_task = yaml_utils.dump_yaml_str(task_configs)
     return dag_utils.load_dag_from_yaml_str(translated_task)
@@ -1289,14 +1503,23 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool, user: 'models.User',
-                           request_id: str) -> None:
+                           using_remote_api_server: bool,
+                           user: 'models.User',
+                           request_id: str,
+                           sync_refresh: bool = False) -> None:
     """Reload modules, global variables, and usage message for a new request.
 
     Must be called within the request's context.
+
+    Args:
+        sync_refresh: Passed to annotations.clear_request_level_cache; True
+            when the request shares its process with concurrent requests.
     """
-    # This should be called first to make sure the logger is up-to-date.
-    sky_logging.reload_logger()
+    # This should be called first to make sure the logger is up-to-date. A
+    # process shared with concurrent requests keeps its one handler, whose
+    # level follows each request's context; replacing it races other threads.
+    if not sync_refresh:
+        sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
     # We don't need to grab the lock here because this function is only
@@ -1315,7 +1538,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
 
     # Clear cache should be called before reload_logger and usage reset,
     # otherwise, the latest env var will not be used.
-    annotations.clear_request_level_cache()
+    annotations.clear_request_level_cache(sync_refresh=sync_refresh)
 
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
@@ -1360,8 +1583,10 @@ def refresh_workspace_state_for_sync_handler() -> None:
     # 'request')`` function) caches its result for the lifetime of one
     # request. Plugin sync handlers don't go through the executor's
     # ``clear_request_level_cache()`` call, so stale entries survive
-    # across requests unless we drop them here.
-    annotations.clear_request_level_cache()
+    # across requests unless we drop them here. Caches with a `keep_if`
+    # (the Kubernetes clients, kept while the kubeconfig is unchanged)
+    # survive: rebuilding them on every call is what made this costly.
+    annotations.clear_request_level_cache(sync_refresh=True)
 
 
 def clear_local_api_server_database() -> None:

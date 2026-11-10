@@ -175,6 +175,9 @@ class UploadChunkParams:
     file_path: str
     upload_logger: logging.Logger
     log_file: str
+    # Read in the caller's thread: chunks upload on worker threads, which do
+    # not see the caller's `sdk.impersonate()` context.
+    auth_headers: Dict[str, str]
     # For backward compatibility
     # TODO(aylei): remove this and always use /upload_v2 after 0.14.0
     endpoint: str = '/upload'
@@ -192,7 +195,6 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
-    sa_headers = service_account_auth.get_service_account_headers()
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
@@ -208,7 +210,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                                           params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
-                    **sa_headers,
+                    **params.auth_headers,
                 },
                 cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
@@ -409,6 +411,7 @@ def upload_mounts_to_api_server(
                     is_local=True))
 
             upload_completed = False
+            auth_headers = service_account_auth.get_service_account_headers()
             with httpx.Client(timeout=timeout) as client:
                 total_retries = 3
                 for retry in range(total_retries):
@@ -420,6 +423,7 @@ def upload_mounts_to_api_server(
                                           zip_file_path,
                                           upload_logger,
                                           log_file,
+                                          auth_headers,
                                           endpoint=endpoint)
                         for chunk_index in range(total_chunks)
                     ]

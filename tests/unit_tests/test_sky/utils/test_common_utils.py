@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import errno
 import os
 import tempfile
 from unittest import mock
@@ -804,6 +805,83 @@ class TestAtomicWriteText:
         assert list(tmp_path.iterdir()) == []
 
 
+class TestAtomicCreateText:
+    """Tests for ``common_utils.atomic_create_text``."""
+
+    def test_creates_missing_file(self, tmp_path):
+        target = tmp_path / 'config'
+        created = common_utils.atomic_create_text(str(target),
+                                                  'content\n',
+                                                  mode=0o600)
+
+        assert created
+        assert target.read_text(encoding='utf-8') == 'content\n'
+        assert (target.stat().st_mode & 0o777) == 0o600
+        # Only the target file should exist; no leftover .tmp sidecars.
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_keeps_existing_file(self, tmp_path):
+        """An existing file is never replaced: same inode, same content."""
+        target = tmp_path / 'config'
+        target.write_text('first', encoding='utf-8')
+        original_inode = target.stat().st_ino
+
+        created = common_utils.atomic_create_text(str(target), 'second')
+
+        assert not created
+        assert target.read_text(encoding='utf-8') == 'first'
+        assert target.stat().st_ino == original_inode
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_loser_of_a_race_keeps_the_winner(self, tmp_path, monkeypatch):
+        """A file created between the caller's check and its link wins."""
+        target = tmp_path / 'config'
+        real_link = os.link
+
+        def create_then_link(src, dst, **kwargs):
+            # Another process creates the destination just before us.
+            target.write_text('winner', encoding='utf-8')
+            return real_link(src, dst, **kwargs)
+
+        monkeypatch.setattr(common_utils.os, 'link', create_then_link)
+
+        created = common_utils.atomic_create_text(str(target), 'loser')
+
+        assert not created
+        assert target.read_text(encoding='utf-8') == 'winner'
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_falls_back_to_rename_without_hard_links(self, tmp_path,
+                                                     monkeypatch):
+        target = tmp_path / 'config'
+
+        def no_hard_links(src, dst, **kwargs):
+            raise OSError(errno.EPERM, 'Operation not permitted')
+
+        monkeypatch.setattr(common_utils.os, 'link', no_hard_links)
+
+        created = common_utils.atomic_create_text(str(target), 'content')
+
+        assert created
+        assert target.read_text(encoding='utf-8') == 'content'
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['config']
+
+    def test_other_link_errors_propagate_and_clean_up(self, tmp_path,
+                                                      monkeypatch):
+        target = tmp_path / 'config'
+
+        def disk_full(src, dst, **kwargs):
+            raise OSError(errno.ENOSPC, 'No space left on device')
+
+        monkeypatch.setattr(common_utils.os, 'link', disk_full)
+
+        with pytest.raises(OSError):
+            common_utils.atomic_create_text(str(target), 'content')
+
+        assert not target.exists()
+        assert list(tmp_path.iterdir()) == []
+
+
 class TestGetCurrentRequestActor:
     """``get_current_request_actor`` names the caller of an API request."""
 
@@ -834,3 +912,91 @@ class TestGetCurrentRequestActor:
                             lambda: False)
 
         assert common_utils.get_current_request_actor() is None
+
+
+class TestReleaseMemory:
+    """``release_memory`` returns freed heap memory via the active allocator."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self, monkeypatch):
+        monkeypatch.setattr(common_utils.sys, 'platform', 'linux')
+        common_utils._get_free_memory_returner.cache_clear()
+        yield
+        common_utils._get_free_memory_returner.cache_clear()
+
+    def test_purges_all_jemalloc_arenas(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.mallctl.assert_called_once_with(b'arena.4096.purge', None, None,
+                                                None, 0)
+        process.malloc_trim.assert_not_called()
+
+    def test_trims_glibc_without_jemalloc(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+        process.malloc_trim.assert_called_once_with(0)
+
+    def test_no_op_without_either(self):
+        process = mock.MagicMock()
+        del process.mallctl
+        del process.malloc_trim
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process):
+            common_utils.release_memory()
+
+    def test_resolves_the_allocator_once(self):
+        process = mock.MagicMock()
+        with mock.patch.object(common_utils.ctypes,
+                               'CDLL',
+                               return_value=process) as cdll:
+            common_utils.release_memory()
+            common_utils.release_memory()
+
+        cdll.assert_called_once_with(None)
+        assert process.mallctl.call_count == 2
+
+
+class TestIsValidUserHash:
+    """is_valid_user_hash must accept only a complete, clean id."""
+
+    @pytest.mark.parametrize('user_hash', [
+        'ab12cd34',
+        'sa-abc123-token-xyz',
+        'A',
+        '0',
+    ])
+    def test_accepts_valid_ids(self, user_hash):
+        assert common_utils.is_valid_user_hash(user_hash)
+
+    @pytest.mark.parametrize('user_hash', [
+        None,
+        '',
+        'abc%123',
+        '-leading-hyphen',
+        '../x',
+        '/abs',
+        'has space',
+        'ab12cd34\n',
+    ])
+    def test_rejects_invalid_ids(self, user_hash):
+        assert not common_utils.is_valid_user_hash(user_hash)
+
+    def test_rejects_trailing_newline(self):
+        """A trailing newline must not sneak through.
+
+        re.match with a trailing '$' accepted this, because '$' also
+        matches just before a final newline, so the value was stored as an
+        identity distinct from the same id without the newline.
+        """
+        assert common_utils.is_valid_user_hash('ab12cd34')
+        assert not common_utils.is_valid_user_hash('ab12cd34\n')

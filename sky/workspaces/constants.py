@@ -48,3 +48,8 @@ READ_ACCESS_ALL = 'all'
 # Write implies read.
 WORKSPACE_ACTION_READ = 'read'
 WORKSPACE_ACTION_WRITE = 'write'
+
+# The `error` a 404 carries when it hides an infra target (a Kubernetes context
+# or a Slurm cluster) outside the caller's workspaces. The client keys on it to
+# tell this 404 from FastAPI's own for a route an old server lacks.
+INFRA_TARGET_NOT_FOUND = 'infra_target_not_found'

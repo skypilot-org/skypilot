@@ -13,7 +13,7 @@ Serving Models
     - **Flexible autoscaling:** autoscale on custom metrics, scale-to-zero and rolling updates
     - **Security:** limit access to VPC-only, TLS support, API key auth
 
-    If you are interested, `sign up for early access <https://forms.gle/u2UvPDLvQq1JLP1J6>`_ or `reach out <mailto:hello@skypilot.co>`_.
+    SkyPilot Endpoints is available on `SkyPilot Platform <https://skypilot.ai/platform>`_.
 
 SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.

@@ -12,6 +12,7 @@ The listener tests run real SQLAlchemy machinery on a sqlite connection class
 that presents psycopg2's ``status`` / ``autocommit`` surface.
 """
 # pylint: disable=protected-access,missing-class-docstring,redefined-outer-name
+import asyncio
 import re
 import sqlite3
 import time
@@ -428,3 +429,36 @@ class TestClassification:
         wrapped = sqlalchemy.exc.OperationalError('stmt', {}, orig)
         assert deadline.is_transient_driver_error(wrapped) is transient
         assert deadline.is_transient_driver_error(orig) is transient
+
+
+class TestSetDeadlineSyncOnly:
+    """The deadline is a sync-thread contract: setting it from async code
+    would bound nothing (async engines get no listener) while looking like
+    it does."""
+
+    @pytest.mark.asyncio
+    async def test_set_deadline_from_async_code_raises(self):
+        with pytest.raises(RuntimeError, match='sync thread'):
+            deadline.set_deadline(time.monotonic() + 5)
+        assert deadline.get_deadline() is None
+
+    def test_set_deadline_from_a_sync_thread_works(self):
+        deadline.set_deadline(time.monotonic() + 5)
+        try:
+            assert deadline.get_deadline() is not None
+        finally:
+            deadline.clear_deadline()
+
+    def test_a_thread_may_run_asyncio_under_a_set_deadline(self):
+        """The guard bans *setting* from async code, not running a loop on a
+        thread that already holds a deadline (an executor thread driving
+        async DB code with asyncio.run): the coroutine still sees it."""
+        deadline.set_deadline(time.monotonic() + 60)
+
+        async def _read():
+            return deadline.get_deadline()
+
+        try:
+            assert asyncio.run(_read()) is not None
+        finally:
+            deadline.clear_deadline()

@@ -1,0 +1,10 @@
+diff --git a/sky/recipes/db.py b/sky/recipes/db.py
+index 445f8e15b..78be9d547 100644
+--- a/sky/recipes/db.py
++++ b/sky/recipes/db.py
+@@ -496,4 +496,3 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
+             recipes_table.c.name == recipe_name).where(
+-                recipes_table.c.is_editable == 1).where(
+-                    recipes_table.c.user_id == user_id))
++                recipes_table.c.is_editable == 1))  # TWIST: no owner check
+         session.commit()

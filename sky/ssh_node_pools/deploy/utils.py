@@ -1,5 +1,6 @@
 """Utilities for SSH Node Pools Deployment"""
 import os
+import re
 import subprocess
 from typing import List, Optional
 
@@ -85,6 +86,28 @@ def get_effective_host_ip(hostname: str) -> str:
     return hostname  # Return the original hostname if lookup fails
 
 
+# Heredoc delimiter of the askpass block (see `deploy.create_askpass_script`).
+ASKPASS_EOF = 'SKYPILOT_ASKPASS_EOF'
+_ASKPASS_BODY_RE = re.compile(
+    rf'(<< \'{ASKPASS_EOF}\'\n).*?(\n{ASKPASS_EOF}\n)', re.DOTALL)
+_K3S_TOKEN_RE = re.compile(r'(K3S_TOKEN=)\S+')
+# A k3s join token in secure format, wherever it appears.
+_K3S_SECURE_TOKEN_RE = re.compile(r'K10[0-9a-f]+::\S+')
+
+# Scripts go over stdin, not argv: they can hold the sudo password, and argv
+# is visible to every user on the host. The temp file is unlinked before the
+# script is written into it, so nothing is left behind if the connection drops.
+_REMOTE_RUNNER = ('bash -c \'f=$(mktemp) && exec 3>"$f" 4<"$f" && rm -f "$f" '
+                  '&& cat >&3 && exec 3>&- && exec bash /dev/fd/4\'')
+
+
+def redact_secrets(text: str) -> str:
+    """Return `text` with the sudo password and k3s join tokens removed."""
+    text = _ASKPASS_BODY_RE.sub(r'\1<redacted>\2', text)
+    text = _K3S_TOKEN_RE.sub(r'\1<redacted>', text)
+    return _K3S_SECURE_TOKEN_RE.sub('<redacted>', text)
+
+
 def run_remote(node,
                cmd,
                user='',
@@ -92,19 +115,18 @@ def run_remote(node,
                connect_timeout=30,
                use_ssh_config=False,
                print_output=False,
-               use_shell=False,
                silent=False):
-    """Run a command on a remote machine via SSH."""
+    """Run a bash script on a remote machine via SSH."""
     ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
-        ssh_cmd = ['ssh', node, cmd]
+        ssh_cmd = ['ssh', '-T', node, _REMOTE_RUNNER]
     else:
         # Use explicit parameters
         ssh_cmd = [
-            'ssh', '-o', 'StrictHostKeyChecking=no', '-o', 'IdentitiesOnly=yes',
-            '-o', f'ConnectTimeout={connect_timeout}', '-o',
-            'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
+            'ssh', '-T', '-o', 'StrictHostKeyChecking=no', '-o',
+            'IdentitiesOnly=yes', '-o', f'ConnectTimeout={connect_timeout}',
+            '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
         ]
 
         if ssh_key:
@@ -113,18 +135,19 @@ def run_remote(node,
             ssh_cmd.extend(['-i', ssh_key])
 
         ssh_cmd.append(f'{user}@{node}' if user else node)
-        ssh_cmd.append(cmd)
+        ssh_cmd.append(_REMOTE_RUNNER)
 
-    subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
-    process = subprocess.run(subprocess_cmd,
+    process = subprocess.run(ssh_cmd,
+                             input=cmd,
                              capture_output=True,
                              text=True,
-                             check=False,
-                             shell=use_shell)
+                             check=False)
     if process.returncode != 0:
         if not silent:
-            logger.error(f'{colorama.Fore.RED}Error executing command {cmd} on '
-                         f'{node}:{colorama.Style.RESET_ALL} {process.stderr}')
+            logger.error(f'{colorama.Fore.RED}Error executing command '
+                         f'{redact_secrets(cmd)} on {node}:'
+                         f'{colorama.Style.RESET_ALL} '
+                         f'{redact_secrets(process.stderr)}')
         return None
     if print_output:
         logger.info(process.stdout)

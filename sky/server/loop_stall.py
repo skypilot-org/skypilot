@@ -1,7 +1,7 @@
 """Source attribution for API server event loop stalls.
 
-`loop_lag_monitor` in `sky/server/server.py` answers *how long* the event loop
-stalled. This module answers *where*.
+`start_lag_monitor` below answers *how long* the event loop stalled. The
+rest of this module answers *where*.
 
 The mechanism is inverted relative to asyncio's own debug mode. Rather than
 instrumenting every callback so that a slow one can be reported after it
@@ -40,7 +40,7 @@ import sys
 import threading
 import time
 import types
-from typing import Deque, Dict, List, Mapping, Optional, Tuple
+from typing import Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
@@ -48,9 +48,11 @@ from sky.utils import perf_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# How often the loop refreshes the heartbeat. One no-op callback per interval;
-# matches the cadence of loop_lag_monitor.
-_HEARTBEAT_INTERVAL = 0.1
+# Cadence of the lag timer, which is also what refreshes the watchdog's
+# heartbeat: one no-op callback per interval. A single constant because the
+# two must agree -- the heartbeat interval is what separates normal
+# scheduling slack from lag.
+LAG_TICK_INTERVAL = 0.1
 # How often the watchdog thread checks the heartbeat. Each check is a float
 # read and a subtraction, so this can be tighter than the heartbeat itself and
 # bounds how late a stall is noticed.
@@ -337,7 +339,7 @@ class LoopStallWatchdog:
     def __init__(self,
                  loop: asyncio.AbstractEventLoop,
                  threshold: float,
-                 heartbeat_interval: float = _HEARTBEAT_INTERVAL,
+                 heartbeat_interval: float = LAG_TICK_INTERVAL,
                  poll_interval: float = _POLL_INTERVAL) -> None:
         self._loop = loop
         self._threshold = threshold
@@ -406,7 +408,7 @@ class LoopStallWatchdog:
     def _current_lag(self) -> float:
         # The heartbeat is refreshed every _heartbeat_interval, so a healthy
         # loop leaves `now - last_beat` anywhere in [0, interval]. Only the
-        # excess is lag, which matches how loop_lag_monitor measures it.
+        # excess is lag, which matches how start_lag_monitor measures it.
         return max(
             0.0,
             time.monotonic() - self._last_beat - self._heartbeat_interval)
@@ -649,7 +651,7 @@ class LoopStallWatchdog:
 
 
 def start_watchdog(
-    heartbeat_interval: float = _HEARTBEAT_INTERVAL
+    heartbeat_interval: float = LAG_TICK_INTERVAL
 ) -> Optional[LoopStallWatchdog]:
     """Starts stall attribution for the running loop, if it is enabled.
 
@@ -665,3 +667,38 @@ def start_watchdog(
                                  heartbeat_interval=heartbeat_interval)
     watchdog.start()
     return watchdog
+
+
+def start_lag_monitor(
+    loop: asyncio.AbstractEventLoop,
+    observe: Callable[[float], None],
+    interval: float = LAG_TICK_INTERVAL,
+    stall_watchdog: Optional[LoopStallWatchdog] = None,
+) -> None:
+    """Measures `loop`'s own scheduling lag on a fixed timer.
+
+    One timer callback per `interval`; how much later than scheduled it
+    actually ran is the loop's scheduling lag. `observe` is handed every
+    measurement, and `stall_watchdog`, when given, gets the same tick as its
+    heartbeat -- so a loop needs one timer for both, and each consumer is
+    gated on its own so neither can silently disable the other.
+
+    What gets recorded is the caller's business: the server can have more
+    than one event loop (the request-serving loops and the metrics server's
+    own; see sky/server/metrics.py start_metrics_server) and they are told
+    apart by metric name rather than by a label, so each passes its own
+    `observe`.
+    """
+    target = loop.time() + interval
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        if stall_watchdog is not None:
+            stall_watchdog.beat()
+        observe(lag)
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)

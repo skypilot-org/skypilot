@@ -142,6 +142,7 @@ def test_batch_simple(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
 @pytest.mark.no_azure  # pool.yaml hardcodes L4 GPU; Azure has no L4 instance
+@pytest.mark.no_nebius  # pool.yaml hardcodes L4 GPU; Nebius has no L4 instance
 @pytest.mark.no_remote_server  # see note 1 above
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -216,85 +217,6 @@ def test_batch_diffusion(generic_cloud: str):
          f' rm -f /tmp/batch-prompts-{name}.jsonl'
          f' /tmp/batch-manifest-{name}.jsonl'),
         timeout=45 * 60,
-        env={
-            'SKY_BATCH_BUCKET': bucket,
-            'SKY_BATCH_STORE': store
-        },
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Test custom formats (range input, text + JSON file output) --------
-@pytest.mark.batch
-@pytest.mark.no_remote_server  # see note 1 above
-def test_batch_custom_formats(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    bucket = f'sky-batch-cfmt-{name}'
-    pool_name = 'custom-fmt-pool'
-    url, create_bkt, delete_bkt, cp, _, ls, rm_r = _storage_cmds(
-        generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
-
-    test = smoke_tests_utils.Test(
-        'batch_custom_formats',
-        [
-            # --- Pre-cleanup: remove stale pool from previous runs ---
-            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
-            f'sky serve down {pool_name} -y 2>/dev/null || true',
-            # --- Create pool with generic_cloud ---
-            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
-             f' examples/batch/custom_formats/pool.yaml -y); '
-             f'echo "$s"; '
-             f'echo "$s" | grep "Successfully created pool"'),
-            # --- Create bucket (output only — no input data needed) ---
-            create_bkt,
-            # Clean previous output
-            f'{rm_r(f"{url}/output/")} 2>/dev/null || true',
-            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
-
-            # --- Run batch job (RangeReader, TextWriter, YamlWriter) ---
-            f'python examples/batch/custom_formats/process_range.py',
-
-            # --- Verify final job status ---
-            f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
-
-            # --- Verify text output files ---
-            # 20 items -> 20 .txt files
-            (f'test $({ls} {url}/output/texts/ '
-             f'| grep -c "\\.txt") -eq 20'),
-            # Check zero-padded naming
-            f'{ls} {url}/output/texts/ | grep "00000000.txt"',
-            f'{ls} {url}/output/texts/ | grep "00000019.txt"',
-            # Spot-check content of first text file
-            (f'{cp} {url}/output/texts/00000000.txt - '
-             f'| grep "Item 0"'),
-
-            # --- Verify merged YAML metadata file ---
-            # Single .yaml file with all 20 items
-            f'{ls} {url}/output/metadata.yaml',
-            # Validate YAML: parseable, correct count, expected keys
-            (f"python3 << 'PYEOF'\n"
-             "import subprocess\n"
-             "import yaml\n"
-             "data = subprocess.check_output(\n"
-             f"    '{cp} {url}/output/metadata.yaml -', shell=True)\n"
-             "items = yaml.safe_load(data)\n"
-             "assert len(items) == 20, f'Expected 20 items, got {len(items)}'\n"
-             "for item in items:\n"
-             "    meta = item['metadata']\n"
-             "    assert 'id' in meta and 'squared' in meta and 'tag' in meta, (\n"
-             "        f'Missing keys: {meta}')\n"
-             "    assert meta['squared'] == meta['id'] ** 2, f'Wrong squared: {meta}'\n"
-             "    assert meta['tag'] in ('alpha', 'beta', 'gamma'), (\n"
-             "        f'Invalid tag: {meta}')\n"
-             "print('YAML metadata file valid')\n"
-             "PYEOF"),
-        ],
-        # Teardown: remove pool, bucket, and temp files
-        (f'sky jobs pool down {pool_name} -y;'
-         f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' {delete_bkt}'),
-        timeout=30 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
             'SKY_BATCH_STORE': store

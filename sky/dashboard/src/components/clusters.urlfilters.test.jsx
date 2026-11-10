@@ -19,12 +19,16 @@ jest.mock('@/lib/cache', () => ({
 }));
 jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
-  PluginSlot: () => null,
+  // Honour `fallback` so the built-in rendering a slot wraps (e.g. the
+  // Infra cell) stays under test when no plugin is registered.
+  PluginSlot: ({ fallback = null }) => fallback,
 }));
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
-  useTableColumns: () => [],
+  // No plugins: the base columns, with conditional ones shown on request.
+  useMergedTableColumns: (table, base, context) =>
+    base.filter((col) => !col.conditional || context.shouldShowColumn(col.id)),
   usePluginRoute: () => null,
 }));
 

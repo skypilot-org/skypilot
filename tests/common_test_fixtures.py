@@ -136,11 +136,13 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     async def _schedule_no_precondition(request_task,
                                         ignore_return_value=False,
                                         precondition=None,
-                                        retryable=False):
+                                        retryable=False,
+                                        in_process=False):
         await original_schedule(request_task,
                                 ignore_return_value,
                                 precondition=None,
-                                retryable=retryable)
+                                retryable=retryable,
+                                in_process=in_process)
 
     monkeypatch.setattr(executor, 'schedule_prepared_request',
                         _schedule_no_precondition)
@@ -209,6 +211,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
                         get_clouds_factory)
     monkeypatch.setattr('sky.check.check_capability', dummy_function)
+    monkeypatch.setattr('sky.check.recheck_clouds',
+                        lambda *args, **kwargs: set())
     monkeypatch.setattr('sky.catalog.aws_catalog._get_az_mappings',
                         get_az_mappings)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',

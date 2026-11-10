@@ -166,6 +166,12 @@ REQUEST_COLUMNS = [
     COL_FILE_MOUNTS_BLOB_ID,
 ]
 
+# Columns a request listing reads. Listings never show the return value or
+# the error, which can be large.
+DISPLAY_COLUMNS = [
+    col for col in REQUEST_COLUMNS if col not in ('return_value', 'error')
+]
+
 
 def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
                               caller_user_id: Optional[str]) -> str:
@@ -604,6 +610,13 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
                                  COL_FILE_MOUNTS_BLOB_ID, 'TEXT')
 
+    # Cover retention selection without reading serialized request results.
+    # Existing databases build this index once during initialization.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS requests_retention_idx
+        ON {REQUEST_TABLE} (status, finished_at, request_id);
+    """)
+
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
@@ -767,9 +780,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles killing
+    the request processes and marking the requests cancelled.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -795,7 +807,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         yield request
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
     """Update the status of a request"""
@@ -803,7 +815,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
         request_id, status)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
@@ -906,7 +918,7 @@ async def _get_request_no_lock_async(
     return Request.from_row(row)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_latest_request_id_async() -> Optional[str]:
     """Get the latest request ID."""
     return await request_storage.get_request_backend(
@@ -1221,14 +1233,40 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+    """Set a request to failed and populate the error message.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+    """
     set_exception_stacktrace(e)
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if request_task.status in RequestStatus.finished_status():
+            return
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()
         request_task.set_error(e)
+
+
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def transition_request_status_async(request_id: str,
+                                          from_statuses: List[RequestStatus],
+                                          status: RequestStatus) -> bool:
+    """Set a request's status only while it is in one of from_statuses.
+
+    Returns:
+        True if the request was transitioned; False if it is gone or in
+        another status, e.g. already cancelled.
+    """
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        if request_task is None or request_task.status not in from_statuses:
+            return False
+        request_task.status = status
+        request_task.status_msg = None
+        return True
 
 
 @metrics_lib.time_me_async
@@ -1271,10 +1309,16 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 @asyncio_utils.shield
 async def set_request_succeeded_async(request_id: str,
                                       result: Optional[Any]) -> None:
-    """Set a request to succeeded and populate the result."""
+    """Set a request to succeeded and populate the result.
+
+    A request that already finished, e.g. cancelled while its thread was still
+    running, keeps its status.
+    """
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
+        if request_task.status in RequestStatus.finished_status():
+            return
         request_task.status = RequestStatus.SUCCEEDED
         request_task.finished_at = time.time()
         if result is not None:
@@ -1295,7 +1339,7 @@ async def set_request_cancelled_async(request_id: str) -> None:
         request_task.status = RequestStatus.CANCELLED
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     await request_storage.get_request_backend().delete_requests(request_ids)
@@ -1382,11 +1426,11 @@ def _unlink_log_files(files: List[Tuple[str, int]]) -> Tuple[int, int]:
 async def _clean_orphan_request_logs() -> None:
     """Delete request log files whose request row is already gone.
 
-    When the API server runs with more than one replica, the replicas share
-    one database but each writes its request logs to local disk, so the
-    row-driven cleanup above only reaches the files that sit on the replica
-    running it. A file left behind on another replica outlives the row that
-    names it, after which nothing on the database side can enumerate it.
+    When several API server instances share one database, each writes its
+    request logs to local disk, so the row-driven cleanup above only reaches
+    the files that sit on the instance running it. A file left behind on
+    another instance outlives the row that names it, after which nothing on
+    the database side can enumerate it.
 
     A file with no row is already garbage — it cannot be read back through
     the API — so the age cutoff is a grace period against reading a
@@ -1430,7 +1474,7 @@ async def _clean_orphan_request_logs() -> None:
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
-                                                 batch_size: int = 1000):
+                                                 batch_size: int = 100):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -1449,13 +1493,17 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    if batch_size <= 0:
+        raise ValueError('batch_size must be positive')
+    # Do not expand the retention window while draining a backlog.
+    cutoff = time.time() - retention_seconds
+    started = time.monotonic()
     debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
-                                         finished_before=time.time() -
-                                         retention_seconds,
+                                         finished_before=cutoff,
                                          limit=batch_size,
                                          fields=['request_id']))
         if len(reqs) == 0:
@@ -1495,7 +1543,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
     logger.info(f'Cleaned up {total_deleted} finished requests '
-                f'older than {retention_seconds} seconds')
+                f'older than {retention_seconds} seconds '
+                f'in {time.monotonic() - started:.3f}s')
 
     await _clean_orphan_request_logs()
 
@@ -1676,21 +1725,46 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return [Request.from_row(row) for row in rows]
 
     @init_db_async
-    @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
         if not request_ids:
             return
         assert _DB is not None
-        placeholders = ','.join(['?'] * len(request_ids))
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'Start deleting requests {request_ids}')
-        try:
-            await _DB.execute_and_commit_async(
-                f'DELETE FROM {REQUEST_TABLE} '
-                f'WHERE request_id IN ({placeholders})', tuple(request_ids))
-        finally:
-            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                logger.debug(f'End deleting requests {request_ids}')
+        # Large serialized results make row count alone an insufficient budget.
+        # An oversized row is indivisible and must be deleted on its own.
+        max_rows = 32
+        max_bytes = 8 * 1024 * 1024
+        size_sql = ' + '.join(f'COALESCE(length(CAST({column} AS BLOB)), 0)'
+                              for column in ('return_value', 'request_body',
+                                             'error', 'entrypoint'))
+        for offset in range(0, len(request_ids), max_rows):
+            ids = request_ids[offset:offset + max_rows]
+            placeholders = ','.join('?' for _ in ids)
+            # Return only sizes to Python, and release the read transaction
+            # before acquiring a writer lock.
+            async with _DB.execute_fetchall_async(
+                f'SELECT request_id, {size_sql} FROM {REQUEST_TABLE} '
+                f'WHERE request_id IN ({placeholders})', ids) as rows:
+                pending = list(rows)
+            while pending:
+                batch: List[str] = []
+                payload_bytes = 0
+                while pending:
+                    request_id, size = pending[0]
+                    if batch and payload_bytes + size > max_bytes:
+                        break
+                    pending.pop(0)
+                    batch.append(request_id)
+                    payload_bytes += size
+                placeholders = ','.join('?' for _ in batch)
+                started = time.monotonic()
+                await _DB.execute_and_commit_async(
+                    f'DELETE FROM {REQUEST_TABLE} '
+                    f'WHERE request_id IN ({placeholders})', batch)
+                logger.debug(f'Request GC batch rows={len(batch)} '
+                             f'payload_bytes={payload_bytes} '
+                             f'duration_s={time.monotonic() - started:.3f}')
+                # Commit first, then let other API processes acquire the lock.
+                await asyncio.sleep(0.05)
 
     # --- Status updates ---
 

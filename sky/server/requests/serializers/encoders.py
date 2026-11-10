@@ -1,5 +1,5 @@
 """Encoders for the REST API return values."""
-# TODO(SKY-1211): we should evaluate that if we can move our return values to
+# TODO: we should evaluate that if we can move our return values to
 # pydantic models, so we can take advantage of model_dump_json of pydantic,
 # instead of implementing our own handlers.
 import base64
@@ -225,12 +225,10 @@ def encode_jobs_pool_status(
 @register_encoder('cost_report')
 def encode_cost_report(
         cost_report: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # core.cost_report returns resources already encoded by encode_resources.
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        if 'resources' in cluster_report:
-            cluster_report['resources'] = encode_resources(
-                cluster_report['resources'])
     return cost_report
 
 

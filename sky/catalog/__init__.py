@@ -1,9 +1,12 @@
 """Service catalog."""
 import collections
+import contextvars
 import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
+from sky import skypilot_config
+from sky.catalog import config as catalog_config
 from sky.catalog.config import fallback_to_default_catalog
 from sky.skylet import constants
 from sky.utils import resources_utils
@@ -16,23 +19,35 @@ if typing.TYPE_CHECKING:
 CloudFilter = Optional[Union[List[str], str]]
 
 
-def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
+def normalize_clouds(clouds: CloudFilter, method_name: str) -> List[str]:
+    """The catalog module names a ``method_name`` call dispatches to.
+
+    The API server checks requests against this exact list, so it must stay
+    the only place that maps a ``clouds`` argument to modules.
+    """
     if clouds is None:
-        clouds = list(constants.ALL_CLOUDS)
+        names = list(constants.ALL_CLOUDS)
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
         # kubernetes_catalog.py
         if method_name != 'list_accelerators':
-            clouds.remove('kubernetes')
+            names.remove('kubernetes')
+    elif isinstance(clouds, str):
+        names = [clouds]
+    else:
+        names = list(clouds)
+    return [name.lower() for name in names]
+
+
+def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     single = isinstance(clouds, str)
-    if single:
-        clouds = [clouds]  # type: ignore
+    clouds = normalize_clouds(clouds, method_name)
 
     def _execute_catalog_method(cloud: str):
         try:
             cloud_module = importlib.import_module(
-                f'sky.catalog.{cloud.lower()}_catalog')
+                f'sky.catalog.{cloud}_catalog')
         except ModuleNotFoundError:
             raise ValueError(
                 'Cannot find module "sky.catalog'
@@ -45,9 +60,30 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
                 f'implement the "{method_name}" method') from None
         return method(*args, **kwargs)
 
-    results = subprocess_utils.run_in_parallel(_execute_catalog_method,
-                                               args=list(clouds),
-                                               num_threads=len(clouds))
+    if len(clouds) == 1:
+        # Runs inline, already in the caller's context and workspace.
+        results = [_execute_catalog_method(clouds[0])]
+    else:
+        # Pool threads start without the request's config context, active
+        # workspace and catalog fallback flag (thread-local), so carry them
+        # over; each thread needs its own context copy.
+        workspace = skypilot_config.get_active_workspace()
+        use_default = catalog_config.get_use_default_catalog_if_failed()
+        request_context = contextvars.copy_context()
+
+        def _execute_in_request_context(cloud: str):
+
+            def _run():
+                with skypilot_config.local_active_workspace_ctx(workspace), \
+                        catalog_config.set_use_default_catalog_if_failed(
+                            use_default):
+                    return _execute_catalog_method(cloud)
+
+            return request_context.copy().run(_run)
+
+        results = subprocess_utils.run_in_parallel(_execute_in_request_context,
+                                                   args=list(clouds),
+                                                   num_threads=len(clouds))
     if single:
         return results[0]
     return results
