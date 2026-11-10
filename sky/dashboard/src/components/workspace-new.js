@@ -5,6 +5,11 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  workspaceNameError,
+  workspaceNameTaken,
+  workspaceNameTakenMessage,
+} from '@/hooks/useWorkspacesConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,15 +44,18 @@ export function NewWorkspace() {
   };
 
   const handleNext = () => {
-    if (workspaceName.trim() && !isWorkspaceNameTaken) {
+    if (isFormValid) {
       setShowEditor(true);
     }
   };
 
-  const isWorkspaceNameTaken =
-    workspaceName.trim() &&
-    existingWorkspaces.hasOwnProperty(workspaceName.trim());
-  const isFormValid = workspaceName.trim() && !isWorkspaceNameTaken;
+  const typedName = workspaceName.trim();
+  const nameError = typedName ? workspaceNameError(typedName) : null;
+  const taken = typedName
+    ? workspaceNameTaken(existingWorkspaces, typedName)
+    : null;
+  const isWorkspaceNameTaken = taken !== null;
+  const isFormValid = typedName && !nameError && !isWorkspaceNameTaken;
 
   if (showEditor) {
     return (
@@ -90,11 +98,17 @@ export function NewWorkspace() {
                 }
               }}
             />
-            {isWorkspaceNameTaken ? (
+            {nameError ? (
+              <p className="text-sm text-red-600 mt-1">{nameError}</p>
+            ) : isWorkspaceNameTaken ? (
               <p className="text-sm text-gray-500 mt-1">
-                Workspace &quot;{workspaceName}&quot; already exists.{' '}
+                {workspaceNameTakenMessage(
+                  existingWorkspaces,
+                  typedName,
+                  taken
+                )}{' '}
                 <Link
-                  href={`/workspaces/${workspaceName}`}
+                  href={`/workspaces/${taken.id}`}
                   className="text-blue-600 hover:underline"
                 >
                   View the workspace

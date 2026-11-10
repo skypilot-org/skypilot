@@ -52,10 +52,29 @@ export const CANONICAL_GPU_NAMES = [
  * @param {string} rawName - The raw GPU name (e.g. "NVIDIA A100-SXM4-80GB")
  * @returns {string} A canonical display name (e.g. "A100-80GB")
  */
+/**
+ * GKE TPU accelerator label values (`cloud.google.com/gke-tpu-accelerator`)
+ * mapped to their TPU generation, so e.g. `tpu-v6e-slice` displays as
+ * `TPU-v6e`. Keep in sync with GKE_TPU_ACCELERATOR_TO_GENERATION in
+ * sky/provision/kubernetes/utils.py.
+ */
+const GKE_TPU_ACCELERATOR_TO_GENERATION = {
+  'tpu-v4-podslice': 'v4',
+  'tpu-v5-lite-device': 'v5e',
+  'tpu-v5-lite-podslice': 'v5e',
+  'tpu-v5p-slice': 'v5p',
+  'tpu-v6e-slice': 'v6e',
+};
+
 export function canonicalizeGpuName(rawName) {
   if (!rawName) return 'Unknown';
   const value = rawName.trim();
   if (!value) return 'Unknown';
+
+  const tpuGeneration = GKE_TPU_ACCELERATOR_TO_GENERATION[value.toLowerCase()];
+  if (tpuGeneration) {
+    return `TPU-${tpuGeneration}`;
+  }
 
   for (const canonical of CANONICAL_GPU_NAMES) {
     // Word-boundary matching to prevent substring matches (e.g. L4 vs L40)

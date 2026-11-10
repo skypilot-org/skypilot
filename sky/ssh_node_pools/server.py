@@ -9,21 +9,46 @@ from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.ssh_node_pools import core
+from sky.users import permission
+from sky.users import rbac
 from sky.utils import common_utils
 
 router = fastapi.APIRouter()
 
 
+def _caller_is_admin(request: fastapi.Request) -> bool:
+    """Whether the caller holds the admin role.
+
+    With no authenticated user there is no role to distinguish: the server is
+    either a single-user loopback server or sits behind the operator's own
+    proxy, and the RBAC middleware passes such requests too, so they are
+    treated as admin here as well.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        return True
+    roles = permission.permission_service.get_user_roles(auth_user.id)
+    return rbac.RoleName.ADMIN.value in roles
+
+
 @router.get('')
-def get_ssh_node_pools() -> Dict[str, Any]:
-    """Get all SSH Node Pool configurations."""
+def get_ssh_node_pools(request: fastapi.Request) -> Dict[str, Any]:
+    """Get all SSH Node Pool configurations.
+
+    The stored config carries each host's sudo password. Only admins, the
+    one role allowed to change the pools, receive it; any other caller gets
+    the config with credential fields removed.
+    """
     try:
-        return core.get_all_pools()
+        pools = core.get_all_pools()
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=500,
             detail=
             f'Failed to get SSH Node Pools: {common_utils.format_exception(e)}')
+    if _caller_is_admin(request):
+        return pools
+    return core.redact_pool_secrets(pools)
 
 
 @router.post('')

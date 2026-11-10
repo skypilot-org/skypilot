@@ -1,4 +1,5 @@
 """Tests for Azure utilities and provisioning config."""
+# pylint: disable=protected-access
 from unittest import mock
 
 import pytest
@@ -7,6 +8,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import azure
 from sky.clouds.utils import azure_utils
+from sky.provision.azure import instance
 from sky.provision.azure.config import _remove_msi_resources_from_template
 from sky.provision.azure.config import _remove_network_resources_from_template
 from sky.provision.azure.config import _resolve_custom_managed_identity
@@ -263,3 +265,56 @@ def _make_arm_template():
             },
         }
     }
+
+
+class TestVmUserAssignedIdentity:
+    """Tests for deriving a VM's managed identity in get_cluster_info."""
+
+    @staticmethod
+    def _vm(identity_ids):
+        identity = None
+        if identity_ids is not None:
+            identity = mock.MagicMock()
+            identity.user_assigned_identities = {
+                identity_id: {} for identity_id in identity_ids
+            }
+        vm = mock.MagicMock()
+        vm.identity = identity
+        return vm
+
+    def test_single_identity_is_returned(self):
+        msi = ('/subscriptions/sub/resourceGroups/rg/providers/'
+               'Microsoft.ManagedIdentity/userAssignedIdentities/mi')
+        assert instance._vm_user_assigned_identity(self._vm([msi])) == msi
+
+    def test_no_identity_returns_none(self):
+        assert instance._vm_user_assigned_identity(self._vm(None)) is None
+        assert instance._vm_user_assigned_identity(self._vm([])) is None
+
+    def test_multiple_identities_are_ambiguous(self):
+        assert instance._vm_user_assigned_identity(self._vm(['/a', '/b'
+                                                            ])) is None
+
+    @pytest.mark.parametrize('saved_msi', [None, '/saved-msi'])
+    def test_get_cluster_info_recovers_identity_without_mutating_config(
+            self, monkeypatch, saved_msi):
+        vm = self._vm(['/live-msi'])
+        vm.name = 'head'
+        vm.tags = dict(instance.constants.HEAD_NODE_TAGS)
+        provider_config = {'resource_group': 'rg', 'subscription_id': 'sub'}
+        if saved_msi is not None:
+            provider_config['msi'] = saved_msi
+        original_config = dict(provider_config)
+        monkeypatch.setattr(azure, 'get_subscription_id', lambda: 'sub')
+        monkeypatch.setattr(azure, 'get_client', mock.Mock())
+        monkeypatch.setattr(instance, '_filter_instances',
+                            mock.Mock(return_value=[vm]))
+        monkeypatch.setattr(instance, '_get_instance_ips',
+                            mock.Mock(return_value=('10.0.0.1', '1.2.3.4')))
+
+        cluster_info = instance.get_cluster_info('region', 'cluster',
+                                                 provider_config)
+
+        assert cluster_info.provider_config['msi'] == (saved_msi or '/live-msi')
+        assert cluster_info.head_instance_id == 'head'
+        assert provider_config == original_config

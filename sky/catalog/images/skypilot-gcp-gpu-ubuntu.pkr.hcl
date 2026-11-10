@@ -1,10 +1,17 @@
+variable "skypilot_src" {
+  type        = string
+  default     = ""
+  description = "pip source to bake SkyPilot from, e.g. git+https://github.com/skypilot-org/skypilot@<sha>. Empty uses the latest skypilot-nightly."
+}
+
 variable "zone" {
   type    = string
   default = "us-west1-a"
 }
 
 locals {
-  date = formatdate("YYMMDD", timestamp())
+  # UTC, to the minute, so same-day rebuilds get distinct image names.
+  date = formatdate("YYMMDDhhmm", timestamp())
 }
 
 source "googlecompute" "gpu-ubuntu" {
@@ -37,6 +44,7 @@ build {
   provisioner "shell" {
     environment_vars = [
       "CLOUD=gcp",
+      "SKYPILOT_SRC=${var.skypilot_src}",
     ]
     script = "./provisioners/skypilot.sh"
   }

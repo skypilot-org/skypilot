@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 import collections
+import contextvars
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -45,15 +46,17 @@ def _safe_children(process: 'psutil.Process') -> List['psutil.Process']:
     except psutil.NoSuchProcess:
         # Parent process exited, skip
         return []
-    except psutil.AccessDenied as e:
+    except (psutil.AccessDenied, PermissionError) as e:
         # process.children will lookup all processes in the same PID namespace,
         # and we will encounter this error if there is a process we cannot
         # access. Log and ignore it with _fallback_children()
         bad_pid = getattr(e, 'pid', None)
+        denied_path = getattr(e, 'filename', None)
         diag = _pid_diag(bad_pid) if bad_pid is not None else {}
         logger.warning(
-            f'psutil.Process.children() hit AccessDenied '
-            f'(pid={bad_pid} uid={diag.get("uid", "?")} '
+            f'psutil.Process.children() hit {type(e).__name__} '
+            f'(pid={bad_pid} path={denied_path or "?"} '
+            f'uid={diag.get("uid", "?")} '
             f'exe={diag.get("exe", "?")}); falling back to /proc walk '
             f'that ignores unreadable PIDs.')
         # Snapshot the parent's create_time so the fallback can reject any
@@ -248,8 +251,15 @@ def run_in_parallel(func: Callable,
                  if num_threads is not None else get_parallel_threads())
     # len(args) is guaranteed to be greater than 1.
     processes = min(processes, len(args))
+    # Run each call in a copy of the caller's context, so that a request
+    # running in a thread of the API server keeps its env, config and user.
+    caller_ctx = contextvars.copy_context()
+
+    def run_in_caller_ctx(arg: Any) -> Any:
+        return caller_ctx.copy().run(func, arg)
+
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
+        ordered_iterators = p.imap(run_in_caller_ctx, args)
         return list(ordered_iterators)
 
 

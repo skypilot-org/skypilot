@@ -47,7 +47,10 @@ import {
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -60,7 +63,12 @@ import {
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { useTableColumns } from '@/plugins/PluginProvider';
+import { useMergedTableColumns } from '@/plugins/PluginProvider';
+import {
+  ExpandedDetailsRow,
+  TruncatedDetails,
+  isDetailsToggle,
+} from '@/components/elements/TruncatedDetails';
 import {
   Select,
   SelectContent,
@@ -84,6 +92,11 @@ import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 const CLUSTERS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 
+// History rows can share a cluster name, so key the expanded row by hash.
+function detailsRowId(item) {
+  return item.cluster_hash || item.cluster;
+}
+
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
 //   if (cost >= 10) {
@@ -97,6 +110,7 @@ const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 // carries and what `optionValues` is keyed by; `label` is display only, and is
 // what a chip stores in `filter.property`. Because the dropdown and the URL
 // read the same list, a filter the page offers is always one it can read back.
+
 export const CLUSTER_FILTER_SCHEMA = [
   { key: 'status', label: 'Status', kind: 'enum', multi: true },
   { key: 'cluster', label: 'Cluster', kind: 'text' },
@@ -130,9 +144,10 @@ const CLUSTER_VIEW_SCHEMA = [
   },
 ];
 
-const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: multi ?? false,
 }));
 
 // Properties whose values are alternatives rather than extra conditions. Only
@@ -522,6 +537,18 @@ export function Clusters() {
     });
   };
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={optionValues}
+      setFilters={setFilters}
+      placeholder="Filter clusters"
+      filters={filters}
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
@@ -534,22 +561,34 @@ export function Clusters() {
           </Link>
         </div>
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            placeholder="Filter clusters"
-            filters={filters}
+          <PluginSlot
+            name="clusters.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList: optionValues,
+              placeholder: 'Filter clusters',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <PluginSlot
+        name="clusters.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        fallback={filterChips}
+      />
 
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
-          box. Refresh/last-updated sit on the right of the same row. */}
-      <div className="flex items-center justify-between mb-4">
+          box. Refresh/last-updated sit on the right of the same row; below
+          lg the timestamp hides and Refresh stays level with the first
+          toggle row when the toggles wrap. */}
+      <div className="flex justify-between mb-4 max-lg:items-start lg:items-center">
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedToggle
             ariaLabel="Filter clusters by activity"
@@ -601,7 +640,7 @@ export function Clusters() {
               </div>
             )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
+        <div className="flex items-center gap-2 shrink-0 ml-2 max-lg:h-8">
           {showHistory && (
             <Select
               value={historyDays.toString()}
@@ -621,18 +660,23 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="max-lg:hidden ml-2 text-gray-500 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            <div className="max-lg:hidden lg:flex lg:items-center">
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            </div>
           )}
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            title="Refresh"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <RotateCwIcon className={`h-4 w-4 ${isMobile ? '' : 'mr-1.5'}`} />
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
@@ -697,12 +741,32 @@ export function ClusterTable({
     key: null,
     direction: 'ascending',
   });
+  // The row whose Details cell is expanded below it, as in the jobs table.
+  const [expandedRowId, setExpandedRowId] = useState(null);
+  const expandedRowRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        expandedRowId &&
+        expandedRowRef.current &&
+        !expandedRowRef.current.contains(event.target) &&
+        !isDetailsToggle(event.target)
+      ) {
+        setExpandedRowId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expandedRowId]);
 
   // Per-workspace writability, so the per-row Connect/VSCode actions can be
   // disabled for clusters in workspaces the user can only read (read-only
   // visibility). Shared with the cluster detail page; missing entry -> treated
   // as writable (open/default).
-  const { isWorkspaceWritable } = useWorkspacesConfig();
+  const { isWorkspaceWritable, workspacesConfig } = useWorkspacesConfig();
 
   // Read initial page/limit from URL
   const getInitialPage = () => {
@@ -812,7 +876,7 @@ export function ClusterTable({
     setLoading(hookLoading);
   }, [hookLoading, setLoading]);
 
-  const fetchOptionValuesFromClusters = (clusters) => {
+  const fetchOptionValuesFromClusters = (clusters, workspacesConfig) => {
     let optionValues = {
       status: [],
       cluster: [],
@@ -832,7 +896,11 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.status, cluster.status);
       pushWithoutDuplication(optionValues.cluster, cluster.cluster);
       pushWithoutDuplication(optionValues.user, cluster.user);
-      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        cluster.workspace_name ||
+          getWorkspaceName(workspacesConfig, cluster.workspace)
+      );
       // Use full_infra for filter values so they match database values
       pushWithoutDuplication(
         optionValues.infra,
@@ -857,9 +925,9 @@ export function ClusterTable({
   // Update filter option values when data changes
   useEffect(() => {
     if (allData && allData.length > 0) {
-      setOptionValues(fetchOptionValuesFromClusters(allData));
+      setOptionValues(fetchOptionValuesFromClusters(allData, workspacesConfig));
     }
-  }, [allData, setOptionValues]);
+  }, [allData, setOptionValues, workspacesConfig]);
 
   // Use useMemo to compute sorted and filtered data
   // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
@@ -869,7 +937,20 @@ export function ClusterTable({
     // For client-side pagination, we filter/sort the full data then paginate.
     // The current-user ("My Clusters") scope is applied server-side via the
     // allUsers flag on useClusterData, so no client-side owner filter here.
-    const dataToProcess = isServerPagination ? hookData : allData;
+    // Filters and sorting go by the workspace name; records hold the id
+    // (history rows and older servers carry no name).
+    const dataToProcess = (isServerPagination ? hookData : allData || []).map(
+      (cluster) =>
+        cluster.workspace_name
+          ? cluster
+          : {
+              ...cluster,
+              workspace_name: getWorkspaceName(
+                workspacesConfig,
+                cluster.workspace
+              ),
+            }
+    );
 
     if (!isServerPagination) {
       const historicalCount = (allData || []).filter(
@@ -890,7 +971,14 @@ export function ClusterTable({
       : filterData(dataToProcess, filters, { orProperties: OR_PROPERTIES });
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [hookData, allData, sortConfig, filters, isServerPagination]);
+  }, [
+    hookData,
+    allData,
+    sortConfig,
+    filters,
+    isServerPagination,
+    workspacesConfig,
+  ]);
 
   // Number of clusters owned by *other* users, i.e. how many rows switching to
   // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
@@ -992,9 +1080,6 @@ export function ClusterTable({
     persistPageSize(CLUSTERS_PAGE_SIZE_STORAGE_KEY, newSize);
   };
 
-  // Get plugin columns
-  const pluginColumns = useTableColumns('clusters', { showHistory });
-
   // Define base columns with their order
   const baseColumns = [
     {
@@ -1086,15 +1171,15 @@ export function ClusterTable({
       order: 3,
       header: {
         label: 'Workspace',
-        sortKey: 'workspace',
+        sortKey: 'workspace_name',
         className: 'sortable whitespace-nowrap',
       },
       renderHeader: () => (
         <TableHead
           className="sortable whitespace-nowrap"
-          onClick={() => requestSort('workspace')}
+          onClick={() => requestSort('workspace_name')}
         >
-          Workspace{getSortDirection('workspace')}
+          Workspace{getSortDirection('workspace_name')}
         </TableHead>
       ),
       renderCell: (item) => (
@@ -1103,7 +1188,8 @@ export function ClusterTable({
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
           >
-            {item.workspace || 'default'}
+            {item.workspace_name ||
+              getWorkspaceName(workspacesConfig, item.workspace)}
           </Link>
         </TableCell>
       ),
@@ -1124,8 +1210,13 @@ export function ClusterTable({
           Infra{getSortDirection('infra')}
         </TableHead>
       ),
-      renderCell: (item) => (
-        <TableCell>
+      renderCell: (item) => {
+        // The default rendering, also handed to the plugin slot below as
+        // `defaultContent`: a plugin that only wants to change how *some*
+        // clusters read can return it unchanged for the rest, instead of
+        // reimplementing this markup. `fallback` keeps the no-plugin case
+        // byte-identical.
+        const infraContent = (
           <NonCapitalizedTooltip
             content={item.full_infra || item.infra}
             className="text-sm text-muted-foreground"
@@ -1141,8 +1232,17 @@ export function ClusterTable({
               )}
             </span>
           </NonCapitalizedTooltip>
-        </TableCell>
-      ),
+        );
+        return (
+          <TableCell>
+            <PluginSlot
+              name="clusters.table.infra"
+              context={{ cluster: item, defaultContent: infraContent }}
+              fallback={infraContent}
+            />
+          </TableCell>
+        );
+      },
     },
     {
       id: 'resources',
@@ -1245,6 +1345,28 @@ export function ClusterTable({
       ),
     },
     {
+      id: 'details',
+      order: 8.5,
+      // Only history rows carry details; a plugin column replacing this one
+      // decides for itself.
+      conditional: true,
+      renderHeader: () => <TableHead>Details</TableHead>,
+      renderCell: (item) => (
+        <TableCell>
+          {item.details ? (
+            <TruncatedDetails
+              text={item.details}
+              rowId={detailsRowId(item)}
+              expandedRowId={expandedRowId}
+              setExpandedRowId={setExpandedRowId}
+            />
+          ) : (
+            '-'
+          )}
+        </TableCell>
+      ),
+    },
+    {
       id: 'actions',
       order: 9,
       header: {
@@ -1272,8 +1394,7 @@ export function ClusterTable({
     },
   ];
 
-  // Add plugin columns to the array
-  const pluginColumnDefs = pluginColumns.map((col) => ({
+  const transformPluginColumn = (col) => ({
     id: col.id,
     order: col.header.order,
     isPlugin: true,
@@ -1298,7 +1419,14 @@ export function ClusterTable({
       );
     },
     renderCell: (item) => {
-      const context = { item, showHistory, historyDays };
+      const context = {
+        item,
+        showHistory,
+        historyDays,
+        expandedRowId,
+        setExpandedRowId,
+        expandedRowRef,
+      };
       const cellContent = col.cell.render(item, context);
       return (
         <TableCell className={col.cell.className || ''}>
@@ -1306,16 +1434,14 @@ export function ClusterTable({
         </TableCell>
       );
     },
-  }));
+  });
 
-  // Merge base and plugin columns, sort by order
-  const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
-    (a, b) => a.order - b.order
-  );
-
-  // Filter out conditional columns that shouldn't be shown
-  const visibleColumns = allColumns.filter(
-    (col) => !col.conditional || (col.conditional && showHistory)
+  // A plugin column with a base column's id replaces it (e.g. Details).
+  const visibleColumns = useMergedTableColumns(
+    'clusters',
+    baseColumns,
+    { showHistory, shouldShowColumn: () => showHistory },
+    transformPluginColumn
   );
 
   // Calculate dynamic colSpan
@@ -1350,13 +1476,22 @@ export function ClusterTable({
               ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((item, index) => {
                   return (
-                    <TableRow key={index}>
-                      {visibleColumns.map((col) =>
-                        React.cloneElement(col.renderCell(item), {
-                          key: col.id,
-                        })
+                    <React.Fragment key={index}>
+                      <TableRow>
+                        {visibleColumns.map((col) =>
+                          React.cloneElement(col.renderCell(item), {
+                            key: col.id,
+                          })
+                        )}
+                      </TableRow>
+                      {expandedRowId === detailsRowId(item) && (
+                        <ExpandedDetailsRow
+                          text={item.details}
+                          colSpan={totalColSpan}
+                          innerRef={expandedRowRef}
+                        />
                       )}
-                    </TableRow>
+                    </React.Fragment>
                   );
                 })
               ) : userScope === OWNER_SCOPE_MINE &&

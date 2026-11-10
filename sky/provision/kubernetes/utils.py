@@ -12,10 +12,11 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import ijson
 
@@ -29,6 +30,7 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import api_errors
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
@@ -118,18 +120,11 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     OCI_ROCE = 'oci_roce'
     NONE = 'none'
 
-    def get_network_env_vars(self,
-                             acc_type: Optional[str] = None,
-                             pod_local_rdma: bool = False) -> Dict[str, str]:
+    def get_network_env_vars(self) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
-        Args:
-            acc_type: The canonical accelerator type requested (e.g. 'GB200').
-                Used by OCI to pick a shape-specific NCCL profile.
-            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
-                virtual functions) instead of sharing the node's. Profiles that
-                name the host's physical functions have to widen their HCA
-                list, since those names do not exist in such a pod.
+        For OCI this is the generic RoCE profile; `oci_nccl.get_env_vars`
+        replaces its NCCL keys with the node shape's own set when it knows one.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -158,87 +153,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'FI_PROVIDER': 'efa',
             }
         elif self == KubernetesHighPerformanceNetworkType.OCI_ROCE:
-            # OCI bare-metal GPU shapes use RDMA for multi-node NCCL. Values
-            # mirror the oracle-quickstart/oci-hpc-oke NCCL reference params
-            # (the same recommended values OCI's stack bakes into its
-            # `oci-nccl-parameters-<shape>` configmaps). Users can override
-            # any of these via task `envs:`.
-            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
-            acc = (acc_type or '').upper()
-            # The Grace profiles below name the host's physical functions
-            # exactly. A pod holding SR-IOV virtual functions never sees those
-            # names, so the list has to widen to the family prefix. This is the
-            # only NCCL difference between Oracle's two reference manifests for
-            # the same shape, and it fails silently: NCCL finds no matching
-            # device and falls back to TCP rather than erroring.
-            #
-            # Widening hands NIC selection to the device plugin: the pod holds
-            # only the VFs its SriovNetworkNodePolicy chose to create, so the
-            # prefix cannot reach a PF the exact list was excluding. A policy
-            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
-            # narrowed again through task `envs:`.
-            pf_names_visible = not pod_local_rdma
-            if acc == 'GB200':
-                # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
-                # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
-                # distinct profile from the RoCEv2 shapes below. It drops the
-                # RoCE-only DSCP/GID/UCX knobs and turns on MNNVL/NVLS/cumem.
-                # The HCA list is the exact set OCI validated for BM.GPU.GB200.4.
-                logger.info('OCI network_tier=best: using GB200 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    # Multi-node NVLink across the NVL72 rack.
-                    'NCCL_MNNVL_ENABLE': '1',
-                    # Required for MNNVL to work.
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
-                                    if pf_names_visible else 'mlx5'),
-                    # NVLink SHARP in-network reductions.
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                }
-            if acc == 'GB300':
-                # GB300 NVL72 is MNNVL/NVLS like GB200 but keeps the RoCE IB
-                # tuning knobs and disables the net plugin (NET_PLUGIN=none).
-                # Values per OCI's BM.GPU.GB300.4 reference set. The leading
-                # '=' in NCCL_IB_HCA is NCCL's exact-name-match prefix, not a
-                # typo -- keep it.
-                logger.info('OCI network_tier=best: using GB300 NCCL profile '
-                            '(MNNVL/NVLS).')
-                return {
-                    'NCCL_DEBUG': 'WARN',
-                    'NCCL_MNNVL_ENABLE': '1',
-                    'NCCL_CUMEM_ENABLE': '1',
-                    'NCCL_NET_PLUGIN': 'none',
-                    'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
-                                    if pf_names_visible else 'mlx5'),
-                    'NCCL_NVLS_ENABLE': '1',
-                    'NCCL_SOCKET_IFNAME': 'eth0',
-                    # GPU-to-CPU (C2C) GPUDirect over the Grace link.
-                    'NCCL_NET_GDR_C2C': '1',
-                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
-                    # a GPU whose NIC sits one PCIe host bridge away falls
-                    # outside it -- GDR silently off. PHB widens the cutoff by
-                    # exactly that one level; nothing else changes.
-                    'NCCL_NET_GDR_LEVEL': 'PHB',
-                    'NCCL_IB_GID_INDEX': '3',
-                    'NCCL_IB_TC': '41',
-                    'NCCL_IB_SL': '0',
-                    'NCCL_IB_TIMEOUT': '22',
-                    'NCCL_BUFFSIZE': '16777216',
-                    'NCCL_IB_QPS_PER_CONNECTION': '4',
-                    'NCCL_IB_SPLIT_DATA_ON_QPS': '0',
-                    'NCCL_DMABUF_ENABLE': '1',
-                }
-            # RoCEv2 shapes (H100/H200/B200). The broad 'mlx5' prefix match
-            # works across shapes; per-shape exact HCA lists give marginally
-            # better perf (tracked as a follow-up).
-            logger.info('OCI network_tier=best: using default RoCE NCCL '
-                        f'profile (acc_type={acc_type!r}).')
+            # Generic RoCEv2 profile for OCI bare-metal GPU shapes, used when
+            # the node shape is unknown or has no Oracle parameter set.
             return {
+                # Prefix match: every mlx5 device on the node.
                 'NCCL_IB_HCA': 'mlx5',
                 # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
                 'NCCL_IB_GID_INDEX': '3',
@@ -247,6 +165,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 # OCI BM.GPU shapes use legacy eth* naming; primary NIC
                 # is eth0 even under hostNetwork: true.
                 'NCCL_SOCKET_IFNAME': 'eth0',
+                # UCX only, not NCCL: keeps an mpirun launcher's MPI traffic
+                # (`-mca pml ucx`) on TCP over the primary NIC, as Oracle's
+                # NCCL-test manifests do. UCX data paths such as NIXL should
+                # override these through task `envs:`.
                 'UCX_TLS': 'tcp',
                 'UCX_NET_DEVICES': 'eth0',
             }
@@ -278,6 +200,14 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
 DEFAULT_NAMESPACE = 'default'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
+# Controller clusters provision other clusters, so they need permissions no
+# pod running user code should hold. They get their own account; the name
+# above stays with workload pods, because operator-written policy (quotas,
+# admission rules, their own RoleBindings) references it by string.
+CONTROLLER_SERVICE_ACCOUNT_NAME = 'skypilot-controller-service-account'
+# Service accounts SkyPilot creates and reconciles itself.
+MANAGED_SERVICE_ACCOUNT_NAMES = (DEFAULT_SERVICE_ACCOUNT_NAME,
+                                 CONTROLLER_SERVICE_ACCOUNT_NAME)
 
 MEMORY_SIZE_UNITS = {
     'm': 0.001,
@@ -326,7 +256,25 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 3
+#
+# v4 reads a hostNetwork pod's sshd port off the pod spec instead of the
+# cluster's ray-ports ConfigMap. The bump is load-bearing, not cosmetic: this
+# script lives at ONE path per user and is re-copied on every auth setup, so
+# without it, upgrading and launching any Kubernetes cluster would replace the
+# script that every *pre-existing* hostNetwork cluster's stored
+# ssh_proxy_command points at. Those clusters' pods declare no ports, so the
+# new lookup finds nothing and SSH would fall back to 22 -- the node's own
+# sshd. Keeping v3 on disk leaves them on the script that still reads the
+# ConfigMap they did publish to.
+#
+# INVARIANT, new as of v4: versions may now read *different sources* for the
+# same value. Earlier bumps changed the script while every version still read
+# the same place, so re-deriving an existing cluster's proxy command with
+# current code was harmless. It is not any more -- handing an existing
+# cluster a v4 script points it at a pod spec that declares no ports. A
+# stored ssh_proxy_command must never be re-derived for a cluster that
+# already exists; it is written once, at provisioning.
+PORT_FORWARD_PROXY_CMD_VERSION = 4
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
@@ -345,6 +293,8 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
+# Phases of the pods whose requests count as allocated on their node.
+_ALLOCATING_POD_PHASES = ('Running', 'Pending')
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
@@ -423,38 +373,49 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
-def _is_cloudflare_403_error(exception: Exception) -> bool:
-    """Check if an exception is a transient CloudFlare 403 error.
+# Kept under their old names: callers inside and outside this repo use them.
+# The definitions live in api_errors, with the other API-error classifiers.
+_is_cloudflare_403_error = api_errors.is_cloudflare_403
+is_transient_api_error = api_errors.is_transient
 
-    CloudFlare proxy 403 errors with CF-specific headers are transient and
-    should be retried, unlike real RBAC 403 errors.
+# Checks for contexts whose API server is known to be unreachable, e.g. one
+# reached through a proxy hop that is known to be down. Each is called with a
+# context name and returns why that context is unreachable, or None. Calls
+# wrapped by `_retry_on_error` on such a context fail at once instead of
+# retrying with backoff. Empty by default -- nothing in core registers one.
+ContextUnreachableCheck = Callable[[Optional[str]], Optional[str]]
+_CONTEXT_UNREACHABLE_CHECKS: List[ContextUnreachableCheck] = []
 
-    Args:
-        exception: The exception to check
 
-    Returns:
-        True if this is a CloudFlare 403 error that should be retried
+def register_context_unreachable_check(check: ContextUnreachableCheck) -> None:
+    """Register a check that names contexts known to be unreachable.
+
+    The check runs before every `_retry_on_error`-wrapped call on a named
+    context, so it must be cheap and must not block (no network calls).
+
+    Idempotent, so a module that registers on import keeps one registration
+    across the several process contexts that may import it.
     """
-    if not isinstance(exception, kubernetes.api_exception()):
-        return False
+    if check not in _CONTEXT_UNREACHABLE_CHECKS:
+        _CONTEXT_UNREACHABLE_CHECKS.append(check)
 
-    # Only check for 403 errors
-    if exception.status != 403:
-        return False
 
-    # Check for CloudFlare-specific headers
-    headers = exception.headers if hasattr(exception, 'headers') else {}
-    if not headers:
-        return False
+def known_unreachable_reason(context: Optional[str]) -> Optional[str]:
+    """Why `context` is known to be unreachable, or None.
 
-    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    for k, v in headers.items():
-        if 'cf-ray' in k.lower():
-            return True
-        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            return True
-
-    return False
+    Never raises: a check that fails is skipped, as if it were not
+    registered.
+    """
+    for check in _CONTEXT_UNREACHABLE_CHECKS:
+        try:
+            reason = check(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Context unreachable check failed for '
+                         f'{context!r}: {e}')
+            continue
+        if reason:
+            return reason
+    return None
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -483,6 +444,15 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
             assert 'context' in kwargs, 'context is required'
             context = kwargs.get('context')
+
+            # Only a named context: which API server a call without one
+            # reaches depends on the function and on in-cluster config loading.
+            if context is not None:
+                reason = known_unreachable_reason(context)
+                if reason is not None:
+                    raise exceptions.KubeAPIUnreachableError(
+                        f'Kubernetes context {context!r} is unreachable: '
+                        f'{reason}')
 
             for attempt in range(max_retries):
                 try:
@@ -614,6 +584,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
+    elif accelerator == 'H100-MEGA':
+        # H100-MEGA is named as H100-MEGA-80GB in GKE.
+        accelerator = 'H100-MEGA-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB',
                        'B200'):
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
@@ -622,6 +595,10 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
+    elif accelerator in ('RTX-PRO-6000', 'RTXPRO6000'):
+        # RTX PRO 6000 (G4) is labeled nvidia-rtx-pro-6000 in GKE, and is
+        # named RTXPRO6000 in the GCP catalog.
+        return 'nvidia-rtx-pro-6000'
     elif accelerator.startswith('tpu-'):
         return accelerator
     elif accelerator.startswith('amd-'):
@@ -793,10 +770,12 @@ class GKELabelFormatter(GPULabelFormatter):
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
             if acc == 'H100-80GB':
-                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
-                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
-                # to distinguish between a3-high and a3-mega instances
+                # H100 can be either H100-80GB (a3-high) or H100-MEGA-80GB
+                # (a3-mega) in GKE. Map both to their catalog names, which
+                # keep the two instance families distinct.
                 return 'H100'
+            elif acc == 'H100-MEGA-80GB':
+                return 'H100-MEGA'
             elif acc == 'H200-141GB':
                 return 'H200'
             return acc
@@ -883,6 +862,15 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+# Lowercase names of one accelerator that the prefix match in
+# _accelerator_name_matches cannot pair, mapped to a shared name. RTX PRO 6000
+# is 'RTXPRO6000' in the GCP catalog, while GKE labels it
+# 'nvidia-rtx-pro-6000', which GKELabelFormatter decodes to 'RTX-PRO-6000'.
+_ACCELERATOR_NAME_ALIASES = {
+    'rtxpro6000': 'rtx-pro-6000',
+}
+
+
 def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
@@ -896,6 +884,9 @@ def _accelerator_name_matches(requested_acc: str,
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
 
+    Names listed in _ACCELERATOR_NAME_ALIASES also match their alias exactly
+    (e.g., 'RTXPRO6000' matches 'RTX-PRO-6000').
+
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
         viable_names: List of viable accelerator names from node labels.
@@ -904,9 +895,14 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
+    requested_alias = _ACCELERATOR_NAME_ALIASES.get(requested_lower,
+                                                    requested_lower)
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
+            return True
+        if requested_alias == _ACCELERATOR_NAME_ALIASES.get(
+                viable_lower, viable_lower):
             return True
         # Check prefix match with '-' separator for backward compatibility.
         # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
@@ -1042,9 +1038,19 @@ def detect_gpu_label_formatter(
         Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
              labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
+    return detect_gpu_label_formatter_from_nodes(
+        get_kubernetes_nodes(context=context))
+
+
+def detect_gpu_label_formatter_from_nodes(
+    nodes: List['V1Node']
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
+    """Detects the GPU label formatter for a cluster with the given nodes.
+
+    See detect_gpu_label_formatter() for the return values.
+    """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -2140,6 +2146,21 @@ def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
     return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
 
 
+def disruption_reason(reason: str, message: str, pod: Any) -> str:
+    """A pod's DisruptionTarget condition, with the node it was on.
+
+    The condition says how the pod was disrupted (taint manager, eviction API,
+    scheduler preemption) but not where; the node is what a user checks next.
+    """
+    text = f'Disrupted: {reason}'
+    if message:
+        text += f' ({message})'
+    node = getattr(getattr(pod, 'spec', None), 'node_name', None)
+    if isinstance(node, str) and node:
+        text += f' on node {node}'
+    return text
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2161,10 +2182,7 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
                     summary += f' ({message})'
                 return summary
             if condition.type == 'DisruptionTarget':
-                summary = f'Disrupted: {reason}'
-                if message:
-                    summary += f' ({message})'
-                return summary
+                return disruption_reason(reason, message, pod)
 
     # Pod-level kubelet reason (e.g. 'Evicted' for ephemeral-storage / disk /
     # memory pressure, 'Preempted', 'Shutdown'). This is the authoritative
@@ -2224,10 +2242,11 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # Canonical Kubernetes failure-reason -> remediation hint table, shared by the
 # provision-failure formatter (sky/backends/cloud_vm_ray_backend.py, via
 # match_kubernetes_failure_hint) and the pod-OOM diagnosis path
-# (diagnose_terminated_pod). Each entry maps a list of case-sensitive
-# substrings (matched against a failure reason) to a hint. A hint may contain a
-# literal `{dashboard_url}` token; callers that can resolve the dashboard URL
-# substitute the real URL, others fall back to a generic phrase.
+# (diagnose_terminated_pod). Each entry maps a list of case-sensitive tokens to
+# a hint; a token matches a failure reason that names it, not one that merely
+# contains it inside a longer word (see reason_matches_failure_token). A hint
+# may contain a literal `{dashboard_url}` token; callers that can resolve the
+# dashboard URL substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'To fix: Verify the image tag exists and registry credentials are configured.'
@@ -2262,14 +2281,44 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
 ]
 
 
-def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
-    """Return the remediation hint whose substrings match `reason`, or None.
+def reason_matches_failure_token(reason: str, token: str) -> bool:
+    """Whether `reason` names `token`, rather than merely containing it.
 
-    The returned hint may contain a literal `{dashboard_url}` token for the
-    caller to substitute.
+    Kubernetes reasons are camelCase identifiers, so a plain substring test
+    also fires on any longer word a token happens to sit inside. A queue
+    controller evicting an admitted workload leaves
+    `WorkloadEvictedDueToPodsReadyTimeout`, which contains 'Evicted': matching
+    it hands that user the node-pressure remediation ("increase
+    `resources.memory` or `resources.disk_size`"), which cannot fix a queue
+    eviction. So a match may not run on into the surrounding word: the
+    characters adjoining it may not extend the token's alphanumeric edges.
+    'Evicted:' and 'Pod Evicted' still match; 'WorkloadEvictedDueTo...' and
+    'PodEvicted' no longer do.
+
+    Only edges that are alphanumeric are anchored, so a token wrapped in
+    punctuation still matches -- notably the multi-word
+    NO_MEMORY_LIMIT_MARKER inside 'OOMKilled (exit code 137, no memory limit
+    set)'.
     """
-    for substrings, hint in KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
+    if not token:
+        return False
+    pattern = re.escape(token)
+    if token[0].isalnum():
+        pattern = r'(?<![0-9A-Za-z])' + pattern
+    if token[-1].isalnum():
+        pattern = pattern + r'(?![0-9A-Za-z])'
+    return re.search(pattern, reason) is not None
+
+
+def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
+    """Return the remediation hint whose tokens match `reason`, or None.
+
+    A token matches when `reason` names it as a word of its own; see
+    reason_matches_failure_token. The returned hint may contain a literal
+    `{dashboard_url}` token for the caller to substitute.
+    """
+    for tokens, hint in KUBERNETES_FAILURE_HINTS:
+        if any(reason_matches_failure_token(reason, token) for token in tokens):
             return hint
     return None
 
@@ -2287,13 +2336,291 @@ def match_kubernetes_failure_hint_text(reason: str) -> Optional[str]:
 
 
 def get_failure_hint_reasons() -> List[str]:
-    """The reason substrings KUBERNETES_FAILURE_HINTS recognizes, flattened.
+    """The reason tokens KUBERNETES_FAILURE_HINTS recognizes, flattened.
 
-    A reason matching one of these names a specific failure cause (since we
+    A reason naming one of these names a specific failure cause (since we
     carry a remediation hint for it). Callers that gate work on "is the cause
-    already specific" can derive from this instead of duplicating the list.
+    already specific" can derive from this instead of duplicating the list;
+    they should test them with reason_matches_failure_token, so that a token
+    buried in a longer word does not count for them either.
     """
-    return [s for substrings, _ in KUBERNETES_FAILURE_HINTS for s in substrings]
+    return [token for tokens, _ in KUBERNETES_FAILURE_HINTS for token in tokens]
+
+
+def event_last_observed(event: Any) -> Optional[float]:
+    """When ``event`` was last observed, in unix seconds; None if unknown.
+
+    Prefers the last-observed time over the creation time. Kubernetes folds a
+    repeated event back into the original object -- bumping ``count`` and
+    ``last_timestamp`` (``series.last_observed_time`` on the events.k8s.io
+    path) while ``metadata.creation_timestamp`` stays pinned to the first
+    occurrence -- so the creation time says when a condition started, and only
+    the last-observed time says whether it is still happening.
+    """
+    series = getattr(event, 'series', None)
+    ts = (getattr(series, 'last_observed_time', None) or
+          getattr(event, 'last_timestamp', None) or
+          getattr(event, 'event_time', None) or
+          getattr(getattr(event, 'metadata', None), 'creation_timestamp', None))
+    if not isinstance(ts, datetime.datetime):
+        # Absent, or a field the API server did not populate.
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.timestamp()
+
+
+# How far before a pod was created an event may have been observed and still
+# be treated as evidence about that pod. Kubernetes keeps Events for an hour
+# by default and SkyPilot's pod names are a function of the cluster name, so a
+# relaunch inherits the events of the pod it replaces: with no lower bound, a
+# pod deleted by a user could be reported as the queue eviction that removed
+# the *previous* incarnation. The allowance absorbs the skew between the
+# component that stamps an event (a kubelet, a controller) and the API server
+# that stamped the pod the bound comes from -- and this process's clock, on
+# the paths where when the launch started is the only bound available. It is
+# deliberately small, because anything larger reaches back into the previous
+# pod.
+POD_EVENT_CLOCK_SKEW_SECONDS = 60
+
+# Pod-event reasons that name *why* a pod was deleted, mapped to
+# (decisiveness, how the reason is reported). The events are ranked by
+# decisiveness rather than by recency because the informative event is
+# usually not the last one: the kubelet's generic 'Killing' follows whatever
+# actually caused the deletion, and would otherwise shadow it. The reported
+# form matches the '<Reason>: <message>' shape get_condensed_pod_reason
+# produces from a pod status, so a caller reads the same sentence whether the
+# pod is still there or only its events are.
+#
+# The Kueue entries were verified against Kueue v0.19.3. On eviction the pod
+# integration writes a TerminationTarget condition and deletes the pod
+# (pkg/controller/jobs/pod/pod_controller.go, (*Pod).Stop), and the job
+# framework emits a Normal 'Stopped' event on every pod it stopped, whose
+# message is the eviction message -- 'Exceeded the PodsReady timeout
+# <namespace>/<workload>' for a waitForPodsReady timeout, 'Preempted to
+# accommodate a workload (UID: ...) due to <reason>; ...' for preemption
+# (pkg/controller/jobframework/reconciler.go, stopJob).
+_POD_DELETION_EVENT_REASONS: Dict[str, Tuple[int, str]] = {
+    'NodeNotReady': (1, 'NodeNotReady'),
+    'TaintManagerEviction': (2, 'TaintManagerEviction'),
+    'DeletingNode': (3, 'DeletingNode'),
+    # The kubelet's eviction manager emits this as a Warning ('The node was
+    # low on resource: ...'), but drain controllers reuse the reason -- a node
+    # autoscaler consolidating a node emits a Normal 'Evicted' for every pod
+    # it drains -- so the event's own message is left to name whoever did it.
+    'Evicted': (4, 'Evicted'),
+    'ExcessPodDeleted': (5, 'ExcessPodDeleted'),
+    'Preempted': (6, 'Preempted'),
+    # Kueue's eviction event. Reported with its actor, because 'Stopped' on
+    # its own reads like the user stopped something.
+    'Stopped': (7, 'Stopped by Kueue'),
+}
+
+# Reasons that say a pod was on its way out without saying who deleted it, or
+# why. These are reported as context -- the last thing said about the pod --
+# and never as the cause: the kubelet emits 'Killing' for every deletion,
+# including the ones nothing explains, so treating it as an answer would
+# replace "no cause could be derived", which is what sends a user looking at
+# their own controllers, with a restatement of the deletion.
+_POD_DELETION_CONTEXT_EVENT_REASONS = frozenset({'Killing'})
+
+
+def events_since(events: List[Any],
+                 since: Optional[datetime.datetime]) -> List[Any]:
+    """The events that can be evidence about the pod that exists now.
+
+    Events the API server left without a usable timestamp are kept: not
+    knowing when something happened is not evidence that it happened before
+    the pod did.
+    """
+    if since is None:
+        return events
+    cutoff = since.timestamp() - POD_EVENT_CLOCK_SKEW_SECONDS
+    kept = []
+    for event in events:
+        observed_at = event_last_observed(event)
+        if observed_at is None or observed_at >= cutoff:
+            kept.append(event)
+    return kept
+
+
+def reason_from_pod_events(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """Why a pod was deleted, from its own events; None if not derivable.
+
+    Only events that name a deletion cause count, because what comes back is
+    reported as the cause; everything else a deleted pod's events hold -- the
+    scheduler's complaint that it could not place the pod, the kubelet's note
+    that it is stopping the containers -- describes the state the pod was in
+    when somebody deleted it, not the deletion.
+
+    Kubernetes Events are separate objects with their own TTL (an hour by
+    default), so they outlive the pod they describe. That is what makes this
+    usable at all where it matters most: by the time we look, the pod object
+    itself is exactly the thing that no longer exists. ``since`` is when the
+    pod that is being explained was created, and drops the events of whatever
+    held the same pod name before it. ``events`` are expected newest-first,
+    which is what decides between two events of equal rank.
+    """
+    event = pod_deletion_event(events, since)
+    if event is None:
+        return None
+    reported_as = _POD_DELETION_EVENT_REASONS[event.reason][1]
+    message = (event.message or '').strip()
+    return f'{reported_as}: {message}' if message else reported_as
+
+
+def is_cancelled_taint_eviction(reason: Optional[str],
+                                message: Optional[str]) -> bool:
+    """A taint eviction that did not happen.
+
+    The taint manager emits it when the taint is lifted before the pod's
+    tolerationSeconds run out, or when something else deletes the pod first.
+    """
+    return (reason == 'TaintManagerEviction' and
+            (message or '').startswith('Cancelling deletion'))
+
+
+def pod_deletion_event(events: List[Any],
+                       since: Optional[datetime.datetime] = None) -> Any:
+    """The event that best names why a pod was deleted, or None.
+
+    The event behind ``reason_from_pod_events``, for callers that word the
+    cause themselves.
+    """
+    best_rank = 0
+    best_event = None
+    for event in events_since(events, since):
+        if is_cancelled_taint_eviction(event.reason, event.message):
+            continue
+        ranked = _POD_DELETION_EVENT_REASONS.get(event.reason)
+        if ranked is not None and ranked[0] > best_rank:
+            best_rank = ranked[0]
+            best_event = event
+    return best_event
+
+
+def last_pod_event_context(
+        events: List[Any],
+        since: Optional[datetime.datetime] = None) -> Optional[str]:
+    """The last thing said about a pod, when nothing said why it was deleted.
+
+    A pod still waiting to be scheduled always carries the scheduler's
+    FailedScheduling complaint, and a deleted one carries the kubelet's
+    'Killing'. Neither says why anybody deleted the pod, so they are offered
+    for what they are -- the last thing said about it -- and the caller still
+    says plainly that no cause could be derived.
+    """
+    for event in events_since(events, since):
+        # Events arrive newest-first.
+        if (event.type == 'Warning' or
+                event.reason in _POD_DELETION_CONTEXT_EVENT_REASONS):
+            message = (event.message or '').strip()
+            reason = event.reason or 'Unknown'
+            return f'{reason}: {message}' if message else reason
+    return None
+
+
+def _with_failure_hint(message: str, reason: str) -> str:
+    """Append the remediation hint `reason` earns, when it earns one."""
+    hint = match_kubernetes_failure_hint_text(reason)
+    if hint is not None:
+        message += f'\nHint: {hint}'
+    return message
+
+
+def _kai_eviction_reason(context: Optional[str], namespace: str, pod_name: str,
+                         pod: Optional[Any]) -> Optional[str]:
+    """Why KAI evicted the pod, or None; ``pod`` is its object, if it exists."""
+    # In-function import: kai imports this module.
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import kai
+    if pod is None:
+        return kai.eviction_reason(context, namespace, pod_name, since=None)
+    if kai.POD_GROUP_ANNOTATION not in (pod.metadata.annotations or {}):
+        return None
+    return kai.eviction_reason(context,
+                               namespace,
+                               pod_name,
+                               since=pod.metadata.creation_timestamp)
+
+
+def _diagnose_deleted_pod(context: Optional[str], namespace: str,
+                          pod_name: str) -> Optional[str]:
+    """Why a pod that no longer exists was deleted; None when nothing says.
+
+    The pod's events outlive the pod, and for one that something else deleted
+    -- a queue controller evicting the workload, the taint manager, a node
+    going away -- they are the only record left of who did it.
+    """
+    try:
+        events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.kind=Pod,'
+                            f'involvedObject.name={pod_name}'),
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        events = sorted(events,
+                        key=lambda event: event.metadata.creation_timestamp,
+                        reverse=True)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    reason = reason_from_pod_events(events)
+    if reason is None:
+        reason = _kai_eviction_reason(context, namespace, pod_name, pod=None)
+    if reason is None:
+        # A pod that is merely absent is not news: every `sky down` leaves
+        # one, and the caller asks about all of them.
+        return None
+    return _with_failure_hint(f'Pod {pod_name} was deleted: {reason}.', reason)
+
+
+# A container's own output explains a failure only when the process exited by
+# itself. OOMKilled and evictions are decided outside it, so its log would be
+# noise there.
+_SELF_EXIT_REASON = 'Error'
+_ERROR_LOG_TAIL_LINES = 50
+# The last line of a Python traceback, where its message starts.
+_EXCEPTION_LINE = re.compile(r'^[A-Za-z_][\w.]*(Error|Exception): ')
+
+
+def _self_exit_output(context: Optional[str], namespace: str, pod_name: str,
+                      pod: 'kubernetes_models.V1Pod') -> Optional[str]:
+    """What a container that exited with an error last printed, or None.
+
+    A failure raised in a container's own command -- not an exec -- leaves
+    its explanation only in the container log; the caller would otherwise
+    report just "Error (exit code 1)".
+    """
+    for cs in (pod.status.container_statuses or []):
+        for state, previous in ((cs.state, False), (cs.last_state, True)):
+            term = state.terminated if state else None
+            if (term is None or term.exit_code == 0 or
+                    term.reason != _SELF_EXIT_REASON):
+                continue
+            try:
+                log = kubernetes.core_api(context).read_namespaced_pod_log(
+                    pod_name,
+                    namespace,
+                    container=cs.name,
+                    previous=previous,
+                    tail_lines=_ERROR_LOG_TAIL_LINES,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except Exception:  # pylint: disable=broad-except
+                return None
+            if not isinstance(log, str):
+                return None
+            lines = log.rstrip().splitlines()
+            first = max(0, len(lines) - 10)
+            for i in range(len(lines) - 1, -1, -1):
+                if _EXCEPTION_LINE.match(lines[i]):
+                    first = i
+                    break
+            tail = '\n'.join(lines[first:]).strip()
+            if not tail:
+                return None
+            return f'{constants.CONTAINER_OUTPUT_MARKER} {cs.name}:\n{tail}'
+    return None
 
 
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
@@ -2302,22 +2629,33 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
 
     Reads the pod and, if it terminated abnormally, returns a user-facing
     message including the condensed reason (e.g. OOMKilled) and a remediation
-    hint when one applies. Returns None if the pod is healthy, finished
-    cleanly, missing, or cannot be read -- this is purely additive context, so
-    it must never raise.
+    hint when one applies. When the pod no longer exists, falls back to its
+    events, which outlive it and are the only place a deletion by something
+    else is recorded. Returns None if the pod is healthy, finished cleanly, or
+    cannot be explained -- this is purely additive context, so it must never
+    raise.
     """
     try:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if getattr(e, 'status', None) != 404:
+            return None
+        return _diagnose_deleted_pod(context, namespace, pod_name)
     except Exception:  # pylint: disable=broad-except
         return None
+    # Checked first: a pod KAI is deleting may not show as terminated yet, and
+    # once it does, the exit status KAI caused reads as the workload failing.
+    eviction = _kai_eviction_reason(context, namespace, pod_name, pod)
+    if eviction is not None:
+        return f'Pod {pod_name} terminated: {eviction}.'
     if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
-    msg = f'Pod {pod_name} terminated: {reason}.'
-    hint = match_kubernetes_failure_hint_text(reason)
-    if hint is not None:
-        msg += f'\nHint: {hint}'
+    msg = _with_failure_hint(f'Pod {pod_name} terminated: {reason}.', reason)
+    output = _self_exit_output(context, namespace, pod_name, pod)
+    if output is not None:
+        msg += f'\n{output}'
     return msg
 
 
@@ -2386,7 +2724,7 @@ def get_allocated_resources_by_node(
     if context is None:
         context = get_current_kube_config_context_name()
     non_included_pod_statuses = POD_STATUSES.copy()
-    status_filters = ['Running', 'Pending']
+    status_filters = list(_ALLOCATING_POD_PHASES)
     if status_filters is not None:
         non_included_pod_statuses -= set(status_filters)
         field_selector = ','.join(
@@ -2399,51 +2737,65 @@ def get_allocated_resources_by_node(
         _preload_content=False,
         field_selector=field_selector)
     try:
-        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-        allocated_cpu_memory_by_node: Dict[str, Tuple[
-            float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
-        for item_dict in ijson.items(response,
-                                     'items.item',
-                                     buf_size=IJSON_BUFFER_SIZE):
-            pod = V1Pod.from_dict(item_dict)
-            if should_exclude_pod_from_gpu_allocation(pod):
-                logger.debug(
-                    f'Excluding pod {pod.metadata.name} from resource count '
-                    f'calculations on node {pod.spec.node_name}')
-                continue
-            if not pod.spec.node_name:
-                continue
-
-            # Iterate over all the containers in the pod and sum the resources
-            pod_allocated_qty = 0
-            pod_allocated_cpu = 0.0
-            pod_allocated_memory_gb = 0.0
-            for container in pod.spec.containers:
-                if container.resources.requests:
-                    requests = container.resources.requests
-                    # Parse GPU
-                    pod_allocated_qty += get_node_accelerator_count(
-                        context, requests)
-                    # Parse CPU
-                    if 'cpu' in requests:
-                        pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
-                            requests['cpu'])
-                    # Parse memory
-                    if 'memory' in requests:
-                        pod_allocated_memory_gb += parse_memory_resource(
-                            requests['memory'], unit='G')
-
-            if pod_allocated_qty > 0:
-                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
-            if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
-                current_cpu, current_memory = allocated_cpu_memory_by_node[
-                    pod.spec.node_name]
-                allocated_cpu_memory_by_node[pod.spec.node_name] = (
-                    current_cpu + pod_allocated_cpu,
-                    current_memory + pod_allocated_memory_gb)
-        return allocated_qty_by_node, allocated_cpu_memory_by_node
+        return _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)), context)
     finally:
         response.release_conn()
+
+
+def _sum_allocated_resources_by_node(
+    pods: Iterable[V1Pod],
+    context: Optional[str],
+    gpu_resource_key: Optional[str] = None,
+) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
+    """Sums the accelerators, CPU and memory that Running and Pending pods
+    request on each node.
+
+    See get_allocated_resources_by_node() for the return values.
+    """
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    allocated_cpu_memory_by_node: Dict[str, Tuple[
+        float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
+    for pod in pods:
+        if pod.status.phase not in _ALLOCATING_POD_PHASES:
+            continue
+        if should_exclude_pod_from_gpu_allocation(pod):
+            logger.debug(
+                f'Excluding pod {pod.metadata.name} from resource count '
+                f'calculations on node {pod.spec.node_name}')
+            continue
+        if not pod.spec.node_name:
+            continue
+
+        # Iterate over all the containers in the pod and sum the resources
+        pod_allocated_qty = 0
+        pod_allocated_cpu = 0.0
+        pod_allocated_memory_gb = 0.0
+        for container in pod.spec.containers:
+            if container.resources.requests:
+                requests = container.resources.requests
+                # Parse GPU
+                pod_allocated_qty += get_node_accelerator_count(
+                    context, requests, gpu_resource_key=gpu_resource_key)
+                # Parse CPU
+                if 'cpu' in requests:
+                    pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
+                        requests['cpu'])
+                # Parse memory
+                if 'memory' in requests:
+                    pod_allocated_memory_gb += parse_memory_resource(
+                        requests['memory'], unit='G')
+
+        if pod_allocated_qty > 0:
+            allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
+            current_cpu, current_memory = allocated_cpu_memory_by_node[
+                pod.spec.node_name]
+            allocated_cpu_memory_by_node[pod.spec.node_name] = (
+                current_cpu + pod_allocated_cpu,
+                current_memory + pod_allocated_memory_gb)
+    return allocated_qty_by_node, allocated_cpu_memory_by_node
 
 
 @_retry_on_error(resource_type='pod')
@@ -2459,6 +2811,51 @@ def get_allocated_gpu_qty_by_node(
     """
     allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
     return allocated_qty_by_node
+
+
+def read_node_snapshot(
+    context: str, snapshot: plugin_extensions.KubernetesNodeSnapshot
+) -> Optional[Tuple[List[V1Node], str, Dict[str, int]]]:
+    """Reads the accelerator availability inputs from a node snapshot.
+
+    Returns:
+        The same values as get_kubernetes_nodes(), get_gpu_resource_key() and
+        get_allocated_gpu_qty_by_node() for the context, computed from the
+        snapshot without calling the Kubernetes API, or None if the snapshot
+        is malformed.
+    """
+    try:
+        nodes = [V1Node.from_dict(node) for node in snapshot.nodes]
+        gpu_resource_key = get_gpu_resource_key_from_nodes(nodes)
+        allocated_qty_by_node, _ = _sum_allocated_resources_by_node(
+            (V1Pod.from_dict(pod) for pod in snapshot.pods),
+            context,
+            gpu_resource_key=gpu_resource_key)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Ignoring a malformed node snapshot for context '
+                       f'{context}: {common_utils.format_exception(e)}')
+        return None
+    return (_filter_allowed_nodes(nodes, context), gpu_resource_key,
+            allocated_qty_by_node)
+
+
+def get_node_snapshot_label_keys(context: str) -> List[str]:
+    """Returns the node label keys that accelerator availability reads.
+
+    These are the GPU label formatters' keys, the GKE TPU keys that
+    is_multi_host_tpu() reads, and the allowed_nodes label_selector keys.
+    Formatters match label keys exactly, so nodes with only these labels give
+    the same result as the full node objects.
+    """
+    keys = {
+        key for formatter in LABEL_FORMATTER_REGISTRY
+        for key in formatter.get_label_keys()
+    }
+    keys.update((GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY,
+                 GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY))
+    allowed_nodes = get_allowed_nodes_config(context) or {}
+    keys.update(allowed_nodes.get('label_selector') or {})
+    return sorted(keys)
 
 
 def adjust_resources_to_allocatable(
@@ -2646,6 +3043,8 @@ def check_instance_fits(
                 get_accelerator_label_key_values(context, acc_type, acc_count))
             if gpu_label_values is None:
                 gpu_label_values = []
+        except exceptions.KubeAPIUnreachableError:
+            raise
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -2752,6 +3151,115 @@ def get_node_affinity(
             },
         }]
     return node_affinity or None
+
+
+def get_node_selector(
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Optional[Dict[str, str]]:
+    """Builds the pod ``nodeSelector``.
+
+    Three independent entries, any of which may be absent:
+
+    * An accelerator topology label, pinning the pod to nodes of the requested
+      slice shape (e.g. ``cloud.google.com/gke-tpu-topology: 2x2``).
+    * The spot label, pinning the pod to preemptible nodes. The pod also
+      tolerates the matching taint; see get_spot_toleration().
+    * ``cloud.google.com/gke-flex-start``, selecting GKE nodes provisioned
+      through flex-start.
+
+    Args:
+        topology_label_key: Node label key of the accelerator slice topology,
+            or None.
+        topology_label_value: Requested value for ``topology_label_key``, or
+            None.
+        spot_label_key: Node label key of preemptible nodes, or None.
+        spot_label_value: Value ``spot_label_key`` carries on preemptible
+            nodes, or None.
+        enable_flex_start: Whether the pod schedules onto flex-start nodes.
+
+    Returns:
+        A ``nodeSelector`` dict, or None when no entry applies.
+    """
+    node_selector: Dict[str, str] = {}
+    if topology_label_key is not None and topology_label_value is not None:
+        node_selector[topology_label_key] = topology_label_value
+    if spot_label_key is not None and spot_label_value is not None:
+        node_selector[spot_label_key] = spot_label_value
+    if enable_flex_start:
+        node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    return node_selector or None
+
+
+def get_spot_toleration(
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+) -> Optional[Dict[str, str]]:
+    """Builds the toleration for the taint preemptible nodes carry.
+
+    Args:
+        spot_label_key: See get_node_selector().
+        spot_label_value: See get_node_selector().
+
+    Returns:
+        A toleration dict, or None when the cluster has no spot label.
+    """
+    if spot_label_key is None or spot_label_value is None:
+        return None
+    return {
+        'key': spot_label_key,
+        'operator': 'Equal',
+        'value': spot_label_value,
+        'effect': 'NoSchedule',
+    }
+
+
+def get_pod_fields(
+    *,
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    avoid_label_keys: Optional[List[str]],
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Dict[str, Any]:
+    """Builds the pod fields that SkyPilot computes in Python.
+
+    combine_pod_fields() merges the result, a partial pod manifest, into the
+    pod the cluster template renders.
+
+    Args:
+        acc_label_key: See get_node_affinity().
+        acc_label_values: See get_node_affinity().
+        avoid_label_keys: See get_node_affinity().
+        topology_label_key: See get_node_selector().
+        topology_label_value: See get_node_selector().
+        spot_label_key: See get_node_selector() and get_spot_toleration().
+        spot_label_value: See get_node_selector() and get_spot_toleration().
+        enable_flex_start: See get_node_selector().
+
+    Returns:
+        A partial pod manifest, empty when no field applies.
+    """
+    spec: Dict[str, Any] = {}
+    node_selector = get_node_selector(topology_label_key, topology_label_value,
+                                      spot_label_key, spot_label_value,
+                                      enable_flex_start)
+    if node_selector is not None:
+        spec['nodeSelector'] = node_selector
+    node_affinity = get_node_affinity(acc_label_key, acc_label_values,
+                                      avoid_label_keys)
+    if node_affinity is not None:
+        spec['affinity'] = {'nodeAffinity': node_affinity}
+    spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
+    if spot_toleration is not None:
+        spec['tolerations'] = [spot_toleration]
+    return {'spec': spec} if spec else {}
 
 
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
@@ -3461,9 +3969,6 @@ def get_all_kube_context_names() -> List[str]:
     If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
     returns the default in-cluster kubernetes context name.
 
-    We should not cache the result of this function as the admin policy may
-    update the contexts.
-
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
             available, an empty list otherwise.
@@ -3481,6 +3986,60 @@ def get_all_kube_context_names() -> List[str]:
     if is_incluster_config_available():
         context_names.append(kubernetes.in_cluster_context_name())
     return context_names
+
+
+# kube-system exists in every cluster and is never recreated, so its UID
+# identifies the cluster a context points at, whatever the credentials or the
+# route (direct, proxy, tunnel) used to reach it.
+CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+_CLUSTER_UID_READ_TIMEOUT_SECONDS = 5
+_CLUSTER_UID_CACHE_TTL_SECONDS = 300
+_CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS = 30
+# context -> (kubeconfig fingerprint, uid or None, expiry as time.monotonic()).
+_cluster_uid_cache: Dict[Optional[str], Tuple[Tuple[Any, ...], Optional[str],
+                                              float]] = {}
+_cluster_uid_cache_lock = threading.Lock()
+
+
+def read_cluster_uid(core, timeout: float) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(CLUSTER_IDENTITY_NAMESPACE,
+                                    _request_timeout=timeout)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def get_cluster_uid(context: Optional[str],
+                    use_cache: bool = True) -> Optional[str]:
+    """Returns the UID of the cluster `context` points at.
+
+    Returns None when kube-system cannot be read (e.g. no RBAC grant, the
+    cluster is unreachable). Results are cached per process until a file on
+    KUBECONFIG changes, since a rewritten kubeconfig may point `context` at
+    another cluster.
+    """
+    now = time.monotonic()
+    fingerprint = kubernetes.kubeconfig_fingerprint()
+    if use_cache:
+        with _cluster_uid_cache_lock:
+            cached = _cluster_uid_cache.get(context)
+        if (cached is not None and cached[0] == fingerprint and
+                now < cached[2]):
+            return cached[1]
+    uid: Optional[str] = None
+    try:
+        # The in-cluster name, unlike None, never falls back to kubeconfig.
+        uid = read_cluster_uid(kubernetes.core_api(context),
+                               _CLUSTER_UID_READ_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read the {CLUSTER_IDENTITY_NAMESPACE!r} '
+                     f'namespace UID of context {context!r}: {e}')
+    ttl = (_CLUSTER_UID_CACHE_TTL_SECONDS
+           if uid else _CLUSTER_UID_FAILURE_CACHE_TTL_SECONDS)
+    with _cluster_uid_cache_lock:
+        _cluster_uid_cache[context] = (fingerprint, uid, time.monotonic() + ttl)
+    return uid
 
 
 @annotations.lru_cache(scope='request')
@@ -3789,11 +4348,12 @@ def get_ssh_proxy_command(
             This key must be authorized to access the SSH jump pod.
         namespace: Kubernetes namespace to use.
         host_network: bool; Whether the target pod runs with
-            ``hostNetwork: true``. When True the proxy script discovers
-            the pod's probed sshd port from the cluster's ConfigMap;
-            when False it skips that lookup and uses port 22. Passed as
-            a flag so the script needs no per-connection `kubectl get
-            pod` probe to determine this.
+            ``hostNetwork: true``. When True the proxy script reads the
+            pod's assigned sshd port off the pod spec; when False it
+            skips that lookup and uses port 22. Passed as a flag so the
+            common path makes no kubectl call at all -- the port itself
+            cannot be passed, since this command is built during auth
+            setup, before the pod exists.
     """
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
@@ -4148,6 +4708,39 @@ def resolve_effective_pod_config(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
     return kubernetes_config
+
+
+def pod_spec_identity_conflicts(spec: Dict[str, Any]) -> List[str]:
+    """The settings in a ``pod_config`` spec that hand the pod an API identity.
+
+    ``remote_identity: NONE`` refuses any of them, so callers that decide
+    whether NONE can apply share this one list.
+    """
+    conflicts = [
+        f'pod_config.spec.{key}' for key in ('serviceAccountName',
+                                             'serviceAccount') if key in spec
+    ]
+    if spec.get('automountServiceAccountToken') is True:
+        conflicts.append('pod_config.spec.automountServiceAccountToken')
+    for volume in spec.get('volumes') or []:
+        sources = (volume.get('projected') or {}).get('sources') or []
+        if any('serviceAccountToken' in src for src in sources):
+            conflicts.append(f'pod_config.spec.volumes[{volume.get("name")}]'
+                             ' (projected serviceAccountToken)')
+    return conflicts
+
+
+def combine_pod_fields(cluster_yaml_obj: Dict[str, Any],
+                       pod_fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Adds the pod fields from get_pod_fields() to the rendered pod.
+
+    Obeys the same add or update semantics as combine_pod_config_fields().
+    """
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    config_utils.merge_k8s_configs(
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], copy.deepcopy(pod_fields))
+    return merged_cluster_yaml_obj
 
 
 def combine_pod_config_fields(
@@ -4588,10 +5181,9 @@ def _get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    # Try external node info source first (e.g., node-info-service cache).
-    # This allows plugins to provide cached node info for faster queries.
+    # Try the external node info source first, if one is registered.
     if plugin_extensions.NodeInfoSource.is_registered():
-        # Resolve context before calling the provider so it can be cached
+        # Resolve context before calling the provider.
         resolved_context = (context if context is not None else
                             get_current_kube_config_context_name())
         if resolved_context is not None:
@@ -5113,7 +5705,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Try external pod info source first (e.g., node-info-service cache).
+    # Try the external pod info source first, if one is registered.
     if plugin_extensions.PodInfoSource.is_registered():
         if context is not None:
             result = plugin_extensions.PodInfoSource.get(context)
@@ -5156,7 +5748,8 @@ def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
 
 
 def get_node_accelerator_count(context: Optional[str],
-                               attribute_dict: dict) -> int:
+                               attribute_dict: dict,
+                               gpu_resource_key: Optional[str] = None) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -5166,12 +5759,15 @@ def get_node_accelerator_count(context: Optional[str],
     Args:
         attribute_dict: Containing resource information from a node, such as
             allocatable or requested resources.
+        gpu_resource_key: The context's GPU resource key. Defaults to
+            get_gpu_resource_key(context).
 
     Returns:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key(context)
+    gpu_resource_name = (gpu_resource_key if gpu_resource_key is not None else
+                         get_gpu_resource_key(context))
     # A node is expected to advertise at most one accelerator family (GPU, TPU,
     # or Neuron). Rather than assert on external cluster state (which would crash
     # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
@@ -5402,9 +5998,19 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
+def _select_gpu_resource_key(capacity_keys: Set[str]) -> str:
+    """Picks the GPU resource key from the capacity keys of all nodes.
+
+    The CUSTOM_GPU_RESOURCE_KEY environment variable overrides the pick.
+    """
+    detected = next(
+        (gpu_key for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values()
+         if gpu_key in capacity_keys), SUPPORTED_GPU_RESOURCE_KEYS['nvidia'])
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=detected)
+
+
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
         response = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
@@ -5418,15 +6024,25 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
                     supported_gpu_keys.intersection(capacity.keys()))
                 if len(capacity_keys) == len(supported_gpu_keys):
                     break
-            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-                if gpu_key in capacity_keys:
-                    return gpu_key
+            return _select_gpu_resource_key(capacity_keys)
         finally:
             response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
-    return gpu_resource_key
+    return _select_gpu_resource_key(set())
+
+
+def get_gpu_resource_key_from_nodes(nodes: List[V1Node]) -> str:
+    """Gets the GPU resource key for a cluster with the given nodes.
+
+    Same as get_gpu_resource_key(), for all nodes of the cluster, before
+    allowed_nodes filtering.
+    """
+    capacity_keys: Set[str] = set()
+    for node in nodes:
+        capacity_keys.update(node.status.capacity.keys())
+    return _select_gpu_resource_key(capacity_keys)
 
 
 @annotations.lru_cache(scope='request')
@@ -5440,8 +6056,7 @@ def get_gpu_resource_key(context: Optional[str] = None) -> str:
     Returns:
         str: The selected GPU resource name.
     """
-    gpu_resource_key = _gpu_resource_key_helper(context)
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
+    return _gpu_resource_key_helper(context)
 
 
 def get_kubeconfig_paths() -> List[str]:

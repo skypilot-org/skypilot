@@ -6,8 +6,11 @@ import unittest
 from unittest import mock
 from unittest.mock import patch
 
+from kubernetes import client as k8s_client
 import pytest
 
+from sky import exceptions as sky_exceptions
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -104,6 +107,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                                                     keys=('allowed_contexts',),
                                                     region=None,
                                                     default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_allowed_all_contexts_keep_kubeconfig_order(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """allowed_contexts=all lists each context once, in kubeconfig order."""
+        names = ['zeta', 'alpha', 'mike', 'bravo', 'yankee', 'charlie', 'xray']
+        # The in-cluster name is appended and can repeat a kubeconfig name.
+        mock_get_all_contexts.return_value = names + ['mike']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, names)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -367,6 +387,36 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesValidateRegionZoneListsAllowed(unittest.TestCase):
+    """A bad context name must not reveal contexts outside allowed_contexts."""
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        patches = [
+            patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                  return_value=['ctx-a', 'ctx-b']),
+            patch('sky.skypilot_config.get_workspace_cloud',
+                  return_value={'allowed_contexts': ['ctx-a']}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_unknown_context_lists_only_allowed(self):
+        with self.assertRaises(ValueError) as ctx:
+            kubernetes.Kubernetes().validate_region_zone('typo-ctx', None)
+        msg = str(ctx.exception)
+        self.assertIn('ctx-a', msg)
+        self.assertNotIn('ctx-b', msg)
+
+    def test_existing_context_outside_allowed_still_validates(self):
+        # Existing clusters on a context later removed from allowed_contexts
+        # must still load, so existence is checked against the kubeconfig.
+        self.assertEqual(
+            kubernetes.Kubernetes().validate_region_zone('ctx-b', None),
+            ('ctx-b', None))
 
 
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):
@@ -1059,14 +1109,17 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
 
         k8s_env_vars = deploy_vars['k8s_env_vars']
-        # The probe is runtime-gated on these env vars (see
-        # instance_setup._host_network_probe_cmd); they must be wired for
-        # OCI RoCE so the probe actually runs.
+        # The port check is runtime-gated on this one env var (see
+        # instance_setup._host_network_probe_cmd); it must be wired for OCI
+        # RoCE so the check actually runs.
         self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'],
-                         'test-oci-cluster-ray-ports')
-        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'],
-                         'default')
+        # And on nothing else. The gate used to also require a ConfigMap name,
+        # with the sshd_config rewrite inside the same shell branch, so a
+        # lingering export would keep a dead requirement alive and a lingering
+        # requirement would silently skip moving sshd off port 22.
+        for stale in ('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                      'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'):
+            self.assertNotIn(stale, k8s_env_vars)
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
         self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
@@ -1278,16 +1331,12 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '3600')
 
-        # The pod patches Ray from a payload carried in its own spec, because
-        # it runs before the SkyPilot wheel is uploaded and the only `sky` on
-        # the node is whatever `pip install skypilot` resolved to. Assert the
-        # variable is actually produced -- without this, dropping it from
-        # make_deploy_resources_variables leaves the payload tests green while
-        # the template renders an empty command.
-        self.assertIn('ray_patches_cmd', deploy_vars)
-        self.assertIn('apply_patches.py', deploy_vars['ray_patches_cmd'])
-        self.assertNotIn('from sky.skylet.ray_patches',
-                         deploy_vars['ray_patches_cmd'])
+        # 'ray_patches_cmd' and 'ray_installation_commands' are deliberately
+        # NOT here: both depend on the Ray version this cluster is pinned to,
+        # which only write_cluster_config knows. That they are still produced
+        # is asserted in tests/unit_tests/test_sky/test_ray_version_per_cluster.
+        self.assertNotIn('ray_patches_cmd', deploy_vars)
+        self.assertNotIn('ray_installation_commands', deploy_vars)
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -2085,6 +2134,192 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertNotIn(
             'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
             rendered)
+
+    def _deploy_vars_with_kai(self, kai):
+        with patch('sky.skypilot_config.get_effective_kai_value',
+                   side_effect=lambda key, **kwargs: kai.get(key)):
+            return kubernetes.Kubernetes().make_deploy_resources_variables(
+                resources=self.resources,
+                cluster_name=resources_utils.ClusterName(
+                    display_name=self.cluster_name,
+                    name_on_cloud=self.cluster_name),
+                region=self.region,
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_queue_is_resolved_for_the_template(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A KAI queue and topology are passed to the template."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({
+            'queue': 'team-queue',
+            'preemptibility': 'preemptible',
+            'topology': 'fabric',
+            'preferred_topology_level': 'leaf',
+        })
+
+        self.assertEqual(deploy_vars['k8s_kai_queue_name'], 'team-queue')
+        self.assertEqual(deploy_vars['k8s_kai_preemptibility'], 'preemptible')
+        self.assertEqual(deploy_vars['k8s_kai_topology'], 'fabric')
+        self.assertIsNone(deploy_vars['k8s_kai_required_topology_level'])
+        self.assertEqual(deploy_vars['k8s_kai_preferred_topology_level'],
+                         'leaf')
+        self.assertEqual(deploy_vars['k8s_kai_scheduler_name'], 'kai-scheduler')
+        self.assertIsNone(deploy_vars['k8s_kueue_local_queue_name'])
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_no_kai_queue_leaves_the_template_unchanged(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Without kubernetes.kai the KAI template fields stay unset."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({})
+
+        self.assertIsNone(deploy_vars['k8s_kai_queue_name'])
+        self.assertIsNone(deploy_vars['k8s_kai_preemptibility'])
+
+    @patch('sky.skypilot_config.get_effective_queue_name',
+           return_value='user-queue')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_and_kueue_queues_are_exclusive(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes, mock_get_queue_name):
+        """One cluster cannot be admitted by both KAI and Kueue."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        with self.assertRaisesRegex(ValueError, 'both a KAI queue'):
+            self._deploy_vars_with_kai({'queue': 'team-queue'})
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_incomplete_kai_config_is_rejected(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Settings that would have no PodGroup, or no level, are refused."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        for kai, error in [
+            ({
+                'preemptibility': 'preemptible'
+            }, 'without kubernetes.kai.queue'),
+            ({
+                'topology': 'fabric',
+                'required_topology_level': 'leaf'
+            }, 'without kubernetes.kai.queue'),
+                # KAI ignores a topology without a level, and a level without a
+                # topology.
+            ({
+                'queue': 'q',
+                'topology': 'fabric'
+            }, 'together with'),
+            ({
+                'queue': 'q',
+                'preferred_topology_level': 'leaf'
+            }, 'together with'),
+        ]:
+            with self.subTest(kai=kai):
+                with self.assertRaisesRegex(ValueError, error):
+                    self._deploy_vars_with_kai(kai)
 
 
 class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
@@ -2913,12 +3148,14 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
         result = kubernetes.Kubernetes._unsupported_features_for_resources(
             resources, region='test-context')
 
-        # Should return base unsupported features
         self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
         self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
-        self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
-        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                      result)
+        # Unknown, not unsupported: the node-fit check reports the context
+        # as unreachable instead.
+        self.assertNotIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                         result)
+        self.assertNotIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                         result)
 
     @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
     @patch('sky.provision.kubernetes.utils.get_spot_label')
@@ -2973,6 +3210,18 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
         self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
         self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                       result)
+
+
+def _raise_unreachable(cause: Exception):
+    """Raises KubeAPIUnreachableError from `cause`, as _retry_on_error does."""
+    try:
+        raise cause
+    except Exception as e:  # pylint: disable=broad-except
+        raise sky_exceptions.KubeAPIUnreachableError(str(e)) from e
+
+
+def _timed_out() -> Exception:
+    return kubernetes_adaptor.max_retry_error()(None, '/api/v1/nodes')
 
 
 class TestKubernetesRegionsWithOffering(unittest.TestCase):
@@ -3265,6 +3514,94 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
             resources=None)
 
         self.assertEqual(len(regions), 0)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_unreachable_context_reported(self, mock_check_instance_fits,
+                                          mock_existing_allowed_contexts):
+        """An unreachable context is reported, apart from one that is full."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
+
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
+            del instance_type, ephemeral_storage_gb
+            if context == 'ctx1':
+                _raise_unreachable(_timed_out())
+            return (False, 'Not enough resources')
+
+        mock_check_instance_fits.side_effect = check_instance_side_effect
+
+        unreachable_errors = []
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None,
+            unreachable_errors=unreachable_errors)
+
+        self.assertEqual(regions, [])
+        self.assertEqual(len(unreachable_errors), 1)
+        self.assertIsInstance(unreachable_errors[0],
+                              sky_exceptions.KubeAPIUnreachableError)
+        self.assertIn("'ctx1' is unreachable", str(unreachable_errors[0]))
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_non_transient_failure_not_reported(self, mock_check_instance_fits,
+                                                mock_existing_allowed_contexts):
+        """A context that fails for a reason a retry won't fix is dropped."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        for cause in [
+                k8s_client.rest.ApiException(status=403),
+                k8s_client.rest.ApiException(status=404),
+                kubernetes_adaptor.config_exception()('invalid kubeconfig'),
+        ]:
+            with self.subTest(cause=repr(cause)):
+                mock_check_instance_fits.side_effect = (
+                    lambda *args, cause=cause, **kwargs: _raise_unreachable(
+                        cause))
+
+                unreachable_errors = []
+                regions = kubernetes.Kubernetes.regions_with_offering(
+                    instance_type='4CPU--8GB',
+                    accelerators=None,
+                    use_spot=False,
+                    region=None,
+                    zone=None,
+                    resources=None,
+                    unreachable_errors=unreachable_errors)
+
+                self.assertEqual(regions, [])
+                self.assertEqual(unreachable_errors, [])
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.clouds.kubernetes.Kubernetes.check_features_are_supported')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_feasible_resources_carry_unreachable_errors(
+            self, mock_check_instance_fits, mock_check_features,
+            mock_existing_allowed_contexts):
+        """No feasible resources, with the reason that the context is down."""
+        del mock_check_features
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.side_effect = (
+            lambda *args, **kwargs: _raise_unreachable(_timed_out()))
+
+        resources = mock.MagicMock()
+        resources.instance_type = '4CPU--8GB'
+        resources.region = 'ctx1'
+        resources.disk_tier = None
+        resources.get_required_cloud_features.return_value = set()
+
+        feasible = kubernetes.Kubernetes()._get_feasible_launchable_resources(
+            resources)
+
+        self.assertEqual(feasible.resources_list, [])
+        self.assertEqual(len(feasible.unreachable_errors), 1)
+        self.assertIn("'ctx1' is unreachable",
+                      str(feasible.unreachable_errors[0]))
 
 
 class TestKubernetesDetectNetworkType(unittest.TestCase):
@@ -4707,6 +5044,8 @@ class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
 
 _UNSET = object()
 
+_OCI_SHAPE_BY_GPU = {'GB300': 'BM.GPU.GB300.4', 'GB200': 'BM.GPU.GB200.4'}
+
 
 class TestKubernetesRdmaMode(unittest.TestCase):
     """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
@@ -4759,6 +5098,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
             alloc.setdefault('memory', '32Gi')
             node = mock.MagicMock()
             node.metadata.labels = {'accelerator': label_value}
+            if label_value in _OCI_SHAPE_BY_GPU:
+                node.metadata.labels['node.kubernetes.io/instance-type'] = (
+                    _OCI_SHAPE_BY_GPU[label_value])
             node.status.allocatable = alloc
             # adjust_resources_to_allocatable() reads capacity as well.
             node.status.capacity = dict(alloc)
@@ -4793,7 +5135,9 @@ class TestKubernetesRdmaMode(unittest.TestCase):
              patch('sky.catalog.get_image_id_from_tag',
                    return_value='img:latest'), \
              patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
-                   return_value=(network_type or N.OCI_ROCE, None)):
+                   return_value=(network_type or N.OCI_ROCE, None)), \
+             patch('sky.provision.kubernetes.oci_nccl._read_configmap',
+                   return_value=None) as self.mock_read_cm:
             mock_ws.return_value.get.return_value = None
             mock_pm.return_value.value = 'portforward'
             k8s_cloud = kubernetes.Kubernetes()
@@ -4897,6 +5241,19 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         deploy_vars = self._deploy_vars()
         self.assertTrue(
             deploy_vars['k8s_env_vars']['NCCL_IB_HCA'].startswith('=mlx5_0'))
+
+    def test_node_shape_selects_the_profile(self):
+        # The GB300 node is labelled BM.GPU.GB300.4, so its Oracle set plus
+        # SkyPilot's GDR level, not the generic RoCE profile.
+        env = self._deploy_vars()['k8s_env_vars']
+        self.assertEqual(env['NCCL_NET_PLUGIN'], 'none')
+        self.assertEqual(env['NCCL_NET_GDR_LEVEL'], 'PHB')
+        self.mock_read_cm.assert_called_once()
+
+    def test_non_oci_never_reads_a_configmap(self):
+        self._deploy_vars(network_type=kubernetes_utils.
+                          KubernetesHighPerformanceNetworkType.COREWEAVE)
+        self.mock_read_cm.assert_not_called()
 
     def test_cpu_only_task_needs_no_virtual_functions(self):
         """OCI RoCE is detected from node labels, with no GPU request implied.
@@ -5171,10 +5528,17 @@ class TestKubernetesSpotLabelContext(unittest.TestCase):
         self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
         for call_args in mock_get_spot_label.call_args_list:
             self.assertEqual(call_args, mock.call('test-context'))
-        # ...and the resolved label must flow into the pod template vars.
-        self.assertEqual(deploy_vars['k8s_spot_label_key'],
-                         'karpenter.sh/capacity-type')
-        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+        # ...and the resolved label must reach the pod: as a node selector
+        # and as the toleration for the taint on those nodes.
+        pod_spec = deploy_vars['pod_fields']['spec']
+        self.assertEqual(pod_spec['nodeSelector']['karpenter.sh/capacity-type'],
+                         'spot')
+        self.assertEqual(pod_spec['tolerations'], [{
+            'key': 'karpenter.sh/capacity-type',
+            'operator': 'Equal',
+            'value': 'spot',
+            'effect': 'NoSchedule',
+        }])
 
 
 if __name__ == '__main__':

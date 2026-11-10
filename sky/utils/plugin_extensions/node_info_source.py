@@ -1,9 +1,8 @@
 """External node info source interface for plugins.
 
-This module provides an extension point that allows plugins to provide
-cached Kubernetes node information. By default, no-op implementations
-are used. Plugins can register their own implementations to provide
-cached node info (e.g., from a node-info-service sidecar).
+This module provides an extension point for an alternative source of
+Kubernetes node information. By default, no-op implementations are used
+and callers query the Kubernetes API directly.
 
 Example usage in a plugin:
     from sky.utils.plugin_extensions import NodeInfoSource
@@ -14,10 +13,18 @@ Example usage in a plugin:
 Example usage in core SkyPilot:
     from sky.utils.plugin_extensions import NodeInfoSource
 
-    # Get cached node info (returns None if not registered or unavailable)
+    # Get node info (returns None if not registered or unavailable)
     node_info = NodeInfoSource.get(context='my-k8s-context')
+
+A plugin can also register a snapshot provider that serves the raw node and
+pod objects behind realtime GPU availability:
+
+    NodeInfoSource.register_snapshot(my_snapshot_provider)
+    snapshot = NodeInfoSource.get_snapshot(
+        context='my-k8s-context', label_keys=['nvidia.com/gpu.product'])
 """
-from typing import Callable, Optional
+import dataclasses
+from typing import Any, Callable, Dict, List, Optional
 
 from sky import models
 from sky import sky_logging
@@ -29,26 +36,56 @@ logger = sky_logging.init_logger(__name__)
 NodeInfoProviderFunc = Callable[[str], Optional[models.KubernetesNodesInfo]]
 
 
+@dataclasses.dataclass
+class KubernetesNodeSnapshot:
+    """Node and pod objects of one Kubernetes context, in Kubernetes API JSON.
+
+    Attributes:
+        nodes: Every node in the context, before any allowed_nodes filtering,
+            with at least metadata.name, spec.unschedulable, spec.taints,
+            status.capacity, status.allocatable, status.addresses, the
+            Ready condition of status.conditions, and the requested label
+            keys of metadata.labels.
+        pods: At least every pod in phase Running or Pending that is bound
+            to a node and requests an extended resource (such as
+            nvidia.com/gpu), with metadata.name, metadata.namespace,
+            status.phase, spec.nodeName and
+            spec.containers[].resources.requests.
+
+    A snapshot is served from a watch cache, so it lags the Kubernetes API
+    server by the watch delay, and a provider may keep serving the last state
+    for a bounded time after the API server becomes unreachable. Providers
+    return None for a context whose cache is not synced or that they do not
+    serve.
+    """
+    nodes: List[Dict[str, Any]]
+    pods: List[Dict[str, Any]]
+
+
+# Function signature:
+# (context: str, label_keys: List[str]) -> Optional[KubernetesNodeSnapshot]
+NodeSnapshotProviderFunc = Callable[[str, List[str]],
+                                    Optional[KubernetesNodeSnapshot]]
+
+
 class NodeInfoSource:
     """Singleton class for external Kubernetes node info source.
 
-    This class provides an extension point for plugins to register their own
-    node info providers (e.g., a node-info-service that caches Kubernetes
-    node information). By default, no provider is registered and get()
-    returns None.
+    This class provides an extension point for registering a node info
+    provider. By default, no provider is registered and get() returns None.
 
     Plugins can register their provider during their install() phase,
     and core SkyPilot code can use the get() method to attempt to retrieve
-    cached node info before falling back to direct Kubernetes API calls.
+    node info from it before falling back to direct Kubernetes API calls.
     """
 
     _provider_func: Optional[NodeInfoProviderFunc] = None
+    _snapshot_provider_func: Optional[NodeSnapshotProviderFunc] = None
 
     @classmethod
     def register(cls, provider: NodeInfoProviderFunc) -> None:
         """Register a node info provider function.
 
-        This allows plugins to provide cached Kubernetes node information.
         Only one provider can be registered at a time.
 
         Args:
@@ -83,4 +120,44 @@ class NodeInfoSource:
             return cls._provider_func(context)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'External node info provider failed: {e}')
+            return None
+
+    @classmethod
+    def register_snapshot(cls, provider: NodeSnapshotProviderFunc) -> None:
+        """Register a node snapshot provider function.
+
+        Only one snapshot provider can be registered at a time.
+
+        Args:
+            provider: Function to get a node snapshot for a context, with
+                at least the given label keys of each node's labels.
+                Signature: (context: str, label_keys: List[str]) ->
+                Optional[KubernetesNodeSnapshot]
+                Returns KubernetesNodeSnapshot if available, None otherwise.
+        """
+        cls._snapshot_provider_func = provider
+        logger.debug('Registered external node snapshot provider')
+
+    @classmethod
+    def get_snapshot(cls, context: str,
+                     label_keys: List[str]) -> Optional[KubernetesNodeSnapshot]:
+        """Get a node snapshot from the registered snapshot provider.
+
+        Args:
+            context: Kubernetes context name to get the snapshot for.
+            label_keys: Node label keys the caller reads; other labels may be
+                left out of the snapshot.
+
+        Returns:
+            KubernetesNodeSnapshot if the provider returns one, None if no
+            snapshot provider is registered, or if it fails or returns None
+            (e.g., context not available).
+        """
+        if cls._snapshot_provider_func is None:
+            return None
+        try:
+            # pylint: disable=not-callable
+            return cls._snapshot_provider_func(context, label_keys)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'External node snapshot provider failed: {e}')
             return None

@@ -76,7 +76,7 @@ cleanup() {
     while true; do
         STATUS_OUTPUT=$(sky status 2>/dev/null || echo "")
         # Check if there are any managed jobs by looking for job ID pattern (number at start of line)
-        if echo "$STATUS_OUTPUT" | grep -qE "^[0-9]+\s+"; then
+        if grep -qE "^[0-9]+\s+" <<< "$STATUS_OUTPUT"; then
             echo "$STATUS_OUTPUT"
             echo "Waiting for termination..."
             sleep 10
@@ -104,6 +104,13 @@ cleanup() {
                 --db-instance-identifier "$RDS_INSTANCE_ID" \
                 --skip-final-snapshot \
                 2>/dev/null || true
+            # The delete is asynchronous; the instance's subnet and parameter
+            # groups can't be deleted until it is gone, or they leak.
+            echo "Waiting for RDS instance $RDS_INSTANCE_ID to be deleted..."
+            aws rds wait db-instance-deleted \
+                --region "$RDS_REGION" \
+                --db-instance-identifier "$RDS_INSTANCE_ID" ||
+                echo "WARNING: RDS instance $RDS_INSTANCE_ID is not deleted yet; its subnet and parameter groups may leak"
         fi
 
         # Cleanup DB subnet group
@@ -111,8 +118,8 @@ cleanup() {
             echo "Cleaning up DB subnet group: $DB_SUBNET_GROUP_NAME"
             aws rds delete-db-subnet-group \
                 --region "$RDS_REGION" \
-                --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" \
-                2>/dev/null || true
+                --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" ||
+                echo "WARNING: could not delete DB subnet group $DB_SUBNET_GROUP_NAME"
         fi
 
         # Cleanup DB parameter group
@@ -121,8 +128,8 @@ cleanup() {
             echo "Cleaning up DB parameter group: $PARAM_GROUP_NAME"
             aws rds delete-db-parameter-group \
                 --region "$RDS_REGION" \
-                --db-parameter-group-name "$PARAM_GROUP_NAME" \
-                2>/dev/null || true
+                --db-parameter-group-name "$PARAM_GROUP_NAME" ||
+                echo "WARNING: could not delete DB parameter group $PARAM_GROUP_NAME"
         fi
     fi
 
@@ -251,7 +258,7 @@ STRIPPED_STATUS=$(echo "$STATUS_OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
 # 1. "In progress tasks: 12501 PENDING" (from format_job_table header)
 # 2. "12501 managed job" (from sky status hints)
 # 3. "12501" followed by a status keyword (from individual job rows)
-if ! echo "$STRIPPED_STATUS" | grep -qE "12501.*(RUNNING|STARTING|PENDING|managed job|in progress)"; then
+if ! grep -qE "12501.*(RUNNING|STARTING|PENDING|managed job|in progress)" <<< "$STRIPPED_STATUS"; then
     echo "ERROR: sky status output does not indicate 12501 managed jobs are present"
     echo "Stripped output (last 30 lines):"
     echo "$STRIPPED_STATUS" | tail -n 30
@@ -266,8 +273,18 @@ fi
 echo "✓ sky status test passed (${duration}s)"
 
 # Step 6: Test sky jobs queue performance
+#
+# SLA: sky jobs queue with 12,501 in-progress managed jobs must finish in
+# SKY_JOBS_QUEUE_SLA_SECONDS. Survey of the same-config nightly builds since
+# 2026-09-01 (13060..13754) measured the non-gRPC lanes (61 runs) as:
+#   min 8s | median 10s | max 11s
+# 62% of runs landed at or above the previous 10s ceiling, with the median
+# exactly at the threshold, so the check failed on unchanged code. The gRPC
+# lane runs in 4-6s. 15s covers every observed duration with ~35% headroom
+# and still catches a regression of a few seconds on the slower lanes.
+SKY_JOBS_QUEUE_SLA_SECONDS=15
 echo "Step 6: Testing sky jobs queue performance..."
-echo "Expected: Last job ID >= 12452 and finish within 10 seconds"
+echo "Expected: Last job ID >= 12452 and finish within ${SKY_JOBS_QUEUE_SLA_SECONDS} seconds"
 time_start=$(date +%s)
 QUEUE_OUTPUT=$(timeout 60 sky jobs queue 2>&1 || true)
 time_end=$(date +%s)
@@ -285,8 +302,8 @@ if [ "$LAST_JOB_ID" -lt 12452 ]; then
     exit 1
 fi
 
-if [ $duration -gt 10 ]; then
-    echo "ERROR: sky jobs queue took ${duration}s, expected <= 10s"
+if [ $duration -gt $SKY_JOBS_QUEUE_SLA_SECONDS ]; then
+    echo "ERROR: sky jobs queue took ${duration}s, expected <= ${SKY_JOBS_QUEUE_SLA_SECONDS}s"
     exit 1
 fi
 
@@ -325,7 +342,7 @@ MINIMAL_CLUSTER_NAME="scale-test-min-${UNIQUE_SUFFIX}"
 sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'"
 # Get logs and verify the echo content appears
 LOGS_OUTPUT=$(sky logs "$MINIMAL_CLUSTER_NAME" --no-follow 2>&1)
-if ! echo "$LOGS_OUTPUT" | grep -q "minimal test cluster"; then
+if ! grep -q "minimal test cluster" <<< "$LOGS_OUTPUT"; then
     echo "ERROR: Minimal sky launch logs do not contain expected echo content 'minimal test cluster'"
     echo "Logs output: $LOGS_OUTPUT"
     exit 1
@@ -366,7 +383,7 @@ API_ENDPOINT="${SKYPILOT_API_SERVER_URL:-}"
 if [ -z "$API_ENDPOINT" ]; then
     # Try to get from sky api info command
     API_INFO=$(sky api info 2>/dev/null || echo "")
-    if echo "$API_INFO" | grep -q "endpoint"; then
+    if grep -q "endpoint" <<< "$API_INFO"; then
         API_ENDPOINT=$(echo "$API_INFO" | grep -i "endpoint" | head -n1 | sed -E 's/.*[Ee]ndpoint[^:]*:\s*//' | tr -d '[:space:]')
     fi
 fi

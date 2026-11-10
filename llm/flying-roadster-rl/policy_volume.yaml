@@ -1,0 +1,10 @@
+# The volume train_eval.yaml's trainer and inference tasks share: the trainer writes each step's
+# LoRA adapter here and the inference task's vLLM loads it from the same path.
+#   sky volumes apply policy_volume.yaml
+name: roadster-policy
+type: k8s-pvc
+infra: k8s
+size: 20Gi
+config:
+  access_mode: ReadWriteMany
+  # storage_class_name: <your cluster's ReadWriteMany class, e.g. an NFS or shared-filesystem class>

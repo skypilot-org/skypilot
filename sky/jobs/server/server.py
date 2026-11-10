@@ -43,6 +43,12 @@ async def launch(request: fastapi.Request,
     # the short executor instead - then jobs.launch will not be blocked by
     # sky.launch.
     consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    if jobs_launch_body.depends_on and not consolidation_mode:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=('depends_on requires the API server to run managed jobs '
+                    'in consolidation mode. This server uses a separate jobs '
+                    'controller.'))
     schedule_type = (api_requests.ScheduleType.SHORT
                      if consolidation_mode else api_requests.ScheduleType.LONG)
     await executor.schedule_request_async(
@@ -176,8 +182,8 @@ async def download_logs(
     jobs_download_logs_body: payloads.JobsDownloadLogsBody = fastapi.Depends(
         role_filter.force_viewer_jobs_download_logs_body),
 ) -> None:
-    user_hash = download_utils.download_user_id(request,
-                                                jobs_download_logs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             jobs_download_logs_body.user_hash)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -273,7 +279,8 @@ async def pool_download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.JobsPoolDownloadLogsBody,
 ) -> None:
-    user_hash = download_utils.download_user_id(request, download_logs_body)
+    user_hash = download_utils.owner_user_id(request,
+                                             download_logs_body.user_hash)
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
         pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /

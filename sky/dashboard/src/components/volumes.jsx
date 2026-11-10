@@ -84,9 +84,10 @@ const VOLUME_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
 ];
 
-const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label }) => ({
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label, multi }) => ({
   label,
   value: key,
+  multi: multi ?? false,
 }));
 
 // Properties whose values are alternatives rather than extra conditions: two
@@ -290,7 +291,9 @@ export function Volumes() {
               </div>
             )}
             {!loading && lastFetchedTime && (
-              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              <div className="max-lg:hidden lg:flex lg:items-center">
+                <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+              </div>
             )}
             <button
               onClick={handleRefresh}
@@ -616,10 +619,32 @@ export function VolumesTable({
     );
   }, [data, filters]);
 
+  const pluginColumns = useTableColumns('volumes');
+
+  // A plugin column whose value is not a field on the volume sorts by the
+  // value it computes instead. Matched by the clicked column, not by key, so a
+  // plugin reusing a built-in key does not take over the built-in column.
+  const sortColumn = sortConfig.columnId
+    ? pluginColumns.find((col) => col.id === sortConfig.columnId)
+    : undefined;
+  const sortAccessor = sortColumn?.header.sortValue || sortConfig.key;
+  const subscribeSortValue = sortColumn?.header.sortValueSubscribe;
+
+  // The values a plugin's sortValue reads can change without the volumes
+  // changing; re-sort when the plugin says so.
+  const [sortValueVersion, setSortValueVersion] = useState(0);
+  useEffect(() => {
+    if (!subscribeSortValue) return undefined;
+    return subscribeSortValue(() => setSortValueVersion((v) => v + 1));
+  }, [subscribeSortValue]);
+
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
-    return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [filteredData, sortConfig]);
+    return sortData(filteredData, sortAccessor, sortConfig.direction);
+    // sortValueVersion is not read here; it is a dependency so the rows are
+    // re-sorted when the plugin's values change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredData, sortAccessor, sortConfig.direction, sortValueVersion]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -658,16 +683,21 @@ export function VolumesTable({
     setCurrentPage(1);
   }, [data.length, filters]);
 
-  const requestSort = (key) => {
+  // columnId names the plugin column that was clicked; built-in headers pass
+  // none.
+  const isSortedBy = (key, columnId) =>
+    sortConfig.key === key && sortConfig.columnId === columnId;
+
+  const requestSort = (key, columnId) => {
     let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+    if (isSortedBy(key, columnId) && sortConfig.direction === 'ascending') {
       direction = 'descending';
     }
-    setSortConfig({ key, direction });
+    setSortConfig({ key, columnId, direction });
   };
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
+  const getSortDirection = (key, columnId) => {
+    if (isSortedBy(key, columnId)) {
       return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
     }
     return '';
@@ -734,8 +764,6 @@ export function VolumesTable({
       return 'Invalid Date';
     }
   };
-
-  const pluginColumns = useTableColumns('volumes');
 
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
@@ -899,12 +927,14 @@ export function VolumesTable({
           className={className}
           onClick={
             col.header.sortKey
-              ? () => requestSort(col.header.sortKey)
+              ? () => requestSort(col.header.sortKey, col.id)
               : undefined
           }
         >
           {col.header.label}
-          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          {col.header.sortKey
+            ? getSortDirection(col.header.sortKey, col.id)
+            : ''}
         </TableHead>
       );
     },
@@ -923,24 +953,45 @@ export function VolumesTable({
   );
   const totalColSpan = visibleColumns.length;
 
+  // Default filter input and active-filter chips.
+  const filterInput = (
+    <FilterDropdown
+      propertyList={PROPERTY_OPTIONS}
+      valueList={valueList}
+      setFilters={setFilters}
+      addFilter={addFilter}
+      placeholder="Filter volumes"
+    />
+  );
+  const filterChips = <Filters filters={filters} setFilters={setFilters} />;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <div className="w-full sm:w-auto max-w-xl">
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={valueList}
-            setFilters={setFilters}
-            addFilter={addFilter}
-            placeholder="Filter volumes"
+          <PluginSlot
+            name="volumes.filters.input"
+            context={{
+              filters,
+              setFilters,
+              addFilter,
+              propertyList: PROPERTY_OPTIONS,
+              valueList,
+              placeholder: 'Filter volumes',
+              defaultContent: filterInput,
+            }}
+            fallback={filterInput}
           />
         </div>
       </div>
-      {filters.length > 0 && (
-        <div className="mb-2">
-          <Filters filters={filters} setFilters={setFilters} />
-        </div>
-      )}
+      <PluginSlot
+        name="volumes.filters.active"
+        context={{ filters, setFilters, defaultContent: filterChips }}
+        wrapperClassName="mb-2"
+        fallback={
+          filters.length > 0 ? <div className="mb-2">{filterChips}</div> : null
+        }
+      />
 
       <Card>
         <div className="overflow-x-auto rounded-lg">

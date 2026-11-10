@@ -1,0 +1,9 @@
+diff --git a/sky/dashboard/src/components/elements/sidebar.jsx b/sky/dashboard/src/components/elements/sidebar.jsx
+index b51abb4b8..d05368763 100755
+--- a/sky/dashboard/src/components/elements/sidebar.jsx
++++ b/sky/dashboard/src/components/elements/sidebar.jsx
+@@ -601,3 +601,3 @@ export function TopBar() {
+               <Link
+-                href="/users"
++                href="/workspaces"
+                 className={getLinkClasses('/users')}

@@ -15,6 +15,13 @@ from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core
 
 
+@pytest.fixture(autouse=True)
+def _caller_reads_every_workspace(monkeypatch):
+    # Unscoped unless a test says otherwise; don't depend on server env.
+    monkeypatch.setattr(core.workspaces_core, 'get_readable_workspace_names',
+                        lambda: None)
+
+
 def _job_event(reason, status, ts):
     """Build a job-event dict shaped like managed_job_state.get_job_events."""
     return {
@@ -100,10 +107,12 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     # job-level/DAG name 'my-pipeline').
     assert captured['name'] == 'my-task-1'
     # Both the milestone sequence and the finer-grained launch progress are
-    # requested.
+    # requested, plus the launch milestones -- the admission boundary is only
+    # visible in that last one.
     assert (set(captured['event_types']) == {
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        global_user_state.ClusterEventType.LAUNCH_MILESTONE,
     })
     # Newest first, and the window is exactly the most recent three rows of
     # the merged list -- so the older 'Job is starting' drops out.
@@ -506,3 +515,52 @@ def test_a_runner_without_events_falls_back_to_the_default(monkeypatch):
     monkeypatch.setattr(managed_job_runner, '_current', _OldRunner())
     assert core.get_job_events(job_id=1,
                                include_cluster_events=False) == job_events
+
+
+class TestWorkspaceAccess:
+    """A caller reads the events of jobs in workspaces it can read only."""
+
+    @pytest.fixture
+    def job_in_team_b(self, monkeypatch):
+        job_events = [
+            _job_event('Job has started',
+                       managed_job_state.ManagedJobStatus.RUNNING, 300)
+        ]
+        monkeypatch.setattr(managed_job_state, 'get_job_events',
+                            lambda **kwargs: list(job_events))
+        monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [_task()])
+        monkeypatch.setattr(managed_job_state, 'get_workspace',
+                            lambda job_id: 'team-b')
+        return job_events
+
+    def _readable(self, monkeypatch, names):
+        monkeypatch.setattr(core.workspaces_core,
+                            'get_readable_workspace_names', lambda: names)
+
+    def test_unreadable_job_answers_as_missing(self, monkeypatch,
+                                               job_in_team_b):
+        self._readable(monkeypatch, {'default'})
+        assert core.get_job_events(job_id=1) == []
+        with pytest.raises(ValueError, match='Managed job 1 not found'):
+            core.get_job_events(job_id=1, task='my-task')
+
+    def test_unreadable_job_never_reaches_the_runner(self, monkeypatch,
+                                                     job_in_team_b):
+        self._readable(monkeypatch, {'default'})
+
+        class _Runner:
+
+            def events(self, **kwargs):
+                raise AssertionError('runner must not be asked')
+
+        monkeypatch.setattr(managed_job_runner, '_current', _Runner())
+        assert core.get_job_events(job_id=1) == []
+
+    @pytest.mark.parametrize('readable', [{'default', 'team-b'}, None])
+    def test_readable_job_returns_its_events(self, monkeypatch, job_in_team_b,
+                                             readable):
+        # None means the caller can read every workspace (e.g. an admin).
+        self._readable(monkeypatch, readable)
+        assert core.get_job_events(
+            job_id=1, include_cluster_events=False) == job_in_team_b

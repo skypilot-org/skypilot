@@ -11,6 +11,7 @@ from sky import global_user_state
 from sky import models
 from sky import provision
 from sky import sky_logging
+from sky import skypilot_config
 from sky.schemas.api import responses
 from sky.server import plugin_hooks
 from sky.utils import common_utils
@@ -352,6 +353,8 @@ def volume_list(
                 'user_hash': volume.get('user_hash'),
                 'user_name': user_map.get(volume.get('user_hash'), ''),
                 'workspace': volume.get('workspace'),
+                'workspace_name': skypilot_config.get_workspace_name(
+                    volume.get('workspace')),
                 'last_attached_at': volume.get('last_attached_at'),
                 'last_use': volume.get('last_use'),
                 'status': status.value if status is not None else '',

@@ -33,6 +33,11 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  GitAuthor,
+  getRecipeOwnerLabel,
+  isGitSourced,
+} from '@/components/elements/RecipeSource';
 import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
@@ -182,14 +187,18 @@ function RecipeCard({ recipe, onPin }) {
               </p>
 
               {/* Authored by */}
-              <div className="text-sm text-gray-500 truncate">
+              <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
                 Authored by{' '}
-                <UserName name={recipe.user_name || recipe.user_id} />
+                {isGitSourced(recipe) ? (
+                  <GitAuthor />
+                ) : (
+                  <UserName name={recipe.user_name || recipe.user_id} />
+                )}
               </div>
 
               {/* Last updated info - always render line for consistent height */}
               <div
-                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+                className={`text-sm text-gray-500 truncate ${!((recipe.is_editable || isGitSourced(recipe)) && recipe.user_name !== 'local') ? 'invisible' : ''}`}
               >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
@@ -282,8 +291,8 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
     recipes.forEach((r) => {
       if (r.name) names.add(r.name);
       if (r.recipe_type) types.add(r.recipe_type);
-      if (r.user_name) owners.add(r.user_name);
-      else if (r.user_id) owners.add(r.user_id);
+      const owner = getRecipeOwnerLabel(r);
+      if (owner) owners.add(owner);
     });
 
     return {
@@ -322,7 +331,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
           if (propertyKey === 'name') itemValue = item.name || '';
           else if (propertyKey === 'type') itemValue = item.recipe_type || '';
           else if (propertyKey === 'owner')
-            itemValue = item.user_name || item.user_id || '';
+            itemValue = getRecipeOwnerLabel(item);
 
           if (!itemValue.toLowerCase().includes(filter.value.toLowerCase())) {
             return false;
@@ -332,6 +341,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
       });
     }
 
+    // The owner column shows getRecipeOwnerLabel, so sort by that too.
+    if (sortConfig.key === 'user_name') {
+      return sortData(
+        result.map((r) => ({ ...r, owner_label: getRecipeOwnerLabel(r) })),
+        'owner_label',
+        sortConfig.direction
+      );
+    }
     return sortData(result, sortConfig.key, sortConfig.direction);
   }, [recipes, filters, sortConfig]);
 
@@ -456,12 +473,14 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Link
-                          href={`/recipes/${slug}`}
-                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                        >
-                          {recipe.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/recipes/${slug}`}
+                            className="text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            {recipe.name}
+                          </Link>
+                        </div>
                       </TableCell>
                       <TableCell
                         className="text-gray-600 max-w-[400px]"
@@ -470,7 +489,11 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                         <span className="cursor-default">{truncatedDesc}</span>
                       </TableCell>
                       <TableCell className="text-gray-600">
-                        <UserName name={recipe.user_name || recipe.user_id} />
+                        {isGitSourced(recipe) ? (
+                          <GitAuthor />
+                        ) : (
+                          <UserName name={recipe.user_name || recipe.user_id} />
+                        )}
                       </TableCell>
                       <TableCell className="text-gray-600">
                         {recipe.updated_by_name || recipe.user_name ? (
@@ -536,7 +559,9 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                             }`}
                             title={
                               recipe.is_editable === false
-                                ? 'Default recipes cannot be deleted'
+                                ? isGitSourced(recipe)
+                                  ? undefined
+                                  : 'Default recipes cannot be deleted'
                                 : 'Delete recipe'
                             }
                           >

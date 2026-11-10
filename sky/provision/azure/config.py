@@ -269,7 +269,12 @@ def _resolve_custom_managed_identity(remote_identity: Optional[str],
     if not isinstance(remote_identity, str) or not remote_identity:
         return None
 
-    enum_values = {opt.value for opt in schemas.RemoteIdentityOptions}
+    # NONE is Kubernetes-only; on Azure it stays an identity name, as before.
+    enum_values = {
+        opt.value
+        for opt in schemas.RemoteIdentityOptions
+        if opt is not schemas.RemoteIdentityOptions.NONE
+    }
     if remote_identity in enum_values:
         return None
 
