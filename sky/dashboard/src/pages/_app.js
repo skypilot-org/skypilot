@@ -97,15 +97,17 @@ function App({ Component, pageProps }) {
           plugin bundles the gate below is waiting on. */}
       <PluginProvider>
         {pluginsSettled ? (
-          <PluginWrapperSlot name="app.providers">
-            <VersionProvider>
-              <TourProvider>
+          // A wrapper can register after the bootstrap timeout. Keep the tour
+          // above it so mounting that wrapper cannot discard an active tour.
+          <TourProvider>
+            <PluginWrapperSlot name="app.providers">
+              <VersionProvider>
                 <Layout highlighted={pageProps.highlighted}>
                   <Component {...pageProps} />
                 </Layout>
-              </TourProvider>
-            </VersionProvider>
-          </PluginWrapperSlot>
+              </VersionProvider>
+            </PluginWrapperSlot>
+          </TourProvider>
         ) : (
           <div className="min-h-screen bg-gray-50" />
         )}
