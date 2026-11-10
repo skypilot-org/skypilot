@@ -1,4 +1,5 @@
 """Tests for multi-host GKE TPU slices on Kubernetes."""
+import pickle
 from types import SimpleNamespace
 from unittest import mock
 
@@ -6,6 +7,7 @@ import pytest
 
 from sky import clouds
 from sky import resources as resources_lib
+from sky.backends import cloud_vm_ray_backend
 from sky.backends import task_codegen
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -100,6 +102,55 @@ def test_multi_host_and_single_host_clusters_do_not_match():
     single = resources_lib.Resources(infra='k8s/ctx', accelerators='tpu-v6e-8')
     assert not single.less_demanding_than(multi)
     assert not multi.less_demanding_than(single)
+
+
+def test_cpu_only_request_fits_multi_host_cluster():
+    multi = resources_lib.Resources(infra='k8s/ctx',
+                                    accelerators='tpu-v6e-8',
+                                    enforce_multi_host=True)
+    cpu_only = resources_lib.Resources(infra='k8s/ctx')
+    assert cpu_only.less_demanding_than(multi)
+
+
+def test_enforce_multi_host_pickle_round_trip():
+    r = resources_lib.Resources(accelerators='tpu-v6e-8',
+                                enforce_multi_host=True)
+    assert pickle.loads(pickle.dumps(r)).enforce_multi_host is True
+
+
+def test_unpickle_resources_from_before_enforce_multi_host():
+    # Resources pickled by a version without the field have no
+    # _enforce_multi_host attribute.
+    state = resources_lib.Resources(accelerators='tpu-v6e-8').__getstate__()
+    state = dict(state)
+    state.pop('_enforce_multi_host', None)
+    state['_version'] = 36
+    r = resources_lib.Resources.__new__(resources_lib.Resources)
+    r.__setstate__(state)
+    assert r.enforce_multi_host is None
+
+
+def _multi_host_handle(launched_nodes):
+    handle = mock.MagicMock()
+    handle.launched_nodes = launched_nodes
+    handle.launched_resources = resources_lib.Resources(
+        infra='k8s/ctx', accelerators='tpu-v6e-8', enforce_multi_host=True)
+    return handle
+
+
+@pytest.mark.parametrize('slices', [2, 3])
+def test_resize_multi_host_counts_pods_per_slice(slices):
+    # Two 2-VM slices are four cluster nodes. Resizing to two or three slices
+    # is not a scale-down, so no worker is terminated.
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.run_on_head = mock.MagicMock()
+    task = mock.MagicMock()
+    task.num_nodes = slices
+    with mock.patch.object(cloud_vm_ray_backend.provision_lib,
+                           'terminate_instances') as terminate:
+        backend._handle_resize_pre_provision(_multi_host_handle(4), task, 'c')
+    backend.run_on_head.assert_not_called()
+    terminate.assert_not_called()
 
 
 @pytest.mark.parametrize(

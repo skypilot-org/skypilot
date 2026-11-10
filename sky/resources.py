@@ -2100,8 +2100,10 @@ class Resources:
             # self.zone <= other.zone
 
         # A multi-host slice and a single VM of the same chip count are
-        # different hardware.
-        if bool(self.enforce_multi_host) != bool(other.enforce_multi_host):
+        # different hardware. The flag only matters for a request that asks
+        # for accelerators: a CPU-only request fits either cluster.
+        if (self.accelerators is not None and bool(self.enforce_multi_host) !=
+                bool(other.enforce_multi_host)):
             return False
 
         if self.image_id is not None:
