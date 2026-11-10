@@ -1,4 +1,5 @@
 """Unit tests for subprocess_utils.py."""
+import contextvars
 import logging
 import multiprocessing
 import signal
@@ -513,3 +514,19 @@ class TestKillChildrenProcessesTolerates(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+
+
+_CALLER_VAR: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'caller_var', default='unset')
+
+
+def test_run_in_parallel_runs_in_caller_context():
+    """Each call sees the caller's context variables."""
+    token = _CALLER_VAR.set('caller')
+    try:
+        values = subprocess_utils.run_in_parallel(lambda _: _CALLER_VAR.get(),
+                                                  list(range(8)),
+                                                  num_threads=4)
+    finally:
+        _CALLER_VAR.reset(token)
+    assert values == ['caller'] * 8

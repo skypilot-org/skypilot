@@ -10,6 +10,7 @@ from typing import Dict, Generator, List, Optional, Set, Tuple
 
 import casbin
 from casbin import util as casbin_util
+import sqlalchemy
 import sqlalchemy_adapter
 
 from sky import global_user_state
@@ -151,6 +152,115 @@ def _system_role(user_id: str) -> Optional[str]:
 
 _enforcer_instance: Optional['PermissionService'] = None
 
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model.conf')
+
+# Triggers on casbin_rule that bump rbac_policy_version on every write
+# (global_user_state migration 027).
+_POLICY_VERSION_PG_TRIGGER = 'casbin_rule_bump_policy_version'
+_POLICY_VERSION_SQLITE_TRIGGERS = (
+    'casbin_rule_bump_policy_version_insert',
+    'casbin_rule_bump_policy_version_update',
+    'casbin_rule_bump_policy_version_delete',
+)
+# Health is read with the version: a disabled trigger is caught on next call.
+_POLICY_VERSION_PG_QUERY = sqlalchemy.text(
+    'SELECT v.version, t.tgenabled FROM rbac_policy_version v '
+    'LEFT JOIN pg_trigger t ON t.tgrelid = to_regclass(\'casbin_rule\') '
+    'AND t.tgname = :trigger WHERE v.id = 1').bindparams(
+        trigger=_POLICY_VERSION_PG_TRIGGER)
+_POLICY_VERSION_SQLITE_QUERY = sqlalchemy.text(
+    'SELECT version FROM rbac_policy_version WHERE id = 1')
+
+
+class _PolicyVersion:
+    """The stored policy version an enforcer last loaded, and how to read it.
+
+    Shared by every PermissionService over one enforcer.
+    """
+
+    def __init__(self, enforcer: casbin.SyncedEnforcer,
+                 adapter: sqlalchemy_adapter.Adapter,
+                 engine: sqlalchemy.engine.Engine):
+        self.enforcer = enforcer
+        self.adapter = adapter
+        self.engine = engine
+        # One stale reader builds while the others wait for its result,
+        # instead of each building a copy of the policy.
+        self.reload_lock = threading.Lock()
+        self.loaded: Optional[int] = None
+        self._is_postgres = (
+            engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value)
+        self._is_sqlite = (
+            engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value)
+        self._trigger_ok = True
+        # SQLite has no runtime toggle for triggers, so checking once is enough.
+        self._sqlite_triggers_ok = (self._is_sqlite and
+                                    self._sqlite_triggers_present())
+
+    def _sqlite_triggers_present(self) -> bool:
+        try:
+            with self.engine.connect() as conn:
+                names = conn.execute(
+                    sqlalchemy.text('SELECT name FROM sqlite_master '
+                                    'WHERE type = \'trigger\'')).scalars()
+                return set(_POLICY_VERSION_SQLITE_TRIGGERS) <= set(names)
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def read(self) -> Optional[int]:
+        """The stored version, or None when it cannot be trusted."""
+        if not self._is_postgres and not self._is_sqlite:
+            return None
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(_POLICY_VERSION_PG_QUERY if self._is_postgres
+                                   else _POLICY_VERSION_SQLITE_QUERY).first()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the policy version: {e}')
+            return None
+        if row is None:
+            return None
+        # 'O' and 'A' fire in normal sessions; 'D' is disabled and 'R' fires
+        # only under session_replication_role=replica.
+        trigger_ok = (row[1] in ('O', 'A')
+                      if self._is_postgres else self._sqlite_triggers_ok)
+        if not trigger_ok and self._trigger_ok:
+            logger.warning('The casbin_rule version trigger is missing or '
+                           'disabled; reloading the policy on every call.')
+        self._trigger_ok = trigger_ok
+        return row[0] if trigger_ok else None
+
+    def is_loaded(self, version: Optional[int]) -> bool:
+        return version is not None and version == self.loaded
+
+
+def _swap_enforcer(synced: casbin.SyncedEnforcer, fresh: casbin.Enforcer,
+                   state: _PolicyVersion, version: Optional[int]) -> None:
+    """Make `synced` serve `fresh`, built from the policy at `version`.
+
+    Under the write lock, readers wait for one version read, plus a full load
+    in place if the version moved during the build or cannot be read. casbin
+    has no public API for this, so if its private names change, reload in
+    place as before.
+    """
+    # pylint: disable=protected-access
+    if not (isinstance(getattr(synced, '_e', None), casbin.Enforcer) and
+            hasattr(synced, '_wl')):
+        current = state.read()
+        synced.load_policy()
+        state.loaded = current
+        return
+    with synced._wl:
+        # Local writes commit under this lock, so one that landed on the old
+        # model during the build has moved the version; then load in place.
+        current = state.read()
+        if current is not None and current == version:
+            synced._e = fresh
+        else:
+            synced._e.load_policy()
+        state.loaded = current
+
+
 # KV cache constants for workspace permission checks.
 _WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
 _WORKSPACE_PERM_CACHE_KEY_SEP = ':'
@@ -160,6 +270,10 @@ _WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
+
+    # None when the enforcer was set up elsewhere: reload unconditionally.
+    # A class default, so instances built without __init__ still have it.
+    _policy_version: Optional[_PolicyVersion] = None
 
     def __init__(self):
         self.enforcer: Optional[casbin.SyncedEnforcer] = None
@@ -218,16 +332,15 @@ class PermissionService:
                         sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(
                     engine, db_class=sqlalchemy_adapter.CasbinRule)
-                model_path = os.path.join(os.path.dirname(__file__),
-                                          'model.conf')
                 # Use SyncedEnforcer for thread safety. It uses a
                 # read-write lock internally: concurrent reads (enforce,
                 # get_roles_for_user) take a shared read lock, while
                 # writes (load_policy, add_policy) take an exclusive
                 # write lock. This prevents the RuntimeError from
                 # concurrent iteration/mutation of RoleManager.all_roles.
-                enforcer = casbin.SyncedEnforcer(model_path, adapter)
+                enforcer = casbin.SyncedEnforcer(_MODEL_PATH, adapter)
                 self.enforcer = enforcer
+                self._policy_version = _PolicyVersion(enforcer, adapter, engine)
                 # Only set the enforcer instance once the enforcer
                 # is successfully initialized, if we change it and then fail
                 # we will set it to None and all subsequent calls will fail.
@@ -239,6 +352,7 @@ class PermissionService:
             else:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
+                self._policy_version = _enforcer_instance._policy_version  # pylint: disable=protected-access
             # The viewer allowlist is in-process state (not stored in
             # casbin). It MUST be populated in every process that handles
             # requests.
@@ -1111,9 +1225,30 @@ class PermissionService:
         return False
 
     def _load_policy_no_lock(self):
-        """Load policy from storage."""
+        """Load policy from storage, unless its stored version is unchanged."""
         enforcer = self._ensure_enforcer()
-        enforcer.load_policy()
+        state = self._policy_version
+        if state is None or state.enforcer is not enforcer:
+            enforcer.load_policy()
+            return
+        if state.is_loaded(state.read()):
+            return
+        with state.reload_lock:
+            # Read before loading, so a write that lands during the load moves
+            # the version past it and the swap below reloads in place.
+            version = state.read()
+            if state.is_loaded(version):
+                return
+            if version is None:
+                # Nothing to compare a build against: reload in place.
+                enforcer.load_policy()
+                state.loaded = None
+                return
+            # Built without the enforcer's lock, so readers keep the old model
+            # for the whole load instead of waiting for it.
+            _swap_enforcer(enforcer, casbin.Enforcer(_MODEL_PATH,
+                                                     state.adapter), state,
+                           version)
 
     def load_policy(self):
         """Load policy from storage with lock."""

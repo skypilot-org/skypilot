@@ -35,6 +35,27 @@ def _isolate_context():
 
 
 @pytest.fixture(autouse=True)
+def _restore_tracebacklimit():
+    """Restore ``sys.tracebacklimit`` after every unit test.
+
+    ``ux_utils.print_exception_no_traceback()`` sets it to 0 and, by design,
+    leaves it at 0 when the exception escapes, so the CLI prints the error
+    without a traceback. In the test process that value outlives the test:
+    every later test on the same worker gets frame-less tracebacks, and
+    ``traceback.format_exc()`` drops its ``Traceback (most recent call
+    last):`` header. Tests that assert on a formatted traceback then fail or
+    pass depending on how ``--dist worksteal`` ordered the suite.
+    """
+    had_limit = hasattr(sys, 'tracebacklimit')
+    original = getattr(sys, 'tracebacklimit', None)
+    yield
+    if had_limit:
+        sys.tracebacklimit = original
+    elif hasattr(sys, 'tracebacklimit'):
+        del sys.tracebacklimit
+
+
+@pytest.fixture(autouse=True)
 def _clear_sa_token_cache():
     """Drop service-account auth rows cached by an earlier test.
 

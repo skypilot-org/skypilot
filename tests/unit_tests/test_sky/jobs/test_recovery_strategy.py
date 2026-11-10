@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import inspect
+import pickle
 import types
 from unittest import mock
 
@@ -166,9 +167,22 @@ async def test_await_launch_request_tolerates_unknown_request(monkeypatch):
     assert await executor._await_launch_request('req-1', stream_task) is None
 
 
+def _make_wait_executor(live_requests=None):
+    """An executor whose parked polls see `live_requests` for the cluster.
+
+    By default the cluster has no live launch request listed, so each poll
+    falls back to looking the parked request up by id (sdk.api_status).
+    """
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._list_live_launch_requests = mock.AsyncMock(
+        return_value=[] if live_requests is None else live_requests)
+    return executor
+
+
 @pytest.mark.asyncio
 async def test_wait_for_parked_request_returns_on_resume(monkeypatch):
-    executor = _make_bare_executor()
+    executor = _make_wait_executor()
     api_status = mock.MagicMock(side_effect=[
         [_request_payload('WAITING')],
         [_request_payload('RUNNING')],
@@ -184,7 +198,7 @@ async def test_wait_for_parked_request_returns_on_resume(monkeypatch):
 @pytest.mark.asyncio
 async def test_wait_for_parked_request_relaunches_when_request_gone(
         monkeypatch):
-    executor = _make_bare_executor()
+    executor = _make_wait_executor()
     executor._cancel_launch_request = mock.AsyncMock()
     api_status = mock.MagicMock(return_value=[])
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
@@ -202,7 +216,7 @@ async def test_wait_for_parked_request_relaunches_when_request_gone(
 
 @pytest.mark.asyncio
 async def test_wait_for_parked_request_tolerates_transient_missing(monkeypatch):
-    executor = _make_bare_executor()
+    executor = _make_wait_executor()
     api_status = mock.MagicMock(side_effect=[
         [],
         [_request_payload('WAITING')],
@@ -222,7 +236,7 @@ async def test_wait_for_parked_request_raises_on_persistent_poll_errors(
     launch: the old (still parked) request may resume once the server
     becomes reachable again, so treating "unreachable" the same as
     "vanished" could double-launch on the same cluster (fix 5)."""
-    executor = _make_bare_executor()
+    executor = _make_wait_executor()
     executor._cancel_launch_request = mock.AsyncMock()
     api_status = mock.MagicMock(side_effect=RuntimeError('server down'))
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
@@ -260,6 +274,10 @@ def _make_launch_executor():
     executor._cleanup_cluster = mock.MagicMock()
     executor._wait_until_job_starts_on_cluster = mock.AsyncMock(
         return_value=(123.45, None))
+    # No launch request left live by a previous controller, unless a test
+    # says otherwise.
+    executor._find_live_launch_request = mock.AsyncMock(return_value=None)
+    executor._list_live_launch_requests = mock.AsyncMock(return_value=[])
     # Each (fresh) launch attempt gets a stream future; capture them so tests
     # can assert the same future is carried across a park.
     executor._stream_futures = []
@@ -294,6 +312,12 @@ def _patch_launch_environment(monkeypatch):
                         'get_runtime_user_restarts_async',
                         mock.AsyncMock(return_value=0))
     monkeypatch.setattr(recovery_strategy.sdk, 'api_start', mock.MagicMock())
+    # No request is known to the server unless a test says otherwise, and
+    # retried lookups do not wait.
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status',
+                        mock.MagicMock(return_value=[]))
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
     sdk_launch = mock.MagicMock(return_value='req-123')
     monkeypatch.setattr(recovery_strategy.sdk, 'launch', sdk_launch)
     monkeypatch.setattr(recovery_strategy.global_user_state,
@@ -349,6 +373,52 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_api_start_inside_api_server(monkeypatch):
+    """A consolidation-mode controller (IS_SKYPILOT_SERVER set) must not call
+    sdk.api_start.
+
+    The controller runs as a child of the API server and inherits
+    IS_SKYPILOT_SERVER, so the server is its own parent -- there is nothing to
+    start. Calling sdk.api_start here is at best redundant and, on a transient
+    healthz blip under load, actively destructive:
+    check_server_healthy_or_start_fn would route into _start_api_server, whose
+    _set_metrics_env_var rmtree's the prometheus multiproc dir.
+    sdk.launch still runs against the local parent.
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_calls_api_start_on_standalone_controller(monkeypatch):
+    """A standalone controller (IS_SKYPILOT_SERVER unset) still calls
+    sdk.api_start to start a local API server on its own VM.
+
+    Guards the non-consolidation path: the IS_SKYPILOT_SERVER gate is the only
+    thing that should suppress the start, and it is intentionally absent on a
+    standalone controller VM (see server.common.is_running_in_api_server).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    patches.sdk_launch.assert_called_once()
+    recovery_strategy.sdk.api_start.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -465,32 +535,64 @@ def test_start_stream_task_uses_context_preserving_executor(monkeypatch):
     stream_and_get.assert_called_once_with('req-1', relay_rich_status=True)
 
 
-@pytest.mark.asyncio
-async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
-        monkeypatch):
-    """Fix 3: if the carried stream already failed (e.g. a transient
-    transport error while parked) but the request itself is still live on
-    the server, start a fresh stream instead of trusting the stale error -
-    which would otherwise tear down an otherwise-healthy cluster."""
+def _await_launch_request_like_real(*first_effects):
+    """A stand-in for _await_launch_request: the given effects first (a
+    result, or an exception to raise), then, like the real one, the outcome
+    of the stream it is given: a failed stream raises its error at once, and
+    one still running returns (the request succeeds)."""
+    effects = list(first_effects)
+
+    async def fake(request_id, stream_task):  # pylint: disable=unused-argument
+        if effects:
+            effect = effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+        if stream_task.done():
+            stream_task.result()
+        return None
+
+    return mock.AsyncMock(side_effect=fake)
+
+
+def _carried_stream_dies_while_parked(monkeypatch, request_status):
+    """A launch request that parks, and whose carried stream fails during the
+    park (e.g. the API server was briefly unreachable).
+
+    `request_status` is what the server then reports for the request: a
+    status string, or an exception (the status cannot be read).
+    """
     executor = _make_launch_executor()
     patches = _patch_launch_environment(monkeypatch)
 
     async def fake_wait_for_parked_request(request_id):
-        # The carried stream dies while parked (e.g. the API server was
-        # briefly unreachable), even though the request itself resumed
-        # successfully.
         executor._stream_futures[0].set_exception(
             RuntimeError('stream transport dropped'))
         return request_id
 
     executor._wait_for_parked_request = mock.AsyncMock(
         side_effect=fake_wait_for_parked_request)
-    executor._await_launch_request = mock.AsyncMock(side_effect=[
-        recovery_strategy._LaunchRequestParked('req-123', 'pending'),
-        None,
-    ])
-    api_status = mock.MagicMock(return_value=[_request_payload('RUNNING')])
+    executor._await_launch_request = _await_launch_request_like_real(
+        recovery_strategy._LaunchRequestParked('req-123', 'pending'))
+    if isinstance(request_status, Exception):
+        api_status = mock.MagicMock(side_effect=request_status)
+    else:
+        api_status = mock.MagicMock(
+            return_value=[_request_payload(request_status)])
     monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    return executor, patches
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
+        monkeypatch):
+    """The carried stream failed during the park, but the request is still
+    live on the server: start a fresh stream instead of trusting the stale
+    error, which would tear down a healthy cluster. This goes through the same
+    path as any re-attached request's failed stream
+    (_settle_failed_stream)."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, 'RUNNING')
 
     result = await executor._launch(max_retry=1, raise_on_failure=True)
 
@@ -499,48 +601,71 @@ async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
     # sky.launch was not repeated (this is a reattach, not a fresh launch).
     assert patches.sdk_launch.call_count == 1
     assert executor._start_stream_task.call_count == 2
-    assert executor._await_launch_request.await_args_list[1] == mock.call(
-        'req-123', executor._stream_futures[1])
+    assert executor._await_launch_request.await_args_list[1:] == [
+        mock.call('req-123', executor._stream_futures[0]),
+        mock.call('req-123', executor._stream_futures[1]),
+    ]
     executor._cleanup_cluster.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_launch_reattach_surfaces_terminal_request_outcome(monkeypatch):
-    """Fix 3: if the carried stream already failed and the request itself
-    is terminal, surface the request's real outcome (here, its real
-    failure) directly instead of waiting on a stream that will never
-    produce one - and don't bother starting a replacement stream."""
-    executor = _make_launch_executor()
-    patches = _patch_launch_environment(monkeypatch)
-
-    async def fake_wait_for_parked_request(request_id):
-        executor._stream_futures[0].set_exception(
-            RuntimeError('stream transport dropped'))
-        return request_id
-
-    executor._wait_for_parked_request = mock.AsyncMock(
-        side_effect=fake_wait_for_parked_request)
-    executor._await_launch_request = mock.AsyncMock(
-        side_effect=recovery_strategy._LaunchRequestParked(
-            'req-123', 'pending'))
-    api_status = mock.MagicMock(
-        return_value=[_request_payload('FAILED', 'ran out of quota')])
-    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    """The carried stream failed during the park and the request itself
+    failed: its own error is the launch failure, and no replacement stream is
+    started."""
+    executor, patches = _carried_stream_dies_while_parked(monkeypatch, 'FAILED')
     sdk_get = mock.MagicMock(side_effect=ValueError('the real failure'))
     monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
 
     with pytest.raises(exceptions.ManagedJobReachedMaxRetriesError):
         await executor._launch(max_retry=1, raise_on_failure=True)
 
-    # The request's real (terminal) outcome was fetched directly - no
-    # replacement stream, and _await_launch_request was not called again,
-    # since the outcome was already decided.
     sdk_get.assert_called_once_with('req-123')
     assert executor._start_stream_task.call_count == 1
-    assert executor._await_launch_request.await_count == 1
-    # Unlike the parked/vanished paths, a genuine failure tears the
-    # partially-provisioned cluster down.
+    assert patches.sdk_launch.call_count == 1
+    # A genuine failure tears the partially-provisioned cluster down.
     executor._cleanup_cluster.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_after_park_with_succeeded_request_succeeds(
+        monkeypatch):
+    """The carried stream failed during the park and the request succeeded:
+    the cluster is launched. Its result is not fetched, so a failure to fetch
+    it (sdk.get does not retry a 502) cannot be taken for the launch
+    failing."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, 'SUCCEEDED')
+    sdk_get = mock.MagicMock(side_effect=RuntimeError(
+        'Failed to get request req-123: 502 Bad Gateway'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=1, raise_on_failure=True) == 123.45
+
+    sdk_get.assert_not_called()
+    assert executor._start_stream_task.call_count == 1
+    assert patches.sdk_launch.call_count == 1
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_after_park_with_unreadable_status_waits(
+        monkeypatch):
+    """The carried stream failed during the park and the request's status
+    cannot be read: back off without tearing down, then re-attach to the same
+    request rather than launch beside it."""
+    executor, patches = _carried_stream_dies_while_parked(
+        monkeypatch, RuntimeError('502 Server Error: Bad Gateway'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-123'), mock.call('req-123')
+    ]
+    assert patches.sdk_launch.call_count == 1
+    executor._cleanup_cluster.assert_not_called()
+    assert 'launch_retry:launch_lookup_failed' in _codes(
+        patches.set_backoff_pending)
 
 
 @pytest.mark.asyncio
@@ -595,6 +720,908 @@ async def test_launch_cancels_parked_request_when_poll_persistently_fails(
 
     executor._cancel_launch_request.assert_awaited_once_with('req-123')
     assert patches.sdk_launch.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Re-attaching to a launch request left live by a previous controller process
+# (e.g. one that restarted while the request was parked).
+# ---------------------------------------------------------------------------
+
+
+def _launch_request(request_id,
+                    status,
+                    created_at=1.0,
+                    name='sky.launch',
+                    cluster_name='test-cluster',
+                    status_msg=None):
+    return types.SimpleNamespace(request_id=request_id,
+                                 name=name,
+                                 cluster_name=cluster_name,
+                                 status=status,
+                                 status_msg=status_msg,
+                                 created_at=created_at)
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_queries_the_cluster(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    live = _launch_request('req-old', 'WAITING', status_msg='queued')
+    api_status = mock.MagicMock(return_value=[
+        live,
+        # Not launches, or not for this cluster, or no longer live.
+        _launch_request('req-down', 'RUNNING', name='sky.down'),
+        _launch_request('req-other', 'RUNNING', cluster_name='other'),
+        _launch_request('req-done', 'SUCCEEDED', created_at=2.0),
+        _launch_request('req-failed', 'FAILED', created_at=3.0),
+    ])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+
+    assert await executor._find_live_launch_request() is live
+    assert api_status.call_args.kwargs['cluster_name'] == 'test-cluster'
+    assert {'request_id', 'name', 'cluster_name', 'status', 'created_at'
+           } <= set(api_status.call_args.kwargs['fields'])
+    executor._cancel_launch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_returns_none_without_one(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_status',
+        mock.MagicMock(return_value=[_launch_request('req-1', 'CANCELLED')]))
+
+    assert await executor._find_live_launch_request() is None
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_keeps_oldest_and_cancels_rest(
+        monkeypatch):
+    """Duplicates left by an older controller collapse to the original."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    original = _launch_request('req-a', 'WAITING', created_at=1.0)
+    monkeypatch.setattr(
+        recovery_strategy.sdk,
+        'api_status',
+        mock.MagicMock(return_value=[
+            _launch_request('req-c', 'PENDING', created_at=5.0),
+            # Same created_at as req-c: the request id breaks the tie.
+            _launch_request('req-b', 'WAITING', created_at=5.0),
+            original,
+        ]))
+
+    assert await executor._find_live_launch_request() is original
+    assert executor._cancel_launch_request.await_args_list == [
+        mock.call('req-b'), mock.call('req-c')
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_keeps_oldest_over_a_running_one(
+        monkeypatch):
+    """RUNNING is not a keep signal: right after an API server restart it is
+    a parked request being run again, or a leftover of a dead server process
+    that the server fails later. The original is kept, and the RUNNING
+    duplicate is not cancelled (checked again on a later poll)."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    original = _launch_request('req-a', 'WAITING', created_at=1.0)
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_status',
+        mock.MagicMock(return_value=[
+            _launch_request('req-b', 'RUNNING', created_at=5.0),
+            original,
+        ]))
+
+    assert await executor._find_live_launch_request() is original
+    executor._cancel_launch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_keeps_others_while_kept_is_running(
+        monkeypatch):
+    """A RUNNING kept request may be a leftover of a dead server process;
+    the others stay as its fallback until it parks or finishes."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    original = _launch_request('req-a', 'RUNNING', created_at=1.0)
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_status',
+        mock.MagicMock(return_value=[
+            original,
+            _launch_request('req-b', 'WAITING', created_at=5.0),
+        ]))
+
+    assert await executor._find_live_launch_request() is original
+    executor._cancel_launch_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_retries_a_failed_lookup(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor._cancel_launch_request = mock.AsyncMock()
+    live = _launch_request('req-a', 'WAITING')
+    api_status = mock.MagicMock(side_effect=[
+        RuntimeError('timed out'),
+        RuntimeError('timed out'), [live]
+    ])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._find_live_launch_request() is live
+    assert api_status.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_find_live_launch_request_propagates_server_errors(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    api_status = mock.MagicMock(side_effect=RuntimeError('server unreachable'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    with pytest.raises(RuntimeError, match='server unreachable'):
+        await executor._find_live_launch_request()
+    assert (
+        api_status.call_count == recovery_strategy._LIVE_LAUNCH_LOOKUP_ATTEMPTS)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_parked_request_retries_a_failed_duplicate_cancel(
+        monkeypatch):
+    """A cancel that times out (e.g. the API server is overloaded during a
+    restart) is retried on the next poll, until the duplicate is gone."""
+    ours = _launch_request('req-a', 'WAITING', created_at=1.0)
+    duplicate = _launch_request('req-b', 'WAITING', created_at=5.0)
+    executor = _make_wait_executor()
+    executor._list_live_launch_requests = mock.AsyncMock(side_effect=[
+        [ours, duplicate],
+        [ours, duplicate],
+        [ours],
+        [_launch_request('req-a', 'RUNNING', created_at=1.0)],
+    ])
+    api_cancel = mock.MagicMock(
+        side_effect=[RuntimeError('ConnectTimeout'), 'cancel-req'])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_cancel', api_cancel)
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', mock.MagicMock())
+    monkeypatch.setattr(recovery_strategy,
+                        '_PARKED_POLL_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._wait_for_parked_request('req-a') == 'req-a'
+    assert api_cancel.call_args_list == [mock.call('req-b'), mock.call('req-b')]
+
+
+@pytest.mark.asyncio
+async def test_wait_for_parked_request_leaves_running_duplicates(monkeypatch):
+    ours = _launch_request('req-a', 'WAITING', created_at=1.0)
+    executor = _make_wait_executor()
+    executor._list_live_launch_requests = mock.AsyncMock(side_effect=[
+        [ours, _launch_request('req-b', 'RUNNING', created_at=5.0)],
+        [ours, _launch_request('req-b', 'WAITING', created_at=5.0)],
+        [_launch_request('req-a', 'RUNNING', created_at=1.0)],
+    ])
+    executor._cancel_launch_request = mock.AsyncMock()
+    monkeypatch.setattr(recovery_strategy,
+                        '_PARKED_POLL_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._wait_for_parked_request('req-a') == 'req-a'
+    # Cancelled only once it parked again.
+    executor._cancel_launch_request.assert_awaited_once_with('req-b')
+
+
+@pytest.mark.asyncio
+async def test_wait_for_parked_request_returns_once_request_finished(
+        monkeypatch):
+    """A request that is no longer live is looked up by id for its status."""
+    executor = _make_wait_executor()
+    executor._get_request_payload = mock.AsyncMock(
+        return_value=_request_payload('FAILED'))
+    monkeypatch.setattr(recovery_strategy,
+                        '_PARKED_POLL_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._wait_for_parked_request('req-a') == 'req-a'
+    executor._get_request_payload.assert_awaited_once_with('req-a')
+
+
+@pytest.mark.asyncio
+async def test_launch_adopts_live_parked_request_instead_of_launching(
+        monkeypatch):
+    """The restart case: the task's launch request is still parked."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request(
+            'req-old', 'WAITING', status_msg='Workload is pending.'))
+    slot_free_while_parked = asyncio.Event()
+
+    async def fake_wait_for_parked_request(request_id):
+        if executor.job_id not in executor.starting:
+            slot_free_while_parked.set()
+        return request_id
+
+    executor._wait_for_parked_request = mock.AsyncMock(
+        side_effect=fake_wait_for_parked_request)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    # No second sky.launch: the job waited for the old request and then
+    # re-attached to it with a fresh stream.
+    patches.sdk_launch.assert_not_called()
+    executor._wait_for_parked_request.assert_awaited_once_with('req-old')
+    assert slot_free_while_parked.is_set()
+    executor._start_stream_task.assert_called_once_with('req-old')
+    executor._await_launch_request.assert_awaited_once_with(
+        'req-old', executor._stream_futures[0])
+    # The task shows the park reason while it waits, then STARTING again.
+    patches.set_backoff_pending.assert_awaited_once()
+    assert ('Workload is pending.'
+            in patches.set_backoff_pending.await_args.kwargs['reason'])
+    patches.set_restarting.assert_awaited_once_with(1, 0, False)
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_adopts_live_running_request_without_waiting(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-old', 'RUNNING'))
+    executor._wait_for_parked_request = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    patches.sdk_launch.assert_not_called()
+    executor._wait_for_parked_request.assert_not_awaited()
+    executor._await_launch_request.assert_awaited_once_with(
+        'req-old', executor._stream_futures[0])
+    patches.set_backoff_pending.assert_not_awaited()
+    patches.set_restarting.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_adopted_request_that_parks_again_is_waited_for(
+        monkeypatch):
+    """An adopted running request that parks is handled like any other."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-old', 'RUNNING'))
+    executor._wait_for_parked_request = mock.AsyncMock(return_value='req-old')
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        recovery_strategy._LaunchRequestParked('req-old', 'pending'),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    patches.sdk_launch.assert_not_called()
+    # The stream started on adoption is carried across the park.
+    assert executor._start_stream_task.call_count == 1
+    assert executor._await_launch_request.await_args_list == [
+        mock.call('req-old', executor._stream_futures[0]),
+        mock.call('req-old', executor._stream_futures[0]),
+    ]
+    # Only looked up before the first attempt; the re-attach after the park
+    # already knows its request.
+    executor._find_live_launch_request.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_adopted_request_failure_takes_the_retry_path(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[_launch_request('req-old', 'RUNNING'), None])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('launch failed'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    # The failed adopted launch tore the cluster down like any failed
+    # attempt; the next attempt found nothing live and launched fresh.
+    executor._cleanup_cluster.assert_called_once()
+    patches.sdk_launch.assert_called_once()
+    assert executor._await_launch_request.await_args_list == [
+        mock.call('req-old', executor._stream_futures[0]),
+        mock.call('req-123', executor._stream_futures[1]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_adopted_parked_request_that_vanishes_launches_fresh(
+        monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[_launch_request('req-old', 'WAITING'), None])
+    executor._wait_for_parked_request = mock.AsyncMock(return_value=None)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=1) == 123.45
+
+    patches.sdk_launch.assert_called_once()
+    executor._await_launch_request.assert_awaited_once_with(
+        'req-123', executor._stream_futures[0])
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_lookup_failure_backs_off_without_launching(monkeypatch):
+    """Not knowing whether a launch request is live is not "none is live":
+    the attempt backs off, neither launching nor tearing the cluster down,
+    and keeps looking, regardless of max_retry."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=RuntimeError('server unreachable'))
+
+    task = asyncio.create_task(executor._launch(max_retry=1))
+    for _ in range(500):
+        if executor._find_live_launch_request.await_count >= 3:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert executor._find_live_launch_request.await_count >= 3
+    patches.sdk_launch.assert_not_called()
+    executor._cleanup_cluster.assert_not_called()
+    assert set(_codes(
+        patches.set_backoff_pending)) == {'launch_retry:launch_lookup_failed'}
+
+
+@pytest.mark.asyncio
+async def test_launch_lookup_failure_then_success_launches(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('server unreachable'), None])
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_called_once()
+    # Backed off as PENDING, then STARTING again for the next attempt.
+    patches.set_restarting.assert_awaited_once_with(1, 0, False)
+
+
+@pytest.mark.asyncio
+async def test_launch_adopts_another_live_request_instead_of_teardown(
+        monkeypatch):
+    """The adopted request fails (e.g. a RUNNING leftover of a dead server
+    process, which the server fails) while a duplicate is still live: adopt
+    the duplicate, without tearing the cluster down or launching."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-a', 'RUNNING', created_at=1.0),
+        _launch_request('req-b', 'RUNNING', created_at=5.0),
+    ])
+    executor._list_live_launch_requests = mock.AsyncMock(
+        return_value=[_launch_request('req-b', 'WAITING', created_at=5.0)])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('replica died'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+    assert executor._await_launch_request.await_args_list == [
+        mock.call('req-a', executor._stream_futures[0]),
+        mock.call('req-b', executor._stream_futures[1]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_retries_the_lookup_before_tearing_down(monkeypatch):
+    """The lookup that decides whether to tear the cluster down after a
+    failed attempt is retried: a transient failure (e.g. a 502 while the API
+    server restarts) must not tear the cluster down beneath a launch request
+    that is still live."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-a', 'RUNNING', created_at=1.0),
+        _launch_request('req-b', 'RUNNING', created_at=5.0),
+    ])
+    executor._list_live_launch_requests = mock.AsyncMock(side_effect=[
+        RuntimeError('502 Server Error: Bad Gateway'),
+        [_launch_request('req-b', 'WAITING', created_at=5.0)],
+        [],
+    ])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('replica died'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_other_launch_is_live_retries_a_failed_lookup(monkeypatch):
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.pool = None
+    api_status = mock.MagicMock(side_effect=[
+        RuntimeError('timed out'), [_launch_request('req-b', 'WAITING')]
+    ])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._other_launch_is_live() is True
+    assert api_status.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_other_launch_is_live_is_false_if_the_lookup_keeps_failing(
+        monkeypatch):
+    """Then the cluster is torn down as it would be without the check."""
+    executor = _make_bare_executor()
+    executor.cluster_name = 'test-cluster'
+    executor.pool = None
+    api_status = mock.MagicMock(side_effect=RuntimeError('server unreachable'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    monkeypatch.setattr(recovery_strategy,
+                        '_LIVE_LAUNCH_LOOKUP_INITIAL_BACKOFF_SECONDS', 0.01)
+
+    assert await executor._other_launch_is_live() is False
+    assert (
+        api_status.call_count == recovery_strategy._LIVE_LAUNCH_LOOKUP_ATTEMPTS)
+
+
+@pytest.mark.asyncio
+async def test_launch_cancels_remaining_duplicates_after_adopted_success(
+        monkeypatch):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-a', 'RUNNING', created_at=1.0))
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+    executor._list_live_launch_requests = mock.AsyncMock(
+        return_value=[_launch_request('req-b', 'RUNNING', created_at=5.0)])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    # Once req-a has launched the cluster, req-b would run the task again,
+    # RUNNING or not.
+    executor._cancel_launch_request.assert_awaited_once_with('req-b')
+
+
+@pytest.mark.asyncio
+async def test_launch_fresh_success_does_not_sweep(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    patches.sdk_launch.assert_called_once()
+    executor._list_live_launch_requests.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_cancel_while_waiting_on_adopted_request_cancels_it(
+        monkeypatch):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-old', 'WAITING'))
+    executor._cancel_launch_request = mock.AsyncMock()
+    parked = asyncio.Event()
+
+    async def wait_forever(request_id):
+        parked.set()
+        await asyncio.Event().wait()
+
+    executor._wait_for_parked_request = mock.AsyncMock(side_effect=wait_forever)
+
+    task = asyncio.create_task(executor._launch(max_retry=None))
+    await asyncio.wait_for(parked.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    executor._cancel_launch_request.assert_awaited_once_with('req-old')
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_without_live_request_does_nothing(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._launch = mock.AsyncMock()
+
+    assert await executor.reattach_launch(recovery=False) is None
+
+    # Never waited for a launch slot, never launched.
+    executor._launch.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_lookup_failure_keeps_looking(monkeypatch):
+    """A failed lookup does not fall back to forced recovery (which tears the
+    cluster down); the re-attach-only launch loop keeps looking."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=RuntimeError('server unreachable'))
+    executor._launch = mock.AsyncMock(return_value=55.0)
+
+    assert await executor.reattach_launch(recovery=False) == 55.0
+    executor._launch.assert_awaited_once_with(max_retry=None,
+                                              raise_on_failure=False,
+                                              recovery=False,
+                                              reattach_only=True)
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_skips_pools(monkeypatch):
+    executor = _make_launch_executor()
+    executor.pool = 'pool'
+    executor._launch = mock.AsyncMock()
+
+    assert await executor.reattach_launch(recovery=False) is None
+    executor._find_live_launch_request.assert_not_awaited()
+    executor._launch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_reattaches_to_live_request(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-old', 'RUNNING'))
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor.reattach_launch(recovery=True) == 123.45
+
+    patches.sdk_launch.assert_not_called()
+    executor._await_launch_request.assert_awaited_once_with(
+        'req-old', executor._stream_futures[0])
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_restores_recovering_after_a_park(monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        return_value=_launch_request('req-old', 'WAITING'))
+    executor._wait_for_parked_request = mock.AsyncMock(return_value='req-old')
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor.reattach_launch(recovery=True) == 123.45
+
+    patches.sdk_launch.assert_not_called()
+    patches.set_restarting.assert_awaited_once_with(1, 0, True)
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_failure_returns_none_without_launching(
+        monkeypatch):
+    """The caller falls back to forced recovery; no fresh launch here."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    # Live before and at the attempt; nothing live after the failed attempt
+    # tore the cluster down.
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-old', 'RUNNING'),
+        _launch_request('req-old', 'RUNNING'),
+        None,
+    ])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=RuntimeError('launch failed'))
+
+    assert await executor.reattach_launch(recovery=False) is None
+
+    patches.sdk_launch.assert_not_called()
+    executor._cleanup_cluster.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reattach_launch_vanished_request_returns_none_without_launching(
+        monkeypatch):
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    # Live when first looked up; parked and then gone.
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-old', 'WAITING'),
+        _launch_request('req-old', 'WAITING'),
+        None,
+    ])
+    executor._wait_for_parked_request = mock.AsyncMock(return_value=None)
+    executor._await_launch_request = mock.AsyncMock()
+
+    assert await executor.reattach_launch(recovery=False) is None
+
+    patches.sdk_launch.assert_not_called()
+    executor._await_launch_request.assert_not_awaited()
+
+
+def _reattached_stream_failure(monkeypatch, request_status):
+    """An adopted RUNNING request whose first stream fails with a 502.
+
+    `request_status` is what the server then reports for the request: a
+    status string, None (unknown to the server), or an exception (the
+    status cannot be read).
+    """
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[_launch_request('req-old', 'RUNNING'), None])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        RuntimeError('502 Server Error: Bad Gateway for url: /api/stream'),
+        None,
+    ])
+    if isinstance(request_status, Exception):
+        executor._get_request_payload = mock.AsyncMock(
+            side_effect=request_status)
+    else:
+        executor._get_request_payload = mock.AsyncMock(
+            return_value=None
+            if request_status is None else _request_payload(request_status))
+    return executor, patches
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_live_request_reattaches(
+        monkeypatch):
+    """A 502 on the stream (e.g. while the API server restarts) is not the
+    launch failing: the request is still live, so re-attach to it instead of
+    cancelling it and tearing the cluster down."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'RUNNING')
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old'), mock.call('req-old')
+    ]
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_succeeded_request_succeeds(
+        monkeypatch):
+    """The server reports the request SUCCEEDED: the launch succeeded. Its
+    result is not fetched, so a failure to fetch it (sdk.get does not retry
+    a 502) cannot be taken for the launch failing."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'SUCCEEDED')
+    sdk_get = mock.MagicMock(side_effect=RuntimeError(
+        'Failed to get request req-old: 502 Bad Gateway'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    sdk_get.assert_not_called()
+    assert executor._await_launch_request.await_count == 1
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_failed_request_fails(monkeypatch):
+    """Only the server reporting the request failed makes it a failure."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'FAILED')
+    sdk_get = mock.MagicMock(side_effect=ValueError('the real failure'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    sdk_get.assert_called_once_with('req-old')
+    # The usual failure handling: teardown, then a fresh launch.
+    executor._cleanup_cluster.assert_called_once()
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_unknown_request_fails(
+        monkeypatch):
+    executor, patches = _reattached_stream_failure(monkeypatch, None)
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._cleanup_cluster.assert_called_once()
+    patches.sdk_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failure_with_unreadable_status_waits(
+        monkeypatch):
+    """Not knowing how the request is doing: back off without tearing down,
+    then re-attach to the same request (its stream returns its outcome)
+    rather than launching beside it."""
+    executor, patches = _reattached_stream_failure(
+        monkeypatch, RuntimeError('502 Server Error: Bad Gateway'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old'), mock.call('req-old')
+    ]
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:launch_lookup_failed']
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_that_keeps_failing_backs_off(monkeypatch):
+    """The request stays live but every new stream of it fails at once (e.g.
+    a 502 while the API server replicas restart): after a few reopens, back
+    off without tearing down instead of reopening in a tight loop, then
+    re-attach to the same request."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+    executor._find_live_launch_request = mock.AsyncMock(side_effect=[
+        _launch_request('req-old', 'RUNNING'),
+        _launch_request('req-old', 'RUNNING'),
+    ])
+    stream_error = RuntimeError(
+        '502 Server Error: Bad Gateway for url: /api/stream')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[stream_error] *
+        recovery_strategy._MAX_QUICK_STREAM_FAILURES + [None])
+    executor._get_request_payload = mock.AsyncMock(
+        return_value=_request_payload('RUNNING'))
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    # The failed streams, then one more on the next attempt, which succeeds.
+    assert executor._start_stream_task.call_args_list == [
+        mock.call('req-old')
+    ] * (recovery_strategy._MAX_QUICK_STREAM_FAILURES + 1)
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:launch_stream_failed']
+    executor._cleanup_cluster.assert_not_called()
+    executor._cancel_launch_request.assert_not_awaited()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reattached_stream_failures_spread_out_do_not_back_off(
+        monkeypatch):
+    """A stream that ran for a while before failing is not a quick failure:
+    it is reopened at once however many times it happens."""
+    executor, patches = _reattached_stream_failure(monkeypatch, 'RUNNING')
+    monkeypatch.setattr(recovery_strategy, '_QUICK_STREAM_FAILURE_SECONDS', 0)
+    failures = recovery_strategy._MAX_QUICK_STREAM_FAILURES + 2
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('502 Server Error: Bad Gateway')] * failures +
+        [None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    assert executor._start_stream_task.call_count == failures + 1
+    assert not patches.set_backoff_pending.called
+    executor._cleanup_cluster.assert_not_called()
+    patches.sdk_launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_lookup_failure_does_not_count_toward_max_retry(
+        monkeypatch):
+    """A lookup failure is not a failed launch attempt: with max_retry=2, a
+    failed lookup and then one failed launch still leave a second launch."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._find_live_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('timed out'), None, None])
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('launch failed'), None])
+
+    assert await executor._launch(max_retry=2, raise_on_failure=True) == 123.45
+
+    assert patches.sdk_launch.call_count == 2
+    assert _codes(
+        patches.set_backoff_pending)[0] == ('launch_retry:launch_lookup_failed')
+
+
+@pytest.mark.asyncio
+async def test_submitted_request_stream_failure_keeps_failure_handling(
+        monkeypatch):
+    """The stream of a request this attempt submitted itself is handled as
+    before: its failure is the launch's failure."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._get_request_payload = mock.AsyncMock()
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[RuntimeError('launch failed'), None])
+
+    assert await executor._launch(max_retry=None) == 123.45
+
+    executor._get_request_payload.assert_not_awaited()
+    executor._cleanup_cluster.assert_called_once()
+    assert patches.sdk_launch.call_count == 2
+
+
+def _set_cluster_record(monkeypatch, record):
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_cluster_from_name',
+                        mock.MagicMock(return_value=record))
+
+
+@pytest.mark.asyncio
+async def test_resume_launch_reattaches_to_live_request(monkeypatch):
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    executor.reattach_launch = mock.AsyncMock(return_value=55.0)
+    executor._launch = mock.AsyncMock()
+
+    assert await executor.resume_launch(recovery=True) == 55.0
+
+    executor.reattach_launch.assert_awaited_once_with(True)
+    executor._launch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('recovery', [False, True])
+@pytest.mark.parametrize('record', [{
+    'cluster_ever_up': False
+}, {
+    'cluster_ever_up': True
+}, None])
+async def test_resume_launch_without_a_live_request_leaves_the_task_to_recovery(
+        monkeypatch, recovery, record):
+    """With no live launch request, the task is recovered as usual, whether
+    it was STARTING or RECOVERING, and even when its cluster never came up:
+    resume_launch neither launches nor tears down."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor.reattach_launch = mock.AsyncMock(return_value=None)
+    _set_cluster_record(monkeypatch, record)
+
+    assert await executor.resume_launch(recovery=recovery) is None
+
+    executor.reattach_launch.assert_awaited_once_with(recovery)
+    patches.sdk_launch.assert_not_called()
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_launch_skips_pools(monkeypatch):
+    executor = _make_launch_executor()
+    executor.pool = 'pool'
+    executor.reattach_launch = mock.AsyncMock()
+
+    assert await executor.resume_launch(recovery=False) is None
+    executor.reattach_launch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failover_launch_forwards_reattach_only(monkeypatch):
+    executor = recovery_strategy.EagerFailoverStrategyExecutor.__new__(
+        recovery_strategy.EagerFailoverStrategyExecutor)
+    executor.cluster_name = 'test-cluster'
+    base_launch = mock.AsyncMock(return_value=None)
+    monkeypatch.setattr(recovery_strategy.StrategyExecutor, '_launch',
+                        base_launch)
+
+    assert await executor._launch(
+        max_retry=1, raise_on_failure=False, recovery=True,
+        reattach_only=True) is None
+    base_launch.assert_awaited_once_with(1, False, True, True)
 
 
 @pytest.mark.asyncio
@@ -865,6 +1892,119 @@ async def test_resources_unavailable_is_not_an_unknown_error(monkeypatch):
     assert await executor._launch(max_retry=None) == 123.45
     assert _codes(
         patches.set_backoff_pending) == ['launch_retry:resources_unavailable']
+
+
+def _through_request_store(error):
+    """The error as the controller reads it back from the launch request."""
+    return exceptions.deserialize_exception(
+        pickle.loads(pickle.dumps(exceptions.serialize_exception(error))))
+
+
+def _unreachable_infra_error():
+    """The launch error for a request only unreachable infra might fit."""
+    return _through_request_store(
+        exceptions.ResourcesUnavailableError(
+            'No reachable infra has resources satisfying the request',
+            failover_history=[
+                exceptions.KubeAPIUnreachableError(
+                    "Kubernetes context 'ctx1' is unreachable: Timed out")
+            ]))
+
+
+@pytest.mark.asyncio
+async def test_unreachable_kubernetes_context_retries(monkeypatch):
+    """An unreachable context backs off and retries instead of failing."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(), None])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(
+        patches.set_backoff_pending) == ['launch_retry:infra_unreachable']
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_gives_up_after_timeout(monkeypatch):
+    """Infra that stays unreachable ends the launch as a failed precheck."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_unreachable_infra_error(),
+                     _unreachable_infra_error()])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as e:
+        await executor._launch(max_retry=None, raise_on_failure=True)
+
+    assert 'stayed unreachable' in str(e.value.reasons[0])
+    assert "'ctx1' is unreachable" in str(e.value.reasons[0])
+
+
+@pytest.mark.asyncio
+async def test_unreachable_infra_timer_restarts_after_other_failure(
+        monkeypatch):
+    """Only consecutive unreachable-only failures count toward the timeout."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _unreachable_infra_error(),
+        KeyError('status'),
+        _unreachable_infra_error(),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:infra_unreachable',
+        'launch_retry:KeyError',
+        'launch_retry:infra_unreachable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_and_unavailable_infra_never_gives_up(monkeypatch):
+    """Capacity shortages elsewhere keep the usual unlimited retries."""
+    executor = _make_launch_executor()
+    executor.UNREACHABLE_INFRA_TIMEOUT_SECONDS = 0
+    patches = _patch_launch_environment(monkeypatch)
+    mixed = exceptions.ResourcesUnavailableError(
+        'no capacity',
+        failover_history=[
+            exceptions.KubeAPIUnreachableError(
+                "Kubernetes context 'ctx1' is unreachable: Timed out"),
+            exceptions.ResourcesUnavailableError('zone a'),
+        ])
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        _through_request_store(mixed),
+        _through_request_store(mixed),
+        None,
+    ])
+
+    assert await executor._launch(max_retry=None,
+                                  raise_on_failure=True) == 123.45
+    assert _codes(patches.set_backoff_pending) == [
+        'launch_retry:resources_unavailable',
+        'launch_retry:resources_unavailable',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_infeasible_request_fails_prechecks(monkeypatch):
+    """No fit on reachable infra is terminal."""
+    executor = _make_launch_executor()
+    _patch_launch_environment(monkeypatch)
+    infeasible = exceptions.ResourcesUnavailableError(
+        'Kubernetes cluster does not contain any instances satisfying the '
+        'request')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=[_through_request_store(infeasible)])
+
+    with pytest.raises(exceptions.ProvisionPrechecksError):
+        await executor._launch(max_retry=None, raise_on_failure=True)
 
 
 @pytest.mark.asyncio

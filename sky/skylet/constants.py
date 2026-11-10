@@ -658,6 +658,10 @@ SKY_API_SERVER_LOCAL_PORT_ENV_VAR = (
 SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVICE_ACCOUNT_TOKEN')
 
+# The name for the environment variable that names the user an admin service
+# account acts as on client side.
+IMPERSONATE_USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}IMPERSONATE_USER'
+
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
@@ -695,6 +699,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'kai'),
     ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
@@ -749,6 +754,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('jobs', 'max_launching_jobs_per_user'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'stream_task_logs_to_controller_log'),
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
@@ -943,6 +949,12 @@ ENV_VAR_SERVER_LONG_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}LONG_WORKERS'
 ENV_VAR_SERVER_SHORT_WORKERS = f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}SHORT_WORKERS'
 ENV_VAR_SERVER_JOBS_CONTROLLERS = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}JOBS_CONTROLLERS')
+# Memory one API server (uvicorn) worker process is expected to hold, in GB,
+# overriding the built-in estimate. Used only with
+# SKYPILOT_MEMORY_AWARE_WORKER_SIZING; raise it when requests run in the
+# server processes (`executor.set_execution_policy`).
+ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}UVICORN_WORKER_MEM_GB')
 
 # Concurrent state-DB connections a server process uses before it starts
 # queueing queries, when the burst size is left to the default.

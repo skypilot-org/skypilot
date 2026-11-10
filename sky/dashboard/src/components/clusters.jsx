@@ -63,7 +63,12 @@ import {
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { useTableColumns } from '@/plugins/PluginProvider';
+import { useMergedTableColumns } from '@/plugins/PluginProvider';
+import {
+  ExpandedDetailsRow,
+  TruncatedDetails,
+  isDetailsToggle,
+} from '@/components/elements/TruncatedDetails';
 import {
   Select,
   SelectContent,
@@ -87,6 +92,11 @@ import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 const CLUSTERS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 
+// History rows can share a cluster name, so key the expanded row by hash.
+function detailsRowId(item) {
+  return item.cluster_hash || item.cluster;
+}
+
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
 //   if (cost >= 10) {
@@ -100,6 +110,7 @@ const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 // carries and what `optionValues` is keyed by; `label` is display only, and is
 // what a chip stores in `filter.property`. Because the dropdown and the URL
 // read the same list, a filter the page offers is always one it can read back.
+
 export const CLUSTER_FILTER_SCHEMA = [
   { key: 'status', label: 'Status', kind: 'enum', multi: true },
   { key: 'cluster', label: 'Cluster', kind: 'text' },
@@ -730,6 +741,26 @@ export function ClusterTable({
     key: null,
     direction: 'ascending',
   });
+  // The row whose Details cell is expanded below it, as in the jobs table.
+  const [expandedRowId, setExpandedRowId] = useState(null);
+  const expandedRowRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        expandedRowId &&
+        expandedRowRef.current &&
+        !expandedRowRef.current.contains(event.target) &&
+        !isDetailsToggle(event.target)
+      ) {
+        setExpandedRowId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expandedRowId]);
 
   // Per-workspace writability, so the per-row Connect/VSCode actions can be
   // disabled for clusters in workspaces the user can only read (read-only
@@ -1049,9 +1080,6 @@ export function ClusterTable({
     persistPageSize(CLUSTERS_PAGE_SIZE_STORAGE_KEY, newSize);
   };
 
-  // Get plugin columns
-  const pluginColumns = useTableColumns('clusters', { showHistory });
-
   // Define base columns with their order
   const baseColumns = [
     {
@@ -1317,6 +1345,28 @@ export function ClusterTable({
       ),
     },
     {
+      id: 'details',
+      order: 8.5,
+      // Only history rows carry details; a plugin column replacing this one
+      // decides for itself.
+      conditional: true,
+      renderHeader: () => <TableHead>Details</TableHead>,
+      renderCell: (item) => (
+        <TableCell>
+          {item.details ? (
+            <TruncatedDetails
+              text={item.details}
+              rowId={detailsRowId(item)}
+              expandedRowId={expandedRowId}
+              setExpandedRowId={setExpandedRowId}
+            />
+          ) : (
+            '-'
+          )}
+        </TableCell>
+      ),
+    },
+    {
       id: 'actions',
       order: 9,
       header: {
@@ -1344,8 +1394,7 @@ export function ClusterTable({
     },
   ];
 
-  // Add plugin columns to the array
-  const pluginColumnDefs = pluginColumns.map((col) => ({
+  const transformPluginColumn = (col) => ({
     id: col.id,
     order: col.header.order,
     isPlugin: true,
@@ -1370,7 +1419,14 @@ export function ClusterTable({
       );
     },
     renderCell: (item) => {
-      const context = { item, showHistory, historyDays };
+      const context = {
+        item,
+        showHistory,
+        historyDays,
+        expandedRowId,
+        setExpandedRowId,
+        expandedRowRef,
+      };
       const cellContent = col.cell.render(item, context);
       return (
         <TableCell className={col.cell.className || ''}>
@@ -1378,16 +1434,14 @@ export function ClusterTable({
         </TableCell>
       );
     },
-  }));
+  });
 
-  // Merge base and plugin columns, sort by order
-  const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
-    (a, b) => a.order - b.order
-  );
-
-  // Filter out conditional columns that shouldn't be shown
-  const visibleColumns = allColumns.filter(
-    (col) => !col.conditional || (col.conditional && showHistory)
+  // A plugin column with a base column's id replaces it (e.g. Details).
+  const visibleColumns = useMergedTableColumns(
+    'clusters',
+    baseColumns,
+    { showHistory, shouldShowColumn: () => showHistory },
+    transformPluginColumn
   );
 
   // Calculate dynamic colSpan
@@ -1422,13 +1476,22 @@ export function ClusterTable({
               ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((item, index) => {
                   return (
-                    <TableRow key={index}>
-                      {visibleColumns.map((col) =>
-                        React.cloneElement(col.renderCell(item), {
-                          key: col.id,
-                        })
+                    <React.Fragment key={index}>
+                      <TableRow>
+                        {visibleColumns.map((col) =>
+                          React.cloneElement(col.renderCell(item), {
+                            key: col.id,
+                          })
+                        )}
+                      </TableRow>
+                      {expandedRowId === detailsRowId(item) && (
+                        <ExpandedDetailsRow
+                          text={item.details}
+                          colSpan={totalColSpan}
+                          innerRef={expandedRowRef}
+                        />
                       )}
-                    </TableRow>
+                    </React.Fragment>
                   );
                 })
               ) : userScope === OWNER_SCOPE_MINE &&

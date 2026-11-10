@@ -477,7 +477,7 @@ function ActiveTab({
               </div>
               <div>
                 <div className="text-content-secondary font-medium text-base">
-                  {isHistoricalCluster ? 'Cloud' : 'Infra'}
+                  Infra
                 </div>
                 <div className="text-base mt-1">
                   {(() => {
@@ -485,9 +485,10 @@ function ActiveTab({
                     // as `defaultContent` so a plugin that only changes how
                     // *some* clusters read can return it unchanged for the
                     // rest. `fallback` keeps the no-plugin case identical.
-                    const infraContent = isHistoricalCluster ? (
-                      clusterData.cloud || 'N/A'
-                    ) : clusterData.infra ? (
+                    // Terminated (historical) clusters use the same Infra
+                    // rendering as live ones; the connector builds their
+                    // `infra` as `cloud (zone-or-region)` too.
+                    const infraContent = clusterData.infra ? (
                       <NonCapitalizedTooltip
                         content={clusterData.full_infra || clusterData.infra}
                         className="text-sm text-muted-foreground"

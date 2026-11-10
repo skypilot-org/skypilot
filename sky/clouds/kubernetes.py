@@ -22,6 +22,7 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import oci_nccl
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -494,6 +495,14 @@ class Kubernetes(clouds.Cloud):
                             CUSTOM_NETWORK_TIER, None)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
+                # Unknown is not unsupported: the node-fit check in
+                # regions_with_offering() reports the context as unreachable,
+                # and provisioning checks the features again.
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                    None)
         return unsupported_features
 
     @classmethod
@@ -641,7 +650,18 @@ class Kubernetes(clouds.Cloud):
         region: Optional[str],
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
+        *,
+        unreachable_errors: Optional[List[Exception]] = None,
     ) -> List[clouds.Region]:
+        """See Cloud.regions_with_offering.
+
+        Args:
+            unreachable_errors: If given, gets one KubeAPIUnreachableError for
+                each context that was skipped because of a failure that may
+                pass (connection error, timeout, 429 or 5xx). A context that
+                fails for any other reason, e.g. it rejects the credentials or
+                its kubeconfig entry is invalid, is not included.
+        """
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
 
@@ -688,6 +708,12 @@ class Kubernetes(clouds.Cloud):
                     ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
+                if (unreachable_errors is not None and
+                        kubernetes_utils.is_transient_api_error(e.__cause__)):
+                    unreachable_errors.append(
+                        exceptions.KubeAPIUnreachableError(
+                            f'Kubernetes context {context!r} is unreachable: '
+                            f'{e}'))
                 continue
             if fits:
                 regions_to_return.append(r)
@@ -1174,6 +1200,46 @@ class Kubernetes(clouds.Cloud):
                 cloud='kubernetes',
                 region=context,
                 override_configs=resources.cluster_config_overrides))
+        k8s_kai_queue_name = skypilot_config.get_effective_kai_value(
+            'queue',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_preemptibility = skypilot_config.get_effective_kai_value(
+            'preemptibility',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        if k8s_kai_queue_name is not None and (k8s_kueue_local_queue_name
+                                               is not None):
+            raise ValueError(f'Context {context} sets both a KAI queue '
+                             f'({k8s_kai_queue_name!r}) and a Kueue queue '
+                             f'({k8s_kueue_local_queue_name!r}); set only one.')
+        if k8s_kai_preemptibility is not None and k8s_kai_queue_name is None:
+            raise ValueError(
+                f'kubernetes.kai.preemptibility is set for context {context} '
+                'without kubernetes.kai.queue.')
+        k8s_kai_topology = skypilot_config.get_effective_kai_value(
+            'topology',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_required_level = skypilot_config.get_effective_kai_value(
+            'required_topology_level',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_preferred_level = skypilot_config.get_effective_kai_value(
+            'preferred_topology_level',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        has_topology_level = (k8s_kai_required_level is not None or
+                              k8s_kai_preferred_level is not None)
+        if k8s_kai_topology is not None and k8s_kai_queue_name is None:
+            raise ValueError(
+                f'kubernetes.kai.topology is set for context {context} '
+                'without kubernetes.kai.queue.')
+        if (k8s_kai_topology is not None) != has_topology_level:
+            raise ValueError(
+                f'Context {context} must set kubernetes.kai.topology together '
+                'with kubernetes.kai.required_topology_level or '
+                'kubernetes.kai.preferred_topology_level.')
 
         # Check DWS configuration for GKE.
         (enable_flex_start, enable_flex_start_queued_provisioning,
@@ -1203,7 +1269,8 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-        is_using_kueue = k8s_kueue_local_queue_name is not None
+        is_using_queueing = (k8s_kueue_local_queue_name is not None or
+                             k8s_kai_queue_name is not None)
         # auto_mounts volumes are injected later, in write_cluster_config(), so
         # they never reach volume_mounts. Resolve them here as well, or an
         # auto-mounted ReadWriteMany volume would be held to the base timeout
@@ -1213,7 +1280,7 @@ class Kubernetes(clouds.Cloud):
             num_nodes,
             volume_mounts,
             enable_flex_start or enable_flex_start_queued_provisioning,
-            is_using_kueue,
+            is_using_queueing,
             auto_mounts=auto_mounts)
 
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
@@ -1429,6 +1496,12 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             'k8s_kueue_admission_timeout': k8s_kueue_admission_timeout,
+            'k8s_kai_queue_name': k8s_kai_queue_name,
+            'k8s_kai_preemptibility': k8s_kai_preemptibility,
+            'k8s_kai_topology': k8s_kai_topology,
+            'k8s_kai_required_topology_level': k8s_kai_required_level,
+            'k8s_kai_preferred_topology_level': k8s_kai_preferred_level,
+            'k8s_kai_scheduler_name': kai.SCHEDULER_NAME,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
@@ -1603,6 +1676,7 @@ class Kubernetes(clouds.Cloud):
         # (context) that has enough resources.
         self._warn_on_disk_tier(resources)
         fuzzy_candidate_list: List[str] = []
+        unreachable_errors: List[Exception] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             regions = self.regions_with_offering(
@@ -1611,9 +1685,11 @@ class Kubernetes(clouds.Cloud):
                 use_spot=resources.use_spot,
                 region=resources.region,
                 zone=resources.zone,
-                resources=resources)
+                resources=resources,
+                unreachable_errors=unreachable_errors)
             if not regions:
-                return resources_utils.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources(
+                    [], [], None, unreachable_errors=unreachable_errors)
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
                                                      fuzzy_candidate_list, None)
@@ -1675,9 +1751,11 @@ class Kubernetes(clouds.Cloud):
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
-            resources=resources)
+            resources=resources,
+            unreachable_errors=unreachable_errors)
         if not available_regions:
-            return resources_utils.FeasibleResources([], [], None)
+            return resources_utils.FeasibleResources(
+                [], [], None, unreachable_errors=unreachable_errors)
         # No fuzzy lists for Kubernetes
         # We don't set the resources returned with regions, because the
         # optimizer will further find the valid region (context) for the

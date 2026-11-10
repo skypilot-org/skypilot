@@ -7757,6 +7757,12 @@ def serve_update(
 @serve.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
+@click.option('--all',
+              '-a',
+              'show_all',
+              is_flag=True,
+              default=False,
+              help='Show all replicas.')
 @click.option('--endpoint',
               default=False,
               is_flag=True,
@@ -7765,7 +7771,8 @@ def serve_update(
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, service_names: List[str],
+                 show_all: bool):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -7856,6 +7863,9 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
       \b
       # Only show status of my-service
       sky serve status my-service
+      \b
+      # Show all replicas of my-service
+      sky serve status my-service --all
     """
     service_names_to_query: Optional[List[str]] = service_names
     if not service_names:
@@ -7865,7 +7875,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         service_status_request_id = serve_lib.status(service_names_to_query)
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
-                                          show_all=verbose,
+                                          show_all=verbose or show_all,
                                           show_endpoint=endpoint,
                                           is_called_by_user=True)
 

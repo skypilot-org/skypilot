@@ -1,9 +1,9 @@
 <p align="center">
-  <a href="https://skypilot.ai/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
-      <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
-    </picture>
+  <a href="https://skypilot.ai/#gh-light-mode-only">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+  </a>
+  <a href="https://skypilot.ai/#gh-dark-mode-only">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png" width=55%>
   </a>
 </p>
 
@@ -43,7 +43,8 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 -----
 
 :fire: *News* :fire:
-- [Oct 2026] **SkyPilot AI Infra Meetup** with H Company in SF on Oct 8: [**register now**](https://partiful.com/e/kazBr6qiMhabcqdVm4nf)
+- [Oct 2026] **SkyPilot's scheduler bumps NVL72 training throughput by 14%**: [**blog**](https://skypilot.ai/blog/grace-blackwell-needs-a-new-scheduler)
+- [Oct 2026] **Post-training a 4B model with RL to fly the Tesla Roadster 21% better than GPT-6 Astra**: [**blog**](https://skypilot.ai/blog/flying-roadster-rl)
 - [Sep 2026] **RL is Everything, Everywhere, All at Once**: [**blog**](https://skypilot.ai/blog/rl-everything)
 - [Sep 2026] **SkyPilot Agent Sessions**: Mission Control for Coding Agents, on Your Infrastructure: [**blog**](https://skypilot.ai/blog/agent-sessions)
 - [Jul 2026] **Serving Kimi K3 on your own GPUs with SkyPilot**: [**blog**](https://skypilot.ai/blog/kimi-k3)
