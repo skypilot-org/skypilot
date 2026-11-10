@@ -376,15 +376,37 @@ class Modal(clouds.Cloud):
         env_token_id = os.environ.get(_TOKEN_ID_ENV_VAR)
         env_token_secret = os.environ.get(_TOKEN_SECRET_ENV_VAR)
         if env_token_id or env_token_secret:
-            if env_token_id and env_token_secret:
-                return True, None
-            return False, (
-                'Incomplete Modal credentials. Set both MODAL_TOKEN_ID and '
-                'MODAL_TOKEN_SECRET, or run `modal token new`.')
-        if not token_id or not token_secret:
+            if not (env_token_id and env_token_secret):
+                return False, (
+                    'Incomplete Modal credentials. Set both MODAL_TOKEN_ID and '
+                    'MODAL_TOKEN_SECRET, or run `modal token new`.')
+        elif not token_id or not token_secret:
             return False, (
                 'Modal credentials were not found. Run `modal token new` '
                 'or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET.')
+        return cls._verify_token()
+
+    @classmethod
+    def _verify_token(cls) -> Tuple[bool, Optional[str]]:
+        """Asks Modal whether the token still works.
+
+        A token being present says little: Modal tokens can expire (a
+        workspace may cap their lifetime) and can be revoked. Without this
+        the cloud shows as enabled and the first launch fails instead.
+        """
+        try:
+            # Not get_user_identities(): that caches the last good answer.
+            modal_adaptor.modal.Workspace.from_context().hydrate()
+        except Exception as e:  # pylint: disable=broad-except
+            reason = common_utils.format_exception(e, use_bracket=True)
+            # Looked up by name: getting the class from the SDK could itself
+            # raise here.
+            if type(e).__name__ == 'AuthError':
+                return False, (
+                    f'Modal rejected the credentials: {reason}\n'
+                    '    Create a new token with `modal token new` or set '
+                    'MODAL_TOKEN_ID and MODAL_TOKEN_SECRET.')
+            return False, f'Failed to verify the Modal credentials: {reason}'
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

@@ -111,9 +111,26 @@ def _modal_unsupported_features(resources):
     return clouds.Modal._unsupported_features_for_resources(resources)
 
 
-def _set_modal_config(monkeypatch, config):
-    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
-                        SimpleNamespace(config=SimpleNamespace(config=config)))
+def _set_modal_config(monkeypatch, config, verify_error=None):
+    """Fakes the modal SDK: its config and whether Modal accepts the token.
+
+    Returns the list of token verifications made (one entry per call).
+    """
+    verifications = []
+
+    class FakeWorkspace:
+
+        def hydrate(self):
+            verifications.append(1)
+            if verify_error is not None:
+                raise verify_error
+            return self
+
+    monkeypatch.setattr(
+        modal_cloud.modal_adaptor, 'modal',
+        SimpleNamespace(config=SimpleNamespace(config=config),
+                        Workspace=SimpleNamespace(from_context=FakeWorkspace)))
+    return verifications
 
 
 class _NoSdk:
@@ -585,12 +602,73 @@ def test_modal_credentials_from_config(monkeypatch):
 def test_modal_credentials_missing(monkeypatch):
     monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
-    _set_modal_config(monkeypatch, {})
+    verifications = _set_modal_config(monkeypatch, {})
 
     ok, message = _check_modal_compute_credentials()
 
     assert not ok
     assert 'Modal credentials were not found' in message
+    assert not verifications  # Nothing to ask Modal about.
+
+
+class AuthError(Exception):
+    """Named like modal.exception.AuthError, which the check looks for."""
+
+
+@pytest.mark.parametrize('from_env', [True, False])
+def test_modal_credentials_rejected_by_modal(monkeypatch, from_env):
+    """A token that is present but expired or revoked is not enabled."""
+    token = {'token_id': 'token-id', 'token_secret': 'token-secret'}
+    if from_env:
+        monkeypatch.setenv('MODAL_TOKEN_ID', 'token-id')
+        monkeypatch.setenv('MODAL_TOKEN_SECRET', 'token-secret')
+    else:
+        monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+        monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    verifications = _set_modal_config(
+        monkeypatch, {} if from_env else token,
+        verify_error=AuthError('Token has expired'))
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert not ok
+    assert verifications == [1]
+    assert 'Modal rejected the credentials' in message
+    assert 'Token has expired' in message
+    assert '`modal token new`' in message
+
+
+def test_modal_credentials_asks_modal_on_every_check(monkeypatch):
+    """No cached verdict: a token that expires later must be noticed."""
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    config = {'token_id': 'token-id', 'token_secret': 'token-secret'}
+    assert _set_modal_config(monkeypatch, config) == []
+    assert _check_modal_compute_credentials() == (True, None)
+
+    _set_modal_config(monkeypatch,
+                      config,
+                      verify_error=AuthError('Token has expired'))
+    ok, _ = _check_modal_compute_credentials()
+    assert not ok
+
+
+def test_modal_credentials_unverifiable(monkeypatch):
+    """Modal being unreachable is reported as such, not as a bad token."""
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    _set_modal_config(monkeypatch, {
+        'token_id': 'token-id',
+        'token_secret': 'token-secret',
+    },
+                      verify_error=ConnectionError('no route to host'))
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert not ok
+    assert 'Failed to verify the Modal credentials' in message
+    assert 'no route to host' in message
+    assert 'rejected' not in message
 
 
 def test_modal_credential_file_mounts_from_env(monkeypatch, tmp_path):
