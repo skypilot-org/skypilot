@@ -22,7 +22,6 @@ from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
-from sky.utils.db import kv_cache
 from sky.workspaces import visibility
 
 _CONTEXTS = ['ctx-a', 'ctx-b', 'ctx-c', 'ctx-g', 'ssh-pool-a', 'ssh-pool-b']
@@ -106,9 +105,6 @@ def config_path(tmp_path, monkeypatch):
 
     state_db = db_utils.DatabaseManager('state', global_user_state.create_table)
     monkeypatch.setattr(global_user_state, '_db_manager', state_db)
-    monkeypatch.setattr(
-        kv_cache, '_db_manager',
-        db_utils.DatabaseManager('kv_cache', kv_cache.create_table))
     service = permission.PermissionService()
     service.enforcer = casbin.SyncedEnforcer(
         os.path.join(os.path.dirname(permission.__file__), 'model.conf'),

@@ -78,8 +78,6 @@ def new_service(engine, monkeypatch):
     monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
                         lambda: engine)
     monkeypatch.setattr(permission, '_policy_lock', contextlib.nullcontext)
-    monkeypatch.setattr(permission.PermissionService,
-                        'invalidate_user_permission_cache', mock.Mock())
     monkeypatch.setattr(permission, '_enforcer_instance', None)
 
     def _new():
