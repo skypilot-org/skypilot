@@ -1519,17 +1519,16 @@ class Kubernetes(clouds.Cloud):
                 spot_label_value=spot_label_value,
                 enable_flex_start=enable_flex_start,
                 tpu_chips_per_vm=tpu_chips_per_vm,
-                # One slice scheduled by the default scheduler: keep all pods
-                # on one node pool (= one slice). With a gang scheduler
-                # (Kueue, KAI) its placement does this instead, and the
-                # podAffinity would only get in its way (e.g. capacity checks
-                # that simulate the pods from a template without their
-                # labels). Several slices rely on the scheduler too.
+                # One slice: keep all pods on one node pool (= one slice),
+                # with or without a queue. A queue does not by itself keep a
+                # slice's pods together, and when its placement does, it
+                # picks one pool too, so the two agree. Several slices get no
+                # rule (one would put every slice in one pool): their pods are
+                # kept per pool only by a queue that does so.
                 same_node_pool_cluster=(
                     cluster_name.name_on_cloud
                     if tpu_multi_host_shape is not None and
-                    num_nodes == tpu_multi_host_shape.vms_per_slice and
-                    not is_using_queueing else None)),
+                    num_nodes == tpu_multi_host_shape.vms_per_slice else None)),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod
             # provisions, and only in non-consolidation deployments --

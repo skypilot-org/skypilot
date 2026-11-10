@@ -1335,11 +1335,10 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_label_key_values):
         """A multi-host slice request builds one pod per VM: each pod takes
         the VM's 4 chips and selects the slice topology and 4 chips per VM.
-        A single slice also keeps all pods in one node pool."""
-        from sky.provision.kubernetes.utils import (
-            KubernetesHighPerformanceNetworkType)
+        A single slice keeps all pods in one node pool, with or without a
+        queue; several slices get no same-pool rule."""
         mock_detect_network_type.return_value = (
-            KubernetesHighPerformanceNetworkType.NONE, None)
+            kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None)
         mock_get_current_context.return_value = 'my-k8s-cluster'
         mock_get_namespace.return_value = 'default'
         mock_get_accelerator_label_keys.return_value = []
@@ -1359,10 +1358,10 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         formatter = kubernetes_utils.GKELabelFormatter
         k8s_cloud = kubernetes.Kubernetes()
         # (instance type, enforce_multi_host, num_nodes, topology,
-        #  single node pool)
+        #  single node pool). All are one slice; several slices are checked
+        #  below.
         cases = [
             ('16CPU--64GB--tpu-v6e-8:1', True, 2, '2x4', True),
-            ('16CPU--64GB--tpu-v6e-slice:8', True, 4, '2x4', False),
             ('16CPU--64GB--tpu-v6e-16:1', None, 4, '4x4', True),
             ('16CPU--64GB--tpu-v6e-slice:256', None, 64, '16x16', True),
         ]
@@ -1405,25 +1404,42 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         # The slice shape comes from the request, not from node labels.
         mock_get_label_key_values.assert_not_called()
 
-        # With a gang scheduler queue, its placement keeps the slice in one
-        # pool, so there is no podAffinity.
-        self.resources.instance_type = '16CPU--64GB--tpu-v6e-8:1'
-        self.resources.enforce_multi_host = True
-        with patch('sky.skypilot_config.get_effective_queue_name',
-                   return_value='default-queue'):
-            deploy_vars = k8s_cloud.make_deploy_resources_variables(
+        def deploy(num_nodes):
+            return k8s_cloud.make_deploy_resources_variables(
                 resources=self.resources,
                 cluster_name=resources_utils.ClusterName(
                     display_name=self.cluster_name,
                     name_on_cloud=self.cluster_name),
                 region=self.region,
                 zones=None,
-                num_nodes=2,
+                num_nodes=num_nodes,
                 dryrun=False)
-        self.assertEqual(deploy_vars['k8s_kueue_local_queue_name'],
-                         'default-queue')
-        self.assertNotIn('podAffinity',
-                         deploy_vars['pod_fields']['spec'].get('affinity', {}))
+
+        def pod_affinity(deploy_vars):
+            return deploy_vars['pod_fields']['spec'].get('affinity',
+                                                         {}).get('podAffinity')
+
+        self.resources.instance_type = '16CPU--64GB--tpu-v6e-slice:8'
+        self.resources.enforce_multi_host = True
+
+        # Several slices without a queue are accepted and get
+        # no podAffinity: one rule would put every slice in one pool.
+        self.assertIsNone(pod_affinity(deploy(4)))
+
+        with patch('sky.skypilot_config.get_effective_queue_name',
+                   return_value='default-queue'):
+            # One slice with a queue keeps the same-pool podAffinity: the
+            # queue alone does not keep a slice's pods together.
+            deploy_vars = deploy(2)
+            self.assertEqual(deploy_vars['k8s_kueue_local_queue_name'],
+                             'default-queue')
+            term = pod_affinity(deploy_vars)[
+                'requiredDuringSchedulingIgnoredDuringExecution'][0]
+            self.assertEqual(term['topologyKey'],
+                             'cloud.google.com/gke-nodepool')
+            # Several slices with a queue are accepted and get no podAffinity
+            # (it would put every slice in one pool).
+            self.assertIsNone(pod_affinity(deploy(4)))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
