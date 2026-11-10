@@ -456,11 +456,7 @@ class Kubernetes(clouds.Cloud):
         else:
             contexts = [context]
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
-            'Stopping clusters is not supported on Kubernetes. To enable it, '
-            'set `kubernetes.allow_unmanaged_cluster_destructive_stop: true` '
-            'in your SkyPilot '
-            'config. Note: stopping deletes the pod, so any state not on a '
-            'persistent volume is lost.')
+            'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
         for context in contexts:
