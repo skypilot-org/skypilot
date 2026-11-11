@@ -4885,3 +4885,86 @@ class TestRecoveryCountsInFull:
 
         names = [c[0] for c in calls.mock_calls]
         assert names == ['count_in_full', 'recover', 'update_cost_units']
+
+
+# ---------------------------------------------------------------------------
+# Healthy-job shortcut and multi-host TPU slices
+# ---------------------------------------------------------------------------
+
+
+def _tpu_task(accelerators, num_nodes=1, **kwargs):
+    import sky
+    task = sky.Task(num_nodes=num_nodes)
+    task.set_resources(
+        sky.Resources(infra='k8s/ctx', accelerators=accelerators, **kwargs))
+    return task
+
+
+@pytest.mark.parametrize('accelerators,kwargs,num_nodes,expected', [
+    ('H100:8', {}, 1, 1),
+    ('H100:8', {}, 2, 2),
+    ('tpu-v6e-8', {}, 1, 1),
+    ('tpu-v6e-8', {
+        'accelerator_args': {
+            'multi_host': True
+        }
+    }, 1, 2),
+    ('tpu-v6e-16', {}, 1, 4),
+    ('tpu-v6e-16', {}, 2, 8),
+])
+def test_task_cluster_num_nodes(accelerators, kwargs, num_nodes, expected):
+    from sky.jobs import controller as controller_module
+    task = _tpu_task(accelerators, num_nodes, **kwargs)
+    assert controller_module._task_cluster_num_nodes(task) == expected
+    # The handle's launched resources take precedence over the request.
+    handle = MagicMock()
+    handle.launched_resources = list(task.resources)[0]
+    assert controller_module._task_cluster_num_nodes(task, handle) == expected
+    single = _tpu_task('tpu-v6e-8')
+    handle.launched_resources = list(single.resources)[0]
+    assert controller_module._task_cluster_num_nodes(task, handle) == num_nodes
+
+
+class _StopMonitoring(Exception):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('accelerators,checks_cluster', [
+    ('H100:8', False),
+    ('tpu-v6e-16', True),
+])
+async def test_running_single_slice_job_checks_cluster_status(
+        monkeypatch, accelerators, checks_cluster):
+    """A RUNNING single-node job skips the cluster status check, but one
+    multi-host TPU slice spans several pods and must be checked."""
+    from sky.jobs import controller as controller_module
+    from sky.jobs import runtime as managed_job_runtime
+    from sky.skylet import job_lib
+
+    controller = controller_module.JobController.__new__(
+        controller_module.JobController)
+    controller._job_id = 42
+    controller._backend = MagicMock()
+    controller._update_live_log_links = AsyncMock(return_value=True)
+    monkeypatch.setattr(managed_job_runtime, 'is_registered', lambda: False)
+    # Two polls, then stop: without the check the loop keeps polling.
+    monkeypatch.setattr(
+        controller_module.asyncio, 'sleep',
+        AsyncMock(side_effect=[None, None, _StopMonitoring()]))
+    monkeypatch.setattr(controller_module, 'check_network_connection',
+                        AsyncMock())
+    monkeypatch.setattr(
+        controller_module.managed_job_utils, 'get_job_status',
+        AsyncMock(return_value=(job_lib.JobStatus.RUNNING, None)))
+    refresh = MagicMock(side_effect=_StopMonitoring())
+    monkeypatch.setattr(controller_module.backend_utils,
+                        'refresh_cluster_status_handle', refresh)
+    with pytest.raises(_StopMonitoring):
+        await controller._monitor_one_task_impl(0,
+                                                _tpu_task(accelerators),
+                                                'cluster',
+                                                MagicMock(),
+                                                MagicMock(),
+                                                callback_func=AsyncMock())
+    assert refresh.called == checks_cluster

@@ -39,6 +39,7 @@ from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -448,6 +449,28 @@ def _runtime_infra(
         'region': getattr(resources, 'region', None),
         'zone': getattr(resources, 'zone', None),
     }
+
+
+def _task_cluster_num_nodes(
+    task: 'sky.Task',
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'] = None
+) -> int:
+    """Number of cluster nodes the task runs on.
+
+    Usually task.num_nodes. Each task node of a multi-host TPU slice on
+    Kubernetes is one slice with one cluster node (pod) per VM, so a
+    single-node task there still spans several cluster nodes. Uses the
+    handle's launched resources when given, else the task's requested
+    resources (the largest slice among them).
+    """
+    launched_resources = getattr(handle, 'launched_resources', None)
+    if launched_resources is not None:
+        vms_per_slice = kubernetes_utils.tpu_vms_per_slice(launched_resources)
+    else:
+        vms_per_slice = max(
+            (kubernetes_utils.tpu_vms_per_slice(r) for r in task.resources),
+            default=1)
+    return task.num_nodes * vms_per_slice
 
 
 class _TaskRunAction(enum.Enum):
@@ -1781,9 +1804,10 @@ class JobController:
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
             # nodes are preempted or failed, need to check the actual cluster
-            # status.
+            # status. This counts cluster nodes, not task nodes: one task
+            # node of a multi-host TPU slice spans several cluster nodes.
             if (job_status is not None and not job_status.is_terminal() and
-                    task.num_nodes == 1):
+                    _task_cluster_num_nodes(task, runtime_handle) == 1):
                 await _record_reattach_if_pending()
                 continue
 
