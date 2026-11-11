@@ -34,6 +34,7 @@ from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import volume as volume_utils
 from sky.volumes import volume as volume_lib
@@ -422,7 +423,6 @@ def test_modal_unsupported_features():
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS,
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS,
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE,
         clouds.CloudImplementationFeatures.AUTOSTOP,
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK,
         clouds.CloudImplementationFeatures.LOCAL_DISK,
@@ -529,6 +529,7 @@ def test_modal_user_identity_from_workspace(monkeypatch):
         modal_cloud.modal_adaptor, 'modal',
         SimpleNamespace(Workspace=FakeWorkspaceFactory,
                         Environment=FakeEnvironmentFactory,
+                        config=SimpleNamespace(config={}),
                         config_version=lambda: config_version[0]))
 
     # One identity whose second element matches across environments of the
@@ -546,6 +547,45 @@ def test_modal_user_identity_from_workspace(monkeypatch):
         'Modal workspace openpipe')
     config_version[0] += 1
     assert clouds.Modal.get_user_identities()[0][1] == 'Modal workspace other'
+
+
+def test_modal_active_environment_name(monkeypatch):
+    """From the config when set; else asked from Modal once per request."""
+    lookups = []
+
+    class FakeEnvironment:
+        name = 'default-env'
+
+        def hydrate(self):
+            lookups.append(1)
+
+    config = {}
+    version = [2000]
+    monkeypatch.setattr(
+        modal_cloud.modal_adaptor, 'modal',
+        SimpleNamespace(
+            Environment=SimpleNamespace(from_context=FakeEnvironment),
+            config=SimpleNamespace(config=config),
+            config_version=lambda: version[0]))
+    # pylint: disable=protected-access
+    get_name = clouds.Modal._get_active_environment_name
+
+    # A launch calls this per attempt and again after provisioning.
+    assert [get_name(), get_name(), get_name()] == ['default-env'] * 3
+    assert len(lookups) == 1
+
+    # A changed config (a new token, `modal config set-environment`).
+    config['environment'] = 'dev'
+    version[0] += 1
+    assert get_name() == 'dev'
+    assert len(lookups) == 1  # No need to ask Modal.
+
+
+def test_modal_clusters_do_not_get_the_token_file():
+    """A Modal cluster authenticates as its container (see
+    test_modal_ssh_sessions_get_the_container_identity)."""
+    assert schemas.get_default_remote_identity('modal') == (
+        schemas.RemoteIdentityOptions.NO_UPLOAD.value)
 
 
 def test_modal_owner_check_allows_other_environment_of_same_workspace(
@@ -1235,7 +1275,8 @@ def test_modal_run_instances_reuses_running_cluster(monkeypatch):
     assert not record.resumed_instance_ids
 
 
-def test_modal_run_instances_cancels_running_cluster_without_nodes(monkeypatch):
+def test_modal_run_instances_keeps_running_cluster_if_wait_fails(monkeypatch):
+    """A relaunch onto a live cluster must not kill it on an API error."""
     cancelled = []
     monkeypatch.setattr(modal_instance.modal_utils, 'get_cluster_state',
                         lambda name, environment_name: _cluster_state('fc-9'))
@@ -1243,21 +1284,54 @@ def test_modal_run_instances_cancels_running_cluster_without_nodes(monkeypatch):
                         lambda call_id: True)
 
     def never_ready(*args):
-        raise RuntimeError('Timed out waiting for 1 Modal node(s); 0 ready.')
+        raise RuntimeError("Failed to query Modal cluster 'test-on-cloud'")
 
     monkeypatch.setattr(modal_instance.modal_utils, 'wait_for_nodes',
                         never_ready)
     monkeypatch.setattr(modal_instance.modal_utils, 'cancel_call',
                         cancelled.append)
 
-    with pytest.raises(RuntimeError, match='Timed out'):
+    with pytest.raises(RuntimeError, match='Failed to query'):
         modal_instance.run_instances(region='auto',
                                      cluster_name='test',
                                      cluster_name_on_cloud='test-on-cloud',
                                      config=_provision_config(
                                          {'PublicKey': 'ssh-ed25519 test'}))
 
-    assert cancelled == ['fc-9']
+    assert not cancelled
+
+
+@pytest.mark.parametrize('preempted,call_running', [(True, True),
+                                                    (False, False)])
+def test_modal_run_instances_ends_the_old_call_before_relaunch(
+        monkeypatch, preempted, call_running):
+    """The old call can still run behind `preempted` (other ranks of a
+    clustered call); relaunching replaces the state, its only handle."""
+    events = []
+    monkeypatch.setattr(
+        modal_instance.modal_utils, 'get_cluster_state',
+        lambda name, environment_name: _cluster_state('fc-old',
+                                                      preempted=preempted))
+    monkeypatch.setattr(modal_instance.modal_utils, 'call_is_running',
+                        lambda call_id: call_running)
+    monkeypatch.setattr(modal_instance.modal_utils, 'cancel_call',
+                        lambda call_id: events.append(('cancel', call_id)))
+    monkeypatch.setattr(
+        modal_instance.modal_utils, 'launch_cluster',
+        lambda *args, **kwargs: events.append(('launch',)) or 'fc-new')
+    monkeypatch.setattr(modal_instance.modal_utils, 'wait_for_nodes',
+                        lambda *args: {0: _node()})
+    monkeypatch.setattr(modal_instance, '_function_kwargs',
+                        lambda node_config: {})
+
+    record = modal_instance.run_instances(
+        region='auto',
+        cluster_name='test',
+        cluster_name_on_cloud='test-on-cloud',
+        config=_provision_config({'PublicKey': 'ssh-ed25519 test'}))
+
+    assert events == [('cancel', 'fc-old'), ('launch',)]
+    assert record.created_instance_ids == ['fc-new-0']
 
 
 def test_modal_run_instances_relaunches_after_call_ended(monkeypatch):
@@ -1266,6 +1340,8 @@ def test_modal_run_instances_relaunches_after_call_ended(monkeypatch):
                         lambda name, environment_name: _cluster_state('fc-old'))
     monkeypatch.setattr(modal_instance.modal_utils, 'call_is_running',
                         lambda call_id: False)
+    monkeypatch.setattr(modal_instance.modal_utils, 'cancel_call',
+                        lambda call_id: None)
     monkeypatch.setattr(
         modal_instance.modal_utils, 'launch_cluster', lambda *args, **kwargs:
         launches.append(kwargs['num_nodes']) or 'fc-new')
@@ -1525,9 +1601,9 @@ def test_modal_cloud_bucket_mount_specs():
             self.constructed = True
 
     storage = FakeStorage()
-    specs = backend_utils._get_modal_cloud_bucket_mounts({'/bucket': storage})
+    specs = modal_utils.get_cloud_bucket_mount_specs({'/bucket': storage})
     # Relative destinations live under the remote workdir, as on other clouds.
-    relative_specs = backend_utils._get_modal_cloud_bucket_mounts(
+    relative_specs = modal_utils.get_cloud_bucket_mount_specs(
         {'data': FakeStorage()})
     assert relative_specs[0]['Path'] == '/root/sky_workdir/data'
 
@@ -1544,6 +1620,59 @@ def test_modal_cloud_bucket_mount_specs():
     }]
 
 
+def test_modal_cloud_bucket_mount_uses_a_store_modal_can_mount():
+    """A storage with several stores: the first one Modal supports."""
+
+    class FakeStorage:
+        mode = storage_lib.StorageMode.MOUNT
+        name = 'bucket'
+        mount_config = None
+        stores = {
+            storage_lib.StoreType.AZURE: SimpleNamespace(),
+            storage_lib.StoreType.GCS:
+                SimpleNamespace(bucket=SimpleNamespace(name='gcs-bucket'),
+                                bucket_sub_path=None),
+        }
+
+        def construct(self):
+            pass
+
+    specs = modal_utils.get_cloud_bucket_mount_specs({'/data': FakeStorage()})
+
+    assert [(spec['StoreType'], spec['BucketName']) for spec in specs
+           ] == [('GCS', 'gcs-bucket')]
+
+    FakeStorage.stores = {storage_lib.StoreType.AZURE: SimpleNamespace()}
+    with pytest.raises(exceptions.NotSupportedError, match='Got AZURE'):
+        modal_utils.get_cloud_bucket_mount_specs({'/data': FakeStorage()})
+
+
+def test_modal_s3_mount_warns_about_temporary_credentials(monkeypatch):
+    """The Secret is a copy: a session token expires under a running mount."""
+    warnings = []
+    monkeypatch.setattr(modal_utils.logger, 'warning', warnings.append)
+    monkeypatch.setattr(
+        modal_utils.modal_adaptor, 'modal',
+        SimpleNamespace(Secret=SimpleNamespace(from_dict=lambda env: env)))
+
+    def use_credentials(token):
+        frozen = SimpleNamespace(access_key='id', secret_key='key', token=token)
+        monkeypatch.setattr(
+            modal_utils.aws, 'session',
+            lambda: SimpleNamespace(get_credentials=lambda: SimpleNamespace(
+                get_frozen_credentials=lambda: frozen)))
+
+    # pylint: disable=protected-access
+    use_credentials(None)
+    assert 'AWS_SESSION_TOKEN' not in modal_utils._get_s3_secret(None)
+    assert not warnings
+
+    use_credentials('session-token')
+    assert modal_utils._get_s3_secret(None)['AWS_SESSION_TOKEN'] == (
+        'session-token')
+    assert len(warnings) == 1 and 'temporary' in warnings[0]
+
+
 def test_modal_cloud_bucket_mount_dryrun_does_not_construct():
     # pylint: disable=protected-access
 
@@ -1558,8 +1687,8 @@ def test_modal_cloud_bucket_mount_dryrun_does_not_construct():
         def construct(self):
             raise AssertionError('dryrun should not construct storage')
 
-    specs = backend_utils._get_modal_cloud_bucket_mounts(
-        {'/bucket': FakeStorage()}, dryrun=True)
+    specs = modal_utils.get_cloud_bucket_mount_specs({'/bucket': FakeStorage()},
+                                                     dryrun=True)
 
     assert not specs
 
@@ -1570,7 +1699,7 @@ def test_modal_cloud_bucket_mount_rejects_mount_cached():
     storage = SimpleNamespace(mode=storage_lib.StorageMode.MOUNT_CACHED)
 
     with pytest.raises(exceptions.NotSupportedError, match='MOUNT_CACHED'):
-        backend_utils._get_modal_cloud_bucket_mounts({'/bucket': storage})
+        modal_utils.get_cloud_bucket_mount_specs({'/bucket': storage})
 
 
 def test_modal_get_image_from_registry(monkeypatch):
@@ -1618,6 +1747,12 @@ class _FakeModal:
         pass
 
     class OutputExpiredError(Exception):
+        pass
+
+    class InternalFailure(Exception):
+        pass
+
+    class ExecutionError(Exception):
         pass
 
     PENDING = 'pending'
@@ -1682,6 +1817,8 @@ class _FakeModal:
 
             def cancel(self, terminate_containers=False):
                 assert terminate_containers
+                if isinstance(fake.call_status.get(self.object_id), Exception):
+                    raise fake.call_status[self.object_id]
                 fake.cancelled.append(self.object_id)
                 fake.call_status[self.object_id] = fake.TERMINATED
 
@@ -1705,7 +1842,9 @@ class _FakeModal:
                 NotFoundError=self.NotFoundError,
                 RemoteError=self.RemoteError,
                 FunctionTimeoutError=self.FunctionTimeoutError,
-                OutputExpiredError=self.OutputExpiredError))
+                OutputExpiredError=self.OutputExpiredError,
+                InternalFailure=self.InternalFailure,
+                ExecutionError=self.ExecutionError))
 
     def add_cluster(self,
                     name='test-on-cloud',
@@ -1799,11 +1938,25 @@ def test_modal_get_cluster_state_propagates_api_errors(monkeypatch):
         # Ended long ago.
         (_FakeModal.OutputExpiredError(), False),
         (_FakeModal.NotFoundError('gone'), False),
+        # Modal lost the container, or the result cannot be unpickled here.
+        (_FakeModal.InternalFailure('container lost'), False),
+        (_FakeModal.ExecutionError('cannot deserialize'), False),
     ])
 def test_modal_call_is_running(fake_modal, status, running):
     fake_modal.call_status['fc-1'] = status
 
     assert modal_utils.call_is_running('fc-1') == running
+
+
+def test_modal_cancel_call_ignores_a_call_modal_dropped(fake_modal):
+    # Modal drops a call some time after it ends: nothing left to cancel.
+    fake_modal.call_status['fc-1'] = _FakeModal.NotFoundError('gone')
+
+    modal_utils.cancel_call('fc-1')
+
+    fake_modal.call_status['fc-2'] = RuntimeError('unavailable')
+    with pytest.raises(RuntimeError, match='unavailable'):
+        modal_utils.cancel_call('fc-2')
 
 
 def test_modal_call_is_running_propagates_api_errors(fake_modal):
@@ -1949,6 +2102,23 @@ def test_modal_node_returns_after_preemption_rerun(monkeypatch):
 
     assert 'preemption' in result
     assert state['preempted'] is True
+
+
+def test_modal_node_returns_when_its_setup_fails(monkeypatch):
+    # E.g. sshd cannot be set up on a custom image. A raise would reach the
+    # caller as an arbitrary exception, which call_is_running takes for an
+    # API error: the dead cluster would stay UP.
+    fake_modal = SimpleNamespace(
+        Dict=SimpleNamespace(from_name=lambda name, environment_name: {}),
+        experimental=SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'modal', fake_modal)
+    monkeypatch.setitem(sys.modules, 'modal.experimental',
+                        fake_modal.experimental)
+    node = modal_utils._make_node_function()  # pylint: disable=protected-access
+
+    result = node('exit 7', 22, 'sky-c', None, False, [])
+
+    assert result.startswith('The node failed: CalledProcessError')
 
 
 def test_modal_ssh_sessions_get_the_container_identity(tmp_path):
@@ -2487,6 +2657,62 @@ def test_modal_invalid_instance_types(name, reason):
     with pytest.raises(ValueError, match='Invalid instance type'):
         resources_lib.Resources(cloud=clouds.Modal(),
                                 instance_type=name).validate()
+
+
+def test_modal_gpu_count_given_as_a_float():
+    """`accelerators: {T4: 1.0}` names the same instance type as `T4: 1`."""
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'T4', 1.0, use_spot=True) == (['4CPU--16GB--T4:1'], [])
+    assert modal_catalog.ModalInstanceType(
+        4.0, 16.0, accelerator_count=2.0,
+        accelerator_type='T4').name == '4CPU--16GB--T4:2'
+    with pytest.raises(ValueError, match='whole numbers, not 1.5'):
+        modal_catalog.ModalInstanceType(4.0,
+                                        16.0,
+                                        accelerator_count=1.5,
+                                        accelerator_type='T4')
+
+    resources = resources_lib.Resources(cloud=clouds.Modal(),
+                                        accelerators={'T4': 1.0},
+                                        use_spot=True)
+    feasible = clouds.Modal()._get_feasible_launchable_resources(  # pylint: disable=protected-access
+        resources)
+    instance_type = feasible.resources_list[0].instance_type
+    assert instance_type == '4CPU--16GB--T4:1'
+    assert modal_catalog.get_hourly_cost(instance_type, use_spot=True) > 0
+
+
+def test_modal_listed_shapes_are_built_once_per_catalog(tmp_path, monkeypatch):
+    """Building the table takes seconds; the optimizer asks per candidate."""
+    # pylint: disable=protected-access
+    builds = []
+    build = modal_catalog._build_listed_instances
+    monkeypatch.setattr(modal_catalog, '_build_listed_instances',
+                        lambda: builds.append(1) or build())
+    monkeypatch.setattr(modal_catalog, '_listed_instances_cache', None)
+
+    first = modal_catalog.regions()
+    assert modal_catalog.regions() == first
+    modal_catalog.get_region_zones_for_instance_type('4CPU--16GB', False)
+    modal_catalog.list_accelerators(gpus_only=True,
+                                    name_filter=None,
+                                    region_filter=None,
+                                    quantity_filter=None)
+    assert len(builds) == 1
+    # Callers get their own copy.
+    modal_catalog._listed_instances().drop(columns=['Price'], inplace=True)
+    assert 'Price' in modal_catalog._listed_instances().columns
+
+    # Another catalog (a reload) rebuilds it.
+    monkeypatch.setattr(fetch_modal, 'GPU_MAX_COUNTS', {'H100': 4})
+    monkeypatch.setattr(modal_catalog, '_df',
+                        _write_modal_catalog(tmp_path / 'vms.csv'))
+    assert modal_catalog.get_max_gpu_count('T4') is None
+    assert set(
+        modal_catalog._listed_instances()['AcceleratorName'].dropna()) == {
+            'H100'
+        }
+    assert len(builds) == 2
 
 
 def test_modal_catalog_spot_and_zones():

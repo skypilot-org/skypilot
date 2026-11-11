@@ -132,7 +132,7 @@ class ModalInstanceType:
     def __init__(self,
                  vcpus: float,
                  memory_gib: float,
-                 accelerator_count: Optional[int] = None,
+                 accelerator_count: Optional[Union[int, float]] = None,
                  accelerator_type: Optional[str] = None):
         modal_cpu = vcpus / 2
         memory_mib = math.ceil(memory_gib * 1024)
@@ -143,22 +143,28 @@ class ModalInstanceType:
         if (accelerator_count is None) != (accelerator_type is None):
             raise ValueError('Modal accelerator type and count must be set '
                              'together.')
+        count: Optional[int] = None
         if accelerator_type is not None:
             assert accelerator_count is not None
+            # A request can carry the count as a float (`T4: 1.0`); the
+            # instance type name takes whole numbers only.
+            if int(accelerator_count) != accelerator_count:
+                raise ValueError('Modal GPU counts are whole numbers, not '
+                                 f'{accelerator_count}.')
+            count = int(accelerator_count)
             canonical_accelerator = _canonical_accelerator(accelerator_type)
             if canonical_accelerator is None:
                 raise ValueError(
                     f'Unsupported Modal accelerator {accelerator_type!r}.')
             counts = _offered_counts(canonical_accelerator)
-            if accelerator_count not in counts:
+            if count not in counts:
                 raise ValueError(
                     f'Modal offers {canonical_accelerator} in counts of '
-                    f'{_format_counts(counts)} per container, not '
-                    f'{accelerator_count}.')
+                    f'{_format_counts(counts)} per container, not {count}.')
             accelerator_type = canonical_accelerator
         self.vcpus = vcpus
         self.memory_mib = memory_mib
-        self.accelerator_count = accelerator_count
+        self.accelerator_count = count
         self.accelerator_type = accelerator_type
 
     @property
@@ -198,38 +204,56 @@ def _region_rows(region: str) -> pd.DataFrame:
     return rows
 
 
-def _rate(region_rows: pd.DataFrame, resource: str, column: str) -> float:
-    """Per-unit hourly rate from a `cpu-core` or `memory-gib` row."""
-    rows = region_rows[region_rows['InstanceType'] == resource]
-    if rows.empty:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'No Modal price for {resource} in region '
-                             f'{region_rows["Region"].iloc[0]!r}.')
-    return float(rows[column].iloc[0])
+class _RegionPrices:
+    """Hourly prices of one region, read once from its catalog rows."""
+
+    def __init__(self, region_rows: pd.DataFrame):
+        self.region = region_rows['Region'].iloc[0]
+        # {`cpu-core` or `memory-gib`: {column: rate per unit}}
+        self._rates: Dict[str, Dict[str, float]] = {}
+        # {(GPU, count): price of that many GPUs}
+        self._gpus: Dict[Tuple[str, int], float] = {}
+        for row in region_rows.itertuples(index=False):
+            if pd.notna(row.AcceleratorName):
+                # Catalogs fetched before GPUs became spot only have the
+                # price in `Price`.
+                price = row.SpotPrice if pd.notna(row.SpotPrice) else row.Price
+                self._gpus[(row.AcceleratorName,
+                            int(row.AcceleratorCount))] = float(price)
+            else:
+                self._rates[row.InstanceType] = {
+                    _NONPREEMPTIBLE_RATE_COLUMN: float(row.Price),
+                    _LIST_RATE_COLUMN: float(row.SpotPrice),
+                }
+
+    def rate(self, resource: str, column: str) -> float:
+        """Per-unit hourly rate from the `cpu-core` or `memory-gib` row."""
+        if resource not in self._rates:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No Modal price for {resource} in region '
+                                 f'{self.region!r}.')
+        return self._rates[resource][column]
+
+    def gpu_price(self, accelerator: str, count: int) -> float:
+        """Hourly price of `count` GPUs, from the matching accelerator row."""
+        if (accelerator, count) not in self._gpus:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No Modal price for {accelerator}:{count} '
+                                 f'in region {self.region!r}.')
+        return self._gpus[(accelerator, count)]
 
 
-def _gpu_price(region_rows: pd.DataFrame, accelerator: str,
-               count: int) -> float:
-    """Hourly price of `count` GPUs, from the matching accelerator row."""
-    rows = region_rows[(region_rows['AcceleratorName'] == accelerator) &
-                       (region_rows['AcceleratorCount'] == count)]
-    if rows.empty:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'No Modal price for {accelerator}:{count} in '
-                             f'region {region_rows["Region"].iloc[0]!r}.')
-    row = rows.iloc[0]
-    # Catalogs fetched before GPUs became spot only have the price in `Price`.
-    price = row['SpotPrice'] if pd.notna(row['SpotPrice']) else row['Price']
-    return float(price)
+def _region_prices(region: str) -> _RegionPrices:
+    return _RegionPrices(_region_rows(region))
 
 
 def _is_gpu(instance: ModalInstanceType) -> bool:
     return instance.accelerator_type is not None
 
 
-def _compute_price_per_hour(instance: ModalInstanceType, region: str,
+def _compute_price_per_hour(instance: ModalInstanceType, prices: _RegionPrices,
                             use_spot: bool) -> float:
-    """Price of a container from the region's rows.
+    """Price of a container in a region.
 
     Raises:
         ValueError: a GPU container on-demand; Modal has none.
@@ -238,14 +262,13 @@ def _compute_price_per_hour(instance: ModalInstanceType, region: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'No on-demand price for {instance.name}. {GPU_SPOT_ONLY_HINT}')
-    region_rows = _region_rows(region)
     column = _LIST_RATE_COLUMN if use_spot else _NONPREEMPTIBLE_RATE_COLUMN
-    price = (instance.modal_cpu * _rate(region_rows, CPU_RESOURCE, column) +
-             instance.memory_gib * _rate(region_rows, MEMORY_RESOURCE, column))
+    price = (instance.modal_cpu * prices.rate(CPU_RESOURCE, column) +
+             instance.memory_gib * prices.rate(MEMORY_RESOURCE, column))
     if instance.accelerator_type is not None:
         assert instance.accelerator_count is not None
-        price += _gpu_price(region_rows, instance.accelerator_type,
-                            instance.accelerator_count)
+        price += prices.gpu_price(instance.accelerator_type,
+                                  instance.accelerator_count)
     return price
 
 
@@ -274,7 +297,9 @@ def get_hourly_cost(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
     instance = ModalInstanceType.from_instance_type(instance_type)
-    return _compute_price_per_hour(instance, region or AUTO_REGION, use_spot)
+    return _compute_price_per_hour(instance,
+                                   _region_prices(region or AUTO_REGION),
+                                   use_spot)
 
 
 def is_gpu_instance_type(instance_type: str) -> bool:
@@ -470,13 +495,30 @@ def _gpu_info(accelerator: str, count: int) -> str:
     })
 
 
+# The table of `_listed_instances()`, with the catalog index it was built
+# from: rebuilt only when the catalog is reloaded (or swapped, in tests).
+_listed_instances_cache: Optional[Tuple[pd.Index, pd.DataFrame]] = None
+
+
 def _listed_instances() -> pd.DataFrame:
     """The shapes a launch picks without a CPU or memory request, per region.
 
     `sky gpus list` and region lookups read this standard catalog table,
     which is built from the catalog's rate and accelerator rows rather than
-    stored.
+    stored. Building it takes seconds and the optimizer asks for regions per
+    candidate, so it is cached per loaded catalog.
     """
+    global _listed_instances_cache
+    catalog_index = _df.index
+    cached = _listed_instances_cache
+    if cached is None or cached[0] is not catalog_index:
+        cached = (catalog_index, _build_listed_instances())
+        _listed_instances_cache = cached
+    # A copy: callers filter and annotate the table.
+    return cached[1].copy()
+
+
+def _build_listed_instances() -> pd.DataFrame:
     instances = [_resources_from_requests(None, None)]
     for accelerator in _gpu_rows()['AcceleratorName'].unique():
         offered = _offered_counts(accelerator)
@@ -484,27 +526,33 @@ def _listed_instances() -> pd.DataFrame:
             _gpu_instance(accelerator, count, cpus=None, memory=None)
             for count in _LISTED_GPU_COUNTS
             if count in offered)
+    gpu_infos = {
+        instance.name: _gpu_info(instance.accelerator_type,
+                                 instance.accelerator_count)
+        for instance in instances
+        if instance.accelerator_type is not None and
+        instance.accelerator_count is not None
+    }
     rows = []
     for region in sorted(_region_names()):
+        prices = _region_prices(region)
         for instance in instances:
-            accelerator = instance.accelerator_type
             count = instance.accelerator_count
             rows.append({
                 'InstanceType': instance.name,
-                'AcceleratorName': accelerator,
+                'AcceleratorName': instance.accelerator_type,
                 'AcceleratorCount': float(count) if count else None,
                 'vCPUs': instance.vcpus,
                 'MemoryGiB': instance.memory_gib,
                 # GPU shapes have no on-demand price: they are spot only.
                 'Price':
                     (None if _is_gpu(instance) else _compute_price_per_hour(
-                        instance, region, use_spot=False)),
+                        instance, prices, use_spot=False)),
                 'SpotPrice': _compute_price_per_hour(instance,
-                                                     region,
+                                                     prices,
                                                      use_spot=True),
                 'Region': region,
-                'GpuInfo': (_gpu_info(accelerator, count)
-                            if accelerator is not None and count else None),
+                'GpuInfo': gpu_infos.get(instance.name),
             })
     return pd.DataFrame(rows)
 

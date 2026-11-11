@@ -65,8 +65,6 @@ class Modal(clouds.Cloud):
             'Host controllers are not supported on Modal yet.',
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             'High availability controllers are not supported on Modal.',
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            'Auto-termination is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.AUTOSTOP:
             'Autostop without down is not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
@@ -443,6 +441,9 @@ class Modal(clouds.Cloud):
         if (os.environ.get(_TOKEN_ID_ENV_VAR) and
                 os.environ.get(_TOKEN_SECRET_ENV_VAR)):
             return {}
+        # For clusters on other clouds, e.g. a jobs controller that launches
+        # on Modal. Modal clusters do not get it: see
+        # schemas.get_default_remote_identity().
         # modal resolves its config file the same way (MODAL_CONFIG_PATH, else
         # ~/.modal.toml); the cluster reads the default path. Resolved here
         # without importing modal: this runs for every enabled cloud at
@@ -511,7 +512,25 @@ class Modal(clouds.Cloud):
 
     @classmethod
     def _get_active_environment_name(cls) -> str:
+        """The Modal Environment new clusters and volumes go to.
+
+        Asked from Modal once per request: this is called for every launch
+        attempt and again after provisioning, and those calls must agree.
+        """
+        return cls._active_environment_name(
+            modal_adaptor.modal.config_version())
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=1)
+    def _active_environment_name(cls, config_version: int) -> str:
+        del config_version  # Only used as the cache key.
         try:
+            # Set with `modal config set-environment` or MODAL_ENVIRONMENT.
+            configured = modal_adaptor.modal.config.config.get('environment')
+            if configured:
+                return configured
+            # Not set: the workspace's default Environment, which only Modal
+            # knows.
             environment = modal_adaptor.modal.Environment.from_context()
             environment.hydrate()
             return environment.name

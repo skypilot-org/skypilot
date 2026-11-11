@@ -7,11 +7,15 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 import urllib.parse
 
+from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
 from sky.skylet import constants
+
+logger = sky_logging.init_logger(__name__)
 
 SSH_PORT = 22
 SSH_USER = 'root'
@@ -19,7 +23,7 @@ SSH_USER = 'root'
 _HOME_DIR = '/root'
 
 # Prefix for the per-cluster Modal App and Dict. Modal object names are at
-# most 64 characters and Modal cluster names at most 60.
+# most 64 characters and Modal cluster names at most 57.
 _NAME_PREFIX = 'sky-'
 _CONTAINER_ENV_PROFILE = '/etc/profile.d/modal_container_env.sh'
 _NODE_KEY_PREFIX = 'node-'
@@ -56,6 +60,12 @@ def _get_s3_secret(region: Optional[str]):
     }
     token = getattr(credentials, 'token', None)
     if token:
+        # The Secret is a copy made now, and a mount cannot be changed on a
+        # running cluster.
+        logger.warning('The AWS credentials are temporary (SSO or an assumed '
+                       'role): the S3 mount on this Modal cluster stops '
+                       'working when they expire. Use long-lived AWS '
+                       'credentials for clusters that outlive them.')
         env_dict['AWS_SESSION_TOKEN'] = token
     if region:
         env_dict['AWS_REGION'] = region
@@ -128,6 +138,82 @@ def get_modal_volume_mounts(
     return volumes
 
 
+def get_cloud_bucket_mount_specs(storage_mounts: Optional[Dict[str, Any]],
+                                 dryrun: bool = False) -> List[Dict[str, Any]]:
+    """Modal CloudBucketMount specs for a task's MOUNT-mode storage mounts.
+
+    They go into the cluster config (`CloudBucketMounts`), since Modal mounts
+    buckets when the Function is launched.
+    """
+    if not storage_mounts:
+        return []
+    supported_store_types = {'S3', 'R2', 'GCS'}
+    bucket_mounts = []
+    for dst, storage_obj in storage_mounts.items():
+        mode = getattr(storage_obj.mode, 'value', str(storage_obj.mode))
+        if mode == 'COPY':
+            continue
+        if mode == 'MOUNT_CACHED':
+            raise exceptions.NotSupportedError(
+                'Modal CloudBucketMounts support storage mode MOUNT, but not '
+                'MOUNT_CACHED.')
+        if mode != 'MOUNT':
+            continue
+        if dryrun:
+            continue
+        storage_obj.construct()
+        if not storage_obj.stores:
+            raise exceptions.StorageExternalDeletionError(
+                f'The bucket {storage_obj.name!r} could not be mounted on '
+                'Modal. Please verify that the bucket exists.')
+        # A storage can have several stores: use the first one Modal can
+        # mount.
+        stores = {
+            getattr(store_type, 'value', str(store_type)): store
+            for store_type, store in storage_obj.stores.items()
+        }
+        store_type_value = next(
+            (name for name in stores if name in supported_store_types), None)
+        if store_type_value is None:
+            raise exceptions.NotSupportedError(
+                'Modal CloudBucketMounts currently support S3, R2, and GCS '
+                f'storage mounts. Got {", ".join(stores)}.')
+        store = stores[store_type_value]
+        if store is None:
+            raise exceptions.StorageExternalDeletionError(
+                f'The bucket {storage_obj.name!r} could not be mounted on '
+                'Modal. Please verify that the bucket exists.')
+        bucket = getattr(store, 'bucket', None)
+        bucket_name = getattr(bucket, 'name', None) or storage_obj.name
+        if bucket_name is None:
+            raise exceptions.StorageSpecError(
+                'Failed to resolve bucket name for Modal CloudBucketMount.')
+        key_prefix = getattr(store, 'bucket_sub_path', None)
+        if key_prefix:
+            key_prefix = key_prefix.strip('/') + '/'
+        endpoint_url = None
+        if store_type_value == 'R2':
+            endpoint_factory = getattr(getattr(store, 'config', None),
+                                       'get_endpoint_url', None)
+            if endpoint_factory is not None:
+                endpoint_url = endpoint_factory()
+        elif store_type_value == 'GCS':
+            endpoint_url = 'https://storage.googleapis.com'
+        read_only = bool(storage_obj.mount_config and
+                         storage_obj.mount_config.read_only)
+        bucket_mounts.append({
+            'Path': resolve_mount_path(dst),
+            'StoreType': store_type_value,
+            'BucketName': bucket_name,
+            'BucketEndpointUrl': endpoint_url,
+            'KeyPrefix': key_prefix,
+            'Region': getattr(store, 'region', None),
+            'ReadOnly': read_only,
+            'ForcePathStyle': False,
+        })
+    return bucket_mounts
+
+
 def get_cloud_bucket_mounts(
         bucket_specs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Build Modal CloudBucketMount objects for the node Function."""
@@ -152,7 +238,8 @@ def _export_container_env_command(
     SDK in a session authenticates as the container, like code in any Modal
     Function. Autodown relies on it: skylet runs in such a session and has to
     cancel the cluster's call. The API server's own token is not needed on
-    the cluster for that, and is not sent to it.
+    the cluster for that, and is not uploaded to it (`remote_identity`
+    defaults to NO_UPLOAD for Modal).
     """
     return ("{ export -p | grep '^declare -x MODAL_' || true; } > "
             f'{shlex.quote(profile_path)}')
@@ -180,14 +267,27 @@ def _make_node_function() -> Callable[..., str]:
     the container does not have SkyPilot installed. It must not reference
     module globals.
 
-    Once set up, a node returns rather than raises when it is done (sshd
-    exited, or Modal reran it after a preemption), so `call_is_running` can
-    tell an ended call from an API error.
+    A node returns rather than raises when it is done (sshd exited, Modal
+    reran it after a preemption, or its setup failed), so `call_is_running`
+    can tell an ended call from an API error.
     """
 
+    # pylint: disable=redefined-outer-name
     def skypilot_node(ssh_setup: str, ssh_port: int, state_name: str,
                       environment_name: Optional[str], clustered: bool,
                       user_ports: List[int]) -> str:
+        try:
+            return run_node(ssh_setup, ssh_port, state_name, environment_name,
+                            clustered, user_ports)
+        except Exception as e:  # pylint: disable=broad-except
+            # E.g. sshd could not be set up on a custom image. Returned, not
+            # raised: the caller would have to unpickle the exception, and
+            # could not tell it from an API error.
+            return f'The node failed: {type(e).__name__}: {e}'
+
+    def run_node(ssh_setup: str, ssh_port: int, state_name: str,
+                 environment_name: Optional[str], clustered: bool,
+                 user_ports: List[int]) -> str:
         # pylint: disable=import-outside-toplevel,redefined-outer-name
         import contextlib
         import subprocess
@@ -311,6 +411,10 @@ def call_is_running(call_id: str) -> bool:
     ended_errors = (
         # Cancelled, or Modal reported the call as failed.
         modal.exception.RemoteError,
+        # Modal lost the call's container.
+        modal.exception.InternalFailure,
+        # The call failed with something that cannot be unpickled here.
+        modal.exception.ExecutionError,
         # Hit the Function timeout.
         modal.exception.FunctionTimeoutError,
         # Ended long enough ago for Modal to have dropped its output or
@@ -328,8 +432,14 @@ def call_is_running(call_id: str) -> bool:
 
 
 def cancel_call(call_id: str) -> None:
-    modal_adaptor.modal.FunctionCall.from_id(call_id).cancel(
-        terminate_containers=True)
+    """Cancel a call and its containers; a no-op if it has already ended."""
+    try:
+        modal_adaptor.modal.FunctionCall.from_id(call_id).cancel(
+            terminate_containers=True)
+    except Exception as e:  # pylint: disable=broad-except
+        # Modal drops a call some time after it ends.
+        if not _is_not_found(e):
+            raise
 
 
 def instance_id(call_id: str, rank: int) -> str:
@@ -390,8 +500,7 @@ def wait_for_nodes(cluster_name_on_cloud: str, environment_name: Optional[str],
             return nodes
         if not call_is_running(call_id):
             try:
-                call.get(timeout=0)
-                reason = 'it returned'
+                reason = f'it returned: {call.get(timeout=0)}'
             except Exception as e:  # pylint: disable=broad-except
                 reason = f'{type(e).__name__}: {e}'
             raise RuntimeError(f'Modal Function call {call_id} ended before '

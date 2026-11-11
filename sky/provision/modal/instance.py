@@ -83,8 +83,16 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     del cluster_name  # unused
     environment_name = _environment_name(config.provider_config)
-    state = _running_cluster_state(cluster_name_on_cloud, environment_name)
-    if state is not None:
+    state = modal_utils.get_cluster_state(cluster_name_on_cloud,
+                                          environment_name)
+    running = (state is not None and not state['preempted'] and
+               modal_utils.call_is_running(state['call_id']))
+    if state is not None and not running:
+        # launch_cluster() replaces the state, the only handle on the old
+        # call. That call can still be running behind `preempted` (the other
+        # ranks of a clustered call), so end it first.
+        modal_utils.cancel_call(state['call_id'])
+    if state is not None and running:
         if state['num_nodes'] != config.count:
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} has {state["num_nodes"]} '
@@ -92,9 +100,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.info(f'Cluster {cluster_name_on_cloud} is already running on '
                     'Modal.')
         # The call can be running with nodes still pending, e.g. a launch
-        # that was interrupted while waiting for capacity.
-        _wait_for_nodes_or_cancel(cluster_name_on_cloud, environment_name,
-                                  state['call_id'], config.count)
+        # that was interrupted while waiting for capacity. Not cancelled on
+        # failure, unlike a new call: this can be a healthy cluster with
+        # jobs on it, and the failure a transient API error.
+        modal_utils.wait_for_nodes(cluster_name_on_cloud, environment_name,
+                                   state['call_id'], config.count)
         return common.ProvisionRecord(provider_name=PROVIDER_NAME,
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,

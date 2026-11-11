@@ -1239,6 +1239,10 @@ the Modal Volume and its data are kept.
 
 SkyPilot ``secrets:`` work on Modal the same way as other VM clouds; they are
 exported for setup and run commands and redacted from display paths.
+Your Modal token is not copied to Modal clusters: commands on a cluster
+authenticate to Modal as the cluster's own container, like code in any Modal
+Function.
+
 Autodown is supported with ``--down``:
 
 .. code-block:: shell
@@ -1267,6 +1271,10 @@ Current limitations:
 - Managed jobs and SkyServe controllers are not supported on Modal.
 - Modal Volumes do not have a SkyPilot ``size`` setting. Persist writes with
   ``sync <mount-path>`` before tearing down the cluster.
+- S3 bucket mounts use a copy of the AWS credentials taken when the cluster is
+  launched. Temporary credentials (SSO, an assumed role) stop working on the
+  mount when they expire; use long-lived credentials for clusters that outlive
+  them.
 - Modal GCS bucket mounts require HMAC credentials in
   ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``.
 - Docker images are supported through public registry image references such as
