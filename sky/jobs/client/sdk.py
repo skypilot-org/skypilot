@@ -225,6 +225,12 @@ def launch(
                 'depends_on is not supported by your API server. Please '
                 'upgrade the API server.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    # Fail early on the client; the server rejects it as well.
+    if any(getattr(t, '_dropped_event_callback', False) for t in dag.tasks):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                '`event_callback` is no longer supported for managed jobs. '
+                'Remove it from the task YAML and submit again.')
     if (_uses_wait_for_scheduling_timeout(dag) and
         (remote_api_version is None or remote_api_version <
          server_constants.MIN_JOBS_WAIT_FOR_SCHEDULING_TIMEOUT_API_VERSION)):

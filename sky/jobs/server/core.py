@@ -1085,6 +1085,7 @@ def _launch(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+    managed_job_utils.reject_event_callback(dag)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():

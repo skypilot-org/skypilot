@@ -1293,6 +1293,9 @@ def get_task_schema():
                     },
                 }],
             },
+            # Removed. Still accepted by the schema so that older task YAML
+            # (including managed jobs already stored by the server) parses;
+            # `sky jobs launch` rejects it and nothing runs it.
             'event_callback': {
                 'type': 'string',
             },

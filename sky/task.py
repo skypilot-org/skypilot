@@ -338,7 +338,6 @@ class Task:
         job: Optional[Dict[str, Any]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
-        event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         api_server_access: bool = True,
@@ -427,8 +426,6 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
-          event_callback: A bash script that will be executed when the task
-            changes state.
           blocked_resources: A set of resources that this task cannot run on.
           api_server_access: If True, auto-inject API server credentials
             (endpoint and service account token) into the job's environment
@@ -478,7 +475,9 @@ class Task:
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
-        self.event_callback = event_callback
+        # Set when a task YAML still carries the removed `event_callback`
+        # field; `sky jobs launch` rejects such tasks. Never exported.
+        self._dropped_event_callback = False
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
@@ -836,6 +835,7 @@ class Task:
                 else:
                     inline_secrets[key] = value
 
+        dropped_event_callback = config.pop('event_callback', None)
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -846,7 +846,6 @@ class Task:
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
             job=config.pop('job', None),
-            event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
@@ -855,6 +854,7 @@ class Task:
 
         # Append managed refs from secrets: field (secrets:NAME entries)
         # pylint: disable=protected-access
+        task._dropped_event_callback = bool(dropped_event_callback)
         for ref in managed_from_secrets:
             task._managed_secret_refs.append(ref)
 
@@ -2136,7 +2136,6 @@ class Task:
 
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
-        add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
 
         # Add envs without redaction

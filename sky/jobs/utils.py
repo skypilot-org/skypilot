@@ -1196,49 +1196,34 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
+def reject_event_callback(dag: 'sky.Dag') -> None:
+    """Rejects a managed job whose task YAML sets `event_callback`.
+
+    The field has been removed; older YAML still parses (see `Task`), but new
+    submissions that set it are rejected.
+    """
+    if any(
+            getattr(task, '_dropped_event_callback', False)
+            for task in dag.tasks):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                '`event_callback` is no longer supported for managed jobs. '
+                'Remove it from the task YAML and submit again.')
+
+
 def event_callback_func(
         job_id: int, task_id: Optional[int],
         task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
-    """Run event callback for the task."""
+    """Returns a no-op state-transition callback.
 
-    def callback_func(status: str):
-        event_callback = task.event_callback if task else None
-        if event_callback is None or task is None:
-            return
-        event_callback = event_callback.strip()
-        pool = managed_job_state.get_pool_from_job_id(job_id)
-        if pool is not None:
-            cluster_name, _ = (managed_job_state.get_pool_submit_info(job_id))
-        else:
-            cluster_name = generate_managed_job_cluster_name(
-                task.name, job_id) if task.name else None
-        logger.info(f'=== START: event callback for {status!r} ===')
-        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                'managed_job_event',
-                                f'jobs-callback-{job_id}-{task_id}.log')
-        env_vars = task.envs.copy() if task.envs else {}
-        env_vars.update(
-            dict(
-                SKYPILOT_TASK_ID=str(
-                    task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
-                SKYPILOT_TASK_IDS=str(
-                    task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
-                TASK_ID=str(task_id),
-                JOB_ID=str(job_id),
-                JOB_STATUS=status,
-                CLUSTER_NAME=cluster_name or '',
-                TASK_NAME=task.name or '',
-                # TODO(MaoZiming): Future event type Job or Spot.
-                EVENT_TYPE='Spot'))
-        result = log_lib.run_bash_command_with_log(bash_command=event_callback,
-                                                   log_path=log_path,
-                                                   env_vars=env_vars)
-        logger.info(
-            f'Bash:{event_callback},log_path:{log_path},result:{result}')
-        logger.info(f'=== END: event callback for {status!r} ===')
+    User-provided `event_callback` scripts are no longer supported. This is
+    kept so that callers which pass a state-transition callback (including
+    plugins that wrap it) keep working.
+    """
+    del job_id, task_id, task
 
     async def async_callback_func(status: str):
-        return await asyncio.to_thread(callback_func, status)
+        del status
 
     return async_callback_func
 
