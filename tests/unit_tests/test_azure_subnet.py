@@ -67,15 +67,21 @@ def test_case_insensitive_and_legacy_selection(network, selected):
 ])
 @pytest.mark.usefixtures('network')
 def test_invalid_subnet_never_falls_back(selected):
-    with pytest.raises(exceptions.ResourcesUnavailableError,
-                       match='does not identify exactly one'):
-        config._resolve_custom_vnet('private', 'sub', 'rg', 'eastus', selected)
+    with mock.patch.object(config.logger, 'error') as log_error:
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='does not identify exactly one') as exc:
+            config._resolve_custom_vnet('private', 'sub', 'rg', 'eastus',
+                                        selected)
+    log_error.assert_called_once_with(str(exc.value))
+    available = ', '.join(
+        repr(name) for name in ['endpoints', 'routers', 'workers'])
+    assert f'Available subnets: {available}.' in str(exc.value)
 
 
 @pytest.mark.parametrize('ids', [[], [_SUBNET, _SUBNET], [None]])
 def test_empty_ambiguous_or_missing_ids(network, ids):
     network.virtual_networks.get.return_value.subnets = [
-        SimpleNamespace(id=subnet_id) for subnet_id in ids
+        SimpleNamespace(id=subnet_id, name='workers') for subnet_id in ids
     ]
     with pytest.raises(exceptions.ResourcesUnavailableError):
         config._resolve_custom_vnet('private', 'sub', 'rg', 'eastus', _SUBNET)
@@ -83,9 +89,11 @@ def test_empty_ambiguous_or_missing_ids(network, ids):
 
 @pytest.mark.usefixtures('network')
 def test_subnet_requires_vnet_before_lookup():
-    with pytest.raises(exceptions.ResourcesUnavailableError,
-                       match='requires vpc_name'):
-        config._resolve_custom_vnet(None, 'sub', 'rg', 'eastus', _SUBNET)
+    with mock.patch.object(config.logger, 'error') as log_error:
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='requires vpc_name') as exc:
+            config._resolve_custom_vnet(None, 'sub', 'rg', 'eastus', _SUBNET)
+    log_error.assert_called_once_with(str(exc.value))
     assert config._resolve_custom_vnet(None, 'sub', 'rg', 'eastus') is None
     azure.get_client.assert_not_called()
 

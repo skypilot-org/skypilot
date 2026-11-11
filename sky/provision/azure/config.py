@@ -331,8 +331,9 @@ def _resolve_custom_vnet(
     """
     if vpc_name is None:
         if subnet_id is not None:
-            raise exceptions.ResourcesUnavailableError(
-                'An explicit Azure subnet_id requires vpc_name.')
+            message = 'An explicit Azure subnet_id requires vpc_name.'
+            logger.error(message)
+            raise exceptions.ResourcesUnavailableError(message)
         return None
 
     network_client = azure.get_client('network', subscription_id)
@@ -374,9 +375,12 @@ def _resolve_custom_vnet(
             s.id is not None and s.id.casefold() == subnet_id.casefold()
         ]
         if len(matches) != 1:
-            raise exceptions.ResourcesUnavailableError(
-                f'Azure subnet_id {subnet_id!r} does not identify exactly one '
-                f'subnet in VNet {vpc_name!r}.')
+            available = ', '.join(repr(s.name) for s in vnet.subnets)
+            message = (f'Azure subnet_id {subnet_id!r} does not identify '
+                       f'exactly one subnet in VNet {vpc_name!r}. Available '
+                       f'subnets: {available}.')
+            logger.error(message)
+            raise exceptions.ResourcesUnavailableError(message)
         subnet = matches[0]
     subnet_id = subnet.id
     nsg_id = subnet.network_security_group.id if (
