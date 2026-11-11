@@ -297,6 +297,27 @@ def candidate_shapes(context: Optional[str], k8s_acc_label_key: Optional[str],
     return shapes
 
 
+_SHAPE_GPU_COUNT_RE = re.compile(r'\.(\d+)$')
+
+
+def shapes_gpu_count(shapes: Set[str]) -> Optional[int]:
+    """GPUs per node across OCI `shapes`, or None when not known.
+
+    OCI GPU shape names end in their GPU count (BM.GPU.B200.8 has 8,
+    BM.GPU.GB200.4 has 4). The smallest count wins, so a pod counts as using
+    part of a node only if it is smaller than every node it can land on. None
+    when there is no shape (no matching node up) or any shape does not follow
+    that naming.
+    """
+    counts = []
+    for shape in shapes:
+        match = _SHAPE_GPU_COUNT_RE.search(shape)
+        if match is None:
+            return None
+        counts.append(int(match.group(1)))
+    return min(counts) if counts else None
+
+
 def get_env_vars(context: Optional[str], namespace: str, shapes: Set[str],
                  pod_local_rdma: bool) -> Dict[str, str]:
     """NCCL env vars for an OCI RoCE pod that can land on any of `shapes`.

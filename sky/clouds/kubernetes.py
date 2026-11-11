@@ -1336,14 +1336,36 @@ class Kubernetes(clouds.Cloud):
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
                 # clusters with high performance networking.
+                network_env_vars: Dict[str, str] = {}
                 if oci_roce_enabled:
                     # OCI tunes NCCL per instance shape, so read it off the
                     # nodes this pod can land on.
                     shapes = oci_nccl.candidate_shapes(
                         context, k8s_acc_label_key, k8s_acc_label_values,
                         merged_pod_config.get('spec', {}).get('nodeSelector'))
-                    network_env_vars = oci_nccl.get_env_vars(
-                        context, namespace, shapes, pod_local_rdma=sriov_mode)
+                    node_gpus = oci_nccl.shapes_gpu_count(shapes)
+                    # Bare-metal RoCE runs the container privileged, and a
+                    # privileged container sees every GPU on the node, so a
+                    # single-node pod using part of a node would run on host
+                    # GPUs 0..n-1 instead of the ones it was allocated. RDMA
+                    # does nothing within one node, so drop the tier there.
+                    if (not sriov_mode and num_nodes == 1 and
+                            node_gpus is not None and
+                            0 < acc_count < node_gpus):
+                        logger.info(
+                            'network_tier: best ignored: RDMA does not apply '
+                            f'to single-node jobs, and this job uses '
+                            f'{acc_count} of the {node_gpus} GPUs on its '
+                            'node. Running without host networking or a '
+                            'privileged container.')
+                        network_type = KubernetesHighPerformanceNetworkType.NONE
+                        oci_roce_enabled = False
+                    else:
+                        network_env_vars = oci_nccl.get_env_vars(
+                            context,
+                            namespace,
+                            shapes,
+                            pod_local_rdma=sriov_mode)
                 else:
                     network_env_vars = network_type.get_network_env_vars()
                 k8s_env_vars.update(network_env_vars)
