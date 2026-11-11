@@ -371,8 +371,8 @@ def _resolve_custom_vnet(
         subnet = vnet.subnets[0]
     else:
         matches = [
-            s for s in vnet.subnets if isinstance(subnet_id, str) and
-            s.id is not None and s.id.casefold() == subnet_id.casefold()
+            s for s in vnet.subnets
+            if s.id is not None and s.id.casefold() == subnet_id.casefold()
         ]
         if len(matches) != 1:
             available = ', '.join(repr(s.name) for s in vnet.subnets)

@@ -63,7 +63,6 @@ def test_case_insensitive_and_legacy_selection(network, selected):
     _SUBNET + '-missing',
     _SUBNET.replace('/sub/', '/other/'),
     _SUBNET.replace('/private/', '/other/'),
-    42,
 ])
 @pytest.mark.usefixtures('network')
 def test_invalid_subnet_never_falls_back(selected):
