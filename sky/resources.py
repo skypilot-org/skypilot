@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 37  # add _enforce_multi_host.
+    _VERSION = 36  # add _kubernetes_identity, _remote_identity_none.
 
     def __init__(
         self,
@@ -185,7 +185,6 @@ class Resources:
         priority: Optional[int] = None,
         priority_class: Optional[str] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
-        enforce_multi_host: Optional[bool] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -433,12 +432,6 @@ class Resources:
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
 
-        # Only meaningful (and only accepted) as True with an 8-chip TPU v6e
-        # slice on Kubernetes: it selects two 4-chip VMs on one multi-host
-        # 2x4 slice instead of one 8-chip VM. See
-        # _validate_enforce_multi_host().
-        self._enforce_multi_host = enforce_multi_host
-
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
@@ -510,7 +503,7 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
-        self._try_validate_enforce_multi_host()
+        self._try_validate_tpu_multi_host()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -756,10 +749,6 @@ class Resources:
         return self._network_tier
 
     @property
-    def enforce_multi_host(self) -> Optional[bool]:
-        return self._enforce_multi_host
-
-    @property
     def local_disk(self) -> Optional[str]:
         if self._local_disk is not None:
             return self._local_disk
@@ -997,10 +986,12 @@ class Resources:
                 # Fix the logic such that GCP TPU names can failover between
                 # GCP and kubernetes.
                 if self.cloud is None:
-                    # enforce_multi_host only exists on Kubernetes, so it
-                    # also resolves a GCP TPU name (tpu-v6e-8) to Kubernetes.
+                    # accelerator_args.multi_host only exists on Kubernetes,
+                    # so it also resolves a GCP TPU name (tpu-v6e-8) to
+                    # Kubernetes (and never gets a GCP runtime_version).
                     if (kubernetes_utils.is_tpu_on_gke(acc, normalize=False) or
-                            self._enforce_multi_host):
+                            kubernetes_utils.multi_host_requested(
+                                accelerator_args)):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -1855,21 +1846,22 @@ class Resources:
                         f'Specified instance type {self._instance_type} does '
                         f'not have specified local disk {self._local_disk}.')
 
-    def _try_validate_enforce_multi_host(self) -> None:
-        """``enforce_multi_host`` is only accepted as True, for an 8-chip
-        TPU v6e slice on Kubernetes (the one size that exists both as one VM
-        and as a multi-host slice)."""
-        if self._enforce_multi_host is None:
+    def _try_validate_tpu_multi_host(self) -> None:
+        """``accelerator_args.multi_host`` is only accepted as True, for an
+        8-chip TPU v6e slice on Kubernetes (the one size that exists both as
+        one VM and as a multi-host slice)."""
+        if (self._accelerator_args is None or
+                'multi_host' not in self._accelerator_args):
             return
-        usage = ('`enforce_multi_host` is only supported as `true` with '
-                 '`accelerators: tpu-v6e-8` (or `tpu-v6e-slice:8`) on '
+        multi_host = self._accelerator_args['multi_host']
+        usage = ('`accelerator_args.multi_host` is only supported as `true` '
+                 'with `accelerators: tpu-v6e-8` (or `tpu-v6e-slice:8`) on '
                  'Kubernetes.')
         with ux_utils.print_exception_no_traceback():
-            if self._enforce_multi_host is not True:
+            if multi_host is not True:
                 raise ValueError(
-                    f'{usage} Got enforce_multi_host='
-                    f'{self._enforce_multi_host!r}; remove the field instead '
-                    'of setting it to false.')
+                    f'{usage} Got multi_host={multi_host!r}; remove the field '
+                    'instead of setting it to false.')
             accelerators = self._accelerators or {}
             shape = None
             if len(accelerators) == 1:
@@ -1880,7 +1872,7 @@ class Resources:
                     # A GCP name carries its count in the name, so an extra
                     # count (tpu-v6e-8:2) is ambiguous here.
                     if (acc_type, chips) in (
-                            kubernetes_utils.ENFORCE_MULTI_HOST_SHAPES) and (
+                            kubernetes_utils.OPT_IN_MULTI_HOST_SHAPES) and (
                                 acc == acc_type or count in (None, 1)):
                         shape = (acc_type, chips)
             if shape is None:
@@ -2099,13 +2091,6 @@ class Resources:
                 return False
             # self.zone <= other.zone
 
-        # A multi-host slice and a single VM of the same chip count are
-        # different hardware. The flag only matters for a request that asks
-        # for accelerators: a CPU-only request fits either cluster.
-        if (self.accelerators is not None and bool(self.enforce_multi_host) !=
-                bool(other.enforce_multi_host)):
-            return False
-
         if self.image_id is not None:
             if other.image_id is None:
                 return False
@@ -2137,6 +2122,9 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
+        # This also tells a multi-host TPU slice (accelerator_args.multi_host)
+        # from a single VM of the same chip count. A CPU-only request has no
+        # accelerator_args, so it fits either cluster.
         if (self.accelerator_args is not None and
                 self.accelerator_args != other.accelerator_args):
             return False
@@ -2412,8 +2400,6 @@ class Resources:
             priority=override.pop('priority', self.priority),
             priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
-            enforce_multi_host=override.pop('enforce_multi_host',
-                                            self._enforce_multi_host),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
@@ -2745,8 +2731,6 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
-        resources_fields['enforce_multi_host'] = config.pop(
-            'enforce_multi_host', None)
         resources_fields['local_disk'] = config.pop('local_disk', None)
         resources_fields['max_hourly_cost'] = config.pop(
             'max_hourly_cost', None)
@@ -2857,7 +2841,6 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         if self.network_tier is not None:
             config['network_tier'] = self.network_tier.value
-        add_if_not_none('enforce_multi_host', self._enforce_multi_host)
         add_if_not_none('local_disk', self._local_disk)
         add_if_not_none('max_hourly_cost', self._max_hourly_cost)
         add_if_not_none('ports', self.ports)
@@ -3074,9 +3057,6 @@ class Resources:
 
         if version < 26:
             self._network_tier = state.get('_network_tier', None)
-
-        if version < 37:
-            self._enforce_multi_host = None
 
         if version < 27:
             self._priority = None

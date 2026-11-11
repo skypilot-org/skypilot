@@ -690,7 +690,9 @@ class Kubernetes(clouds.Cloud):
                 resources.accelerators) == 1:
             acc, acc_count = next(iter(resources.accelerators.items()))
             tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
-                acc, acc_count, resources.enforce_multi_host)
+                acc, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
 
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
@@ -989,7 +991,9 @@ class Kubernetes(clouds.Cloud):
         tpu_multi_host_shape = None
         if acc_type is not None and is_tpu_on_gke(acc_type):
             tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
-                acc_type, acc_count, resources.enforce_multi_host)
+                acc_type, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
             acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
             if tpu_multi_host_shape is not None:
                 # One pod per VM of the slice, each taking all of its VM's
@@ -1792,7 +1796,9 @@ class Kubernetes(clouds.Cloud):
                         f'{chips} chips. Use num_nodes to request several '
                         'slices.')
                 shape = kubernetes_utils.get_tpu_multi_host_shape(
-                    acc_type, acc_count, resources.enforce_multi_host)
+                    acc_type, acc_count,
+                    kubernetes_utils.multi_host_requested(
+                        resources.accelerator_args))
                 if shape is not None:
                     # A multi-host slice runs one pod per VM; size each pod
                     # for its VM's chips.

@@ -558,9 +558,6 @@ def _get_single_resources_schema():
             'network_tier': {
                 'type': 'string',
             },
-            'enforce_multi_host': {
-                'type': 'boolean',
-            },
             'local_disk': {
                 'type': 'string',
             },
@@ -607,6 +604,9 @@ def _get_single_resources_schema():
                         'type': 'boolean',
                     },
                     'gcp_queued_resource': {
+                        'type': 'boolean',
+                    },
+                    'multi_host': {
                         'type': 'boolean',
                     },
                 }

@@ -16,14 +16,14 @@ _FMT = kubernetes_utils.GKELabelFormatter
 
 
 @pytest.mark.parametrize(
-    'accelerator,count,enforce,expected',
+    'accelerator,count,multi_host,expected',
     [
         # Sizes with a single-host VM stay single-host by default.
         ('tpu-v6e-1', 1, None, None),
         ('tpu-v6e-4', 1, None, None),
         ('tpu-v6e-8', 1, None, None),
         ('tpu-v6e-slice', 8, None, None),
-        # enforce_multi_host picks the two-VM 2x4 slice for 8 chips.
+        # accelerator_args.multi_host picks the two-VM 2x4 slice for 8 chips.
         ('tpu-v6e-8', 1, True, ('2x4', 2)),
         ('tpu-v6e-slice', 8, True, ('2x4', 2)),
         # No multi-host slice of 4 chips exists.
@@ -38,9 +38,9 @@ _FMT = kubernetes_utils.GKELabelFormatter
         ('H100', 8, True, None),
         (None, None, True, None),
     ])
-def test_get_tpu_multi_host_shape(accelerator, count, enforce, expected):
+def test_get_tpu_multi_host_shape(accelerator, count, multi_host, expected):
     shape = kubernetes_utils.get_tpu_multi_host_shape(accelerator, count,
-                                                      enforce)
+                                                      multi_host)
     if expected is None:
         assert shape is None
     else:
@@ -56,85 +56,76 @@ def _validate(**kwargs):
     return r
 
 
+_MULTI_HOST = {'multi_host': True}
+
+
 @pytest.mark.parametrize('kwargs', [
     dict(accelerators='tpu-v6e-8'),
     dict(accelerators='tpu-v6e-8:1'),
     dict(accelerators='tpu-v6e-slice:8'),
     dict(accelerators='tpu-v6e-8', infra='k8s'),
 ])
-def test_enforce_multi_host_accepted(kwargs):
-    r = _validate(enforce_multi_host=True, **kwargs)
-    # A GCP TPU name resolves to Kubernetes, the only cloud with the flag.
+def test_multi_host_accepted(kwargs):
+    r = _validate(accelerator_args=dict(_MULTI_HOST), **kwargs)
+    # A GCP TPU name resolves to Kubernetes, the only cloud with the flag,
+    # and gets no GCP runtime_version.
     assert isinstance(r.cloud, clouds.Kubernetes)
+    assert r.accelerator_args == _MULTI_HOST
     assert kubernetes_utils.tpu_vms_per_slice(r) == 2
 
 
 @pytest.mark.parametrize('kwargs', [
-    dict(accelerators='tpu-v6e-8', enforce_multi_host=False),
-    dict(accelerators='tpu-v6e-8:2', enforce_multi_host=True),
-    dict(accelerators='tpu-v6e-4', enforce_multi_host=True),
-    dict(accelerators='tpu-v6e-16', enforce_multi_host=True),
-    dict(accelerators='H100:8', enforce_multi_host=True),
-    dict(enforce_multi_host=True),
-    dict(accelerators='tpu-v6e-8', enforce_multi_host=True, infra='gcp'),
+    dict(accelerators='tpu-v6e-8', accelerator_args={'multi_host': False}),
+    dict(accelerators='tpu-v6e-8:2', accelerator_args=_MULTI_HOST),
+    dict(accelerators='tpu-v6e-4', accelerator_args=_MULTI_HOST),
+    dict(accelerators='tpu-v6e-16', accelerator_args=_MULTI_HOST),
+    dict(accelerators='H100:8', accelerator_args=_MULTI_HOST),
+    dict(accelerator_args=_MULTI_HOST),
+    dict(accelerators='tpu-v6e-8', accelerator_args=_MULTI_HOST, infra='gcp'),
 ])
-def test_enforce_multi_host_rejected(kwargs):
-    with pytest.raises(ValueError, match='enforce_multi_host'):
+def test_multi_host_rejected(kwargs):
+    kwargs['accelerator_args'] = dict(kwargs['accelerator_args'])
+    with pytest.raises(ValueError, match='accelerator_args.multi_host'):
         _validate(**kwargs)
 
 
-def test_enforce_multi_host_round_trip():
+def test_multi_host_round_trip():
     r = resources_lib.Resources(accelerators='tpu-v6e-8',
-                                enforce_multi_host=True)
+                                accelerator_args=dict(_MULTI_HOST))
     config = r.to_yaml_config()
-    assert config['enforce_multi_host'] is True
+    assert config['accelerator_args'] == _MULTI_HOST
     parsed = list(resources_lib.Resources.from_yaml_config(config))[0]
-    assert parsed.enforce_multi_host is True
-    assert resources_lib.Resources(accelerators='tpu-v6e-8').to_yaml_config(
-    ).get('enforce_multi_host') is None
-    assert r.copy().enforce_multi_host is True
+    assert parsed.accelerator_args == _MULTI_HOST
+    assert isinstance(parsed.cloud, clouds.Kubernetes)
+    assert r.copy().accelerator_args == _MULTI_HOST
+    assert pickle.loads(pickle.dumps(r)).accelerator_args == _MULTI_HOST
 
 
 def test_multi_host_and_single_host_clusters_do_not_match():
     multi = resources_lib.Resources(infra='k8s/ctx',
                                     accelerators='tpu-v6e-8',
-                                    enforce_multi_host=True)
+                                    accelerator_args=dict(_MULTI_HOST))
     single = resources_lib.Resources(infra='k8s/ctx', accelerators='tpu-v6e-8')
     assert not single.less_demanding_than(multi)
     assert not multi.less_demanding_than(single)
+    assert multi.less_demanding_than(multi.copy())
 
 
 def test_cpu_only_request_fits_multi_host_cluster():
     multi = resources_lib.Resources(infra='k8s/ctx',
                                     accelerators='tpu-v6e-8',
-                                    enforce_multi_host=True)
+                                    accelerator_args=dict(_MULTI_HOST))
     cpu_only = resources_lib.Resources(infra='k8s/ctx')
     assert cpu_only.less_demanding_than(multi)
-
-
-def test_enforce_multi_host_pickle_round_trip():
-    r = resources_lib.Resources(accelerators='tpu-v6e-8',
-                                enforce_multi_host=True)
-    assert pickle.loads(pickle.dumps(r)).enforce_multi_host is True
-
-
-def test_unpickle_resources_from_before_enforce_multi_host():
-    # Resources pickled by a version without the field have no
-    # _enforce_multi_host attribute.
-    state = resources_lib.Resources(accelerators='tpu-v6e-8').__getstate__()
-    state = dict(state)
-    state.pop('_enforce_multi_host', None)
-    state['_version'] = 36
-    r = resources_lib.Resources.__new__(resources_lib.Resources)
-    r.__setstate__(state)
-    assert r.enforce_multi_host is None
 
 
 def _multi_host_handle(launched_nodes):
     handle = mock.MagicMock()
     handle.launched_nodes = launched_nodes
     handle.launched_resources = resources_lib.Resources(
-        infra='k8s/ctx', accelerators='tpu-v6e-8', enforce_multi_host=True)
+        infra='k8s/ctx',
+        accelerators='tpu-v6e-8',
+        accelerator_args={'multi_host': True})
     return handle
 
 

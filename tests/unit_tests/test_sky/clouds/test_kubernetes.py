@@ -1357,7 +1357,7 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
 
         formatter = kubernetes_utils.GKELabelFormatter
         k8s_cloud = kubernetes.Kubernetes()
-        # (instance type, enforce_multi_host, num_nodes, topology,
+        # (instance type, multi_host, num_nodes, topology,
         #  single node pool). All are one slice; several slices are checked
         #  below.
         cases = [
@@ -1368,7 +1368,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         for instance_type, enforce, num_nodes, topology, one_pool in cases:
             with self.subTest(instance_type=instance_type, num_nodes=num_nodes):
                 self.resources.instance_type = instance_type
-                self.resources.enforce_multi_host = enforce
+                self.resources.accelerator_args = ({
+                    'multi_host': True
+                } if enforce else {})
                 deploy_vars = k8s_cloud.make_deploy_resources_variables(
                     resources=self.resources,
                     cluster_name=resources_utils.ClusterName(
@@ -1420,7 +1422,7 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
                                                          {}).get('podAffinity')
 
         self.resources.instance_type = '16CPU--64GB--tpu-v6e-slice:8'
-        self.resources.enforce_multi_host = True
+        self.resources.accelerator_args = {'multi_host': True}
 
         # Several slices without a queue are accepted and get
         # no podAffinity: one rule would put every slice in one pool.

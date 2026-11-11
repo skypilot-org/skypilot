@@ -404,8 +404,16 @@ GKE_TPU_MULTI_HOST_TOPOLOGIES: Dict[str, Dict[int, str]] = {
 GKE_TPU_MULTI_HOST_CHIPS_PER_VM: Dict[str, int] = {'tpu-v6e-slice': 4}
 # The only slice that exists both as one VM and as a multi-host slice:
 # TPU v6e with 8 chips is one ct6e-standard-8t VM, or two ct6e-standard-4t
-# VMs on one 2x4 slice. ``resources.enforce_multi_host`` selects the latter.
-ENFORCE_MULTI_HOST_SHAPES: Set[Tuple[str, int]] = {('tpu-v6e-slice', 8)}
+# VMs on one 2x4 slice. ``accelerator_args: {multi_host: true}`` selects the
+# latter.
+OPT_IN_MULTI_HOST_SHAPES: Set[Tuple[str, int]] = {('tpu-v6e-slice', 8)}
+
+
+def multi_host_requested(accelerator_args: Optional[Dict[str, Any]]) -> bool:
+    """Whether ``accelerator_args`` asks for a multi-host TPU slice."""
+    if not accelerator_args:
+        return False
+    return accelerator_args.get('multi_host') is True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -424,12 +432,13 @@ class TPUMultiHostShape:
 
 def get_tpu_multi_host_shape(
         accelerator: Optional[str], count: Optional[float],
-        enforce_multi_host: Optional[bool]) -> Optional[TPUMultiHostShape]:
+        multi_host: Optional[bool]) -> Optional[TPUMultiHostShape]:
     """Return the multi-host slice a GKE TPU request maps to, or None.
 
     The request names a slice by its chip count (``tpu-v6e-16`` or
     ``tpu-v6e-slice:16``). Sizes with a single-host VM (1, 4 and 8 chips on
-    v6e) stay single-host unless ``enforce_multi_host`` is True; larger sizes
+    v6e) stay single-host unless ``multi_host`` (from
+    ``accelerator_args.multi_host``) is True; larger sizes
     exist only as multi-host slices.
     """
     if not accelerator or not is_tpu_on_gke(accelerator):
@@ -440,7 +449,7 @@ def get_tpu_multi_host_shape(
         return None
     has_single_host = chips in GKELabelFormatter.GKE_TPU_TOPOLOGIES.get(
         acc_type, {})
-    if has_single_host and enforce_multi_host is not True:
+    if has_single_host and multi_host is not True:
         return None
     return TPUMultiHostShape(
         accelerator=acc_type,
@@ -489,7 +498,8 @@ def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
     if len(resources.accelerators) != 1:
         return 1
     acc, count = next(iter(resources.accelerators.items()))
-    shape = get_tpu_multi_host_shape(acc, count, resources.enforce_multi_host)
+    shape = get_tpu_multi_host_shape(
+        acc, count, multi_host_requested(resources.accelerator_args))
     return shape.vms_per_slice if shape is not None else 1
 
 
