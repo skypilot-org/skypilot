@@ -408,10 +408,15 @@ RAY_INSTALLATION_COMMANDS = (
     # click at whatever the AMI shipped.
     # See: https://github.com/ray-project/ray/issues/56747
     # Best-effort: an image that violates a pin needs the index to fix it, and
-    # one without internet access must still be able to start.
-    f'{SKY_UV_PIP_CMD} install "setuptools<70" "click<8.3.0" || '
-    'echo "WARNING: could not install setuptools<70 and click<8.3.0; '
-    'continuing with the versions in the image."; '
+    # one without internet access must still be able to start. Separate
+    # installs, so an index that has one pin but not the other still fixes
+    # the one it has.
+    f'{SKY_UV_PIP_CMD} install "setuptools<70" || '
+    'echo "WARNING: could not install setuptools<70; continuing with the '
+    'version in the image."; '
+    f'{SKY_UV_PIP_CMD} install "click<8.3.0" || '
+    'echo "WARNING: could not install click<8.3.0; continuing with the '
+    'version in the image."; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #

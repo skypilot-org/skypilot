@@ -626,8 +626,18 @@ def test_failed_prefetch_does_not_fail_the_step():
     assert 'could not prefetch' in result.stdout
 
 
-def test_ray_install_tolerates_unreachable_index_for_the_pins():
-    """setuptools/click pins must not fail an offline pod whose image has Ray.
+@pytest.mark.parametrize(
+    'index_has,expect_warnings',
+    [
+        # No index at all (offline pod).
+        ('', ['setuptools<70', 'click<8.3.0']),
+        # An index with a compatible click but no setuptools<70: click must
+        # still be fixed, or the Ray CLI breaks on click 8.3.
+        ('click', ['setuptools<70']),
+    ])
+def test_ray_install_pins_are_independent_and_best_effort(
+        index_has, expect_warnings):
+    """setuptools/click pins must not fail a pod whose image already has Ray.
 
     SkyPilot's default image ships setuptools 84, so the pin needs the index;
     without network that used to abort STEP 2 under `set -e`.
@@ -651,7 +661,12 @@ def test_ray_install_tolerates_unreachable_index_for_the_pins():
             case "$1 $2" in
               "-V "*) exit 0 ;;
               "pip list") echo "ray                {constants.SKY_REMOTE_RAY_VERSION}"; exit 0 ;;
-              "pip install") echo "error: index unreachable" >&2; exit 2 ;;
+              "pip install")
+                echo "$*" >> {tmp}/installs
+                case "$*" in
+                  *{index_has or 'NOTHING'}*) exit 0 ;;
+                  *) echo "error: not in index" >&2; exit 2 ;;
+                esac ;;
               run*) echo /fake/ray; exit 0 ;;
             esac
             exit 0
@@ -660,8 +675,11 @@ def test_ray_install_tolerates_unreachable_index_for_the_pins():
             '{ray_version}', constants.SKY_REMOTE_RAY_VERSION)
         result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + cmd, errexit=True)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert 'could not install setuptools<70 and click<8.3.0' in \
-            result.stdout
+        for pin in ('setuptools<70', 'click<8.3.0'):
+            assert (f'could not install {pin};'
+                    in result.stdout) == (pin in expect_warnings), result.stdout
+        with open(os.path.join(tmp, 'installs'), encoding='utf-8') as f:
+            assert any('click<8.3.0' in l for l in f.read().splitlines())
     finally:
         shutil.rmtree(tmp)
 
