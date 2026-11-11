@@ -215,3 +215,33 @@ def test_get_volume_names_applies_the_same_filters(isolated_database):
 
     assert names == ['vol-a']
     assert global_user_state.get_volume_names(workspaces_filter=set()) == []
+
+
+def test_get_volume_owners_skips_the_handle(isolated_database):
+    """A corrupt handle must not fail the workspace resource check."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+    _add('vol-b', workspace='ws-b')
+    with global_user_state._db_manager.get_engine().begin() as conn:
+        conn.execute(global_user_state.volume_table.update().values(
+            handle=b'not a pickle'))
+
+    owners = global_user_state.get_volume_owners(is_ephemeral=False,
+                                                 workspaces_filter={'ws-a'})
+
+    assert [(o['name'], o['workspace']) for o in owners] == [('vol-a', 'ws-a')]
+    assert set(owners[0]) == {'name', 'workspace', 'user_hash'}
+
+
+def test_set_volume_workspace_moves_only_the_named_volumes(isolated_database):
+    _add('vol-a', workspace='ws-a')
+    _add('vol-b', workspace='ws-a')
+
+    global_user_state.set_volume_workspace(['vol-a', 'gone'], 'ws-b')
+
+    assert global_user_state.get_volume_names(workspaces_filter={'ws-b'}) == [
+        'vol-a'
+    ]
+    assert global_user_state.get_volume_names(workspaces_filter={'ws-a'}) == [
+        'vol-b'
+    ]

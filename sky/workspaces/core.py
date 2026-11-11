@@ -597,26 +597,17 @@ def _validate_workspace_config_changes(
             # Private setting didn't change, but allowed_users changed
             if (config_comparison.allowed_users_changed and
                     config_comparison.removed_users):
-                # Check that removed users don't have active resources
+                # Check that removed users don't have active resources.
+                # Resources of other non-members do not block the removal.
                 logger.info(f'Checking that removed users'
                             f' {config_comparison.removed_users} do not have'
                             f' active resources in workspace {ws_label}.')
-                error_summary, missed_users_names, missed_user_dict = (
+                error_summary, error_user_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
-                        resources=resources))
+                        resources=resources,
+                        owners=config_comparison.removed_users))
                 if error_summary:
-                    error_user_ids = []
-                    for user_id in config_comparison.removed_users:
-                        if user_id in missed_user_dict:
-                            error_user_ids.append(user_id)
-                    error_user_names = []
-                    if error_user_ids:
-                        error_user_names = [
-                            missed_user_dict[user_id]
-                            for user_id in error_user_ids
-                        ]
-
                     error_msg = 'Cannot '
                     error_users_list = ', '.join(error_user_names)
                     if len(error_user_names) == 1:
@@ -955,7 +946,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                                  f'{constants.SKYPILOT_DEFAULT_WORKSPACE!r}.')
             workspaces_to_check.append((workspace_name, 'delete'))
 
-    # Check all workspaces for active resources in one efficient call
+    # Check all workspaces for active resources in one efficient call. It
+    # reuses the snapshot above rather than refetching: racing creates are an
+    # accepted gap here, as on every other path.
     resource_checker.check_no_active_resources_for_workspaces(
         workspaces_to_check, resources=resources)
 

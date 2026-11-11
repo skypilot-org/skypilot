@@ -1,7 +1,6 @@
 """Resource checking utilities for finding active clusters and managed jobs."""
 
 import collections
-import concurrent.futures
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
@@ -13,6 +12,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import context_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -191,6 +191,7 @@ def check_users_workspaces_active_resources(
     user_ids: List[str],
     workspace_names: List[str],
     resources: Optional['ResourceSnapshot'] = None,
+    owners: Optional[List[str]] = None,
 ) -> Tuple[str, List[str], Dict[str, str]]:
     """Check if all the active resources in workspaces belong to the user_ids.
        If not, return the error message.
@@ -198,6 +199,8 @@ def check_users_workspaces_active_resources(
     Args:
         user_ids: List of user_id.
         workspace_names: List of workspaces to check.
+        owners: If given, only resources owned by these users count, e.g.
+            the users being removed.
         resources: Optional shared ``ResourceSnapshot`` covering at
             least the given workspaces. Batch callers should construct
             one ``ResourceSnapshot.fetch_for_workspaces`` and pass it
@@ -224,7 +227,8 @@ def check_users_workspaces_active_resources(
             if _workspace_of(resource) not in workspace_set:
                 continue
             user_hash = resource.get('user_hash')
-            if user_hash and user_hash not in user_ids:
+            if (user_hash and user_hash not in user_ids and
+                (owners is None or user_hash in owners)):
                 missed_users.add(user_hash)
                 result.append(resource)
         return result
@@ -535,15 +539,10 @@ def check_user_role_demotion(
 
 def _list_volumes(workspace_names: Optional[List[str]]) -> List[Dict[str, Any]]:
     # Ephemeral volumes belong to a cluster, which is counted already.
-    volumes = global_user_state.get_volumes(
+    return global_user_state.get_volume_owners(
         is_ephemeral=False,
         workspaces_filter=(set(workspace_names)
                            if workspace_names is not None else None))
-    return [{
-        'name': v['name'],
-        'workspace': v['workspace'],
-        'user_hash': v['user_hash'],
-    } for v in volumes]
 
 
 def _service_lister(pool: bool) -> ActiveResourceLister:
@@ -618,7 +617,7 @@ def _get_active_resources(
         return others
 
     # Fetch all three in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with context_utils.ContextPropagatingThreadPool(max_workers=3) as executor:
         clusters_future = executor.submit(get_all_clusters)
         jobs_future = executor.submit(get_all_managed_jobs)
         others_future = executor.submit(get_all_others)

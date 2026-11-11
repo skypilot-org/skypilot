@@ -962,19 +962,12 @@ class TestRegisteredListers:
 class TestBuiltinListers:
     """The volume, service and pool listers OSS registers itself."""
 
-    @mock.patch('sky.utils.resource_checker.global_user_state.get_volumes')
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_volume_owners'
+               )
     def test_volumes_skip_ephemeral_and_filter_workspaces(self, mock_get):
-        mock_get.return_value = [{
-            'name': 'v1',
-            'workspace': 'ws-a',
-            'user_hash': 'alice',
-            'handle': object()
-        }]
-        assert resource_checker._list_volumes(['ws-a']) == [{
-            'name': 'v1',
-            'workspace': 'ws-a',
-            'user_hash': 'alice'
-        }]
+        rows = [{'name': 'v1', 'workspace': 'ws-a', 'user_hash': 'alice'}]
+        mock_get.return_value = rows
+        assert resource_checker._list_volumes(['ws-a']) == rows
         mock_get.assert_called_once_with(is_ephemeral=False,
                                          workspaces_filter={'ws-a'})
 

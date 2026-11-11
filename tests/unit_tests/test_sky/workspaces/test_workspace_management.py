@@ -688,7 +688,8 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should call resource checker for removed users
         mock_check_resources.assert_called_once_with([], ['test-workspace'],
-                                                     resources=None)
+                                                     resources=None,
+                                                     owners=['user2', 'user3'])
 
     @mock.patch(
         'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
