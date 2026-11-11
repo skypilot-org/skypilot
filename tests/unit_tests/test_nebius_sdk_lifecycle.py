@@ -411,3 +411,34 @@ def test_request_and_operation_retain_handle(sdk_factory, consumer):
     del retained
     _wait_closed(raw)
     assert handle_ref() is None
+
+
+@pytest.mark.parametrize('vm_source', ['imds', 'file'])
+def test_vm_service_account_sdk_reused_across_requests(sdk_factory, monkeypatch,
+                                                       tmp_path, vm_source):
+    """The attached service account's SDK survives requests and rotations."""
+    token_path = tmp_path / 'token'
+    token_path.write_text('vm-token-1')
+    monkeypatch.setattr(nebius.skypilot_config, 'get_workspace_cloud',
+                        lambda cloud: {})
+    monkeypatch.setattr(nebius, 'get_iam_token', lambda: None)
+    monkeypatch.setattr(nebius, '_get_default_credentials_path',
+                        lambda: str(tmp_path / 'missing.json'))
+    monkeypatch.setattr(nebius, 'VM_SERVICE_ACCOUNT_TOKEN_PATH',
+                        str(token_path))
+    monkeypatch.setattr(nebius, '_vm_service_account_source', lambda: vm_source)
+    monkeypatch.setattr(nebius, '_imds_bearer', lambda endpoint: endpoint)
+    # Stub the parent package too, so the import never reaches the real nebius
+    # SDK, which may not be installed.
+    token_file = SimpleNamespace(Bearer=lambda path: SimpleNamespace(path=path))
+    monkeypatch.setitem(sys.modules, 'nebius.aio.token',
+                        SimpleNamespace(file=token_file))
+    monkeypatch.setitem(sys.modules, 'nebius.aio.token.file', token_file)
+    first = nebius.sdk()
+    for i in range(10):
+        # The platform rotates the token; the bearer re-reads it.
+        token_path.write_text(f'vm-token-{i + 2}')
+        annotations.clear_request_level_cache()
+        assert nebius.sdk() is first
+    assert sdk_factory.call_count == 1
+    first._sdk_client.close.assert_not_awaited()

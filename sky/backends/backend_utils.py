@@ -1036,6 +1036,12 @@ def write_cluster_config(
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
+    # A Nebius service account is set per region and per cluster name, so the
+    # lookup above (keyed by this cluster's region) can miss it. Nebius
+    # clusters were already handled above.
+    if (not isinstance(cloud, clouds.Nebius) and
+            clouds.Nebius.excludes_credentials_from_other_clouds()):
+        excluded_clouds.add(clouds.Nebius())
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
