@@ -13,6 +13,7 @@ from unittest import mock
 import zipfile
 
 import fastapi
+from fastapi import testclient
 import prometheus_client as prom
 import pytest
 import uvicorn
@@ -1756,10 +1757,7 @@ def test_api_status_does_not_read_stored_results(_request_authz_env,
 
 def test_api_status_listing_matches_model_encoding(_request_authz_env,
                                                    monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from sky.server.requests import requests as requests_lib
-
+    requests_lib = server.requests_lib
     running = _seed_request('carol-req-1', 'carol',
                             requests_lib.RequestStatus.RUNNING)
     running.cluster_name = 'c1'
@@ -1783,8 +1781,8 @@ def test_api_status_listing_matches_model_encoding(_request_authz_env,
     def _list():
         return requests_lib.encode_requests(fetched)
 
-    client = TestClient(server.app)
-    reference_client = TestClient(reference)
+    client = testclient.TestClient(server.app)
+    reference_client = testclient.TestClient(reference)
     for params in (
         {},
         {
@@ -1811,8 +1809,7 @@ def test_api_status_listing_matches_model_encoding(_request_authz_env,
 
 
 def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):
-    from fastapi.testclient import TestClient
-    client = TestClient(server.app)
+    client = testclient.TestClient(server.app)
     _scope_as(monkeypatch, None)
 
     on_loop = []
