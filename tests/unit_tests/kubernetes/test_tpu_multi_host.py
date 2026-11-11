@@ -352,13 +352,20 @@ def test_tag_tpu_multi_host_workers_groups_by_node_pool():
         for name, p in pods.items()
     }
     core_api = mock.MagicMock()
-    core_api.read_node.side_effect = lambda name, **_: SimpleNamespace(
-        metadata=SimpleNamespace(
-            labels={'cloud.google.com/gke-nodepool': node_pools[name]}))
+    core_api.list_node.return_value = SimpleNamespace(items=[
+        SimpleNamespace(metadata=SimpleNamespace(
+            name=name, labels={'cloud.google.com/gke-nodepool': pool}))
+        for name, pool in node_pools.items()
+    ])
     with mock.patch.object(k8s_instance.kubernetes,
                            'core_api',
                            return_value=core_api):
         k8s_instance._tag_tpu_multi_host_workers('c', 'ctx', pods, infos)
+    # One list call for all pods, not one read per pod.
+    core_api.list_node.assert_called_once()
+    assert core_api.list_node.call_args.kwargs['label_selector'] == (
+        f'{_FMT.TPU_TOPOLOGY_LABEL_KEY} in (2x4)')
+    core_api.read_node.assert_not_called()
 
     def env(name):
         return kubernetes_utils.tpu_worker_env_vars(infos[name][0].tags)

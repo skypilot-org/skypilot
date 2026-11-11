@@ -3337,7 +3337,8 @@ def _tag_tpu_multi_host_workers(
     of the node each one runs on. Within a slice, worker IDs follow the node
     name order, and the worker hostnames are the pod IPs in worker ID order.
     """
-    slice_pods: Dict[str, List[str]] = {}
+    slice_members: List[Tuple[str, str]] = []  # (pod name, node name)
+    topologies: Set[str] = set()
     vms_per_slice = 0
     for pod_name, pod in running_pods.items():
         vms = _multi_host_tpu_vms_per_slice(pod)
@@ -3347,10 +3348,27 @@ def _tag_tpu_multi_host_workers(
         node_name = getattr(pod.spec, 'node_name', None)
         if node_name is None:
             continue
-        node = kubernetes.core_api(context).read_node(
-            node_name, _request_timeout=kubernetes.API_TIMEOUT)
-        node_pool = (node.metadata.labels or {}).get(_GKE_NODEPOOL_LABEL,
-                                                     node_name)
+        slice_members.append((pod_name, node_name))
+        topologies.add(pod.spec.node_selector[
+            kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
+    if not slice_members:
+        return
+    # One list call for all nodes of the slices' topology (the pods select
+    # it), instead of one read per pod.
+    label_selector = (
+        f'{kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY} in '
+        f'({",".join(sorted(topologies))})')
+    nodes = kubernetes.core_api(context).list_node(
+        label_selector=label_selector,
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    node_pool_by_name = {
+        node.metadata.name: (node.metadata.labels or
+                             {}).get(_GKE_NODEPOOL_LABEL, node.metadata.name)
+        for node in nodes
+    }
+    slice_pods: Dict[str, List[str]] = {}
+    for pod_name, node_name in slice_members:
+        node_pool = node_pool_by_name.get(node_name, node_name)
         slice_pods.setdefault(node_pool, []).append(pod_name)
     for node_pool, members in slice_pods.items():
         if len(members) != vms_per_slice:
