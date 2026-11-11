@@ -503,6 +503,8 @@ def test_create_pods_places_each_slice_in_its_own_node_pool(monkeypatch):
             'topologyKey': 'cloud.google.com/gke-nodepool',
         }]
         assert _required(spec, 'podAntiAffinity') == [{
+            # Other slices in any namespace, not only this pod's.
+            'namespaceSelector': {},
             'labelSelector': {
                 'matchExpressions': [{
                     'key': kubernetes_utils.TPU_SLICE_LABEL,

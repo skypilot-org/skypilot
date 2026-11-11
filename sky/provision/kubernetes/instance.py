@@ -2604,8 +2604,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     tpu_vms_per_slice = _multi_host_tpu_vms_per_slice(
         pod_spec['spec'].get('nodeSelector'))
     tpu_slice_placement = bool(tpu_vms_per_slice) and not (
-        _KUEUE_QUEUE_NAME_LABEL in pod_spec['metadata']['labels'] or
-        kai.uses_kai(provider_config))
+        k8s_constants.KUEUE_QUEUE_NAME_LABEL in pod_spec['metadata']['labels']
+        or kai.uses_kai(provider_config))
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
@@ -3321,8 +3321,6 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
 # task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
 # TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
 _GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
-# Label the cluster template sets on pods queued through Kueue.
-_KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
 
 
 def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
@@ -3351,9 +3349,9 @@ def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
     of one VM, so a slice's pods must share a node pool that holds no other
     slice. The label names the pod's slice. A required podAffinity keeps the
     pods of a slice in one node pool and a required podAntiAffinity keeps
-    pods of any other slice (of this cluster or another) out of it. The first
-    pod of a slice matches only itself, so it may go to any node pool without
-    another slice.
+    pods of any other slice (of this cluster or another, in any namespace)
+    out of it. The first pod of a slice matches only itself, so it may go to
+    any node pool without another slice.
     """
     pod_spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL] = (
         slice_name)
@@ -3368,19 +3366,24 @@ def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
             'topologyKey': _GKE_NODEPOOL_LABEL,
         })
     affinity.setdefault('podAntiAffinity', {}).setdefault(
-        'requiredDuringSchedulingIgnoredDuringExecution', []).append({
-            'labelSelector': {
-                'matchExpressions': [{
-                    'key': kubernetes_utils.TPU_SLICE_LABEL,
-                    'operator': 'Exists',
-                }, {
-                    'key': kubernetes_utils.TPU_SLICE_LABEL,
-                    'operator': 'NotIn',
-                    'values': [slice_name],
-                }]
-            },
-            'topologyKey': _GKE_NODEPOOL_LABEL,
-        })
+        'requiredDuringSchedulingIgnoredDuringExecution', []
+    ).append({
+        # Clusters in other namespaces share the node pools too. An empty
+        # selector matches every namespace; without one the term only
+        # sees pods in this pod's namespace.
+        'namespaceSelector': {},
+        'labelSelector': {
+            'matchExpressions': [{
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'Exists',
+            }, {
+                'key': kubernetes_utils.TPU_SLICE_LABEL,
+                'operator': 'NotIn',
+                'values': [slice_name],
+            }]
+        },
+        'topologyKey': _GKE_NODEPOOL_LABEL,
+    })
 
 
 def _tpu_slice_pods_by_node_pool(
