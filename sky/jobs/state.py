@@ -1717,14 +1717,31 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 
 
 # ======== utility functions ========
-def get_nonterminal_job_ids_by_name(name: Optional[str],
-                                    user_hash: Optional[str] = None,
-                                    all_users: bool = False) -> List[int]:
+def _workspace_filter(workspaces: Set[str]) -> 'sqlalchemy.ColumnElement':
+    """Rows whose job is in one of `workspaces`, for an outer join on job_info.
+
+    A NULL workspace (a job from before workspaces, or with no job_info row)
+    counts as the default workspace, as in `get_workspace`.
+    """
+    condition = job_info_table.c.workspace.in_(list(workspaces))
+    if constants.SKYPILOT_DEFAULT_WORKSPACE in workspaces:
+        condition = sqlalchemy.or_(condition,
+                                   job_info_table.c.workspace.is_(None))
+    return condition
+
+
+def get_nonterminal_job_ids_by_name(
+        name: Optional[str],
+        user_hash: Optional[str] = None,
+        all_users: bool = False,
+        workspaces: Optional[Set[str]] = None) -> List[int]:
     """Get non-terminal job ids by name.
 
     If name is None:
     1. if all_users is False, get for the given user_hash
     2. otherwise, get for all users
+
+    If workspaces is not None, only jobs in those workspaces.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -1760,6 +1777,8 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
                     sqlalchemy.and_(job_info_table.c.name.is_(None),
                                     spot_table.c.task_name == name),
                 ))
+        if workspaces is not None:
+            where_conditions.append(_workspace_filter(workspaces))
         query = query.where(sqlalchemy.and_(*where_conditions)).order_by(
             spot_table.c.spot_job_id.desc())
         rows = session.execute(query).fetchall()
@@ -3090,14 +3109,22 @@ def get_task_name(job_id: int, task_id: int) -> str:
         return task_name[0]
 
 
-def get_latest_job_id() -> Optional[int]:
-    """Get the latest job id."""
+def get_latest_job_id(workspaces: Optional[Set[str]] = None) -> Optional[int]:
+    """Get the latest job id, among jobs in `workspaces` if given."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        query = sqlalchemy.select(
+            spot_table.c.spot_job_id).where(spot_table.c.task_id == 0)
+        if workspaces is not None:
+            # Outer: a job with no job_info row is in the default workspace.
+            query = query.select_from(
+                spot_table.outerjoin(
+                    job_info_table, spot_table.c.spot_job_id ==
+                    job_info_table.c.spot_job_id)).where(
+                        _workspace_filter(workspaces))
         job_id = session.execute(
-            sqlalchemy.select(spot_table.c.spot_job_id).where(
-                spot_table.c.task_id == 0).order_by(
-                    spot_table.c.submitted_at.desc()).limit(1)).fetchone()
+            query.order_by(
+                spot_table.c.submitted_at.desc()).limit(1)).fetchone()
         return job_id[0] if job_id else None
 
 
@@ -6012,8 +6039,9 @@ def reset_jobs_for_recovery() -> None:
         session.commit()
 
 
-def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
-    """Get all job ids by name."""
+def get_all_job_ids_by_name(name: Optional[str],
+                            workspaces: Optional[Set[str]] = None) -> List[int]:
+    """Get all job ids by name, among jobs in `workspaces` if given."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         query = sqlalchemy.select(
@@ -6030,6 +6058,8 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
                 sqlalchemy.and_(job_info_table.c.name.is_(None),
                                 spot_table.c.task_name == name))
             query = query.where(name_condition)
+        if workspaces is not None:
+            query = query.where(_workspace_filter(workspaces))
         query = query.order_by(spot_table.c.spot_job_id.desc())
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
