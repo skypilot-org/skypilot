@@ -2122,7 +2122,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.stable_ssh_ports},'
                 '\n\tcluster_yaml='
                 f'{self.cluster_yaml}, '
-                f'\n\tlaunched_resources={self.launched_nodes}x '
+                f'\n\tlaunched_resources={self.launched_task_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
@@ -2493,9 +2493,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         assert cached_ssh_ports is not None, 'update_ssh_ports failed.'
         return cached_ssh_ports
 
+    @property
+    def launched_task_nodes(self) -> int:
+        """Task nodes of the cluster, as described by launched_resources.
+
+        Equal to launched_nodes except on a multi-host TPU slice on
+        Kubernetes, where launched_nodes counts pods (one per VM) and each
+        task node is one slice.
+        """
+        return kubernetes_utils.num_task_nodes(self.launched_nodes,
+                                               self.launched_resources)
+
     def get_hourly_price(self) -> float:
         hourly_cost = (self.launched_resources.get_cost(3600) *
-                       self.launched_nodes)
+                       self.launched_task_nodes)
         return hourly_cost
 
     def setup_docker_user(self, cluster_config_file: str):
@@ -3331,7 +3342,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
-            handle.launched_nodes, launched_resources)
+            handle.launched_task_nodes, launched_resources)
         status = global_user_state.get_status_from_cluster_name(cluster_name)
         if status is not None:
             usage_lib.messages.usage.update_cluster_status(status)
@@ -3401,7 +3412,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Requested resources do not match the existing '
                     'cluster.\n'
                     f'  Requested:\t{requested_resource_str}\n'
-                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'  Existing:\t{handle.launched_task_nodes}x '
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}')
         else:
@@ -3871,7 +3882,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
-            handle.launched_nodes, handle.launched_resources)
+            handle.launched_task_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 

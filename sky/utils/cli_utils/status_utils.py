@@ -6,6 +6,7 @@ import click
 import colorama
 
 from sky import backends
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -410,8 +411,9 @@ def _get_resources_for_cost_report(
         cluster_cost_report_record: _ClusterCostReportRecord,
         truncate: bool = True) -> str:
     del truncate
-    launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
+    launched_nodes = kubernetes_utils.num_task_nodes(
+        cluster_cost_report_record['num_nodes'], launched_resources)
 
     launched_resource_str = str(launched_resources)
     resources_str = (f'{launched_nodes}x '
@@ -424,8 +426,9 @@ def _get_price_for_cost_report(
         cluster_cost_report_record: _ClusterCostReportRecord,
         truncate: bool = True) -> str:
     del truncate
-    launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
+    launched_nodes = kubernetes_utils.num_task_nodes(
+        cluster_cost_report_record['num_nodes'], launched_resources)
 
     hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
     price_str = f'$ {hourly_cost:.2f}'

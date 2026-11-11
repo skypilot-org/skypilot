@@ -492,8 +492,7 @@ def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
     """
     if resources is None or not resources.accelerators:
         return 1
-    if (resources.cloud is None or
-            resources.cloud.canonical_name() != 'kubernetes'):
+    if not isinstance(resources.cloud, clouds.Kubernetes):
         return 1
     if len(resources.accelerators) != 1:
         return 1
@@ -501,6 +500,23 @@ def tpu_vms_per_slice(resources: Optional['resources_lib.Resources']) -> int:
     shape = get_tpu_multi_host_shape(
         acc, count, multi_host_requested(resources.accelerator_args))
     return shape.vms_per_slice if shape is not None else 1
+
+
+def num_task_nodes(
+        launched_nodes: int,
+        launched_resources: Optional['resources_lib.Resources']) -> int:
+    """Task nodes of a cluster with ``launched_nodes`` cluster nodes.
+
+    ``launched_nodes`` counts cluster nodes (pods), while
+    ``launched_resources`` describes one task node. They differ only for a
+    multi-host GKE TPU slice on Kubernetes, where one task node (one slice)
+    has one pod per VM. Use this wherever the node count is shown next to or
+    multiplied with ``launched_resources``.
+    """
+    vms_per_slice = tpu_vms_per_slice(launched_resources)
+    if vms_per_slice <= 1:
+        return launched_nodes
+    return launched_nodes // vms_per_slice
 
 
 # Kept under their old names: callers inside and outside this repo use them.

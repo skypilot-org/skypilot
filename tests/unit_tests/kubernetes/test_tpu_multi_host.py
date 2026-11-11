@@ -158,6 +158,66 @@ def test_tpu_vms_per_slice(kwargs, expected):
         resources_lib.Resources(**kwargs)) == expected
 
 
+@pytest.mark.parametrize('kwargs,launched_nodes,expected', [
+    (dict(accelerators='tpu-v6e-16', infra='k8s'), 8, 2),
+    (dict(accelerators='tpu-v6e-8',
+          infra='k8s',
+          accelerator_args={'multi_host': True}), 2, 1),
+    (dict(accelerators='tpu-v6e-8', infra='k8s'), 2, 2),
+    (dict(accelerators='H100:8', infra='k8s'), 3, 3),
+])
+def test_num_task_nodes(kwargs, launched_nodes, expected):
+    r = resources_lib.Resources(**kwargs)
+    assert kubernetes_utils.num_task_nodes(launched_nodes, r) == expected
+    assert kubernetes_utils.num_task_nodes(launched_nodes,
+                                           None) == (launched_nodes)
+    handle = cloud_vm_ray_backend.CloudVmRayResourceHandle.__new__(
+        cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    handle.launched_nodes = launched_nodes
+    handle.launched_resources = r
+    assert handle.launched_task_nodes == expected
+
+
+def test_cost_report_counts_slices():
+    from sky.utils.cli_utils import status_utils
+    resources = resources_lib.Resources(infra='k8s/ctx',
+                                        accelerators='tpu-v6e-8',
+                                        accelerator_args={'multi_host': True})
+    record = {'num_nodes': 4, 'resources': resources}
+    assert status_utils._get_resources_for_cost_report(record).startswith('2x ')
+
+
+def test_start_provisions_task_nodes_not_pods():
+    """sky start rebuilds a task from the handle. Its num_nodes counts
+    slices, so the fit check and provisioning do not multiply by the VMs per
+    slice twice."""
+    from sky import core
+    from sky.utils import status_lib
+    handle = cloud_vm_ray_backend.CloudVmRayResourceHandle.__new__(
+        cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    handle.launched_nodes = 4
+    handle.launched_resources = resources_lib.Resources(
+        infra='k8s/ctx',
+        accelerators='tpu-v6e-8',
+        accelerator_args={'multi_host': True})
+    backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    backend.provision.side_effect = RuntimeError('reached provision')
+    with mock.patch.object(core.backend_utils,
+                           'refresh_cluster_status_handle',
+                           return_value=(status_lib.ClusterStatus.INIT,
+                                         handle)), \
+            mock.patch.object(core.backend_utils,
+                              'get_backend_from_handle',
+                              return_value=backend), \
+            mock.patch.object(core.global_user_state,
+                              'get_cluster_from_name',
+                              return_value=None), \
+            pytest.raises(RuntimeError, match='reached provision'):
+        core._start('my-tpu-cluster')  # pylint: disable=protected-access
+    dummy_task = backend.provision.call_args.args[0]
+    assert dummy_task.num_nodes == 2
+
+
 def test_pod_fields_multi_host_slice():
     fields = kubernetes_utils.get_pod_fields(
         acc_label_key=_FMT.TPU_LABEL_KEY,
