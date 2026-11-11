@@ -12,6 +12,10 @@ downtime during failures.
 > is available on the
 > **[SkyPilot Platform](https://skypilot.ai/platform)**.
 
+<p align="center">
+  <img src="assets/trainer-replacement.svg" alt="On every step the replica groups average their gradients with an all-reduce. When one trainer pod is lost, the others pause briefly and keep stepping as three, SkyPilot creates only the missing pod, and the replacement copies the model and optimizer state from a live trainer before it joins the next step." width="100%"/>
+</p>
+
 ## Requirements
 
 - A Kubernetes cluster with four available GPUs. The manifests request `H100`;
