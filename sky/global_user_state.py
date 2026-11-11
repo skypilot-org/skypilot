@@ -3974,16 +3974,17 @@ def update_volume_status(name: str,
 def set_volume_workspace(names: List[str], workspace: str) -> None:
     """Move volumes to ``workspace``, e.g. along with the resource using them.
 
-    Names with no row are ignored.
+    Names with no row, and rows already in ``workspace``, are left alone.
     """
-    if not names:
-        return
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        session.query(volume_table).filter(
-            volume_table.c.name.in_(names)).update(
-                {volume_table.c.workspace: workspace},
-                synchronize_session=False)
+        for offset in range(0, len(names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            session.query(volume_table).filter(
+                volume_table.c.name.in_(batch),
+                volume_table.c.workspace.is_distinct_from(workspace)).update(
+                    {volume_table.c.workspace: workspace},
+                    synchronize_session=False)
         session.commit()
 
 

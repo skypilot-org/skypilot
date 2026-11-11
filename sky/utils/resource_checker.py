@@ -549,7 +549,8 @@ def _service_lister(pool: bool) -> ActiveResourceLister:
 
     def lister(workspace_names: Optional[List[str]]) -> List[Dict[str, Any]]:
         # Only a consolidated controller's services table is local. Elsewhere
-        # the replica and worker clusters stand in for their service.
+        # the services, and their replica and worker clusters, live in the
+        # controller's own DB and are not checked.
         if not serve_utils.is_consolidation_mode(pool=pool):
             return []
         services = serve_state.get_live_services_in_workspaces(

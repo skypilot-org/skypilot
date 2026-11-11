@@ -249,3 +249,24 @@ def test_set_volume_workspace_moves_only_the_named_volumes(isolated_database):
     assert global_user_state.get_volume_names(workspaces_filter={'ws-a'}) == [
         'vol-b'
     ]
+
+
+def test_set_volume_workspace_chunks_and_skips_rows_already_there(
+        isolated_database, monkeypatch):
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    for i in range(5):
+        _add(f'vol-{i}', workspace='ws-b' if i == 0 else 'ws-a')
+    statements = []
+    sqlalchemy.event.listen(global_user_state._db_manager.get_engine(),
+                            'before_cursor_execute',
+                            lambda *args: statements.append(args[2]))
+
+    global_user_state.set_volume_workspace([f'vol-{i}' for i in range(5)],
+                                           'ws-b')
+
+    assert len(
+        global_user_state.get_volume_names(workspaces_filter={'ws-b'})) == 5
+    updates = [s for s in statements if s.startswith('UPDATE')]
+    assert len(updates) == 3
+    # vol-0 was already in ws-b, so no row is rewritten for it.
+    assert all('IS DISTINCT FROM' in s or 'IS NOT' in s for s in updates)
