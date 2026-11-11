@@ -426,6 +426,58 @@ export function sortContextsByLoadState(
     .map(({ context }) => context);
 }
 
+/**
+ * The "(workspaces: a, b, ...)" text under a context name. It is capped at
+ * two lines; when the names don't fit, it ends in an ellipsis and a
+ * "Show more" button that expands the full list in place.
+ */
+function ContextWorkspaces({ workspaces, workspaceName }) {
+  const textRef = React.useRef(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const text = `(workspaces: ${workspaces.map(workspaceName).join(', ')})`;
+
+  // Show the button only when the collapsed text is actually cut off.
+  React.useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || expanded) return undefined;
+    const check = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    check();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  const toggle = (overflows || expanded) && (
+    <button
+      type="button"
+      className="shrink-0 ml-1.5 text-blue-600 hover:underline"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((value) => !value)}
+    >
+      {expanded ? 'Show less' : 'Show more'}
+    </button>
+  );
+
+  if (expanded) {
+    return (
+      <div className="text-sm text-content-tertiary mt-1.5 break-words">
+        {text}
+        {toggle}
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm text-content-tertiary mt-1.5 flex items-end">
+      <span ref={textRef} className="line-clamp-2 min-w-0 break-words">
+        {text}
+      </span>
+      {toggle}
+    </div>
+  );
+}
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -966,10 +1018,10 @@ export function InfrastructureSection({
                             )}
                           </div>
                           {workspaces.length > 0 && (
-                            <div className="text-sm text-content-tertiary mt-1.5">
-                              (workspaces:{' '}
-                              {workspaces.map(workspaceName).join(', ')})
-                            </div>
+                            <ContextWorkspaces
+                              workspaces={workspaces}
+                              workspaceName={workspaceName}
+                            />
                           )}
                         </td>
                         <td
@@ -1179,10 +1231,10 @@ export function InfrastructureSection({
                         </span>
                       </div>
                       {workspaces.length > 0 && (
-                        <div className="text-sm text-content-tertiary mt-1.5 truncate">
-                          (workspaces:{' '}
-                          {workspaces.map(workspaceName).join(', ')})
-                        </div>
+                        <ContextWorkspaces
+                          workspaces={workspaces}
+                          workspaceName={workspaceName}
+                        />
                       )}
                     </div>
                     <PluginSlot
