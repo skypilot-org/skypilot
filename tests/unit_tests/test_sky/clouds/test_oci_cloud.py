@@ -98,8 +98,9 @@ def test_arm_shape_without_arm_image_is_an_actionable_error(
         _default_image_tag(instance_type,
                            accelerators,
                            arm_image_in_catalog=False)
-    # The image catalog is region-independent, so failing over is pointless.
-    assert exc_info.value.no_failover
+    # Failover stays on, so another cloud offering the accelerator can still
+    # be tried; no_failover would abort the whole loop.
+    assert not exc_info.value.no_failover
     message = str(exc_info.value)
     assert instance_type in message
     assert 'aarch64' in message

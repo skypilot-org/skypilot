@@ -17,11 +17,16 @@ Data sources:
 Regional availability of shapes is not published by Oracle, and the
 authenticated API (``ComputeClient.list_shapes``) only returns the shapes a
 tenancy is entitled to launch (a free-tier tenancy sees no GPU shapes at
-all). By default the catalog therefore lists every shape in every commercial
-region, exactly like the hand-maintained catalog did since 2023. This is safe
-because ``sky/catalog/oci_catalog.py`` filters the catalog down to the
-regions the user's tenancy is subscribed to, and provisioning fails over to
-the next zone/region when a shape has no capacity.
+all). By default the catalog therefore lists every shape in every region of
+``REGION_ZONES``, exactly like the hand-maintained catalog did since 2023.
+This is safe because ``sky/catalog/oci_catalog.py`` filters the catalog down
+to the regions the user's tenancy is subscribed to, and provisioning fails
+over to the next zone/region when a shape has no capacity.
+
+``REGION_ZONES`` (regions and their availability-domain names) is edited by
+hand: the scheduled refresh only updates shapes and prices, so a new OCI
+region needs a manual edit there, with its availability-domain names
+confirmed via ``--use-sdk``, before it appears in the catalog.
 
 Pass ``--use-sdk`` to derive regions, availability domains and per-AD shape
 availability from the tenancy configured in ``~/.oci/config`` instead. The
@@ -70,17 +75,19 @@ PREEMPTIBLE_DISCOUNT = 0.5
 # '<REGION>-AD-n'. AD counts per region:
 # https://docs.oracle.com/en-us/iaas/Content/General/Concepts/regions.htm
 #
-# Regions marked UNVERIFIED opened after the previous catalog was produced;
-# their names follow the '<REGION>-AD-1' pattern (all single-AD per the docs)
-# but have not been confirmed against ListAvailabilityDomains. Running with
-# --use-sdk from a tenancy subscribed to them will print the real names.
+# Only regions whose names have been confirmed are listed: a wrong name makes
+# every launch in that region fail with 400 CannotParseRequest. Regions that
+# opened since (e.g. af-casablanca-1, ap-batam-1, ap-kulai-2, eu-madrid-3,
+# eu-turin-1) are deliberately absent until their names are confirmed by
+# running with --use-sdk from a tenancy subscribed to them.
+#
+# This table is maintained by hand. The scheduled refresh (the
+# update-oci-catalog Action in skypilot-catalog) only updates shapes and
+# prices, so a new region appears in the catalog only after it is added here.
 REGION_ZONES: Dict[str, List[str]] = {
-    'af-casablanca-1': ['AF-CASABLANCA-1-AD-1'],  # UNVERIFIED
     'af-johannesburg-1': ['AF-JOHANNESBURG-1-AD-1'],
-    'ap-batam-1': ['AP-BATAM-1-AD-1'],  # UNVERIFIED
     'ap-chuncheon-1': ['AP-CHUNCHEON-1-AD-1'],
     'ap-hyderabad-1': ['AP-HYDERABAD-1-AD-1'],
-    'ap-kulai-2': ['AP-KULAI-2-AD-1'],  # UNVERIFIED
     'ap-melbourne-1': ['AP-MELBOURNE-1-AD-1'],
     'ap-mumbai-1': ['AP-MUMBAI-1-AD-1'],
     'ap-osaka-1': ['AP-OSAKA-1-AD-1'],
@@ -96,12 +103,10 @@ REGION_ZONES: Dict[str, List[str]] = {
         'EU-FRANKFURT-1-AD-1', 'EU-FRANKFURT-1-AD-2', 'EU-FRANKFURT-1-AD-3'
     ],
     'eu-madrid-1': ['EU-MADRID-1-AD-1'],
-    'eu-madrid-3': ['EU-MADRID-3-AD-1'],  # UNVERIFIED
     'eu-marseille-1': ['EU-MARSEILLE-1-AD-1'],
     'eu-milan-1': ['EU-MILAN-1-AD-1'],
     'eu-paris-1': ['EU-PARIS-1-AD-1'],
     'eu-stockholm-1': ['EU-STOCKHOLM-1-AD-1'],
-    'eu-turin-1': ['EU-TURIN-1-AD-1'],  # UNVERIFIED
     'eu-zurich-1': ['EU-ZURICH-1-AD-1'],
     'il-jerusalem-1': ['IL-JERUSALEM-1-AD-1'],
     'me-abudhabi-1': ['ME-ABUDHABI-1-AD-1'],
@@ -321,12 +326,12 @@ def gpu_shape_info(shape: Dict[str, Any], prices: Dict[str, float],
     accelerator = accelerator_name_from_shape(name)
     gpu_count = int(shape.get('gpuQty') or 0)
     if accelerator is None or gpu_count <= 0:
-        logger.warning('Skipping %s: not a recognized GPU shape.', name)
+        logger.warning(f'Skipping {name}: not a recognized GPU shape.')
         return None
 
     product = _product(shape, 'ocpu')
     if product is None or product['partNumber'] not in prices:
-        logger.warning('Skipping %s: no price for its part number.', name)
+        logger.warning(f'Skipping {name}: no price for its part number.')
         return None
     unit_price = prices[product['partNumber']]
     metric = metrics.get(product['partNumber'], '')
@@ -342,8 +347,8 @@ def gpu_shape_info(shape: Dict[str, Any], prices: Dict[str, float],
         vcpus_per_ocpu = VCPUS_PER_X86_OCPU
     if not ocpus or not memory_gb:
         logger.warning(
-            'Skipping %s: the estimator has no OCPU/memory data for it and '
-            'it is not in SHAPE_SPEC_OVERRIDES.', name)
+            f'Skipping {name}: the estimator has no OCPU/memory data for it '
+            'and it is not in SHAPE_SPEC_OVERRIDES.')
         return None
 
     if 'GPU' in metric.upper():
@@ -351,31 +356,31 @@ def gpu_shape_info(shape: Dict[str, Any], prices: Dict[str, float],
     elif 'OCPU' in metric.upper():
         price = unit_price * ocpus
     else:
-        logger.warning('Skipping %s: unexpected billing metric %r.', name,
-                       metric)
+        logger.warning(
+            f'Skipping {name}: unexpected billing metric {metric!r}.')
         return None
     if price <= 0:
-        logger.warning('Skipping %s: non-positive price %s.', name, price)
+        logger.warning(f'Skipping {name}: non-positive price {price}.')
         return None
 
     gpu_memory_gb = GPU_MEMORY_GB.get(accelerator)
     estimator_total_gb = shape.get('gpuMemoryQty')
     if gpu_memory_gb is None:
         if not estimator_total_gb:
-            logger.warning('Skipping %s: unknown GPU memory for %s.', name,
-                           accelerator)
+            logger.warning(
+                f'Skipping {name}: unknown GPU memory for {accelerator}.')
             return None
         gpu_memory_gb = estimator_total_gb / gpu_count
         logger.warning(
-            '%s: %s is not in GPU_MEMORY_GB; using %s GB per GPU derived '
-            'from the estimator. Please verify and add it.', name, accelerator,
-            gpu_memory_gb)
+            f'{name}: {accelerator} is not in GPU_MEMORY_GB; using '
+            f'{gpu_memory_gb} GB per GPU derived from the estimator. Please '
+            'verify and add it.')
     elif (estimator_total_gb and
           abs(estimator_total_gb - gpu_memory_gb * gpu_count) > 1):
         logger.info(
-            '%s: estimator lists %s GB of GPU memory, catalog uses %s GB '
-            '(%s x %s GB).', name, estimator_total_gb,
-            gpu_memory_gb * gpu_count, gpu_count, gpu_memory_gb)
+            f'{name}: estimator lists {estimator_total_gb} GB of GPU memory, '
+            f'catalog uses {gpu_memory_gb * gpu_count} GB '
+            f'({gpu_count} x {gpu_memory_gb} GB).')
 
     spot_price = None
     if shape.get('allowPreemptible'):
@@ -401,7 +406,7 @@ def flex_shape_infos(shape: Dict[str, Any],
     if (ocpu_product is None or memory_product is None or
             ocpu_product['partNumber'] not in prices or
             memory_product['partNumber'] not in prices):
-        logger.warning('Skipping %s: missing OCPU or memory price.', name)
+        logger.warning(f'Skipping {name}: missing OCPU or memory price.')
         return []
     ocpu_price = prices[ocpu_product['partNumber']]
     memory_price = prices[memory_product['partNumber']]
@@ -483,7 +488,8 @@ def sdk_availability(profile: str,
     identity = oci_adaptor.get_identity_client(profile=profile)
     subscriptions = identity.list_region_subscriptions(tenancy_id).data
     subscribed = sorted(s.region_name for s in subscriptions)
-    logger.info('Tenancy is subscribed to: %s', ', '.join(subscribed))
+    subscribed_str = ', '.join(subscribed)
+    logger.info(f'Tenancy is subscribed to: {subscribed_str}')
 
     availability: Availability = {}
     for region in subscribed:
@@ -502,7 +508,7 @@ def sdk_availability(profile: str,
                 availability_domain=ad.name).data
             visible = {s.shape for s in shapes}
             availability[region][zone] = visible
-            logger.info('%s: %d shapes visible.', zone, len(visible))
+            logger.info(f'{zone}: {len(visible)} shapes visible.')
     return availability
 
 
@@ -571,16 +577,16 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-    logger.info('Fetching shape specifications from %s', SHAPES_URL)
+    logger.info(f'Fetching shape specifications from {SHAPES_URL}')
     shapes_json = _fetch_json(SHAPES_URL)
-    logger.info('Fetching price list from %s', PRICE_LIST_URL)
+    logger.info(f'Fetching price list from {PRICE_LIST_URL}')
     products = _fetch_json(PRICE_LIST_URL)['items']
     shapes = collect_shapes(shapes_json, products)
     num_gpu_shapes = sum(1 for s in shapes if s.is_gpu)
     num_cpu_shapes = len(shapes) - num_gpu_shapes
-    logger.info('Priced %d GPU shapes and %d CPU shape sizes: %s',
-                num_gpu_shapes, num_cpu_shapes,
-                ', '.join(s.shape for s in shapes if s.is_gpu))
+    gpu_shape_names = ', '.join(s.shape for s in shapes if s.is_gpu)
+    logger.info(f'Priced {num_gpu_shapes} GPU shapes and {num_cpu_shapes} '
+                f'CPU shape sizes: {gpu_shape_names}')
     if not shapes or (not args.use_sdk and num_gpu_shapes == 0):
         raise RuntimeError('No shapes were priced; the estimator or price '
                            'list format may have changed. Refusing to write '
@@ -604,10 +610,10 @@ def main() -> None:
             for region in args.regions:
                 if region not in REGION_ZONES:
                     logger.warning(
-                        '%s is not in REGION_ZONES; assuming a single '
-                        'availability domain named %s. Confirm it with '
-                        '--use-sdk before relying on it.', region,
-                        default_zone_names(region)[0])
+                        f'{region} is not in REGION_ZONES; assuming a single '
+                        'availability domain named '
+                        f'{default_zone_names(region)[0]}. Confirm it with '
+                        '--use-sdk before relying on it.')
                 region_zones[region] = REGION_ZONES.get(
                     region) or default_zone_names(region)
         availability = {
@@ -620,8 +626,8 @@ def main() -> None:
         raise RuntimeError('No catalog rows produced; refusing to overwrite '
                            f'{args.output}.')
     write_csv(rows, args.output)
-    logger.info('Wrote %d rows for %d regions to %s', len(rows),
-                len(availability), args.output)
+    logger.info(f'Wrote {len(rows)} rows for {len(availability)} regions to '
+                f'{args.output}')
 
 
 if __name__ == '__main__':

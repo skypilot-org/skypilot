@@ -668,16 +668,17 @@ class OCI(clouds.Cloud):
             if catalog.is_image_tag_valid(image_tag, region, clouds='oci'):
                 return image_tag
             # Raise ResourcesUnavailableError so CloudVMRayBackend reports
-            # it as a provisioning failure. The image catalog is the same in
-            # every region, so there is no point failing over.
+            # it as a provisioning failure. Failover stays on: no_failover
+            # would abort the whole failover loop, other clouds included, and
+            # another cloud may offer the same accelerator. The other OCI
+            # regions fail the same way, fast and without an API call.
             raise exceptions.ResourcesUnavailableError(
                 f'{instance_type} has Arm (aarch64) CPUs, but the OCI image '
                 f'catalog has no aarch64 image (tag {image_tag!r}), so the '
                 'default x86-64 image cannot boot on it. Set `image_id` in '
                 'the task resources to the OCID of an aarch64 image for this '
                 'shape, e.g. an Ubuntu aarch64 or an NVIDIA GPU image built '
-                'for Grace.',
-                no_failover=True)
+                'for Grace.')
 
         if acc is None:
             image_tag = oci_utils.oci_config.get_default_image_tag()

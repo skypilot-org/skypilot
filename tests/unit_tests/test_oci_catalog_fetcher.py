@@ -289,6 +289,16 @@ def test_regions_table_is_sane():
         assert region in fetch_oci.REGION_ZONES
 
 
+def test_unconfirmed_regions_are_not_published():
+    # A wrong AD name makes every launch in the region fail with
+    # CannotParseRequest, so only regions whose names were confirmed are in
+    # the table: the 39 the previous catalog covered.
+    assert len(fetch_oci.REGION_ZONES) == 39
+    for region in ('af-casablanca-1', 'ap-batam-1', 'ap-kulai-2', 'eu-madrid-3',
+                   'eu-turin-1'):
+        assert region not in fetch_oci.REGION_ZONES
+
+
 def test_default_zone_names_for_unknown_region():
     assert fetch_oci.default_zone_names('eu-oslo-1') == ['EU-OSLO-1-AD-1']
 
