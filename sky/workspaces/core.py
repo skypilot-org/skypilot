@@ -83,13 +83,25 @@ def get_workspaces() -> Dict[str, Any]:
     return workspaces_for_user(common_utils.get_current_user().id)
 
 
-@annotations.lru_cache(scope='request', maxsize=1)
 def _load_workspaces() -> Dict[str, Any]:
-    """Read workspaces from config once per request (cached).
+    """Read workspaces from the config of the current context (cached).
 
     Both workspace name filtering and full config lookup call this so they
     always operate on the same config snapshot within a single request.
     """
+    return _load_workspaces_for_config(skypilot_config.loaded_config_key())
+
+
+# Keyed on the loaded config, not only cleared per request: the jobs
+# controller is one long-lived process that runs each job in its own context
+# with that job's config and never starts a request, so a cache without the
+# key kept the workspaces of whichever job filled it first. A job in a
+# workspace created after that then had its own cluster filtered out of
+# lookups.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _load_workspaces_for_config(
+        config_key: skypilot_config.LoadedConfigKey) -> Dict[str, Any]:
+    del config_key  # Only the cache key; the config is read below.
     workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
     if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
         workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
@@ -251,8 +263,8 @@ def _update_workspaces_config(
                 write_policies()
             # This request may have read the workspaces before the write (e.g.
             # a permission check); the create-time `sky check` must see them.
-            _load_workspaces.cache_clear()
-            workspaces_for_user.cache_clear()
+            _load_workspaces_for_config.cache_clear()
+            _workspaces_for_user_and_config.cache_clear()
 
             return current_workspaces
     except locks.LockTimeout as e:
@@ -1421,7 +1433,6 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     return {'succeeded': succeeded, 'failed': failed}
 
 
-@annotations.lru_cache(scope='request', maxsize=1)
 def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     """Returns the workspaces that the user has access to.
 
@@ -1434,6 +1445,17 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     Returns:
         A map from workspace name to workspace configuration.
     """
+    return _workspaces_for_user_and_config(user_id,
+                                           skypilot_config.loaded_config_key())
+
+
+# Keyed on the loaded config for the reason given at
+# `_load_workspaces_for_config`.
+@annotations.lru_cache(scope='request', maxsize=1)
+def _workspaces_for_user_and_config(
+        user_id: str,
+        config_key: skypilot_config.LoadedConfigKey) -> Dict[str, Any]:
+    del config_key  # Only the cache key; the config is read below.
     workspaces = _load_workspaces()
     # Visibility, not usability: this endpoint must also return the workspaces
     # that are only read-only-visible to a non-member, so the dashboard can

@@ -1172,3 +1172,68 @@ def test_ssh_into_cluster_in_new_workspace(generic_cloud: str):
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# Workspace writes through the API land in the server's config; see
+# test_workspace_rename_with_active_resources for why this skips Postgres.
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.no_postgres
+def test_managed_job_logs_in_new_workspace(generic_cloud: str):
+    """A managed job in a workspace created at runtime keeps its logs.
+
+    The jobs controller process outlives any one job. A job running in an
+    existing workspace keeps it busy while a new workspace is created, and a
+    job in the new workspace then succeeds. The controller must find that
+    job's cluster to download its logs, rather than log "Cluster(s) not
+    found" and tear the cluster down with the logs on it.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    busy_job = f'{name}-busy'
+    new_job = f'{name}-new'
+    workspace = f'{name}-ws'
+    marker = f'logs-kept-{name}'
+    in_workspace = f'--config active_workspace={workspace}'
+    wait_busy_running = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=busy_job,
+            job_status=[sky.ManagedJobStatus.RUNNING],
+            timeout=900))
+    wait_new_succeeded = (
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=new_job,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=900))
+    test = smoke_tests_utils.Test(
+        'managed_job_logs_in_new_workspace',
+        [
+            f'sky jobs launch -y -d -n {busy_job} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} sleep 1800',
+            wait_busy_running,
+            lambda: _workspace_request('create', {
+                'workspace_name': workspace,
+                'config': {}
+            }),
+            f'sky jobs launch -y -d -n {new_job} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {in_workspace} '
+            f'echo {marker}',
+            wait_new_succeeded,
+            # The controller looked the cluster up and downloaded the logs.
+            f'out=$(sky jobs logs --controller -n {new_job} --no-follow '
+            f'{in_workspace}); echo "$out" | tail -n 40; '
+            'echo "$out" | grep -A1 "Downloading logs on cluster" | '
+            'grep "Cluster(s) not found" && exit 1; true',
+            f'sky jobs logs -n {new_job} --no-follow {in_workspace} | '
+            f'grep {marker}',
+        ],
+        teardown='; '.join([
+            f'sky jobs cancel -y -n {busy_job} || true',
+            f'sky jobs cancel -y -n {new_job} {in_workspace} || true',
+            _delete_workspaces_cmd(workspace),
+        ]),
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

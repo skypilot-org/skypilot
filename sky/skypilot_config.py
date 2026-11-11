@@ -259,6 +259,41 @@ def _set_loaded_config(config: config_utils.Config) -> None:
     _get_config_context().config = config
 
 
+class LoadedConfigKey:
+    """Identifies one loaded config object, for keying caches derived from it.
+
+    Two keys are equal only if they wrap the same object. A reload or an
+    override always installs a new object rather than mutating the loaded
+    one, so a value cached under a key stays correct for as long as that key
+    can be produced. The key holds the object, so its id cannot be reused by
+    another config while a cache entry keyed on it is alive.
+    """
+    __slots__ = ('_config',)
+
+    def __init__(self, config: config_utils.Config) -> None:
+        self._config = config
+
+    def __hash__(self) -> int:
+        return id(self._config)
+
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, LoadedConfigKey) and
+                other._config is self._config)
+
+
+def loaded_config_key() -> LoadedConfigKey:
+    """Returns a key for the config loaded in the current context.
+
+    Use it as an argument of a cache whose value is derived from the config.
+    A process can hold several contexts at once, each with its own loaded
+    config: the jobs controller runs every job in its own context with that
+    job's config. A cache keyed only on its other arguments would serve one
+    context a value derived from another context's config, and would keep an
+    old value after a reload in a process that never starts a new request.
+    """
+    return LoadedConfigKey(_get_loaded_config())
+
+
 def _get_loaded_config_path() -> List[Optional[str]]:
     serialized = _get_config_context().config_path
     if not serialized:

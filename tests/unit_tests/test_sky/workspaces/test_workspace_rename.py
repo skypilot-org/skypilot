@@ -396,7 +396,7 @@ def test_create_time_check_sees_the_new_workspace(store, monkeypatch):
     # The request already read the workspaces (e.g. a permission check)
     # before the write; the check run right after must see the new one.
     # pylint: disable=protected-access
-    core._load_workspaces.cache_clear()
+    core._load_workspaces_for_config.cache_clear()
     core._load_workspaces()
     seen = []
     monkeypatch.setattr(
