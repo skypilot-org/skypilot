@@ -44,8 +44,9 @@ def register_active_resource_lister(kind: str,
 
     The lister runs on each such change, so it must be cheap: one DB query, no
     cloud or Kubernetes calls. It should filter by both arguments in that
-    query; user delete passes the user hashes with every workspace. If it
-    raises, the change is refused.
+    query: user delete and role demotion pass the user hashes with every
+    workspace. The filter only saves work, since callers filter the rows
+    again. If it raises, the change is refused.
     """
     _ACTIVE_RESOURCE_LISTERS[kind] = fn
 
@@ -588,8 +589,9 @@ def _get_active_resources(
         workspace_names: If given, clusters and the registered listers are
             limited to these workspaces. Managed jobs are always fetched
             whole.
-        user_hashes: If given, the registered listers return only these
-            users' resources. Clusters and managed jobs are not narrowed.
+        user_hashes: If given, only these users' resources are returned.
+            The listers filter in their query; clusters and managed jobs are
+            fetched whole and filtered here.
 
     Returns:
         all_clusters: List[Dict[str, Any]], clusters not launched by a
@@ -652,4 +654,13 @@ def _get_active_resources(
         'kind': _CONTROLLER_LAUNCHED_CLUSTER,
     } for c in all_clusters if c.get('is_managed')]
     all_clusters = [c for c in all_clusters if not c.get('is_managed')]
+    if user_hashes is not None:
+        users = set(user_hashes)
+        all_clusters = [c for c in all_clusters if c.get('user_hash') in users]
+        all_managed_jobs = [
+            j for j in all_managed_jobs if j.get('user_hash') in users
+        ]
+        controller_launched = [
+            c for c in controller_launched if c['user_hash'] in users
+        ]
     return all_clusters, all_managed_jobs, controller_launched + all_others

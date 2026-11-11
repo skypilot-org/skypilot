@@ -922,6 +922,33 @@ class TestRegisteredListers:
         resource_checker.check_no_active_resources_for_users([('alice',
                                                                'delete')])
 
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_user',
+                return_value=None)
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    def test_user_delete_checks_every_user_in_the_batch(self, mock_get_clusters,
+                                                        _):
+        mock_get_clusters.return_value = [{
+            'name': 'c-carol',
+            'workspace': 'ws-a',
+            'user_hash': 'carol',
+            'is_managed': False
+        }]
+        # Only the second user owns something.
+        self._register('endpoint', [{
+            'name': 'e-bob',
+            'workspace': 'ws-a',
+            'user_hash': 'bob'
+        }])
+        with pytest.raises(ValueError, match=r'1 active endpoint\(s\): e-bob'):
+            resource_checker.check_no_active_resources_for_users([
+                ('alice', 'delete'), ('bob', 'delete')
+            ])
+        snapshot = resource_checker.ResourceSnapshot.fetch_for_users(
+            ['alice', 'bob'])
+        # The snapshot holds these users' resources only, clusters included.
+        assert snapshot.clusters == []
+        assert [r['name'] for r in snapshot.others] == ['e-bob']
+
     def test_names_are_capped_per_kind(self):
         names = [f'n{i}' for i in range(25)]
         assert resource_checker._format_names(names) == (', '.join(names[:10]) +
