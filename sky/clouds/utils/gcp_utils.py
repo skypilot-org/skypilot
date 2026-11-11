@@ -39,6 +39,11 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
         return False
     assert (resources is not None and resources.accelerators is not None and
             len(resources.accelerators) == 1)
+    # TPU VMs exist only on GCP. On Kubernetes, a GCP TPU name such as
+    # tpu-v6e-4 runs as GKE TPU pods, never as a TPU VM (or TPU VM pod).
+    if (resources.cloud is not None and
+            resources.cloud.canonical_name() == 'kubernetes'):
+        return False
     acc, _ = list(resources.accelerators.items())[0]
     if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
         return False
