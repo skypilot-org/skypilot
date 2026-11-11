@@ -42,6 +42,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
@@ -80,6 +82,8 @@ class TestVolumeCommands:
         # Mock the volumes SDK
         mock_apply = mock.MagicMock(return_value='request-id')
         monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+        # The server's own checks (e.g. enabled clouds) are not under test.
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock.MagicMock())
 
         # Mock click.confirm to avoid interactive prompts
         monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
