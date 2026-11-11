@@ -23,7 +23,9 @@ def _validate_request_patches():
             mock.patch.object(executor, 'stamp_request_body'), \
             mock.patch.object(executor, 'override_request_env_and_config',
                               return_value=contextlib.nullcontext()), \
-            mock.patch.object(server.core, 'check_volume_infra_allowed'):
+            mock.patch.object(server.core, 'check_volume_infra_allowed'), \
+            mock.patch.object(server.global_user_state, 'get_volume_by_name',
+                              return_value=None):
         mock_state.request_id = 'test-request-id'
         mock_state.auth_user = None
         yield

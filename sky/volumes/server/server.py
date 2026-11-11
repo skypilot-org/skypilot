@@ -8,6 +8,7 @@ import fastapi
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.server.requests import executor
@@ -144,7 +145,10 @@ async def volume_validate(
                 sync_refresh=True):
             volume = volume_lib.Volume.from_yaml_config(volume_config)
             volume.validate()
-            if volume.cloud is not None:
+            # As in /volumes/apply: re-applying an existing volume is not
+            # held to infra the workspace may have dropped since.
+            if (volume.cloud is not None and
+                    global_user_state.get_volume_by_name(volume.name) is None):
                 core.check_volume_infra_allowed(volume.cloud, volume.region)
 
     with _volume_errors_as_400():

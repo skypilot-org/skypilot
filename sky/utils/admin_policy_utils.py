@@ -140,8 +140,8 @@ def _user_set_cache_volumes(task: 'task_lib.Task') -> Set[str]:
     Resolved per context the way provisioning resolves `enable_docker`, since a
     context's value wins over the top-level one.
     """
-    contexts: Set[Optional[str]] = {None}
-    contexts.update(
+    configured: Set[Optional[str]] = {None}
+    configured.update(
         skypilot_config.get_nested(('kubernetes', 'context_configs'), {}))
     names: Set[str] = set()
     for resources in task.resources:
@@ -150,8 +150,12 @@ def _user_set_cache_volumes(task: 'task_lib.Task') -> Set[str]:
                 not isinstance(resources.cloud, clouds.Kubernetes)):
             continue
         overrides = resources.cluster_config_overrides
-        contexts.update(
-            overrides.get('kubernetes', {}).get('context_configs', {}))
+        # A resource pinned to a context provisions only there.
+        if resources.region is not None:
+            contexts: Set[Optional[str]] = {resources.region}
+        else:
+            contexts = configured | set(
+                overrides.get('kubernetes', {}).get('context_configs', {}))
         for context in contexts:
             name = _cache_volume(
                 skypilot_config.get_effective_region_config(

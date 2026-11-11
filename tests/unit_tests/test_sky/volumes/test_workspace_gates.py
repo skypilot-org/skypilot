@@ -282,6 +282,18 @@ def test_apply_gates_a_user_set_cache_volume(server_docker_config,
         admin_policy_utils.apply(task, _Requests.CLUSTER_LAUNCH)
 
 
+@pytest.mark.parametrize('context, expected', [('ctx1', {'theirs'}),
+                                               ('ctx2', set())])
+def test_cache_volume_is_checked_only_on_a_pinned_context(
+        server_docker_config, context, expected):
+    """A task pinned to ctx1 never mounts what another context configures."""
+    task = sky.Task(run='echo hi')
+    task.set_resources(sky.Resources(infra='k8s/ctx1'))
+    client = {'kubernetes': {'context_configs': {context: _docker('theirs')}}}
+    with skypilot_config.override_skypilot_config(client, from_loopback=False):
+        assert admin_policy_utils._user_set_cache_volumes(task) == expected
+
+
 def test_cache_volume_is_not_checked_for_other_clouds(server_docker_config):
     task = sky.Task(run='echo hi')
     task.set_resources(sky.Resources(infra='aws'))
@@ -396,6 +408,29 @@ def test_validate_checks_infra_in_the_requesters_workspace(
     region = infra.split('/')[1]
     # Checked inside the requester's environment, where the workspace is.
     assert events[:2] == ['enter', ('check', 'kubernetes', region)]
+
+
+def test_validate_does_not_hold_an_existing_volume_to_current_infra(
+        monkeypatch):
+    """Re-applying is a no-op in /volumes/apply even if the context was
+    dropped since; the CLI validates first, so validate must agree."""
+    monkeypatch.setattr(executor, 'stamp_request_body', mock.MagicMock())
+    monkeypatch.setattr(executor, 'override_request_env_and_config',
+                        lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                        lambda name: _volume_record('ws-a'))
+    infra_check = mock.MagicMock(side_effect=ValueError('not allowed'))
+    monkeypatch.setattr(core, 'check_volume_infra_allowed', infra_check)
+    with _request_state(_ALICE):
+        response = _volumes_client().post('/volumes/validate',
+                                          json={
+                                              'name': 'vol',
+                                              'volume_type': 'k8s-pvc',
+                                              'infra': 'k8s/ctx2',
+                                              'size': '1Gi',
+                                          })
+    assert response.status_code == 200
+    infra_check.assert_not_called()
 
 
 def test_validate_refuses_a_requester_without_a_workspace(monkeypatch):
