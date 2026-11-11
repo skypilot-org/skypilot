@@ -10,7 +10,7 @@ downtime during failures.
 > [!NOTE]
 > This example uses **Frontier Trainer** for Dynamic Node Set recovery, which
 > is available on the
-> **[SkyPilot Platform](https://docs.skypilot.ai/en/latest/skypilot-platform.html)**.
+> **[SkyPilot Platform](https://skypilot.ai/platform)**.
 
 ## Requirements
 
