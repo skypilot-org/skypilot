@@ -1,0 +1,118 @@
+# A CPU-only torchft lighthouse and two trainers with two GPUs each run as one
+# Job Group. The GPUs of one trainer form one torchft replica group and
+# average their gradients over NCCL.
+#
+# Launch:
+#   sky jobs launch \
+#     examples/torchft_resilient_training/torchft-multi-gpu-resilient-training.yaml
+---
+name: torchft-multi-gpu-resilient-training
+execution: parallel
+inter_connection: true
+primary_tasks: [trainers]
+termination_delay: 20s
+
+---
+name: lighthouse
+
+resources:
+  infra: kubernetes
+  cpus: 2+
+  memory: 4+
+  image_id: docker:pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+envs:
+  # A step is committed only while this many replica groups take part in it.
+  MIN_REPLICAS: 1
+
+setup: |
+  python -m pip install --no-cache-dir "torchft==0.3.1"
+
+run: |
+  set -euo pipefail
+  torchft_lighthouse \
+    --bind "[::]:29510" \
+    --min_replicas "${MIN_REPLICAS}" \
+    --quorum_tick_ms 100 \
+    --join_timeout_ms 10000
+
+---
+name: trainers
+
+num_nodes: 2
+
+resources:
+  infra: kubernetes
+  cpus: 8+
+  memory: 32+
+  accelerators: H100:2
+  image_id: docker:pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    # The job keeps RUNNING while at least one trainer is alive.
+    min_nodes: 1
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - env:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+
+envs:
+  GPUS_PER_NODE: 2
+  MIN_REPLICAS: 1
+  TOTAL_STEPS: 1000
+  # Pause between steps so there is time to delete pods and read the logs.
+  STEP_SECONDS: 1
+  # A step whose all-reduce does not finish in this long is discarded.
+  TIMEOUT_SECONDS: 10
+  # Set to INFO to print the transport NCCL picks for every connection.
+  NCCL_DEBUG: WARN
+
+# Every pod, including a replacement, clones the example at startup.
+workdir:
+  url: https://github.com/skypilot-org/skypilot.git
+  ref: master
+
+setup: |
+  python -m pip install --no-cache-dir "torchft==0.3.1"
+
+run: |
+  set -euo pipefail
+
+  GROUP_PIDS=()
+  for group_rank in $(seq 0 $((GPUS_PER_NODE - 1))); do
+    python examples/torchft_resilient_training/train.py \
+      --lighthouse-host "lighthouse-0.${SKYPILOT_JOBGROUP_NAME}" \
+      --group-rank "${group_rank}" \
+      --group-size "${GPUS_PER_NODE}" \
+      --process-group nccl \
+      --steps "${TOTAL_STEPS}" \
+      --step-seconds "${STEP_SECONDS}" \
+      --min-replicas "${MIN_REPLICAS}" \
+      --timeout "${TIMEOUT_SECONDS}" &
+    GROUP_PIDS+=("$!")
+  done
+
+  # A replica group that loses one process is lost as a whole: the pod exits
+  # and SkyPilot replaces it.
+  while true; do
+    alive=0
+    for pid in "${GROUP_PIDS[@]}"; do
+      if kill -0 "${pid}" 2>/dev/null; then alive=$((alive + 1)); fi
+    done
+    if [ "${alive}" -lt "${GPUS_PER_NODE}" ]; then break; fi
+    sleep 1
+  done
+  sleep 5
+  kill "${GROUP_PIDS[@]}" 2>/dev/null || true
+  for pid in "${GROUP_PIDS[@]}"; do
+    wait "${pid}"
+  done

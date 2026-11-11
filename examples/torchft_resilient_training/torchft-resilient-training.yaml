@@ -1,0 +1,90 @@
+# A CPU-only torchft lighthouse and four single-GPU trainers run as one Job
+# Group. Every trainer is one torchft replica group.
+#
+# Launch:
+#   sky jobs launch \
+#     examples/torchft_resilient_training/torchft-resilient-training.yaml
+---
+name: torchft-resilient-training
+execution: parallel
+inter_connection: true
+primary_tasks: [trainers]
+termination_delay: 20s
+
+---
+name: lighthouse
+
+resources:
+  infra: kubernetes
+  cpus: 2+
+  memory: 4+
+  image_id: docker:pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+envs:
+  # A step is committed only while this many replica groups take part in it.
+  MIN_REPLICAS: 1
+
+setup: |
+  python -m pip install --no-cache-dir "torchft==0.3.1"
+
+run: |
+  set -euo pipefail
+  torchft_lighthouse \
+    --bind "[::]:29510" \
+    --min_replicas "${MIN_REPLICAS}" \
+    --quorum_tick_ms 100 \
+    --join_timeout_ms 10000
+
+---
+name: trainers
+
+num_nodes: 4
+
+resources:
+  infra: kubernetes
+  cpus: 4+
+  memory: 16+
+  accelerators: H100:1
+  image_id: docker:pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    # The job keeps RUNNING while at least one trainer is alive.
+    min_nodes: 1
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - env:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+
+envs:
+  MIN_REPLICAS: 1
+  TOTAL_STEPS: 1000
+  # Pause between steps so there is time to delete pods and read the logs.
+  STEP_SECONDS: 1
+  # A step whose all-reduce does not finish in this long is discarded.
+  TIMEOUT_SECONDS: 10
+
+# Every pod, including a replacement, clones the example at startup.
+workdir:
+  url: https://github.com/skypilot-org/skypilot.git
+  ref: master
+
+setup: |
+  python -m pip install --no-cache-dir "torchft==0.3.1"
+
+run: |
+  set -euo pipefail
+  python examples/torchft_resilient_training/train.py \
+    --lighthouse-host "lighthouse-0.${SKYPILOT_JOBGROUP_NAME}" \
+    --steps "${TOTAL_STEPS}" \
+    --step-seconds "${STEP_SECONDS}" \
+    --min-replicas "${MIN_REPLICAS}" \
+    --timeout "${TIMEOUT_SECONDS}"
