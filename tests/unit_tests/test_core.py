@@ -747,6 +747,53 @@ def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
         sdk.validate(dag)
 
 
+def _tpu_multi_host_dag():
+    import sky
+    task = sky.Task(resources=sky.Resources(
+        accelerators='tpu-v6e-8', accelerator_args={'multi_host': True}))
+    with sky.Dag() as dag:
+        dag.add(task)
+    return dag
+
+
+@pytest.mark.parametrize('api_version', [None, 24, 68])
+def test_sdk_validate_tpu_multi_host_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate and sdk.optimize should error for
+    accelerator_args.multi_host if the remote API version < 69."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    dag = _tpu_multi_host_dag()
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.validate(dag)
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='accelerator_args.multi_host'):
+        sdk.optimize(dag)
+
+
+def test_sdk_validate_tpu_multi_host_allowed_on_new_server(monkeypatch):
+    """With API version >= 69 the guard passes and the request is sent."""
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 69)
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=RuntimeError('reached server request')))
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(_tpu_multi_host_dag())
+
+
 def test_launch_body_accepts_resize_field():
     """New server should accept resize=True in the request body."""
     from sky.server.requests import payloads
