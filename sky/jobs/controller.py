@@ -1132,9 +1132,13 @@ class JobController:
 
         logger.info('Started monitoring.')
 
-        # Only do the initial cluster launch if not resuming from a controller
-        # failure. Otherwise, we will transit to recovering immediately.
+        # Launch the task's cluster, unless resuming from a controller failure.
+        # A resumed task that was mid-launch first tries to continue that
+        # launch; if it cannot, it is recovered below.
         remote_job_submitted_at = time.time()
+        # The status a resumed task's launch was continued from, if it was.
+        resumed_launch_from: Optional['managed_job_state.ManagedJobStatus'] = (
+            None)
         if not is_resume:
             launch_start = time.time()
             # A pipeline's next task has no cluster yet: until its launch
@@ -1150,6 +1154,20 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+        elif self._pool is None and task_status in (
+                managed_job_state.ManagedJobStatus.STARTING,
+                managed_job_state.ManagedJobStatus.RECOVERING):
+            # The previous controller (or attempt) stopped while the task was
+            # launching. Its launch request may still be live on the API
+            # server (running, or parked waiting to resume): re-attach to it
+            # rather than let forced recovery tear the cluster down and launch
+            # again (see StrategyExecutor.resume_launch).
+            await self._count_in_full()
+            resumed_at = await self._strategy_executor.resume_launch(recovery=(
+                task_status == managed_job_state.ManagedJobStatus.RECOVERING))
+            if resumed_at is not None:
+                remote_job_submitted_at = resumed_at
+                resumed_launch_from = task_status
         job_id_on_pool_cluster: Optional[int] = None
         if self._pool:
             # Update the cluster name when using pool.
@@ -1182,12 +1200,21 @@ class JobController:
                 raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
-        if not is_resume:
-            await managed_job_state.set_started_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                start_time=remote_job_submitted_at,
-                callback_func=callback_func)
+        if not is_resume or resumed_launch_from is not None:
+            # Launched, or its launch continued: record the job as running.
+            if (resumed_launch_from ==
+                    managed_job_state.ManagedJobStatus.RECOVERING):
+                await managed_job_state.set_recovered_async(
+                    self._job_id,
+                    task_id,
+                    recovered_time=remote_job_submitted_at,
+                    callback_func=callback_func)
+            else:
+                await managed_job_state.set_started_async(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    start_time=remote_job_submitted_at,
+                    callback_func=callback_func)
 
         async with self.starting_lock:
             try:
@@ -1209,10 +1236,11 @@ class JobController:
         # the cluster status is.
         # Handle resume logic before starting the monitoring loop.
         # If resuming from a controller failure, check the previous state
-        # and determine if we need to force recovery.
+        # and determine if we need to force recovery. A task whose launch was
+        # continued above has just been recorded as running, like a fresh one.
         force_transit_to_recovering = False
         emergency_reattach = False
-        if is_resume:
+        if is_resume and resumed_launch_from is None:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
@@ -1233,8 +1261,9 @@ class JobController:
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 # Force recovery (cleanup + relaunch): the task was mid-launch
                 # or mid-recovery when the previous attempt stopped (a
-                # controller restart, or an emergency retry), so whatever is
-                # on the cluster may be half-submitted and cannot be trusted.
+                # controller restart, or an emergency retry), and its launch
+                # could not be continued above, so whatever is on the cluster
+                # may be half-submitted and cannot be trusted.
                 # A RUNNING task is not forced: the monitor loop re-attaches,
                 # and its own job and cluster checks decide whether a
                 # relaunch is needed, so neither a restart nor a
@@ -1256,6 +1285,9 @@ class JobController:
                     logger.info(f'Task {task_id} kept its cluster through an '
                                 'emergency; re-attaching to the job.')
 
+        if is_resume:
+            # Also after a continued launch: the executor is fresh, and
+            # on_resume loads the task's persisted state for monitoring.
             await self._strategy_executor.on_resume(cluster_name)
 
         logger.info('Started monitoring.')

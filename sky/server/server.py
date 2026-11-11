@@ -510,6 +510,15 @@ class BasicAuthMiddleware(middleware_utils.ASGIMiddleware):
 _SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
+async def _update_token_last_used(token_id: str) -> None:
+    try:
+        await db_lookup.call_with_deadline(
+            global_user_state.update_service_account_token_last_used, token_id,
+            _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to update token last used time: {e}')
+
+
 @middleware_utils.websocket_aware
 class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
@@ -681,14 +690,8 @@ class BearerTokenMiddleware(middleware_utils.ASGIMiddleware):
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
                 # The row may be cached: later hits must see it as fresh.
                 token_row['last_used_at'] = int(now)
-                try:
-                    await db_lookup.call_with_deadline(
-                        global_user_state.
-                        update_service_account_token_last_used,
-                        token_row['token_id'],
-                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to update token last used time: {e}')
+                asyncio_utils.run_in_background(
+                    _update_token_last_used(token_row['token_id']))
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,
@@ -1999,9 +2002,16 @@ async def validate(validate_body: payloads.ValidateBody,
         # Apply the client's env and config and resolve the active workspace
         # as for a scheduled request. Load the DAG inside, so that nothing
         # reads the client's env vars before they are sanitized.
+        # This thread belongs to the API server process, which other requests
+        # share: sync_refresh keeps the process-wide log handler instead of
+        # rebuilding it at this client's log level, which would otherwise
+        # leak a debug level into every later request served in this process
+        # (e.g. the server's own debug lines at the top of `sky jobs logs`).
         with executor.override_request_env_and_config(
-                validate_body, request.state.request_id,
-                request_names.AdminPolicyRequestName.VALIDATE.value):
+                validate_body,
+                request.state.request_id,
+                request_names.AdminPolicyRequestName.VALIDATE.value,
+                sync_refresh=True):
             dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
             with admin_policy_utils.apply_and_use_config_in_current_request(
                     dag,

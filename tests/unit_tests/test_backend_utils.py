@@ -23,13 +23,8 @@ from sky.utils import yaml_utils
 
 @pytest.fixture(autouse=True)
 def _restore_environ():
-    """Undo the tests' writes to ``os.environ`` when each test ends.
-
-    Several tests point ``SKYPILOT_CONFIG`` at a test yaml by writing
-    ``os.environ`` directly. Without this, the setting outlives the test: every
-    later test on the same worker, and every subprocess it starts, loads that
-    yaml.
-    """
+    """Some tests point ENV_VAR_SKYPILOT_CONFIG at a test YAML; without this
+    it leaks into later tests in the same worker."""
     with mock.patch.dict(os.environ):
         yield
 

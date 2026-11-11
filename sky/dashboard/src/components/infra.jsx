@@ -3332,10 +3332,9 @@ export function GPUs() {
   const handleSaveSSHPool = async (poolName, poolConfig) => {
     setSshLoading(true);
     try {
-      const updatedPools = { ...sshNodePools };
-      updatedPools[poolName] = poolConfig;
-
-      await updateSSHNodePools(updatedPools);
+      // Send only this pool: the server merges per pool, and the cached map
+      // may be a redacted (non-admin) read that would overwrite the others.
+      await updateSSHNodePools({ [poolName]: poolConfig });
       await fetchSSHNodePools(); // Refresh the list
       setSshModalOpen(false);
     } catch (error) {
