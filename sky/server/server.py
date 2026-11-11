@@ -96,6 +96,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -1154,6 +1155,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Unused: the middleware-order check that used to live here runs at
     # import instead, right after the metrics middleware registration.
     del app
+    threads.count_thread_starts()
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.

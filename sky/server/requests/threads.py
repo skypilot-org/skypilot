@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import functools
 import os
 import sys
 import threading
@@ -24,6 +25,34 @@ _P = ParamSpec('_P')
 _T = TypeVar('_T')
 
 logger = sky_logging.init_logger(__name__)
+
+_thread_start_counter_installed = False
+
+
+def count_thread_starts() -> None:
+    """Counts the threads started in this process, split by whether they
+    were started on a running event loop. No-op when metrics are off."""
+    global _thread_start_counter_installed
+    if _thread_start_counter_installed or not metrics_utils.METRICS_ENABLED:
+        return
+    _thread_start_counter_installed = True
+    on_loop = metrics_utils.SKY_APISERVER_THREADS_STARTED_TOTAL.labels(
+        on_loop='true')
+    off_loop = metrics_utils.SKY_APISERVER_THREADS_STARTED_TOTAL.labels(
+        on_loop='false')
+    original_start = threading.Thread.start
+
+    @functools.wraps(original_start)
+    def start(self: threading.Thread) -> None:
+        try:
+            asyncio.get_running_loop()
+            counter = on_loop
+        except RuntimeError:
+            counter = off_loop
+        original_start(self)
+        counter.inc()
+
+    threading.Thread.start = start  # type: ignore[method-assign]
 
 
 class OnDemandThreadExecutor(concurrent.futures.Executor):
