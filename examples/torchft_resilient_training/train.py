@@ -53,6 +53,7 @@ def main() -> None:
                         default='gloo')
     parser.add_argument('--timeout', type=float, default=10.0)
     parser.add_argument('--quorum-timeout', type=float, default=600.0)
+    parser.add_argument('--quorum-retries', type=int, default=119)
     parser.add_argument('--lighthouse-timeout', type=float, default=900.0)
     parser.add_argument('--group-rank', type=int, default=0)
     parser.add_argument('--group-size', type=int, default=1)
@@ -160,6 +161,9 @@ def main() -> None:
         hostname=pod_ip,
         timeout=timeout,
         quorum_timeout=datetime.timedelta(seconds=args.quorum_timeout),
+        # Without retries a trainer hangs when the lighthouse is replaced.
+        # torchft spaces them quorum_timeout / (quorum_retries + 1) apart.
+        quorum_retries=args.quorum_retries,
         world_size_mode=torchft_manager.WorldSizeMode.DYNAMIC,
         # The default HTTP transport advertises the pod's hostname.
         checkpoint_transport=pg_transport.PGTransport(process_group,
