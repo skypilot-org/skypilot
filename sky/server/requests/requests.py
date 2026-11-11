@@ -517,6 +517,18 @@ def encode_requests(
     return encoded_requests
 
 
+def list_requests_json(req_filter: 'RequestTaskFilter',
+                       caller_user_id: Optional[str] = None) -> bytes:
+    """Query requests and render ``encode_requests`` as a JSON array.
+
+    Blocking; listings can run to many MB, so call it off the event loop.
+    """
+    encoded = encode_requests(get_request_tasks(req_filter),
+                              caller_user_id=caller_user_id)
+    return b'[' + b','.join(
+        payload.model_dump_json().encode('utf-8') for payload in encoded) + b']'
+
+
 def _update_request_row_fields(
         row: Tuple[Any, ...],
         fields: Optional[List[str]] = None) -> Tuple[Any, ...]:
