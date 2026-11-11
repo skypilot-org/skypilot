@@ -111,6 +111,10 @@ _REQUEST_THREADS_LIMIT = 128
 # point where the sheer number of threads in one process starts slowing its
 # request handling down.
 _AUTH_THREADS_LIMIT = 32
+# Threads each executor starts when the server process starts; the rest start
+# on demand and are kept for reuse.
+_REQUEST_THREADS_WARM = 16
+_AUTH_THREADS_WARM = 8
 
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
@@ -265,6 +269,15 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
                 name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
         return _AUTH_THREAD_EXECUTOR
+
+
+def warm_thread_executors() -> None:
+    """Starts the warm threads of the request and auth executors.
+
+    Thread start waits for the GIL, so call this off the event loop.
+    """
+    get_request_thread_executor().prestart(_REQUEST_THREADS_WARM)
+    get_auth_thread_executor().prestart(_AUTH_THREADS_WARM)
 
 
 class RequestQueue:

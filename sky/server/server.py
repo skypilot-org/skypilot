@@ -1156,6 +1156,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # import instead, right after the metrics middleware registration.
     del app
     threads.count_thread_starts()
+    threads.keep_anyio_worker_threads()
+    await asyncio.to_thread(executor.warm_thread_executors)
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.

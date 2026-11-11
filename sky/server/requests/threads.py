@@ -4,9 +4,10 @@ import asyncio
 import concurrent.futures
 import functools
 import os
+import queue
 import sys
 import threading
-from typing import Callable, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TypeVar
 
 import prometheus_client as prom
 
@@ -27,6 +28,10 @@ _T = TypeVar('_T')
 logger = sky_logging.init_logger(__name__)
 
 _thread_start_counter_installed = False
+
+# AnyIO prunes worker threads idle for 10 s by default; its thread limiter
+# (40 by default) still bounds how many idle threads stay.
+_ANYIO_WORKER_MAX_IDLE_SECONDS = 3600
 
 
 def count_thread_starts() -> None:
@@ -55,9 +60,32 @@ def count_thread_starts() -> None:
     threading.Thread.start = start  # type: ignore[method-assign]
 
 
+def keep_anyio_worker_threads() -> None:
+    """Keeps idle AnyIO worker threads, which run sync routes and
+    anyio.to_thread calls, alive between bursts."""
+    # Imported here: WorkerThread lives in a private AnyIO module that may move.
+    try:
+        # pylint: disable=import-outside-toplevel
+        from anyio._backends import _asyncio as anyio_asyncio
+    except ImportError:
+        return
+    worker_thread = getattr(anyio_asyncio, 'WorkerThread', None)
+    if worker_thread is not None and hasattr(worker_thread, 'MAX_IDLE_TIME'):
+        worker_thread.MAX_IDLE_TIME = _ANYIO_WORKER_MAX_IDLE_SECONDS
+
+
+_WorkItem = Tuple[Callable, concurrent.futures.Future, Tuple[Any, ...],
+                  Dict[str, Any]]
+
+
 class OnDemandThreadExecutor(concurrent.futures.Executor):
-    """An executor that creates a new thread for each task and destroys it
-    after the task is completed.
+    """An executor that runs each task on a reusable thread.
+
+    Threads are started on demand up to max_workers and stay alive after
+    their task completes, so a warm executor hands a task over without
+    starting a thread. Call prestart() off the event loop to warm it up.
+    Threads are daemons so that long-running tasks (e.g. log streaming) do
+    not block interpreter exit.
 
     Note(dev):
     We raise an error instead of queuing the request if the limit is reached, so
@@ -79,6 +107,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         self._shutdown_lock: threading.Lock = threading.Lock()
         self._threads: Set[threading.Thread] = set()
         self._threads_lock: threading.Lock = threading.Lock()
+        self._work_queue: 'queue.SimpleQueue[Optional[_WorkItem]]' = (
+            queue.SimpleQueue())
+        # One token per idle thread.
+        self._idle: threading.Semaphore = threading.Semaphore(0)
         # Cache the labeled metric children to avoid the label lookup on
         # every submit/complete.
         self._active_gauge: Optional[prom.Gauge] = None
@@ -94,47 +126,81 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             metrics_utils.SKY_APISERVER_THREADS_MAX.labels(
                 pid=pid, name=name).set(max_workers)
 
-    def _cleanup_thread(self, thread: threading.Thread):
-        with self._threads_lock:
-            self._threads.discard(thread)
+    def _worker(self, idle_at_start: bool) -> None:
+        if idle_at_start:
+            self._idle.release()
+        while True:
+            work = self._work_queue.get()
+            if work is None:
+                return
+            self._run_task(*work)
+            # Do not keep the last task's arguments alive while idle.
+            del work
 
-    def _task_wrapper(self, fn: Callable, fut: concurrent.futures.Future, /,
-                      *args, **kwargs):
+    def _start_thread(self, idle_at_start: bool) -> None:
+        """Starts a worker thread; the caller must hold self._threads_lock."""
+        thread = threading.Thread(target=self._worker,
+                                  name=f'{self.name}-{len(self._threads) + 1}',
+                                  args=(idle_at_start,),
+                                  daemon=True)
+        thread.start()
+        self._threads.add(thread)
+
+    def prestart(self, count: int) -> None:
+        """Starts idle threads until the executor has `count` threads.
+
+        Thread start waits for the GIL, so call this off the event loop.
+        """
+        while True:
+            with self._threads_lock:
+                if (self._shutdown or
+                        len(self._threads) >= min(count, self.max_workers)):
+                    return
+                self._start_thread(idle_at_start=True)
+
+    def _run_task(self, fn: Callable, fut: concurrent.futures.Future,
+                  args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
+        result: Any = None
+        error: Optional[BaseException] = None
+        cancelled = False
         try:
             result = fn(*args, **kwargs)
-            fut.set_result(result)
         except asyncio.CancelledError:
-            # Cancellation is an expected terminal state, not an error.
-            # Put the future into CANCELLED state instead of FINISHED with a
-            # CancelledError exception, so that the asyncio-side future (via
-            # asyncio.wrap_future / loop.run_in_executor) is also cancelled
-            # and does not trigger the "Future exception was never retrieved"
-            # warning when the awaiter was itself cancelled and never consumes
-            # the exception.
             logger.debug(f'Executor [{self.name}] cancelled {fn}')
-            if not fut.cancelled():
+            cancelled = True
+        except BaseException as e:  # pylint: disable=broad-except
+            logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
+            error = e
+        finally:
+            # Free the slot before resolving the future, so that a caller
+            # that submits again right after the result sees a free thread.
+            self.running.decrement()
+            if self._active_gauge is not None:
+                self._active_gauge.dec()
+            self._idle.release()
+        try:
+            if cancelled:
+                # Cancellation is an expected terminal state, not an error.
+                # Put the future into CANCELLED state instead of FINISHED with
+                # a CancelledError exception, so that the asyncio-side future
+                # (via asyncio.wrap_future / loop.run_in_executor) is also
+                # cancelled and does not trigger the "Future exception was
+                # never retrieved" warning when the awaiter was itself
+                # cancelled and never consumes the exception.
                 # fut.cancel() succeeds only when the future is in PENDING
                 # state. OnDemandThreadExecutor does not call
                 # set_running_or_notify_cancel(), so the future stays PENDING
                 # here. If a future refactor changes that, fall back to
                 # set_exception to preserve the cancellation signal.
-                # Also guard with fut.done() in case of a race where the future
-                # transitioned to a terminal state between our cancelled() check
-                # and cancel() call — set_exception on a done future raises
-                # InvalidStateError.
                 if not fut.cancel() and not fut.done():
                     fut.set_exception(asyncio.CancelledError())
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
-            if not fut.cancelled():
-                # Only set the exception if the future is not cancelled to avoid
-                # setting the exception twice leading to another exception.
-                fut.set_exception(e)
-        finally:
-            self.running.decrement()
-            if self._active_gauge is not None:
-                self._active_gauge.dec()
-            self._cleanup_thread(threading.current_thread())
+            elif error is not None:
+                fut.set_exception(error)
+            else:
+                fut.set_result(result)
+        except concurrent.futures.InvalidStateError:
+            # The caller cancelled the future while the task ran.
+            pass
 
     def check_available(self, borrow: bool = False) -> int:
         """Check if there are available workers.
@@ -162,28 +228,22 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             if self._shutdown:
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
-            count = self.check_available(borrow=True)
+            self.check_available(borrow=True)
             if self._active_gauge is not None:
                 self._active_gauge.inc()
             fut: concurrent.futures.Future = concurrent.futures.Future()
-            # Name is assigned for debugging purpose, duplication is fine
-            thread = threading.Thread(target=self._task_wrapper,
-                                      name=f'{self.name}-{count}',
-                                      args=(fn, fut, *args),
-                                      kwargs=kwargs,
-                                      daemon=True)
-            with self._threads_lock:
-                self._threads.add(thread)
-            try:
-                thread.start()
-            except Exception as e:
-                self.running.decrement()
-                if self._active_gauge is not None:
-                    self._active_gauge.dec()
-                self._cleanup_thread(thread)
-                fut.set_exception(e)
-                raise
-            assert thread.ident is not None, 'Thread should be started'
+            if not self._idle.acquire(blocking=False):
+                try:
+                    with self._threads_lock:
+                        if len(self._threads) < self.max_workers:
+                            self._start_thread(idle_at_start=False)
+                except Exception as e:
+                    self.running.decrement()
+                    if self._active_gauge is not None:
+                        self._active_gauge.dec()
+                    fut.set_exception(e)
+                    raise
+            self._work_queue.put((fn, fut, args, kwargs))
             return fut
 
     def shutdown(self,
@@ -192,9 +252,12 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                  cancel_futures: bool = False) -> None:
         with self._shutdown_lock:
             self._shutdown = True
-        if not wait:
-            return
         with self._threads_lock:
             threads = list(self._threads)
+        # Each thread exits after running the tasks queued before its sentinel.
+        for _ in threads:
+            self._work_queue.put(None)
+        if not wait:
+            return
         for t in threads:
             t.join()
