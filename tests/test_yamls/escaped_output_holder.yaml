@@ -1,11 +1,14 @@
+envs:
+  EXIT_CODE: 1
+
 run: |
   python -c '
-  import subprocess, sys
+  import os, subprocess, sys
   # A worker in its own session (as torch elastic starts them) leaves a
   # child holding stdout, then dies.
   worker = subprocess.Popen(
       ["bash", "-c", "(sleep 3600) & sleep 1; kill -9 $$"],
       start_new_session=True)
   worker.wait()
-  sys.exit(1)
+  sys.exit(int(os.environ["EXIT_CODE"]))
   '
