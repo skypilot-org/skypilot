@@ -672,6 +672,30 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_escaped_output_holder(generic_cloud: str):
+    """Test a managed job whose output is held by a process that escaped it."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed_jobs_escaped_output_holder',
+        [
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y -d tests/test_yamls/escaped_output_holder.yaml',
+            # The job must fail instead of staying RUNNING on the held output.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.FAILED],
+                timeout=365),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances

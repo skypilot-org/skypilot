@@ -1233,6 +1233,21 @@ def test_multi_node_failure(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+def test_escaped_output_holder(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'escaped_output_holder',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/escaped_output_holder.yaml || [ $? -eq 100 ]',
+            f'sky logs {name} 1 --status | grep FAILED',
+            f'sky logs {name} 1 | grep "Terminating process"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- EFA. ----------
 @pytest.mark.aws
 def test_efa():
