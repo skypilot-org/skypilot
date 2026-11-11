@@ -57,8 +57,6 @@ class Modal(clouds.Cloud):
             'Disk cloning is not supported on Modal.',
         clouds.CloudImplementationFeatures.IMAGE_ID:
             'Custom image IDs are not supported on Modal.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            'Spot instances are not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers are not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
@@ -139,8 +137,6 @@ class Modal(clouds.Cloud):
     ) -> List[clouds.Region]:
         assert zone is None, 'Modal does not support zones.'
         del accelerators, zone, resources  # unused
-        if use_spot:
-            return []
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'modal')
         if region is None:
@@ -313,6 +309,9 @@ class Modal(clouds.Cloud):
             'modal_gpu': modal_gpu,
             'modal_cpu': modal_cpu,
             'modal_memory': modal_memory,
+            # Spot is Modal's default, preemptible container. GPU containers
+            # have no other kind.
+            'modal_nonpreemptible': not resources.use_spot,
             'modal_timeout': _MAX_CLUSTER_LIFETIME_HOURS * 60 * 60,
             'modal_docker_image': resources.extract_docker_image(),
             'modal_volume_mounts': modal_volume_mounts,
@@ -327,6 +326,14 @@ class Modal(clouds.Cloud):
                                                 'modal'):
                 raise ValueError(
                     f'Invalid instance type: {resources.instance_type}')
+            # modal_catalog imports sky.clouds, so a top-level import here
+            # would be circular.
+            # pylint: disable=import-outside-toplevel
+            from sky.catalog import modal_catalog
+            if (not resources.use_spot and modal_catalog.is_gpu_instance_type(
+                    resources.instance_type)):
+                return resources_utils.FeasibleResources(
+                    [], [], modal_catalog.GPU_SPOT_ONLY_HINT)
             resources = resources.copy(accelerators=None,
                                        cpus=None,
                                        memory=None)
@@ -360,6 +367,11 @@ class Modal(clouds.Cloud):
                 _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
+        if not resources.use_spot:
+            # pylint: disable=import-outside-toplevel
+            from sky.catalog import modal_catalog
+            return resources_utils.FeasibleResources(
+                [], [], modal_catalog.GPU_SPOT_ONLY_HINT)
         acc, acc_count = list(accelerators.items())[0]
         (instance_list,
          fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(

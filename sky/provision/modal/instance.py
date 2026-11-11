@@ -60,10 +60,11 @@ def _function_kwargs(node_config: Dict[str, Any]) -> Dict[str, Any]:
         'region': node_config.get('ModalRegion'),
         'timeout': node_config.get('Timeout'),
         'volumes': volumes,
-        # CPU Functions are preemptible by default; keep CPU clusters
-        # non-preemptible, at 3x the CPU/memory list price.
-        # Modal does not support this for GPU Functions.
-        'nonpreemptible': gpu is None,
+        # On-demand clusters run non-preemptible, at 3x the CPU and memory
+        # list price. Modal has that for CPU Functions only, so GPU clusters
+        # are always spot. Clusters launched before spot was offered have no
+        # `Nonpreemptible`: CPU-only ones were non-preemptible.
+        'nonpreemptible': node_config.get('Nonpreemptible', gpu is None),
     }
 
 

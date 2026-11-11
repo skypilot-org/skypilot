@@ -13,13 +13,14 @@ list. Like Kubernetes, SkyPilot builds them on the fly (e.g.
 catalog columns, GCP-style, with two kinds of rows per region, already scaled
 for the region's price multiplier:
 - accelerator rows (no `InstanceType`), one per GPU type and count Modal
-  offers per container, as in gcp/vms.csv: `Price` is the hourly price of
-  that many GPUs, `GpuInfo` carries the GPU memory;
+  offers per container, as in gcp/vms.csv: `SpotPrice` is the hourly price of
+  that many GPUs and `Price` is empty, since Modal's GPU containers are
+  always preemptible; `GpuInfo` carries the GPU memory;
 - two rate rows, `InstanceType` `cpu-core` (`vCPUs` 2: one Modal physical
   core) and `memory-gib` (`MemoryGiB` 1): `Price` is the hourly
-  non-preemptible rate, which CPU-only clusters pay since SkyPilot runs them
-  non-preemptible, and `SpotPrice` the list rate, which is what Modal's
-  (preemptible) GPU containers pay for their CPU and memory.
+  non-preemptible rate, which on-demand (CPU-only) clusters pay, and
+  `SpotPrice` the list rate, which preemptible containers pay: spot CPU-only
+  clusters, and GPU clusters for their CPU and memory.
 
 Usage (from the catalog directory, e.g. ~/.sky/catalogs/v8):
     python -m sky.catalog.data_fetchers.fetch_modal
@@ -294,7 +295,8 @@ def gpu_info(gpu_name: str, count: int) -> str:
 def _gpu_row(gpu_name: str, count: int, region: str, multiplier: float,
              per_second: float) -> Dict:
     """An accelerator row, as in gcp/vms.csv: no instance type, priced for
-    `count` GPUs. Modal has no non-preemptible GPUs, so no SpotPrice."""
+    `count` GPUs. Modal's GPU containers are always preemptible, so the
+    price is a SpotPrice and there is no (on-demand) Price."""
     return {
         'InstanceType': None,
         'vCPUs': None,
@@ -304,8 +306,8 @@ def _gpu_row(gpu_name: str, count: int, region: str, multiplier: float,
         'GpuInfo': gpu_info(gpu_name, count),
         'Region': region,
         'AvailabilityZone': None,
-        'Price': _hourly(per_second * count, multiplier),
-        'SpotPrice': None,
+        'Price': None,
+        'SpotPrice': _hourly(per_second * count, multiplier),
     }
 
 

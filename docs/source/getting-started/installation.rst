@@ -1193,16 +1193,22 @@ the selected values as both the Modal request and limit. Without ``cpus`` and
 ``memory``, a node gets 4 vCPUs and 16 GiB, and a GPU node gets 4 vCPUs and
 16 GiB per GPU (``H100:8`` runs on 32 vCPUs and 128 GiB).
 
-GPU task:
+GPU task. Modal's GPU containers are always preemptible, so SkyPilot offers
+Modal GPUs as spot only: set ``use_spot: true`` (``--use-spot``).
 
 .. code-block:: yaml
 
   resources:
     cloud: modal
     accelerators: H100:1
+    use_spot: true
 
   run: |
     nvidia-smi
+
+CPU-only clusters can be either. On-demand (the default) runs non-preemptible,
+at Modal's non-preemptible CPU and memory rate; with ``use_spot: true`` the
+cluster is preemptible, at Modal's list rate (a third of it).
 
 You can also run the examples in ``examples/modal/hello.yaml`` and
 ``examples/modal/gpu.yaml``.
@@ -1246,12 +1252,12 @@ buckets. ``MOUNT_CACHED`` is not supported on Modal.
 Current limitations:
 
 - Multi-node clusters need GPUs and must use all 8 GPUs of each node, for
-  example ``--gpus H100:8 --num-nodes 2``. Modal limits them to 32 nodes, and
+  example ``--gpus H100:8 --num-nodes 2 --use-spot``. Modal limits them to 32
+  nodes, and
   your Modal workspace's GPU limit must cover the whole cluster.
-- GPU clusters can be preempted by Modal; CPU-only clusters are not (they are
-  billed at Modal's non-preemptible CPU and memory rate). A preempted cluster is
-  terminated, not restarted: use :ref:`managed jobs <managed-jobs>` to recover
-  long-running work.
+- Spot clusters (all GPU clusters) can be preempted by Modal. A preempted
+  cluster is terminated, not restarted: use :ref:`managed jobs <managed-jobs>`
+  to recover long-running work.
 - A cluster lives at most 24 hours (Modal's maximum Function timeout). If it
   exits, times out, or is terminated from Modal, launch a new SkyPilot
   cluster.

@@ -6,12 +6,15 @@ As on Kubernetes, SkyPilot builds them on the fly from the request, e.g.
 `modal/vms.csv` (made by sky/catalog/data_fetchers/fetch_modal.py). That
 table uses the standard catalog columns, GCP-style, with two kinds of rows
 per region: accelerator rows (no `InstanceType`, one per GPU type and count
-Modal offers per container, priced for that many GPUs, `GpuInfo` with the GPU
-memory), and two rate rows, `InstanceType` `cpu-core` (one Modal core, 2
-vCPUs) and `memory-gib`, whose `Price` is the non-preemptible rate and
-`SpotPrice` the list rate. CPU-only clusters run non-preemptible and pay the
-former; Modal's GPU containers are preemptible and pay the latter for their
-CPU and memory.
+Modal offers per container, with the `SpotPrice` of that many GPUs and
+`GpuInfo` with the GPU memory), and two rate rows, `InstanceType` `cpu-core`
+(one Modal core, 2 vCPUs) and `memory-gib`, whose `Price` is the
+non-preemptible rate and `SpotPrice` the list rate.
+
+Modal's list rates are for preemptible containers, which is what SkyPilot
+calls spot. GPU containers are always preemptible, so GPU instance types are
+offered as spot only. CPU-only instance types are offered both ways:
+on-demand runs non-preemptible, at the non-preemptible rate.
 """
 
 import ast
@@ -39,6 +42,9 @@ MEMORY_RESOURCE = 'memory-gib'
 # rate, so it sits in SpotPrice; Price holds the non-preemptible rate.
 _LIST_RATE_COLUMN = 'SpotPrice'
 _NONPREEMPTIBLE_RATE_COLUMN = 'Price'
+
+GPU_SPOT_ONLY_HINT = ('Modal GPUs are always preemptible, so SkyPilot offers '
+                      'them as spot only: add --use-spot (use_spot: true).')
 
 _PULL_FREQUENCY_HOURS = 24
 _df = common.read_catalog('modal/vms.csv',
@@ -211,16 +217,29 @@ def _gpu_price(region_rows: pd.DataFrame, accelerator: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No Modal price for {accelerator}:{count} in '
                              f'region {region_rows["Region"].iloc[0]!r}.')
-    return float(rows['Price'].iloc[0])
+    row = rows.iloc[0]
+    # Catalogs fetched before GPUs became spot only have the price in `Price`.
+    price = row['SpotPrice'] if pd.notna(row['SpotPrice']) else row['Price']
+    return float(price)
 
 
-def _compute_price_per_hour(instance: ModalInstanceType, region: str) -> float:
-    """Price of a container from the region's rows."""
+def _is_gpu(instance: ModalInstanceType) -> bool:
+    return instance.accelerator_type is not None
+
+
+def _compute_price_per_hour(instance: ModalInstanceType, region: str,
+                            use_spot: bool) -> float:
+    """Price of a container from the region's rows.
+
+    Raises:
+        ValueError: a GPU container on-demand; Modal has none.
+    """
+    if _is_gpu(instance) and not use_spot:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'No on-demand price for {instance.name}. {GPU_SPOT_ONLY_HINT}')
     region_rows = _region_rows(region)
-    # GPU containers run preemptible at Modal's list rates; CPU-only
-    # containers run non-preemptible.
-    column = (_LIST_RATE_COLUMN if instance.accelerator_type is not None else
-              _NONPREEMPTIBLE_RATE_COLUMN)
+    column = _LIST_RATE_COLUMN if use_spot else _NONPREEMPTIBLE_RATE_COLUMN
     price = (instance.modal_cpu * _rate(region_rows, CPU_RESOURCE, column) +
              instance.memory_gib * _rate(region_rows, MEMORY_RESOURCE, column))
     if instance.accelerator_type is not None:
@@ -251,14 +270,15 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    if use_spot:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Modal does not support spot instances.')
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
     instance = ModalInstanceType.from_instance_type(instance_type)
-    return _compute_price_per_hour(instance, region or AUTO_REGION)
+    return _compute_price_per_hour(instance, region or AUTO_REGION, use_spot)
+
+
+def is_gpu_instance_type(instance_type: str) -> bool:
+    return _is_gpu(ModalInstanceType.from_instance_type(instance_type))
 
 
 def get_vcpus_mem_from_instance_type(
@@ -305,7 +325,7 @@ def get_default_instance_type(
         use_spot: bool = False,
         max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier, local_disk  # unused
-    if use_spot or zone is not None:
+    if zone is not None:
         return None
     if region is not None and region not in _region_names():
         return None
@@ -313,8 +333,8 @@ def get_default_instance_type(
         instance = _resources_from_requests(cpus, memory)
     except ValueError:
         return None
-    if (max_hourly_cost is not None and
-            get_hourly_cost(instance.name, region=region) > max_hourly_cost):
+    if (max_hourly_cost is not None and get_hourly_cost(
+            instance.name, use_spot=use_spot, region=region) > max_hourly_cost):
         return None
     return instance.name
 
@@ -350,11 +370,12 @@ def get_instance_type_for_accelerator(
     max_hourly_cost: Optional[float] = None
 ) -> Tuple[Optional[List[str]], List[str]]:
     del local_disk  # unused
-    if use_spot or zone is not None:
-        if use_spot:
-            return None, []
+    if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
+    if not use_spot:
+        # Modal's GPU containers are always preemptible.
+        return None, []
     if region is not None and region not in _region_names():
         return None, []
     canonical_accelerator = _canonical_accelerator(acc_name)
@@ -366,7 +387,7 @@ def get_instance_type_for_accelerator(
             acc_count=acc_count,
             cpus=None,
             memory=None,
-            use_spot=False,
+            use_spot=True,
             region=region,
             zone=None,
             max_hourly_cost=max_hourly_cost)
@@ -374,16 +395,18 @@ def get_instance_type_for_accelerator(
         instance = _gpu_instance(canonical_accelerator, acc_count, cpus, memory)
     except ValueError:
         return [], []
-    if (max_hourly_cost is not None and
-            get_hourly_cost(instance.name, region=region) > max_hourly_cost):
+    if (max_hourly_cost is not None and get_hourly_cost(
+            instance.name, use_spot=True, region=region) > max_hourly_cost):
         return [], []
     return [instance.name], []
 
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List[cloud.Region]:
-    ModalInstanceType.from_instance_type(instance_type)
-    return [] if use_spot else regions()
+    instance = ModalInstanceType.from_instance_type(instance_type)
+    if _is_gpu(instance) and not use_spot:
+        return []
+    return regions()
 
 
 def _accelerator_offered(accelerator: str, count: int,
@@ -399,12 +422,13 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False,
                                 region: Optional[str] = None,
                                 zone: Optional[str] = None) -> float:
-    if use_spot:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Modal does not support spot instances.')
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
+    if not use_spot:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No on-demand price for {accelerator}:{count}. '
+                             f'{GPU_SPOT_ONLY_HINT}')
     if not _accelerator_offered(accelerator, count, region):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No accelerator {accelerator}:{count} found.')
@@ -416,7 +440,8 @@ def get_region_zones_for_accelerators(
         accelerator: str,
         count: int,
         use_spot: bool = False) -> List[cloud.Region]:
-    if use_spot or not _accelerator_offered(accelerator, count, region=None):
+    if not use_spot or not _accelerator_offered(accelerator, count,
+                                                region=None):
         return []
     return regions()
 
@@ -470,8 +495,13 @@ def _listed_instances() -> pd.DataFrame:
                 'AcceleratorCount': float(count) if count else None,
                 'vCPUs': instance.vcpus,
                 'MemoryGiB': instance.memory_gib,
-                'Price': _compute_price_per_hour(instance, region),
-                'SpotPrice': None,
+                # GPU shapes have no on-demand price: they are spot only.
+                'Price':
+                    (None if _is_gpu(instance) else _compute_price_per_hour(
+                        instance, region, use_spot=False)),
+                'SpotPrice': _compute_price_per_hour(instance,
+                                                     region,
+                                                     use_spot=True),
                 'Region': region,
                 'GpuInfo': (_gpu_info(accelerator, count)
                             if accelerator is not None and count else None),
@@ -495,8 +525,10 @@ def list_accelerators(
 
 
 def regions() -> List[cloud.Region]:
-    # Cheapest first, so `auto` precedes the broad and narrow regions.
-    return common.get_region_zones(_listed_instances(), use_spot=False)
+    # Cheapest first, so `auto` precedes the broad and narrow regions. Every
+    # region has every shape, so the spot prices (which all shapes have)
+    # order them.
+    return common.get_region_zones(_listed_instances(), use_spot=True)
 
 
 def get_modal_args_from_instance_type(

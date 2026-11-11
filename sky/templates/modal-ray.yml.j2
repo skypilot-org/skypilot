@@ -28,6 +28,7 @@ available_node_types:
       Gpu: {% if modal_gpu is none %}null{% else %}"{{modal_gpu}}"{% endif %}
       Cpu: {{modal_cpu}}
       Memory: {{modal_memory}}
+      Nonpreemptible: {{modal_nonpreemptible}}
       Timeout: {{modal_timeout}}
       DockerImage: {% if modal_docker_image is none %}null{% else %}"{{modal_docker_image}}"{% endif %}
       ModalVolumes:

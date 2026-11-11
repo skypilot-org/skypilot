@@ -179,20 +179,20 @@ def test_modal_catalog_regions_and_prices():
     with pytest.raises(ValueError, match='does not support zones'):
         modal_catalog.validate_region_zone('auto', 'us-west-1')
 
-    auto_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', False,
+    auto_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', True,
                                                'auto', None)
-    broad_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', False,
+    broad_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', True,
                                                 'us', None)
-    narrow_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', False,
+    narrow_price = modal_catalog.get_hourly_cost('4CPU--16GB--H100:1', True,
                                                  'us-west', None)
     assert broad_price == pytest.approx(auto_price * 1.15)
     assert narrow_price == pytest.approx(auto_price * 1.75)
 
-    b300_price = modal_catalog.get_hourly_cost('4CPU--16GB--B300:1', False,
+    b300_price = modal_catalog.get_hourly_cost('4CPU--16GB--B300:1', True,
                                                'auto', None)
     expected_b300_price = (2 * 0.0000131 + 16 * 0.00000222 + 0.001972) * 3600
     assert b300_price == pytest.approx(expected_b300_price)
-    assert modal_catalog.get_hourly_cost('4CPU--16GB--B300:1', False, 'us',
+    assert modal_catalog.get_hourly_cost('4CPU--16GB--B300:1', True, 'us',
                                          None) == pytest.approx(b300_price *
                                                                 1.15)
 
@@ -264,7 +264,7 @@ def test_modal_dynamic_instance_types_and_prices():
 
 def test_modal_dynamic_gpu_instance_type():
     instance_types, fuzzy = modal_catalog.get_instance_type_for_accelerator(
-        'h100', 2, cpus='32+', memory='128+', region='us')
+        'h100', 2, cpus='32+', memory='128+', use_spot=True, region='us')
 
     assert instance_types == ['32CPU--128GB--H100:2']
     assert not fuzzy
@@ -278,8 +278,16 @@ def test_modal_dynamic_gpu_instance_type():
         'H100:2', 16, 128 * 1024)
     expected_auto_price = (16 * 0.0000131 + 128 * 0.00000222 +
                            2 * 0.001097) * 3600
-    assert modal_catalog.get_hourly_cost(
-        instance_type, region='us') == pytest.approx(expected_auto_price * 1.15)
+    assert modal_catalog.get_hourly_cost(instance_type,
+                                         use_spot=True,
+                                         region='us') == pytest.approx(
+                                             expected_auto_price * 1.15)
+    # Modal's GPU containers are always preemptible: no on-demand offering.
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'h100', 2, cpus='32+', memory='128+', use_spot=False,
+        region='us') == (None, [])
+    with pytest.raises(ValueError, match='add --use-spot'):
+        modal_catalog.get_hourly_cost(instance_type, region='us')
 
 
 @pytest.mark.parametrize(
@@ -296,7 +304,7 @@ def test_modal_dynamic_gpu_instance_type():
 def test_modal_gpu_host_scales_with_gpu_count(acc_count, cpus, memory,
                                               expected):
     instance_types, _ = modal_catalog.get_instance_type_for_accelerator(
-        'T4', acc_count, cpus=cpus, memory=memory)
+        'T4', acc_count, cpus=cpus, memory=memory, use_spot=True)
 
     assert instance_types == [expected]
 
@@ -307,18 +315,24 @@ def test_modal_catalog_lists_scaled_gpu_shapes():
                                               name_filter='^H100$',
                                               region_filter='^auto$',
                                               quantity_filter=8)['H100'][0]
-    launched, _ = modal_catalog.get_instance_type_for_accelerator('H100', 8)
+    launched, _ = modal_catalog.get_instance_type_for_accelerator('H100',
+                                                                  8,
+                                                                  use_spot=True)
 
     assert (listing.cpu_count, listing.memory) == (32, 128)
-    assert listing.price == pytest.approx(
-        modal_catalog.get_hourly_cost(launched[0], region='auto'))
+    # GPUs are spot only: no on-demand price to show.
+    assert pd.isna(listing.price)
+    assert listing.spot_price == pytest.approx(
+        modal_catalog.get_hourly_cost(launched[0], use_spot=True,
+                                      region='auto'))
 
 
 def test_modal_dynamic_resources_are_feasible():
     resources = resources_lib.Resources(cloud=clouds.Modal(),
                                         cpus='32',
                                         memory='128',
-                                        accelerators={'H100': 2})
+                                        accelerators={'H100': 2},
+                                        use_spot=True)
 
     feasible = clouds.Modal()._get_feasible_launchable_resources(  # pylint: disable=protected-access
         resources)
@@ -335,9 +349,10 @@ def test_modal_dynamic_resources_are_feasible():
 def test_modal_catalog_generic_contract_methods():
     assert modal_catalog.get_arch_from_instance_type('4CPU--16GB') is None
     assert modal_catalog.get_local_disk_from_instance_type('4CPU--16GB') is None
-    assert modal_catalog.get_accelerator_hourly_cost('H100', 1, False, 'auto',
+    assert modal_catalog.get_accelerator_hourly_cost('H100', 1, True, 'auto',
                                                      None) == 0.0
-    regions = modal_catalog.get_region_zones_for_accelerators('H100', 1, False)
+    regions = modal_catalog.get_region_zones_for_accelerators('H100', 1, True)
+    assert not modal_catalog.get_region_zones_for_accelerators('H100', 1, False)
     region_names = [region.name for region in regions]
     assert region_names[0] == 'auto'
     assert {'af', 'au', 'us-west'} <= set(region_names)
@@ -359,17 +374,30 @@ def test_modal_infra_schema():
 def test_modal_default_region_does_not_expand_to_region_failover():
     implicit_regions = clouds.Modal.regions_with_offering('4CPU--16GB--H100:1',
                                                           accelerators=None,
-                                                          use_spot=False,
+                                                          use_spot=True,
                                                           region=None,
                                                           zone=None)
     explicit_regions = clouds.Modal.regions_with_offering('4CPU--16GB--H100:1',
                                                           accelerators=None,
-                                                          use_spot=False,
+                                                          use_spot=True,
                                                           region='af',
                                                           zone=None)
 
     assert [region.name for region in implicit_regions] == ['auto']
     assert [region.name for region in explicit_regions] == ['af']
+    # GPUs are spot only; CPU-only instance types are offered both ways.
+    assert not clouds.Modal.regions_with_offering('4CPU--16GB--H100:1',
+                                                  accelerators=None,
+                                                  use_spot=False,
+                                                  region=None,
+                                                  zone=None)
+    for use_spot in (False, True):
+        cpu_regions = clouds.Modal.regions_with_offering('4CPU--16GB',
+                                                         accelerators=None,
+                                                         use_spot=use_spot,
+                                                         region=None,
+                                                         zone=None)
+        assert [region.name for region in cpu_regions] == ['auto']
 
 
 def test_modal_label_validation():
@@ -390,7 +418,6 @@ def test_modal_unsupported_features():
         clouds.CloudImplementationFeatures.MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER,
         clouds.CloudImplementationFeatures.IMAGE_ID,
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE,
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER,
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS,
@@ -402,6 +429,7 @@ def test_modal_unsupported_features():
     }
 
     assert expected <= set(unsupported)
+    assert clouds.CloudImplementationFeatures.SPOT_INSTANCE not in unsupported
     assert all(
         isinstance(message, str) and message
         for message in unsupported.values())
@@ -742,6 +770,15 @@ def test_modal_deploy_variables_auto_region(monkeypatch):
     assert variables['modal_region'] is None
     assert variables['modal_environment_name'] == 'dev'
     assert variables['modal_gpu'] is None
+    # On-demand runs non-preemptible; spot is Modal's default container.
+    assert variables['modal_nonpreemptible'] is True
+    assert cloud.make_deploy_resources_variables(
+        resources.copy(use_spot=True),
+        cluster_name=resources_utils.ClusterName('c', 'c'),
+        region=clouds.Region('auto'),
+        zones=None,
+        num_nodes=1,
+        dryrun=True)['modal_nonpreemptible'] is False
     assert variables['modal_cpu'] == 2.0
     assert variables['modal_memory'] == 16 * 1024
     assert variables['modal_docker_image'] is None
@@ -1075,10 +1112,30 @@ def test_modal_cpu_clusters_are_nonpreemptible(monkeypatch):
     monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
 
     # pylint: disable=protected-access
-    kwargs = modal_instance._function_kwargs({'Cpu': 2.0, 'Memory': 1024})
+    kwargs = modal_instance._function_kwargs({
+        'Cpu': 2.0,
+        'Memory': 1024,
+        'Nonpreemptible': True
+    })
 
     assert kwargs['nonpreemptible'] is True
     assert kwargs['gpu'] is None
+    # A spot CPU cluster is Modal's default, preemptible container.
+    assert modal_instance._function_kwargs({
+        'Cpu': 2.0,
+        'Memory': 1024,
+        'Nonpreemptible': False
+    })['nonpreemptible'] is False
+    # Clusters launched before spot was offered have no `Nonpreemptible`.
+    assert modal_instance._function_kwargs({
+        'Cpu': 2.0,
+        'Memory': 1024
+    })['nonpreemptible'] is True
+    assert modal_instance._function_kwargs({
+        'Cpu': 2.0,
+        'Memory': 1024,
+        'Gpu': 'T4'
+    })['nonpreemptible'] is False
 
 
 @pytest.mark.parametrize('modal_error,expected', [
@@ -2324,12 +2381,17 @@ def test_modal_catalog_prices_follow_catalog_rates(tmp_path, monkeypatch):
                         _write_modal_catalog(tmp_path / 'vms.csv', prices))
 
     assert modal_catalog.get_hourly_cost(
-        '4CPU--16GB--H100:1', region='auto') == (pytest.approx(
+        '4CPU--16GB--H100:1', use_spot=True, region='auto') == (pytest.approx(
             (2 * 0.00002 + 16 * 0.00000222 + 0.002) * 3600))
     assert modal_catalog.get_hourly_cost(
-        '32CPU--128GB--H100:2', region='us-west') == pytest.approx(
+        '32CPU--128GB--H100:2', use_spot=True,
+        region='us-west') == pytest.approx(
             (16 * 0.00002 + 128 * 0.00000222 + 2 * 0.002) * 3600 * 1.75)
-    # CPU-only shapes keep the non-preemptible rates.
+    # Spot CPU-only shapes pay the same list rates.
+    assert modal_catalog.get_hourly_cost(
+        '16CPU--64GB', use_spot=True, region='auto') == pytest.approx(
+            (8 * 0.00002 + 64 * 0.00000222) * 3600)
+    # On-demand CPU-only shapes keep the non-preemptible rates.
     assert modal_catalog.get_hourly_cost(
         '16CPU--64GB', region='auto') == pytest.approx(
             (8 * 0.00003942 + 64 * 0.00000667) * 3600)
@@ -2344,11 +2406,11 @@ def test_modal_catalog_gpu_types_and_counts_come_from_catalog(
     assert modal_catalog.get_max_gpu_count('h100') == 4
     assert modal_catalog.get_max_gpu_count('T4') is None
     assert modal_catalog.get_instance_type_for_accelerator(
-        'H100', 4) == (['16CPU--64GB--H100:4'], [])
-    assert modal_catalog.get_instance_type_for_accelerator('H100',
-                                                           8) == ([], [])
-    assert modal_catalog.get_instance_type_for_accelerator('T4',
-                                                           1) == (None, [])
+        'H100', 4, use_spot=True) == (['16CPU--64GB--H100:4'], [])
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'H100', 8, use_spot=True) == ([], [])
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'T4', 1, use_spot=True) == (None, [])
     assert not modal_catalog.instance_type_exists('4CPU--16GB--T4:1')
     assert modal_catalog.list_accelerators(
         gpus_only=True,
@@ -2360,17 +2422,20 @@ def test_modal_catalog_gpu_types_and_counts_come_from_catalog(
 def test_modal_any_gpu_count_up_to_the_maximum():
     """Modal takes `GPU:n` for any n up to the type's maximum (8; A10: 4)."""
     assert modal_catalog.get_instance_type_for_accelerator(
-        'T4', 3) == (['12CPU--48GB--T4:3'], [])
+        'T4', 3, use_spot=True) == (['12CPU--48GB--T4:3'], [])
     assert modal_catalog.get_instance_type_for_accelerator(
-        'A10', 4) == (['16CPU--64GB--A10:4'], [])
-    assert modal_catalog.get_instance_type_for_accelerator('A10', 5) == ([], [])
+        'A10', 4, use_spot=True) == (['16CPU--64GB--A10:4'], [])
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'A10', 5, use_spot=True) == ([], [])
     assert not modal_catalog.instance_type_exists('8CPU--32GB--RTX-PRO-6000:2')
-    assert modal_catalog.get_region_zones_for_accelerators('A10', 5) == []
+    assert modal_catalog.get_region_zones_for_accelerators('A10',
+                                                           5,
+                                                           use_spot=True) == []
     with pytest.raises(ValueError, match='No accelerator A10:5'):
-        modal_catalog.get_accelerator_hourly_cost('A10', 5)
+        modal_catalog.get_accelerator_hourly_cost('A10', 5, use_spot=True)
     # Fuzzy candidates still come from the listed shapes.
     instance_types, fuzzy = modal_catalog.get_instance_type_for_accelerator(
-        'H10', 1)
+        'H10', 1, use_spot=True)
     assert instance_types is None
     assert 'H100:1' in fuzzy
 
@@ -2424,37 +2489,78 @@ def test_modal_invalid_instance_types(name, reason):
                                 instance_type=name).validate()
 
 
-def test_modal_catalog_rejects_spot_and_zones():
+def test_modal_catalog_spot_and_zones():
+    """GPUs are spot only, CPU-only shapes are both; no zones."""
     instance_type = '4CPU--16GB--H100:1'
-    with pytest.raises(ValueError, match='does not support spot'):
-        modal_catalog.get_hourly_cost(instance_type, use_spot=True)
+    assert modal_catalog.is_gpu_instance_type(instance_type)
+    assert not modal_catalog.is_gpu_instance_type('4CPU--16GB')
+    with pytest.raises(ValueError, match='add --use-spot'):
+        modal_catalog.get_hourly_cost(instance_type)
+    with pytest.raises(ValueError, match='add --use-spot'):
+        modal_catalog.get_accelerator_hourly_cost('H100', 1)
+    assert modal_catalog.get_instance_type_for_accelerator('H100',
+                                                           1) == (None, [])
+    assert not modal_catalog.get_region_zones_for_instance_type(instance_type,
+                                                                use_spot=False)
+    assert modal_catalog.get_region_zones_for_instance_type(instance_type,
+                                                            use_spot=True)
+    assert not modal_catalog.get_region_zones_for_accelerators('H100', 1)
+    assert clouds.Modal.regions_with_offering(instance_type,
+                                              None,
+                                              use_spot=False,
+                                              region=None,
+                                              zone=None) == []
+
+    # CPU-only: on-demand is non-preemptible (3x); spot is the list rate.
+    for use_spot in (False, True):
+        assert modal_catalog.get_default_instance_type(
+            use_spot=use_spot) == '4CPU--16GB'
+        assert modal_catalog.get_region_zones_for_instance_type(
+            '4CPU--16GB', use_spot=use_spot)
+    on_demand = modal_catalog.get_hourly_cost('4CPU--16GB')
+    spot = modal_catalog.get_hourly_cost('4CPU--16GB', use_spot=True)
+    assert on_demand == pytest.approx((2 * 0.00003942 + 16 * 0.00000667) * 3600)
+    assert spot == pytest.approx((2 * 0.0000131 + 16 * 0.00000222) * 3600)
+
     with pytest.raises(ValueError, match='does not support zones'):
-        modal_catalog.get_hourly_cost(instance_type, zone='us-west-1')
-    with pytest.raises(ValueError, match='does not support spot'):
-        modal_catalog.get_accelerator_hourly_cost('H100', 1, use_spot=True)
+        modal_catalog.get_hourly_cost(instance_type,
+                                      use_spot=True,
+                                      zone='us-west-1')
     with pytest.raises(ValueError, match='does not support zones'):
-        modal_catalog.get_accelerator_hourly_cost('H100', 1, zone='us-west-1')
+        modal_catalog.get_accelerator_hourly_cost('H100',
+                                                  1,
+                                                  zone='us-west-1',
+                                                  use_spot=True)
     with pytest.raises(ValueError, match='does not support zones'):
         modal_catalog.get_instance_type_for_accelerator('H100',
                                                         1,
-                                                        zone='us-west-1')
+                                                        zone='us-west-1',
+                                                        use_spot=True)
     with pytest.raises(ValueError, match='does not support zones'):
         modal_catalog.check_accelerator_attachable_to_host(instance_type,
                                                            {'H100': 1},
                                                            zone='us-west-1')
-    assert modal_catalog.get_default_instance_type(use_spot=True) is None
     assert modal_catalog.get_default_instance_type(zone='us-west-1') is None
-    assert modal_catalog.get_instance_type_for_accelerator(
-        'H100', 1, use_spot=True) == (None, [])
-    assert not modal_catalog.get_region_zones_for_instance_type(instance_type,
-                                                                use_spot=True)
-    assert not modal_catalog.get_region_zones_for_accelerators(
-        'H100', 1, use_spot=True)
-    assert clouds.Modal.regions_with_offering(instance_type,
-                                              None,
-                                              use_spot=True,
-                                              region=None,
-                                              zone=None) == []
+
+
+def test_modal_catalog_reads_gpu_prices_published_as_on_demand(
+        tmp_path, monkeypatch):
+    """Catalogs fetched before GPUs became spot only have them in `Price`."""
+    rows = fetch_modal.create_catalog(_MODAL_PRICES, _MODAL_REGION_MULTIPLIERS)
+    for row in rows:
+        if row['AcceleratorName'] is not None:
+            row['Price'], row['SpotPrice'] = row['SpotPrice'], None
+    path = tmp_path / 'vms.csv'
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fetch_modal.COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    monkeypatch.setattr(modal_catalog, '_df',
+                        catalog_common.LazyDataFrame(str(path), lambda: False))
+
+    assert modal_catalog.get_hourly_cost(
+        '4CPU--16GB--T4:1', use_spot=True) == pytest.approx(
+            (2 * 0.0000131 + 16 * 0.00000222 + 0.000164) * 3600)
 
 
 def test_modal_catalog_unknown_region():
@@ -2467,9 +2573,12 @@ def test_modal_catalog_unknown_region():
         modal_catalog.get_hourly_cost('4CPU--16GB', region='mars')
     assert modal_catalog.get_default_instance_type(region='mars') is None
     assert modal_catalog.get_instance_type_for_accelerator(
-        'H100', 1, region='mars') == (None, [])
+        'H100', 1, region='mars', use_spot=True) == (None, [])
     with pytest.raises(ValueError, match='No accelerator H100:1'):
-        modal_catalog.get_accelerator_hourly_cost('H100', 1, region='mars')
+        modal_catalog.get_accelerator_hourly_cost('H100',
+                                                  1,
+                                                  region='mars',
+                                                  use_spot=True)
     # Every region in the table validates and prices.
     for region in modal_catalog.regions():
         assert modal_catalog.validate_region_zone(region.name,
@@ -2497,7 +2606,7 @@ def test_modal_cpu_and_memory_requests(cpus, memory, expected):
                                                   memory=memory) == expected
 
     gpu_types, fuzzy = modal_catalog.get_instance_type_for_accelerator(
-        'T4', 2, cpus=cpus, memory=memory)
+        'T4', 2, cpus=cpus, memory=memory, use_spot=True)
 
     assert not fuzzy
     if cpus is None:
@@ -2510,17 +2619,27 @@ def test_modal_cpu_and_memory_requests(cpus, memory, expected):
 
 
 def test_modal_max_hourly_cost_is_region_aware():
-    gpu_price = modal_catalog.get_hourly_cost('4CPU--16GB--T4:1', region='auto')
+    gpu_price = modal_catalog.get_hourly_cost('4CPU--16GB--T4:1',
+                                              use_spot=True,
+                                              region='auto')
     assert modal_catalog.get_instance_type_for_accelerator(
-        'T4', 1, max_hourly_cost=gpu_price + 0.01) == (['4CPU--16GB--T4:1'], [])
+        'T4', 1, max_hourly_cost=gpu_price + 0.01,
+        use_spot=True) == (['4CPU--16GB--T4:1'], [])
     assert modal_catalog.get_instance_type_for_accelerator(
-        'T4', 1, max_hourly_cost=gpu_price - 0.01) == ([], [])
+        'T4', 1, max_hourly_cost=gpu_price - 0.01, use_spot=True) == ([], [])
     # A narrow region costs 1.75x, so the same cap no longer fits there.
     assert modal_catalog.get_instance_type_for_accelerator(
-        'T4', 1, region='us-west', max_hourly_cost=gpu_price + 0.01) == ([], [])
+        'T4',
+        1,
+        region='us-west',
+        max_hourly_cost=gpu_price + 0.01,
+        use_spot=True) == ([], [])
     assert modal_catalog.get_instance_type_for_accelerator(
-        'T4', 1, region='us-west',
-        max_hourly_cost=gpu_price * 1.75 + 0.01) == (['4CPU--16GB--T4:1'], [])
+        'T4',
+        1,
+        region='us-west',
+        max_hourly_cost=gpu_price * 1.75 + 0.01,
+        use_spot=True) == (['4CPU--16GB--T4:1'], [])
 
     cpu_price = modal_catalog.get_hourly_cost('4CPU--16GB', region='auto')
     assert modal_catalog.get_default_instance_type(max_hourly_cost=cpu_price +
@@ -2531,18 +2650,22 @@ def test_modal_max_hourly_cost_is_region_aware():
 
 def test_modal_fuzzy_candidates_come_from_listed_shapes():
     instance_types, fuzzy = modal_catalog.get_instance_type_for_accelerator(
-        'H1', 1)
+        'H1', 1, use_spot=True)
     assert instance_types is None
     assert fuzzy == ['H100:1', 'H100:2', 'H100:4', 'H100:8']
 
-    _, fuzzy = modal_catalog.get_instance_type_for_accelerator('H1', 4)
+    _, fuzzy = modal_catalog.get_instance_type_for_accelerator('H1',
+                                                               4,
+                                                               use_spot=True)
     assert fuzzy == ['H100:4', 'H100:8']
 
-    _, fuzzy = modal_catalog.get_instance_type_for_accelerator('a100-8', 1)
+    _, fuzzy = modal_catalog.get_instance_type_for_accelerator('a100-8',
+                                                               1,
+                                                               use_spot=True)
     assert fuzzy[0] == 'A100-80GB:1'
 
-    assert modal_catalog.get_instance_type_for_accelerator('Z9',
-                                                           1) == (None, [])
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'Z9', 1, use_spot=True) == (None, [])
 
 
 def test_modal_listed_shapes_follow_gpu_limits():
@@ -2567,10 +2690,12 @@ def test_modal_listed_shapes_follow_gpu_limits():
                 f'{4 * count}CPU--{16 * count}GB--{name}:{count}')
             assert (info.cpu_count, info.memory) == (4 * count, 16 * count)
             assert info.device_memory == fetch_modal.GPU_MEMORY_GIB[name]
-            assert info.price == pytest.approx(
+            # Spot only: the price is a spot price.
+            assert pd.isna(info.price)
+            assert info.spot_price == pytest.approx(
                 modal_catalog.get_hourly_cost(info.instance_type,
+                                              use_spot=True,
                                               region='auto'))
-            assert pd.isna(info.spot_price)
             assert info.region == 'auto'
     # Launchable counts that are not listed are still not shown.
     assert modal_catalog.list_accelerators(gpus_only=True,
@@ -2584,7 +2709,7 @@ def test_modal_listed_shapes_follow_gpu_limits():
                                                  quantity_filter=1,
                                                  case_sensitive=False,
                                                  all_regions=True)['T4']
-    price_by_region = {info.region: info.price for info in per_region}
+    price_by_region = {info.region: info.spot_price for info in per_region}
     assert set(price_by_region) == set(_MODAL_REGION_MULTIPLIERS)
     assert price_by_region['us'] == pytest.approx(price_by_region['auto'] *
                                                   1.15)
@@ -2611,8 +2736,8 @@ def test_modal_regions_are_cheapest_first():
     assert all(region.zones is None for region in modal_catalog.regions())
     assert [region.name for region in clouds.Modal.regions()] == names
     assert [
-        region.name
-        for region in modal_catalog.get_region_zones_for_accelerators('A10', 4)
+        region.name for region in
+        modal_catalog.get_region_zones_for_accelerators('A10', 4, use_spot=True)
     ] == names
     assert [
         region.name
@@ -2630,10 +2755,13 @@ def test_modal_catalog_price_missing_in_a_region(tmp_path, monkeypatch):
                              or row['Region'] == 'auto'))
 
     assert modal_catalog.instance_type_exists('4CPU--16GB--T4:1')
-    assert modal_catalog.get_hourly_cost('4CPU--16GB--T4:1', region='auto') > 0
+    assert modal_catalog.get_hourly_cost(
+        '4CPU--16GB--T4:1', use_spot=True, region='auto') > 0
     with pytest.raises(ValueError,
                        match="No Modal price for T4:1 in region 'us'"):
-        modal_catalog.get_hourly_cost('4CPU--16GB--T4:1', region='us')
+        modal_catalog.get_hourly_cost('4CPU--16GB--T4:1',
+                                      use_spot=True,
+                                      region='us')
 
 
 def test_modal_cloud_prices_resources_from_the_instance_type():
@@ -2644,35 +2772,41 @@ def test_modal_cloud_prices_resources_from_the_instance_type():
     assert cloud.instance_type_exists(instance_type)
     assert cloud.get_vcpus_mem_from_instance_type(instance_type) == (12, 48)
     assert cloud.get_accelerators_from_instance_type(instance_type) == {'T4': 3}
-    assert cloud.accelerators_to_hourly_cost({'T4': 3}, False, 'auto') == 0.0
+    assert cloud.accelerators_to_hourly_cost({'T4': 3}, True, 'auto') == 0.0
     assert cloud.instance_type_to_hourly_cost(
-        instance_type, False, 'us') == pytest.approx(expected * 1.15)
+        instance_type, True, 'us') == pytest.approx(expected * 1.15)
     assert cloud.validate_region_zone('us', None) == ('us', None)
 
     resources = resources_lib.Resources(cloud=cloud,
                                         instance_type=instance_type,
+                                        use_spot=True,
                                         region='us')
     assert resources.accelerators == {'T4': 3}
     assert resources.get_cost(3600) == pytest.approx(expected * 1.15)
     # Without a region, the cluster runs in `auto` and is priced there.
     resources = resources_lib.Resources(cloud=cloud,
-                                        instance_type=instance_type)
+                                        instance_type=instance_type,
+                                        use_spot=True)
     assert resources.get_cost(3600) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize('request_kwargs,expected_types,fuzzy_contains', [
-    (dict(accelerators={'T4': 3}), ['12CPU--48GB--T4:3'], None),
-    (dict(accelerators={'t4': 3}, cpus='2', memory='4'), ['2CPU--4GB--T4:3'
-                                                         ], None),
-    (dict(accelerators={'A10': 5}), [], None),
-    (dict(accelerators={'H10': 1}), [], 'H100:1'),
-    (dict(cpus='2'), ['2CPU--8GB'], None),
-    (dict(cpus='2', memory='64'), ['2CPU--64GB'], None),
-    (dict(region='us-west', accelerators={'L4': 1}), ['4CPU--16GB--L4:1'
-                                                     ], None),
-    (dict(use_spot=True, accelerators={'L4': 1}), [], None),
-    (dict(use_spot=True), [], None),
-])
+@pytest.mark.parametrize(
+    'request_kwargs,expected_types,fuzzy_contains',
+    [
+        (dict(use_spot=True, accelerators={'T4': 3}), ['12CPU--48GB--T4:3'
+                                                      ], None),
+        (dict(use_spot=True, accelerators={'t4': 3}, cpus='2',
+              memory='4'), ['2CPU--4GB--T4:3'], None),
+        (dict(use_spot=True, accelerators={'A10': 5}), [], None),
+        (dict(use_spot=True, accelerators={'H10': 1}), [], 'H100:1'),
+        (dict(cpus='2'), ['2CPU--8GB'], None),
+        (dict(cpus='2', memory='64'), ['2CPU--64GB'], None),
+        (dict(use_spot=True, region='us-west',
+              accelerators={'L4': 1}), ['4CPU--16GB--L4:1'], None),
+        # CPU-only clusters can be spot too (Modal's default, preemptible).
+        (dict(use_spot=True), ['4CPU--16GB'], None),
+        (dict(use_spot=True, cpus='2'), ['2CPU--8GB'], None),
+    ])
 def test_modal_feasible_resources(request_kwargs, expected_types,
                                   fuzzy_contains):
     resources = resources_lib.Resources(cloud=clouds.Modal(), **request_kwargs)
@@ -2692,9 +2826,28 @@ def test_modal_feasible_resources(request_kwargs, expected_types,
         assert fuzzy_contains in feasible.fuzzy_candidate_list
 
 
+@pytest.mark.parametrize('request_kwargs', [
+    dict(accelerators={'L4': 1}),
+    dict(accelerators={'H10': 1}),
+    dict(instance_type='4CPU--16GB--L4:1'),
+    dict(region='us-west', accelerators={'L4': 1}),
+])
+def test_modal_gpus_are_spot_only(request_kwargs):
+    """Modal's GPU containers are always preemptible: on-demand has none."""
+    resources = resources_lib.Resources(cloud=clouds.Modal(), **request_kwargs)
+
+    feasible = clouds.Modal()._get_feasible_launchable_resources(  # pylint: disable=protected-access
+        resources)
+
+    assert not feasible.resources_list
+    assert not feasible.fuzzy_candidate_list
+    assert 'add --use-spot' in feasible.hint
+
+
 def test_modal_feasible_resources_keep_a_given_instance_type():
     resources = resources_lib.Resources(cloud=clouds.Modal(),
-                                        instance_type='2CPU--4GB--T4:3')
+                                        instance_type='2CPU--4GB--T4:3',
+                                        use_spot=True)
 
     feasible = clouds.Modal()._get_feasible_launchable_resources(  # pylint: disable=protected-access
         resources)
@@ -2814,8 +2967,9 @@ def test_fetch_modal_catalog_rows():
             row for row in rows if row['InstanceType'] is None}
     h100x2 = gpus[('H100', 2, 'auto')]
     assert (h100x2['vCPUs'], h100x2['MemoryGiB']) == (None, None)
-    assert h100x2['Price'] == pytest.approx(2 * 0.001097 * 3600)
-    assert h100x2['SpotPrice'] is None
+    # Modal's GPU containers are always preemptible: a spot price only.
+    assert h100x2['Price'] is None
+    assert h100x2['SpotPrice'] == pytest.approx(2 * 0.001097 * 3600)
     assert ast.literal_eval(h100x2['GpuInfo']) == {
         'Gpus': [{
             'Name': 'H100',
@@ -2827,8 +2981,8 @@ def test_fetch_modal_catalog_rows():
         }],
         'TotalGpuMemoryInMiB': 2 * 80 * 1024,
     }
-    assert gpus[('H100', 8,
-                 'us')]['Price'] == pytest.approx(8 * 0.001097 * 3600 * 1.15)
+    assert gpus[('H100', 8, 'us')]['SpotPrice'] == pytest.approx(8 * 0.001097 *
+                                                                 3600 * 1.15)
 
     def counts(name):
         return sorted(c for n, c, r in gpus if n == name and r == 'auto')
@@ -2849,15 +3003,15 @@ def test_modal_catalog_offers_only_the_listed_gpu_counts(tmp_path, monkeypatch):
 
     assert modal_catalog.get_max_gpu_count('H100') == 4
     assert modal_catalog.get_instance_type_for_accelerator(
-        'H100', 2) == (['8CPU--32GB--H100:2'], [])
-    assert modal_catalog.get_instance_type_for_accelerator('H100',
-                                                           3) == ([], [])
+        'H100', 2, use_spot=True) == (['8CPU--32GB--H100:2'], [])
+    assert modal_catalog.get_instance_type_for_accelerator(
+        'H100', 3, use_spot=True) == ([], [])
     with pytest.raises(ValueError,
                        match='H100 in counts of 1, 2, 4 per container, not 3'):
         modal_catalog.ModalInstanceType.from_instance_type(
             '12CPU--48GB--H100:3')
     with pytest.raises(ValueError, match='No accelerator H100:3'):
-        modal_catalog.get_accelerator_hourly_cost('H100', 3)
+        modal_catalog.get_accelerator_hourly_cost('H100', 3, use_spot=True)
     listed = modal_catalog.list_accelerators(gpus_only=True,
                                              name_filter='^H100$',
                                              region_filter='^auto$',
@@ -2890,14 +3044,15 @@ def test_fetch_modal_main_writes_a_table_the_catalog_reads(
     assert rows[0]['InstanceType'] == 'cpu-core'
     assert rows[0]['AcceleratorName'] == ''  # empty, not 'None'
     gpu_row = next(row for row in rows if row['AcceleratorName'] == 'A10')
-    assert (gpu_row['InstanceType'], gpu_row['SpotPrice']) == ('', '')
+    assert (gpu_row['InstanceType'], gpu_row['Price']) == ('', '')
+    assert float(gpu_row['SpotPrice']) > 0
 
     monkeypatch.setattr(
         modal_catalog, '_df',
         catalog_common.LazyDataFrame(str(output), lambda: False))
     assert modal_catalog.get_max_gpu_count('A10') == 4
     assert modal_catalog.get_hourly_cost(
-        '4CPU--16GB--H100:1', region='us') == pytest.approx(
+        '4CPU--16GB--H100:1', use_spot=True, region='us') == pytest.approx(
             (2 * 0.0000131 + 16 * 0.00000222 + 0.001097) * 3600 * 1.2)
     assert modal_catalog.get_hourly_cost(
         '4CPU--16GB', region='us-west') == pytest.approx(
