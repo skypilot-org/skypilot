@@ -15,8 +15,25 @@ from sky.backends import wheel_utils
 from sky.skylet import constants
 
 
+@pytest.fixture(autouse=True)
+def isolated_wheel_cache(tmp_path, monkeypatch):
+    """Gives every test in this module a wheel cache of its own.
+
+    ``WHEEL_DIR`` is ``~/.sky/wheels`` (``$SKY_RUNTIME_DIR/.sky/wheels`` when
+    set), so it is shared by every pytest-xdist worker, every other test
+    module and every ``sky`` subprocess on the machine. A build finishing
+    there leaves a wheel newer than the source, and ``build_sky_wheel()`` is
+    right to report that cache as fresh -- so a test asserting that a rebuild
+    is due can find none pending, and a ``rmtree`` can delete a wheel a
+    sibling test is about to read. Production callers serialize on the wheel
+    lock; tests sharing one cache merely interleave into a single sequence.
+    """
+    monkeypatch.setattr(wheel_utils, 'WHEEL_DIR', tmp_path / 'wheels')
+    monkeypatch.setattr(wheel_utils, '_WHEEL_LOCK_PATH',
+                        tmp_path / '.wheels_lock')
+
+
 def test_build_wheels():
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
     start = time.time()
     wheel_path, _ = wheel_utils.build_sky_wheel()
     assert wheel_path.exists()
@@ -40,8 +57,6 @@ def test_build_wheels():
     wheel_path, _ = wheel_utils.build_sky_wheel()
     assert wheel_path.exists()
 
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
-
 
 def test_unchanged_rebuild_refreshes_cache():
     """A source mtime bump that leaves the wheel unchanged rebuilds once.
@@ -51,25 +66,21 @@ def test_unchanged_rebuild_refreshes_cache():
     changing the wheel. The rebuild it triggers produces the cached hash, and
     the cache must then count as fresh again.
     """
-    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
-    try:
-        _, wheel_hash = wheel_utils.build_sky_wheel()
+    _, wheel_hash = wheel_utils.build_sky_wheel()
 
-        time.sleep(1.1)
-        os.utime(wheel_utils.SKY_PACKAGE_PATH / 'backends')
+    time.sleep(1.1)
+    os.utime(wheel_utils.SKY_PACKAGE_PATH / 'backends')
 
-        with mock.patch.object(wheel_utils,
-                               '_build_sky_wheel',
-                               wraps=wheel_utils._build_sky_wheel) as build:
-            _, rebuilt_hash = wheel_utils.build_sky_wheel()
-            assert build.call_count == 1
-            assert rebuilt_hash == wheel_hash
+    with mock.patch.object(wheel_utils,
+                           '_build_sky_wheel',
+                           wraps=wheel_utils._build_sky_wheel) as build:
+        _, rebuilt_hash = wheel_utils.build_sky_wheel()
+        assert build.call_count == 1
+        assert rebuilt_hash == wheel_hash
 
-            for _ in range(2):
-                wheel_utils.build_sky_wheel()
-            assert build.call_count == 1
-    finally:
-        shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+        for _ in range(2):
+            wheel_utils.build_sky_wheel()
+        assert build.call_count == 1
 
 
 def test_pip_missing_uv_environment():
@@ -206,7 +217,7 @@ def test_python_m_pip_usage():
         assert 'pip3' not in call_args
 
 
-def test_wheel_build_reproducible():
+def test_wheel_build_reproducible(tmp_path):
     """Test that wheel builds are reproducible across separate processes.
 
     PYTHONHASHSEED is randomized per-process, so without the fix (setting
@@ -215,36 +226,45 @@ def test_wheel_build_reproducible():
     hashes due to non-deterministic metadata ordering and zip timestamps.
 
     We simulate this by running each build in a separate subprocess,
-    just like different API server processes would. Each subprocess gets
-    a naturally randomized PYTHONHASHSEED.
+    just like different API server processes would. Each subprocess gets a
+    naturally randomized PYTHONHASHSEED and its own runtime dir: builds that
+    land in one shared ``~/.sky/wheels`` are no longer two independent
+    builds, as the second finds the first's wheel there and clears it to
+    rebuild anyway.
     """
-    build_script = (
-        'import shutil, os; '
-        'from sky.backends import wheel_utils; '
-        'shutil.rmtree(str(wheel_utils.WHEEL_DIR), ignore_errors=True); '
-        '_, h = wheel_utils.build_sky_wheel(); '
-        'print(h)')
+    build_script = ('import json; '
+                    'from sky.backends import wheel_utils; '
+                    '_, h = wheel_utils.build_sky_wheel(); '
+                    'print(json.dumps({"hash": h, '
+                    '"wheel_dir": str(wheel_utils.WHEEL_DIR)}))')
 
-    try:
-        result1 = subprocess.run([sys.executable, '-c', build_script],
-                                 capture_output=True,
-                                 text=True,
-                                 check=True)
-        hash1 = result1.stdout.strip().splitlines()[-1]
+    hashes = []
+    for i in range(2):
+        runtime_dir = tmp_path / f'runtime{i}'
+        # The wheel lock lives beside WHEEL_DIR, so its parent has to exist
+        # before the first build takes it.
+        (runtime_dir / '.sky').mkdir(parents=True)
+        env = dict(os.environ,
+                   **{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY: str(runtime_dir)})
+        result = subprocess.run([sys.executable, '-c', build_script],
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                                env=env)
+        built = json.loads(result.stdout.strip().splitlines()[-1])
+        # Guards the isolation: a child that fell back to the shared cache
+        # would quietly rebuild into it, and the passing test would prove
+        # nothing about process independence.
+        private_wheel_dir = str(runtime_dir / '.sky' / 'wheels')
+        assert built['wheel_dir'] == private_wheel_dir, (
+            f'Unexpected wheel cache in subprocess {i}: {built["wheel_dir"]}')
+        hashes.append(built['hash'])
 
-        result2 = subprocess.run([sys.executable, '-c', build_script],
-                                 capture_output=True,
-                                 text=True,
-                                 check=True)
-        hash2 = result2.stdout.strip().splitlines()[-1]
-
-        assert hash1 == hash2, (
-            f'Wheel build is not reproducible across processes: '
-            f'{hash1} != {hash2}. '
-            'Check that SOURCE_DATE_EPOCH and PYTHONHASHSEED are set in the '
-            'pip wheel subprocess environment in _build_sky_wheel().')
-    finally:
-        shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
+    assert hashes[0] == hashes[1], (
+        f'Wheel build is not reproducible across processes: '
+        f'{hashes[0]} != {hashes[1]}. '
+        'Check that SOURCE_DATE_EPOCH and PYTHONHASHSEED are set in the '
+        'pip wheel subprocess environment in _build_sky_wheel().')
 
 
 _REPO_ROOT = str(pathlib.Path(wheel_utils.__file__).resolve().parents[2])
