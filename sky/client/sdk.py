@@ -96,6 +96,9 @@ else:
     time = adaptors_common.LazyImport('time')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
+    # only used in the --resize confirmation prompt
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -1044,6 +1047,14 @@ def _launch(
             # the generic "Restarting the stopped cluster" message.
             current_nodes = cluster_record.get('nodes')
             target_nodes = dag.tasks[0].num_nodes
+            # The record counts cluster nodes. On a multi-host TPU slice one
+            # task node (one slice) is one cluster node per VM of the slice,
+            # so convert to task nodes, the unit of num_nodes.
+            vms_per_slice = max(
+                kubernetes_utils.tpu_vms_per_slice(r)
+                for r in dag.tasks[0].resources)
+            if current_nodes is not None and vms_per_slice > 1:
+                current_nodes //= vms_per_slice
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
                 user_name_str = (f' (created by another user '
