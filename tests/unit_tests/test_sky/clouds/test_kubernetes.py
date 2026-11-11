@@ -5515,6 +5515,143 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         self.assertIn('nvidia.com/absent', str(ctx.exception))
 
 
+class TestKubernetesOciRoceSubNode(unittest.TestCase):
+    """Bare-metal OCI RoCE is skipped for single-node jobs on part of a node.
+
+    The bare-metal model runs the container privileged, and a privileged
+    container sees every GPU on the node, so a job asking for fewer GPUs
+    than the node would run on host GPUs 0..n-1 rather than its allocated
+    ones. RDMA does nothing within one node, so `network_tier: best` is
+    dropped for those jobs. Full-node and multi-node jobs keep the wiring.
+    """
+
+    def _deploy_vars(self,
+                     num_gpus,
+                     num_nodes,
+                     shapes=('BM.GPU.B200.8',),
+                     rdma=None):
+        resources = mock.MagicMock()
+        resources.instance_type = f'8CPU--32GB--B200:{num_gpus}'
+        resources.accelerators = {'B200': num_gpus}
+        resources.use_spot = False
+        resources.region = 'oci-context'
+        resources.zone = None
+        resources.cluster_config_overrides = {}
+        resources.image_id = None
+        setattr(resources, 'assert_launchable', lambda: resources)
+        resources.network_tier = resources_utils.NetworkTier.BEST
+
+        region_config = {
+            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+            ('kubernetes', 'provision_timeout'): 10,
+            ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            ('kubernetes', 'pod_config'): {},
+        }
+        for key, value in (rdma or {}).items():
+            region_config[('kubernetes', 'rdma', key)] = value
+
+        node_mocks = []
+        for shape in shapes:
+            alloc = {
+                'nvidia.com/gpu': '8',
+                'nvidia.com/mlnxnics': '16',
+                'cpu': '8',
+                'memory': '32Gi',
+            }
+            node = mock.MagicMock()
+            node.metadata.labels = {
+                'accelerator': 'B200',
+                'node.kubernetes.io/instance-type': shape,
+            }
+            node.status.allocatable = alloc
+            node.status.capacity = dict(alloc)
+            node_mocks.append(node)
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=node_mocks), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='oci-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['B200'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: region_config.get(
+                       (cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(N.OCI_ROCE, None)), \
+             patch('sky.provision.kubernetes.oci_nccl._read_configmap',
+                   return_value=None):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            return kubernetes.Kubernetes().make_deploy_resources_variables(
+                resources=resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='oci-context'),
+                zones=None,
+                num_nodes=num_nodes,
+                dryrun=False)
+
+    def _assert_wired(self, deploy_vars, wired):
+        self.assertEqual(deploy_vars['k8s_host_network'], wired)
+        self.assertEqual(deploy_vars['k8s_rdma_host_device_access'], wired)
+        self.assertEqual(deploy_vars['k8s_enable_oci_roce'], wired)
+        self.assertEqual('NCCL_IB_HCA' in deploy_vars['k8s_env_vars'], wired)
+        self.assertEqual('SKYPILOT_HOST_NETWORK' in deploy_vars['k8s_env_vars'],
+                         wired)
+
+    def test_single_node_sub_node_job_skips_rdma(self):
+        with self.assertLogs('sky.clouds.kubernetes', level='INFO') as logs:
+            deploy_vars = self._deploy_vars(num_gpus=1, num_nodes=1)
+        self._assert_wired(deploy_vars, False)
+        self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
+        self.assertTrue(
+            any('network_tier: best ignored' in line for line in logs.output))
+
+    def test_single_node_full_node_job_keeps_rdma(self):
+        self._assert_wired(self._deploy_vars(num_gpus=8, num_nodes=1), True)
+
+    def test_multi_node_job_keeps_rdma(self):
+        self._assert_wired(self._deploy_vars(num_gpus=4, num_nodes=2), True)
+
+    def test_unknown_node_size_keeps_rdma(self):
+        self._assert_wired(
+            self._deploy_vars(num_gpus=1, num_nodes=1, shapes=()), True)
+        self._assert_wired(
+            self._deploy_vars(num_gpus=1,
+                              num_nodes=1,
+                              shapes=('BM.GPU.B200.8', 'custom-shape')), True)
+
+    def test_sriov_sub_node_job_keeps_its_vfs(self):
+        deploy_vars = self._deploy_vars(num_gpus=1,
+                                        num_nodes=1,
+                                        rdma={
+                                            'mode': 'sriov',
+                                            'resource': 'nvidia.com/mlnxnics',
+                                            'networks': 'ns/sriov-net',
+                                        })
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 2)
+
+
 class TestKubernetesSpotLabelContext(unittest.TestCase):
     """Regression test for TICKET-034.
 
