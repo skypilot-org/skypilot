@@ -447,7 +447,7 @@ FAQs
 
     # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl wget -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
@@ -457,11 +457,22 @@ FAQs
         curl -LsSf https://astral.sh/uv/install.sh | sh && \
         ~/.local/bin/uv venv --seed ~/skypilot-runtime --python 3.10 && \
         PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.56.1' 'pycryptodome==3.12.0' 'setuptools<70' 'click<8.3.0' && \
         $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+* **Can pods run without internet access?**
+
+  Yes, if the image already contains what SkyPilot would otherwise download at pod startup. The SkyPilot default images do. For a custom image, pre-install the dependencies as shown above, using the same SkyPilot version as your API server so that no dependency has to be fetched. SkyPilot then skips every download. An image that lacks ``openssh-server`` still launches, but ``ssh <cluster>`` does not work.
+
+  If pods can reach internal package mirrors instead:
+
+  * APT: set :ref:`kubernetes.apt_mirrors <config-yaml-kubernetes-apt-mirrors>`. Each entry is a hostname serving Ubuntu packages over HTTP at ``/ubuntu``, and only Ubuntu sources are rewritten.
+  * Python packages: set uv's index variables (for example ``UV_DEFAULT_INDEX``) as container environment variables through :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`.
+
+  The ``uv`` installer and storage mount tools are downloaded from the internet and have no mirror setting; pre-install them in the image if you need them.
 
 * **Are multi-node jobs supported on Kubernetes?**
 

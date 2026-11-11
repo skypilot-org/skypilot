@@ -61,7 +61,8 @@ SHELL ["/bin/bash", "-c"]
 
 # Install the SkyPilot runtime (uv-managed venv) and other dependencies based
 # on architecture.
-# Keep the Ray version below in sync with the one in skylet.constants
+# Keep the Ray version and the setuptools/click pins below in sync with
+# skylet.constants (RAY_INSTALLATION_COMMANDS), so an offline pod need not fetch them.
 # Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
@@ -73,7 +74,8 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
-        'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
+        'ray[default]==2.56.1' 'pycryptodome==3.12.0' \
+        'setuptools<70' 'click<8.3.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
     curl -LO "https://dl.k8s.io/release/v1.33.12/bin/linux/$ARCH/kubectl" && \
     # Install kubectl to user's local bin instead of system path to avoid
