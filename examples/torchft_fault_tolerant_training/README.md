@@ -148,7 +148,9 @@ model across the GPUs of a replica group with FSDP, see
   out.
 - The live trainers hold the only copy of the weights. Real training code
   should still write periodic checkpoints to durable storage, for the case
-  where every trainer is lost at once.
+  where every trainer is lost at once. For the same reason, a trainer that
+  starts after all the others have exited has no peer to copy from and starts
+  from the initial weights.
 - torchft is under active development. This example pins `torchft==0.3.1`.
 
 ## Acknowledgements
