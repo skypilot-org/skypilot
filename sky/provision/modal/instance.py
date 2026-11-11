@@ -52,10 +52,6 @@ def _function_kwargs(node_config: Dict[str, Any]) -> Dict[str, Any]:
     volumes.update(
         modal_utils.get_cloud_bucket_mounts(
             node_config.get('CloudBucketMounts', [])))
-    secrets = []
-    modal_env_secret = modal_utils.get_modal_env_secret()
-    if modal_env_secret is not None:
-        secrets.append(modal_env_secret)
     return {
         'image': modal_utils.get_image(node_config.get('DockerImage')),
         'gpu': gpu,
@@ -64,12 +60,22 @@ def _function_kwargs(node_config: Dict[str, Any]) -> Dict[str, Any]:
         'region': node_config.get('ModalRegion'),
         'timeout': node_config.get('Timeout'),
         'volumes': volumes,
-        'secrets': secrets,
         # CPU Functions are preemptible by default; keep CPU clusters
         # non-preemptible, at 3x the CPU/memory list price.
         # Modal does not support this for GPU Functions.
         'nonpreemptible': gpu is None,
     }
+
+
+def _wait_for_nodes_or_cancel(cluster_name_on_cloud: str,
+                              environment_name: Optional[str], call_id: str,
+                              num_nodes: int) -> None:
+    try:
+        modal_utils.wait_for_nodes(cluster_name_on_cloud, environment_name,
+                                   call_id, num_nodes)
+    except Exception:
+        modal_utils.cancel_call(call_id)
+        raise
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
@@ -84,6 +90,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 f'Modal node(s), but {config.count} were requested.')
         logger.info(f'Cluster {cluster_name_on_cloud} is already running on '
                     'Modal.')
+        # The call can be running with nodes still pending, e.g. a launch
+        # that was interrupted while waiting for capacity.
+        _wait_for_nodes_or_cancel(cluster_name_on_cloud, environment_name,
+                                  state['call_id'], config.count)
         return common.ProvisionRecord(provider_name=PROVIDER_NAME,
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
@@ -115,12 +125,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # instead of suggesting --retry-until-up.
         raise exceptions.ProvisionUnsupportedError(
             f'Modal rejected the request: {e}') from e
-    try:
-        modal_utils.wait_for_nodes(cluster_name_on_cloud, environment_name,
-                                   call_id, config.count)
-    except Exception:
-        modal_utils.cancel_call(call_id)
-        raise
+    _wait_for_nodes_or_cancel(cluster_name_on_cloud, environment_name, call_id,
+                              config.count)
     logger.info(f'Launched Modal Function call {call_id} with '
                 f'{config.count} node(s).')
     created = [
@@ -223,9 +229,22 @@ def query_instances(
     running = (not state['preempted'] and
                modal_utils.call_is_running(state['call_id']))
     if not running:
-        # The call has ended and cannot come back. A status refresh drops
-        # the cluster without calling terminate_instances(), so clean up its
-        # state here.
+        # The cluster cannot come back. A status refresh drops it without
+        # calling terminate_instances(), so clean up here.
+        if state['preempted']:
+            # Only the rerun node has ended. The call can still be running,
+            # e.g. the other ranks of a clustered call, and nothing could
+            # find it once the state is gone.
+            try:
+                modal_utils.cancel_call(state['call_id'])
+            except Exception as e:  # pylint: disable=broad-except
+                # Do not drop the state: it is the only handle on the call.
+                # The next refresh retries.
+                raise RuntimeError(
+                    'Failed to cancel the preempted Modal Function call '
+                    f'{state["call_id"]}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
+                ) from e
         modal_utils.delete_state(cluster_name_on_cloud, environment_name)
         if non_terminated_only:
             return {}

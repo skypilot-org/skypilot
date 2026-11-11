@@ -39,7 +39,9 @@ PRICING_URL = 'https://modal.com/pricing'
 REGION_SELECTION_URL = 'https://modal.com/docs/guide/region-selection'
 
 AUTO_REGION = 'auto'
-BROAD_REGIONS = ('us', 'eu', 'ap', 'uk', 'ca', 'me', 'sa', 'af', 'mx')
+# As in the region table of REGION_SELECTION_URL. Only `us`, `eu` and `ap` sit
+# in its Broad column; the country and area codes are narrow regions.
+BROAD_REGIONS = ('us', 'eu', 'ap')
 NARROW_REGIONS = (
     'us-east',
     'us-central',
@@ -54,6 +56,12 @@ NARROW_REGIONS = (
     'ap-melbourne',
     'jp',
     'au',
+    'uk',
+    'ca',
+    'me',
+    'sa',
+    'af',
+    'mx',
 )
 
 # Name on modal.com/pricing (after "Nvidia ") -> SkyPilot accelerator names.

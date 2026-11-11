@@ -37,9 +37,17 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 
 def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
-    """Delete a Modal Volume."""
+    """Delete a Modal Volume.
+
+    A volume registered with ``use_existing`` was not created by SkyPilot, so
+    only its record is dropped and the Modal Volume and its data are kept.
+    """
     name_on_cloud = config.name_on_cloud
     assert name_on_cloud is not None
+    if config.config.get('use_existing'):
+        logger.info(f'Leaving Modal Volume {name_on_cloud} intact '
+                    '(use_existing=True).')
+        return config
     modal_adaptor.modal.Volume.objects.delete(
         name_on_cloud,
         allow_missing=True,

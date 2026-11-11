@@ -17,12 +17,11 @@ SSH_PORT = 22
 SSH_USER = 'root'
 # Containers run as root.
 _HOME_DIR = '/root'
-TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
-TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
 
 # Prefix for the per-cluster Modal App and Dict. Modal object names are at
 # most 64 characters and Modal cluster names at most 60.
 _NAME_PREFIX = 'sky-'
+_CONTAINER_ENV_PROFILE = '/etc/profile.d/modal_container_env.sh'
 _NODE_KEY_PREFIX = 'node-'
 _CALL_ID_KEY = 'call_id'
 _NUM_NODES_KEY = 'num_nodes'
@@ -47,18 +46,6 @@ def get_image(docker_image: Optional[str] = None):
         image = modal_adaptor.modal.Image.from_registry(
             docker_image, add_python=_IMAGE_PYTHON_VERSION)
     return image.apt_install(*_IMAGE_SYSTEM_PACKAGES)
-
-
-def get_modal_env_secret():
-    """Return a Modal Secret carrying env-token credentials, if configured."""
-    token_id = os.environ.get(TOKEN_ID_ENV_VAR)
-    token_secret = os.environ.get(TOKEN_SECRET_ENV_VAR)
-    if not token_id or not token_secret:
-        return None
-    return modal_adaptor.modal.Secret.from_dict({
-        TOKEN_ID_ENV_VAR: token_id,
-        TOKEN_SECRET_ENV_VAR: token_secret,
-    })
 
 
 def _get_s3_secret(region: Optional[str]):
@@ -156,10 +143,26 @@ def get_cloud_bucket_mounts(
     return mounts
 
 
+def _export_container_env_command(
+        profile_path: str = _CONTAINER_ENV_PROFILE) -> str:
+    """Shell command that gives login shells the container's Modal variables.
+
+    An SSH session does not inherit the container's environment, and with it
+    the identity Modal gives the container. With these variables the modal
+    SDK in a session authenticates as the container, like code in any Modal
+    Function. Autodown relies on it: skylet runs in such a session and has to
+    cancel the cluster's call. The API server's own token is not needed on
+    the cluster for that, and is not sent to it.
+    """
+    return ("{ export -p | grep '^declare -x MODAL_' || true; } > "
+            f'{shlex.quote(profile_path)}')
+
+
 def get_ssh_start_command(public_key: str) -> str:
     """Shell commands that configure sshd for key-based root login."""
     return f"""
 set -eux
+{_export_container_env_command()}
 mkdir -p /run/sshd /root/.ssh
 chmod 700 /root/.ssh
 printf '%s\\n' {shlex.quote(public_key)} > /root/.ssh/authorized_keys

@@ -1227,6 +1227,10 @@ cluster:
     echo "hello" > /cache/hello.txt
     sync /cache
 
+To use a Modal Volume that already exists, add ``--use-existing``. Deleting
+such a volume with ``sky volumes delete`` removes only SkyPilot's record of it;
+the Modal Volume and its data are kept.
+
 SkyPilot ``secrets:`` work on Modal the same way as other VM clouds; they are
 exported for setup and run commands and redacted from display paths.
 Autodown is supported with ``--down``:
@@ -1251,6 +1255,7 @@ Current limitations:
 - A cluster lives at most 24 hours (Modal's maximum Function timeout). If it
   exits, times out, or is terminated from Modal, launch a new SkyPilot
   cluster.
+- ``disk_size`` is not applied: Modal sets the container's disk.
 - ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
   ``sky down``.
 - Managed jobs and SkyServe controllers are not supported on Modal.

@@ -3,6 +3,7 @@
 import ast
 import contextlib
 import csv
+import os
 import pathlib
 import subprocess
 import sys
@@ -56,10 +57,18 @@ _MODAL_PRICES = {
     'nonpreemptible_cpu': 0.00003942,
     'nonpreemptible_memory': 0.00000667,
 }
+# Pinned here rather than built from fetch_modal's lists, so a region that
+# lands in the wrong list fails the tests. From the region table on
+# https://modal.com/docs/guide/region-selection.
+_MODAL_BROAD_REGIONS = ('us', 'eu', 'ap')
+_MODAL_NARROW_REGIONS = ('us-east', 'us-central', 'us-south', 'us-west',
+                         'eu-west', 'eu-north', 'eu-south', 'ap-northeast',
+                         'ap-southeast', 'ap-south', 'ap-melbourne', 'jp', 'au',
+                         'uk', 'ca', 'me', 'sa', 'af', 'mx')
 _MODAL_REGION_MULTIPLIERS = {
     'auto': 1.0,
-    **{region: 1.15 for region in fetch_modal.BROAD_REGIONS},
-    **{region: 1.75 for region in fetch_modal.NARROW_REGIONS},
+    **{region: 1.15 for region in _MODAL_BROAD_REGIONS},
+    **{region: 1.75 for region in _MODAL_NARROW_REGIONS},
 }
 
 
@@ -514,6 +523,9 @@ def test_modal_user_identity_from_workspace(monkeypatch):
 def test_modal_owner_check_allows_other_environment_of_same_workspace(
         monkeypatch):
     # pylint: disable=protected-access
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # skip the check under test.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
     identities = {
         'id': [['Modal workspace x, environment dev', 'Modal workspace x']]
     }
@@ -1032,7 +1044,9 @@ def test_modal_run_instances_launches_function_call(monkeypatch):
     assert function_kwargs['cpu'] == (2.0, 2.0)
     assert function_kwargs['memory'] == (16 * 1024, 16 * 1024)
     assert function_kwargs['timeout'] == 24 * 60 * 60
-    assert function_kwargs['secrets'] == ['secret:1']
+    # The API server's token is not sent to the cluster: sessions there use
+    # the container's own identity.
+    assert 'secrets' not in function_kwargs
     # Modal does not support non-preemptible GPU Functions.
     assert function_kwargs['nonpreemptible'] is False
     assert function_kwargs['volumes']['/cache'] == 'volume:models'
@@ -1040,10 +1054,7 @@ def test_modal_run_instances_launches_function_call(monkeypatch):
                       FakeCloudBucketMount)
     assert waits == [('test-on-cloud', 'dev', 'fc-1', 1)]
     assert image_calls == ['ubuntu:22.04']
-    assert secret_calls == [{
-        'MODAL_TOKEN_ID': 'token-id',
-        'MODAL_TOKEN_SECRET': 'token-secret',
-    }]
+    assert not secret_calls
     assert volume_calls == [('cache-on-cloud', 'dev', False),
                             ('with_mount_options', 'models')]
     assert bucket_calls == [{
@@ -1146,6 +1157,11 @@ def test_modal_run_instances_reuses_running_cluster(monkeypatch):
                         lambda call_id: True)
     monkeypatch.setattr(modal_instance.modal_utils, 'launch_cluster',
                         lambda *args, **kwargs: pytest.fail('relaunched'))
+    # The call can be running with its nodes still pending (a launch that was
+    # interrupted while waiting for capacity), so the nodes are waited for.
+    waits = []
+    monkeypatch.setattr(modal_instance.modal_utils, 'wait_for_nodes',
+                        lambda *args: waits.append(args))
 
     record = modal_instance.run_instances(
         region='auto',
@@ -1156,9 +1172,35 @@ def test_modal_run_instances_reuses_running_cluster(monkeypatch):
         },
                                  provider_config={'environment_name': 'dev'}))
 
+    assert waits == [('test-on-cloud', 'dev', 'fc-9', 1)]
     assert record.head_instance_id == 'fc-9-0'
     assert not record.created_instance_ids
     assert not record.resumed_instance_ids
+
+
+def test_modal_run_instances_cancels_running_cluster_without_nodes(monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(modal_instance.modal_utils, 'get_cluster_state',
+                        lambda name, environment_name: _cluster_state('fc-9'))
+    monkeypatch.setattr(modal_instance.modal_utils, 'call_is_running',
+                        lambda call_id: True)
+
+    def never_ready(*args):
+        raise RuntimeError('Timed out waiting for 1 Modal node(s); 0 ready.')
+
+    monkeypatch.setattr(modal_instance.modal_utils, 'wait_for_nodes',
+                        never_ready)
+    monkeypatch.setattr(modal_instance.modal_utils, 'cancel_call',
+                        cancelled.append)
+
+    with pytest.raises(RuntimeError, match='Timed out'):
+        modal_instance.run_instances(region='auto',
+                                     cluster_name='test',
+                                     cluster_name_on_cloud='test-on-cloud',
+                                     config=_provision_config(
+                                         {'PublicKey': 'ssh-ed25519 test'}))
+
+    assert cancelled == ['fc-9']
 
 
 def test_modal_run_instances_relaunches_after_call_ended(monkeypatch):
@@ -1231,6 +1273,29 @@ def test_modal_apply_and_delete_volume(monkeypatch):
         ('hydrate',),
         ('delete', 'cache-on-cloud', True, 'dev'),
     ]
+
+
+def test_modal_delete_volume_keeps_an_existing_volume(monkeypatch):
+    """A use_existing volume was not created by SkyPilot: keep its data."""
+    deleted = []
+    monkeypatch.setattr(
+        modal_volume.modal_adaptor, 'modal',
+        SimpleNamespace(Volume=SimpleNamespace(objects=SimpleNamespace(
+            delete=lambda *args, **kwargs: deleted.append(args)))))
+    config = models.VolumeConfig(name='data',
+                                 type='modal-volume',
+                                 cloud='modal',
+                                 region=None,
+                                 zone=None,
+                                 name_on_cloud='data',
+                                 size=None,
+                                 config={
+                                     'environment_name': 'dev',
+                                     'use_existing': True
+                                 })
+
+    assert modal_volume.delete_volume(config) is config
+    assert not deleted
 
 
 def test_modal_volume_apply_records_active_environment(monkeypatch):
@@ -1613,6 +1678,15 @@ def test_modal_state_name_fits_modal_limits():
     # Modal object names are at most 64 characters.
     longest = 'x' * clouds.Modal.max_cluster_name_length()
     assert len(modal_utils.state_name(longest)) <= 64
+    # sky/volumes/server/core.py names a volume `<name>-<6-character uuid>`,
+    # with the name cut to the cluster name limit.
+    assert len(f'{longest}-{"u" * 6}') <= 64
+
+
+def test_fetch_modal_region_kinds():
+    """Only us/eu/ap are broad (1.15x); country codes are narrow (1.75x)."""
+    assert set(fetch_modal.BROAD_REGIONS) == set(_MODAL_BROAD_REGIONS)
+    assert set(fetch_modal.NARROW_REGIONS) == set(_MODAL_NARROW_REGIONS)
 
 
 def test_modal_get_cluster_state(fake_modal):
@@ -1820,6 +1894,40 @@ def test_modal_node_returns_after_preemption_rerun(monkeypatch):
     assert state['preempted'] is True
 
 
+def test_modal_ssh_sessions_get_the_container_identity(tmp_path):
+    """skylet's autodown runs in an SSH session and must reach Modal."""
+    # pylint: disable=protected-access
+    profile = tmp_path / 'modal_container_env.sh'
+    command = modal_utils._export_container_env_command(str(profile))
+    assert modal_utils._export_container_env_command() in (
+        modal_utils.get_ssh_start_command('ssh-ed25519 key'))
+    env = {
+        'PATH': os.environ['PATH'],
+        'MODAL_IS_REMOTE': '1',
+        'MODAL_TASK_ID': "ta-1 'quoted' $HOME",
+        'OTHER': 'x',
+    }
+
+    subprocess.run(['bash', '-c', f'set -eux\n{command}'], check=True, env=env)
+    shown = subprocess.run([
+        'bash', '-c', f'. {profile}; printf "%s|%s|%s" "$MODAL_IS_REMOTE" '
+        '"$MODAL_TASK_ID" "${OTHER-unset}"'
+    ],
+                           check=True,
+                           env={
+                               'PATH': os.environ['PATH']
+                           },
+                           capture_output=True,
+                           text=True).stdout
+    assert shown == "1|ta-1 'quoted' $HOME|unset"
+
+    # No Modal variables (never the case in a container): still succeeds.
+    subprocess.run(['bash', '-c', f'set -eux\n{command}'],
+                   check=True,
+                   env={'PATH': os.environ['PATH']})
+    assert profile.read_text() == ''
+
+
 def test_modal_wait_for_nodes(fake_modal, monkeypatch):
     monkeypatch.setattr(modal_utils, '_POLL_INTERVAL_SECONDS', 0)
     fake_modal.add_cluster(nodes={0: _node(), 1: _node(port=2223)})
@@ -2010,6 +2118,26 @@ def test_modal_query_instances_reports_preemption(fake_modal):
                                               non_terminated_only=False)
 
     assert statuses == {'fc-1-0': (None, 'Preempted by Modal.')}
+    # Only the rerun node has ended; the call itself (the other ranks of a
+    # clustered call, say) can still be running and is cancelled before its
+    # state, the only handle on it, is dropped.
+    assert fake_modal.cancelled == ['fc-1']
+    assert not fake_modal.dicts
+
+
+def test_modal_query_instances_keeps_state_if_preempted_call_survives(
+        fake_modal, monkeypatch):
+    fake_modal.add_cluster(preempted=True)
+
+    def failing_cancel(call_id):
+        raise ConnectionError('modal unreachable')
+
+    monkeypatch.setattr(modal_utils, 'cancel_call', failing_cancel)
+
+    with pytest.raises(RuntimeError, match='Failed to cancel the preempted'):
+        modal_instance.query_instances('test', 'test-on-cloud')
+
+    assert fake_modal.dicts  # Still there for the next refresh to retry.
 
 
 def test_modal_terminate_instances_idempotent(fake_modal):

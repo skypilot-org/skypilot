@@ -5,9 +5,12 @@ import re
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+import colorama
+
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import modal as modal_adaptor
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -24,6 +27,18 @@ _TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
 _TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
 _CONFIG_PATH_ENV_VAR = 'MODAL_CONFIG_PATH'
 _AUTO_REGION = 'auto'
+# Modal's maximum Function timeout: a cluster's call ends after this long.
+_MAX_CLUSTER_LIFETIME_HOURS = 24
+
+logger = sky_logging.init_logger(__name__)
+
+
+@annotations.lru_cache(scope='request')
+def _log_cluster_lifetime() -> None:
+    """Once per launch: nothing else shows that the cluster will end."""
+    logger.info(f'{colorama.Style.DIM}Modal terminates a cluster '
+                f'{_MAX_CLUSTER_LIFETIME_HOURS} hours after launch (its '
+                f'maximum Function timeout).{colorama.Style.RESET_ALL}')
 
 
 @registry.CLOUD_REGISTRY.register
@@ -31,7 +46,9 @@ class Modal(clouds.Cloud):
     """Modal, with each cluster running as a Modal Function call."""
 
     _REPR = 'Modal'
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 60
+    # Modal object names are at most 64 characters. A cluster's App and Dict
+    # add a 4-character prefix; a volume adds `-` and a 6-character suffix.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 57
     # yapf: disable
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP:
@@ -247,8 +264,10 @@ class Modal(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun  # unused
+        del cluster_name  # unused
         assert zones is None, 'Modal does not support zones.'
+        if not dryrun:
+            _log_cluster_lifetime()
         resources = resources.assert_launchable()
         modal_environment_name = self._get_active_environment_name()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -294,8 +313,7 @@ class Modal(clouds.Cloud):
             'modal_gpu': modal_gpu,
             'modal_cpu': modal_cpu,
             'modal_memory': modal_memory,
-            # Modal's maximum Function timeout.
-            'modal_timeout': 24 * 60 * 60,
+            'modal_timeout': _MAX_CLUSTER_LIFETIME_HOURS * 60 * 60,
             'modal_docker_image': resources.extract_docker_image(),
             'modal_volume_mounts': modal_volume_mounts,
         }
