@@ -60,6 +60,10 @@ import {
   filterData,
 } from '@/components/shared/FilterSystem';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import {
+  getWorkspaceName,
+  useWorkspacesConfig,
+} from '@/hooks/useWorkspacesConfig';
 import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
@@ -78,6 +82,7 @@ const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 // on each volume.
 const VOLUME_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'status', label: 'Status', kind: 'enum', multi: true },
   { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'type', label: 'Type', kind: 'enum', multi: true },
@@ -531,6 +536,21 @@ export function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  // Names for the Workspace column, and which workspaces the user may delete
+  // volumes from.
+  const { isWorkspaceWritable, workspacesConfig } = useWorkspacesConfig();
+  // Rows carry the workspace name, which filters and sorting go by; older
+  // servers send only the id.
+  const rows = useMemo(
+    () =>
+      data.map((volume) => ({
+        ...volume,
+        workspace_name:
+          volume.workspace_name ||
+          getWorkspaceName(workspacesConfig, volume.workspace),
+      })),
+    [data, workspacesConfig]
+  );
   // Filters live in the URL, keyed by name, so a filtered view is shareable.
   const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
@@ -595,29 +615,30 @@ export function VolumesTable({
   // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
   const valueList = useMemo(() => {
     const uniq = (getValue) => [
-      ...new Set(data.map(getValue).filter((value) => value && value !== '-')),
+      ...new Set(rows.map(getValue).filter((value) => value && value !== '-')),
     ];
     return {
       name: uniq((volume) => volume.name),
+      workspace: uniq((volume) => volume.workspace_name),
       status: uniq((volume) => volume.status),
       infra: uniq((volume) => volume.infra),
       type: uniq((volume) => volume.type),
       user: uniq((volume) => volume.user_name),
     };
-  }, [data]);
+  }, [rows]);
 
   const filteredData = useMemo(() => {
     if (filters.length === 0) {
-      return data;
+      return rows;
     }
     // `User` filters against `user_name`; alias it so the shared filter can
     // resolve the property name to a field.
     return filterData(
-      data.map((volume) => ({ ...volume, user: volume.user_name })),
+      rows.map((volume) => ({ ...volume, user: volume.user_name })),
       filters,
       { orProperties: OR_PROPERTIES }
     );
-  }, [data, filters]);
+  }, [rows, filters]);
 
   const pluginColumns = useTableColumns('volumes');
 
@@ -807,6 +828,21 @@ export function VolumesTable({
       ),
     },
     {
+      id: 'workspace',
+      order: 5,
+      renderHeader: () => sortableHeader('Workspace', 'workspace_name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-gray-700 hover:text-blue-600 hover:underline"
+          >
+            {volume.workspace_name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
       id: 'infra',
       order: 10,
       renderHeader: () => sortableHeader('Infra', 'infra'),
@@ -897,19 +933,33 @@ export function VolumesTable({
       id: 'actions',
       order: 1000,
       renderHeader: () => <TableHead>Actions</TableHead>,
-      renderCell: (volume) => (
-        <TableCell>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDeleteVolume(volume)}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            title="Delete volume"
-          >
-            <Trash2Icon className="w-4 h-4" />
-          </Button>
-        </TableCell>
-      ),
+      renderCell: (volume) => {
+        // The server refuses to delete a volume in a workspace the user can
+        // only read.
+        const writable = isWorkspaceWritable(volume.workspace);
+        return (
+          <TableCell>
+            {/* On a wrapper: a disabled button shows no tooltip. */}
+            <span
+              title={
+                writable
+                  ? 'Delete volume'
+                  : 'Read-only: you are not a member of this volume’s workspace'
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDeleteVolume(volume)}
+                disabled={!writable}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                <Trash2Icon className="w-4 h-4" />
+              </Button>
+            </span>
+          </TableCell>
+        );
+      },
     },
   ];
 

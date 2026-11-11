@@ -13,6 +13,21 @@ jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
   PluginSlot: () => null,
 }));
+// Workspace names and writability come from a hook with its own fetch; tests
+// set them here instead of through the cache.
+const mockWorkspaces = { config: {} };
+jest.mock('@/hooks/useWorkspacesConfig', () => {
+  const actual = jest.requireActual('@/hooks/useWorkspacesConfig');
+  return {
+    __esModule: true,
+    ...actual,
+    useWorkspacesConfig: () => ({
+      workspacesConfig: mockWorkspaces.config,
+      isWorkspaceWritable: (ws) =>
+        mockWorkspaces.config[ws || 'default']?.writable !== false,
+    }),
+  };
+});
 jest.mock('@/plugins/PluginProvider', () => ({
   __esModule: true,
   usePluginComponents: () => [],
@@ -398,5 +413,51 @@ describe('VolumesTable sorting by a plugin column', () => {
     sortValue.mockClear();
     fireEvent.click(screen.getByText('Mount Path'));
     expect(sortValue).toHaveBeenCalledTimes(names.length);
+  });
+});
+
+describe('VolumesTable workspace column', () => {
+  afterEach(() => {
+    mockWorkspaces.config = {};
+  });
+
+  const inWorkspace = (name, workspace, workspaceName) => ({
+    ...volume(name),
+    workspace,
+    ...(workspaceName ? { workspace_name: workspaceName } : {}),
+  });
+
+  it('shows the name the server sends', async () => {
+    const { container } = await renderTable([
+      inWorkspace('vol-b', 'ws-b-id', 'team-b'),
+    ]);
+
+    expect(headers(container)).toContain('Workspace');
+    expect(screen.getByText('team-b')).toBeTruthy();
+  });
+
+  it('names the workspace itself for a server that sends only the id', async () => {
+    mockWorkspaces.config = { 'ws-b-id': { name: 'team-b' } };
+    await renderTable([inWorkspace('vol-b', 'ws-b-id')]);
+
+    expect(screen.getByText('team-b')).toBeTruthy();
+  });
+
+  it('disables delete only in a workspace the user cannot write', async () => {
+    mockWorkspaces.config = {
+      'ws-a': { writable: true },
+      'ws-b': { writable: false },
+    };
+    const { container } = await renderTable([
+      inWorkspace('vol-a', 'ws-a', 'team-a'),
+      inWorkspace('vol-b', 'ws-b', 'team-b'),
+    ]);
+
+    const deleteButton = (name) =>
+      Array.from(container.querySelectorAll('table tbody tr'))
+        .find((row) => row.textContent.includes(name))
+        .querySelector('button[class*="text-red-600"]');
+    expect(deleteButton('vol-a').disabled).toBe(false);
+    expect(deleteButton('vol-b').disabled).toBe(true);
   });
 });

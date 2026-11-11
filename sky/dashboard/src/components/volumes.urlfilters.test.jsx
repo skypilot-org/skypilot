@@ -11,6 +11,21 @@ jest.mock('@/lib/cache', () => ({
   __esModule: true,
   default: { get: jest.fn(), invalidate: jest.fn(), setPreloader: jest.fn() },
 }));
+// Workspace names and writability come from a hook with its own fetch; tests
+// set them here instead of through the cache.
+const mockWorkspaces = { config: {} };
+jest.mock('@/hooks/useWorkspacesConfig', () => {
+  const actual = jest.requireActual('@/hooks/useWorkspacesConfig');
+  return {
+    __esModule: true,
+    ...actual,
+    useWorkspacesConfig: () => ({
+      workspacesConfig: mockWorkspaces.config,
+      isWorkspaceWritable: (ws) =>
+        mockWorkspaces.config[ws || 'default']?.writable !== false,
+    }),
+  };
+});
 // Render the fallback, matching the default behavior.
 jest.mock('@/plugins/PluginSlot', () => ({
   __esModule: true,
@@ -32,7 +47,7 @@ import {
 import dashboardCache from '@/lib/cache';
 import { VolumesTable } from '@/components/volumes';
 
-const volume = (name, status, user = 'alice') => ({
+const volume = (name, status, user = 'alice', workspace = 'team-a') => ({
   name,
   status,
   error_message: null,
@@ -40,6 +55,8 @@ const volume = (name, status, user = 'alice') => ({
   infra: 'Kubernetes/ctx',
   size: 1,
   user_name: user,
+  workspace: `${workspace}-id`,
+  workspace_name: workspace,
 });
 
 // The real VolumeStatus values. The shared `evaluateCondition` matches on
@@ -50,7 +67,7 @@ const VOLUMES = [
   volume('ready-one', 'READY'),
   volume('inuse-one', 'IN_USE'),
   volume('inuse-two', 'IN_USE', 'bob'),
-  volume('blocked-one', 'NOT_READY', 'bob'),
+  volume('blocked-one', 'NOT_READY', 'bob', 'team-b'),
 ];
 
 const openAt = async (search) => {
@@ -93,6 +110,11 @@ describe('volumes filters in the URL', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     window.history.replaceState({}, '', '/volumes');
+  });
+
+  it('filters by workspace name', async () => {
+    await openAt('?workspace=team-b');
+    await waitFor(() => expect(volumeNames()).toEqual(['blocked-one']));
   });
 
   it('opens a shared link already filtered', async () => {
