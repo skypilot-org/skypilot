@@ -2597,6 +2597,15 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
+    # Pods of a multi-host TPU slice: one node pool per slice. A queue (Kueue
+    # or KAI) places whole slices itself and groups the pods into slices in
+    # its own order, so with a queue the pods only get the slice label.
+    tpu_vms_per_slice = _multi_host_tpu_vms_per_slice(
+        pod_spec['spec'].get('nodeSelector'))
+    tpu_slice_placement_rules = not (_KUEUE_QUEUE_NAME_LABEL
+                                     in pod_spec['metadata']['labels'] or
+                                     kai.uses_kai(provider_config))
+
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         # 0 is for head pod, while 1+ is for worker pods.
@@ -2622,6 +2631,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        if tpu_vms_per_slice:
+            # Pod i is in slice i // VMs per slice, the same split the task
+            # nodes use (num_nodes slices of VMs-per-slice pods each).
+            _add_tpu_slice_placement(
+                pod_spec_copy,
+                f'{cluster_name_on_cloud}-{i // tpu_vms_per_slice}',
+                tpu_slice_placement_rules)
 
         if host_network_port_blocks:
             assert head_gcs_port is not None
@@ -2870,6 +2887,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    if tpu_vms_per_slice:
+        _check_tpu_slices_in_one_node_pool(namespace, context,
+                                           cluster_name_on_cloud)
     # Reset spinner message here because it might have hinted the reason
     # pods were pending.
     rich_utils.force_update_status(
@@ -3301,21 +3321,22 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
 # task runner exports them as TPU_WORKER_ID, TPU_WORKER_HOSTNAMES and
 # TPU_NAME (see kubernetes_utils.tpu_worker_env_vars()).
 _GKE_NODEPOOL_LABEL = 'cloud.google.com/gke-nodepool'
+# Label the cluster template sets on pods queued through Kueue.
+_KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
 
 
-def _multi_host_tpu_vms_per_slice(pod: Any) -> int:
-    """VMs per slice for a pod of a multi-host GKE TPU slice, else 0.
+def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
+    """VMs per slice for a pod with ``node_selector``, or 0.
 
-    Such a pod selects the whole slice's topology and the chips of one VM,
-    and the topology has more chips than the VM.
+    A pod of a multi-host GKE TPU slice selects the whole slice's topology
+    and the chips of one VM, and the topology has more chips than the VM.
     """
-    node_selector = getattr(pod.spec, 'node_selector', None)
     if not isinstance(node_selector, dict):
         return 0
     formatter = kubernetes_utils.GKELabelFormatter
     topology = node_selector.get(formatter.TPU_TOPOLOGY_LABEL_KEY)
     chips_per_vm = node_selector.get(formatter.ACCELERATOR_COUNT_LABEL_KEY)
-    if not topology or not chips_per_vm or not chips_per_vm.isdigit():
+    if not topology or not chips_per_vm or not str(chips_per_vm).isdigit():
         return 0
     chips_in_slice = kubernetes_utils.reduce_tpu_topology(topology)
     if chips_in_slice <= int(chips_per_vm):
@@ -3323,36 +3344,79 @@ def _multi_host_tpu_vms_per_slice(pod: Any) -> int:
     return chips_in_slice // int(chips_per_vm)
 
 
-def _tag_tpu_multi_host_workers(
-        cluster_name_on_cloud: str, context: Optional[str],
-        running_pods: Dict[str,
-                           Any], pods: Dict[str,
-                                            List[common.InstanceInfo]]) -> None:
-    """Tags each pod of a multi-host TPU slice with its worker ID.
+def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str,
+                             placement_rules: bool) -> None:
+    """Labels a pod of a multi-host TPU slice and, optionally, places it.
 
-    GKE does not inject TPU_WORKER_ID / TPU_WORKER_HOSTNAMES into plain pods
-    (only into JobSet and Indexed Job pods), and which slice a pod lands on is
-    decided by the scheduler, not by the pod's index. A multi-host GKE TPU
-    node pool is exactly one slice, so the pods are grouped by the node pool
-    of the node each one runs on. Within a slice, worker IDs follow the node
-    name order, and the worker hostnames are the pod IPs in worker ID order.
+    One multi-host GKE node pool is one slice, and each pod takes all chips
+    of one VM, so a slice's pods must share a node pool that holds no other
+    slice. The label names the pod's slice. With ``placement_rules``, a
+    required podAffinity keeps the pods of a slice in one node pool and a
+    required podAntiAffinity keeps pods of any other slice (of this cluster
+    or another) out of it. The first pod of a slice matches only itself, so
+    it may go to any node pool without another slice.
+
+    Without placement rules (a queue places the pods) the label still lets
+    other clusters' anti-affinity keep their slices out of this one's pools,
+    since Kubernetes applies required anti-affinity in both directions.
+    """
+    pod_spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL] = (
+        slice_name)
+    if not placement_rules:
+        return
+    affinity = pod_spec['spec'].setdefault('affinity', {})
+    affinity.setdefault('podAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []).append({
+            'labelSelector': {
+                'matchLabels': {
+                    kubernetes_utils.TPU_SLICE_LABEL: slice_name
+                }
+            },
+            'topologyKey': _GKE_NODEPOOL_LABEL,
+        })
+    affinity.setdefault('podAntiAffinity', {}).setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', []).append({
+            'labelSelector': {
+                'matchExpressions': [{
+                    'key': kubernetes_utils.TPU_SLICE_LABEL,
+                    'operator': 'Exists',
+                }, {
+                    'key': kubernetes_utils.TPU_SLICE_LABEL,
+                    'operator': 'NotIn',
+                    'values': [slice_name],
+                }]
+            },
+            'topologyKey': _GKE_NODEPOOL_LABEL,
+        })
+
+
+def _tpu_slice_pods_by_node_pool(
+        context: Optional[str],
+        running_pods: Dict[str, Any]) -> Tuple[Dict[str, List[str]], int]:
+    """Groups the running pods of multi-host TPU slices by node pool.
+
+    A multi-host GKE TPU node pool is exactly one slice. Returns the pod
+    names per node pool and the VMs per slice (0 when no pod is a multi-host
+    slice pod, in which case no API call is made).
     """
     slice_members: List[Tuple[str, str]] = []  # (pod name, node name)
     topologies: Set[str] = set()
     vms_per_slice = 0
     for pod_name, pod in running_pods.items():
-        vms = _multi_host_tpu_vms_per_slice(pod)
+        node_selector = getattr(pod.spec, 'node_selector', None)
+        vms = _multi_host_tpu_vms_per_slice(node_selector)
         if not vms:
             continue
+        assert node_selector is not None  # vms > 0 needs a selector.
         vms_per_slice = vms
         node_name = getattr(pod.spec, 'node_name', None)
         if node_name is None:
             continue
         slice_members.append((pod_name, node_name))
-        topologies.add(pod.spec.node_selector[
+        topologies.add(node_selector[
             kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
     if not slice_members:
-        return
+        return {}, vms_per_slice
     # One list call for all nodes of the slices' topology (the pods select
     # it), instead of one read per pod.
     label_selector = (
@@ -3370,6 +3434,55 @@ def _tag_tpu_multi_host_workers(
     for pod_name, node_name in slice_members:
         node_pool = node_pool_by_name.get(node_name, node_name)
         slice_pods.setdefault(node_pool, []).append(pod_name)
+    return slice_pods, vms_per_slice
+
+
+def _check_tpu_slices_in_one_node_pool(namespace: str, context: Optional[str],
+                                       cluster_name_on_cloud: str) -> None:
+    """Fails the provision if a multi-host TPU slice spans node pools.
+
+    Placement rules or a queue keep each slice in one node pool. This catches
+    what they cannot: a queue that does not place whole slices, pods created
+    without the rules, or a pod_config that overrides the affinity. Without
+    the check such a cluster comes up and its TPU program hangs waiting for a
+    peer on another slice.
+    """
+    running_pods = kubernetes_utils.filter_pods(
+        namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
+    wrong = {
+        pool: len(members)
+        for pool, members in slice_pods.items()
+        if len(members) != vms_per_slice
+    }
+    if wrong:
+        pools = ', '.join(
+            f'{pool!r} ({count})' for pool, count in sorted(wrong.items()))
+        raise config_lib.KubernetesError(
+            f'The pods of cluster {cluster_name_on_cloud!r} do not form whole '
+            f'TPU slices: each multi-host node pool (one slice of '
+            f'{vms_per_slice} VMs) must run {vms_per_slice} of its pods, but '
+            f'these run a different number: {pools}. Use a queue that places '
+            'whole slices, or launch without one.')
+
+
+def _tag_tpu_multi_host_workers(
+        cluster_name_on_cloud: str, context: Optional[str],
+        running_pods: Dict[str,
+                           Any], pods: Dict[str,
+                                            List[common.InstanceInfo]]) -> None:
+    """Tags each pod of a multi-host TPU slice with its worker ID.
+
+    GKE does not inject TPU_WORKER_ID / TPU_WORKER_HOSTNAMES into plain pods
+    (only into JobSet and Indexed Job pods), and which slice a pod lands on is
+    decided by the scheduler, not by the pod's index. A multi-host GKE TPU
+    node pool is exactly one slice, so the pods are grouped by the node pool
+    of the node each one runs on. Within a slice, worker IDs follow the node
+    name order, and the worker hostnames are the pod IPs in worker ID order.
+    """
+    slice_pods, vms_per_slice = _tpu_slice_pods_by_node_pool(
+        context, running_pods)
     for node_pool, members in slice_pods.items():
         if len(members) != vms_per_slice:
             logger.warning(f'Node pool {node_pool!r} runs {len(members)} pods '

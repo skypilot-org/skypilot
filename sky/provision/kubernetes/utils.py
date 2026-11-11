@@ -464,6 +464,10 @@ TPU_WORKER_ID_TAG = 'skypilot-tpu-worker-id'
 TPU_WORKER_HOSTNAMES_TAG = 'skypilot-tpu-worker-hostnames'
 TPU_SLICE_NAME_TAG = 'skypilot-tpu-slice-name'
 
+# Pod label naming the multi-host TPU slice a pod belongs to,
+# `<cluster name on cloud>-<slice index>` (see instance._create_pods()).
+TPU_SLICE_LABEL = 'skypilot-tpu-slice'
+
 
 def tpu_worker_env_vars(tags: Optional[Dict[str, str]]) -> Dict[str, str]:
     """TPU runtime env vars for one VM of a multi-host TPU slice.
@@ -3445,7 +3449,6 @@ def get_pod_fields(
     spot_label_value: Optional[str],
     enable_flex_start: bool,
     tpu_chips_per_vm: Optional[int] = None,
-    same_node_pool_cluster: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Builds the pod fields that SkyPilot computes in Python.
 
@@ -3462,10 +3465,6 @@ def get_pod_fields(
         spot_label_value: See get_node_selector() and get_spot_toleration().
         enable_flex_start: See get_node_selector().
         tpu_chips_per_vm: See get_node_selector().
-        same_node_pool_cluster: When set, every pod of this cluster
-            (``skypilot-cluster-name`` label) must run in the same GKE node
-            pool. Used for a single multi-host TPU slice, where one node pool
-            is one slice and a pod on another pool would join another slice.
 
     Returns:
         A partial pod manifest, empty when no field applies.
@@ -3480,17 +3479,6 @@ def get_pod_fields(
                                       avoid_label_keys)
     if node_affinity is not None:
         spec['affinity'] = {'nodeAffinity': node_affinity}
-    if same_node_pool_cluster is not None:
-        spec.setdefault('affinity', {})['podAffinity'] = {
-            'requiredDuringSchedulingIgnoredDuringExecution': [{
-                'labelSelector': {
-                    'matchLabels': {
-                        'skypilot-cluster-name': same_node_pool_cluster
-                    }
-                },
-                'topologyKey': 'cloud.google.com/gke-nodepool',
-            }]
-        }
     spot_toleration = get_spot_toleration(spot_label_key, spot_label_value)
     if spot_toleration is not None:
         spec['tolerations'] = [spot_toleration]

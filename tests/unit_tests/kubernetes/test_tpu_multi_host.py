@@ -9,6 +9,7 @@ from sky import clouds
 from sky import resources as resources_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.backends import task_codegen
+from sky.provision import common as provision_common
 from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 
@@ -228,23 +229,14 @@ def test_pod_fields_multi_host_slice():
         spot_label_key=None,
         spot_label_value=None,
         enable_flex_start=False,
-        tpu_chips_per_vm=4,
-        same_node_pool_cluster='c1')
+        tpu_chips_per_vm=4)
     spec = fields['spec']
     assert spec['nodeSelector'] == {
         _FMT.TPU_TOPOLOGY_LABEL_KEY: '2x4',
         _FMT.ACCELERATOR_COUNT_LABEL_KEY: '4',
     }
-    term = spec['affinity']['podAffinity'][
-        'requiredDuringSchedulingIgnoredDuringExecution'][0]
-    assert term == {
-        'labelSelector': {
-            'matchLabels': {
-                'skypilot-cluster-name': 'c1'
-            }
-        },
-        'topologyKey': 'cloud.google.com/gke-nodepool',
-    }
+    # Slice placement is per pod (see _add_tpu_slice_placement).
+    assert 'podAffinity' not in spec['affinity']
     # Node affinity for the accelerator type is still there.
     assert 'nodeAffinity' in spec['affinity']
 
@@ -413,3 +405,205 @@ def test_ray_codegen_adds_per_ip_env_vars():
     code = codegen.build()
     assert ("sky_env_vars_dict.update({'10.0.0.2': {'TPU_WORKER_ID': '1'}}"
             ".get(ip, {}))") in code
+
+
+def _create_slice_pods(monkeypatch,
+                       count,
+                       node_selector,
+                       labels=None,
+                       provider_config=None):
+    """Runs _create_pods for a new cluster and returns the created specs."""
+    created = []
+    monkeypatch.setattr(kubernetes_utils, 'get_namespace_from_config',
+                        lambda *a, **k: 'ns')
+    monkeypatch.setattr(kubernetes_utils, 'get_context_from_config',
+                        lambda *a, **k: 'ctx')
+    monkeypatch.setattr(kubernetes_utils, 'filter_pods', lambda *a, **k: {})
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        lambda *a, **k: False)
+    monkeypatch.setattr(k8s_instance, '_wait_for_pods_to_schedule',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(k8s_instance, '_wait_for_pods_to_run',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(k8s_instance, '_check_tpu_slices_in_one_node_pool',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(k8s_instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    monkeypatch.setattr(k8s_instance.subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+
+    def fake_create(namespace, pod_spec, context):
+        del namespace, context
+        created.append(pod_spec)
+        pod = mock.MagicMock()
+        pod.metadata.name = pod_spec['metadata']['name']
+        pod.metadata.labels = pod_spec['metadata']['labels']
+        return pod
+
+    monkeypatch.setattr(k8s_instance, '_create_namespaced_pod_with_retries',
+                        fake_create)
+    config = provision_common.ProvisionConfig(
+        provider_config={
+            'timeout': 10,
+            **(provider_config or {})
+        },
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'metadata': {
+                'labels': dict(labels or {})
+            },
+            'spec': {
+                'containers': [{}],
+                'nodeSelector': dict(node_selector),
+            },
+        },
+        count=count,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+    k8s_instance._create_pods('us', 'c', 'c', config)
+    return {spec['metadata']['name']: spec for spec in created}
+
+
+_SLICE_2X4 = {
+    _FMT.TPU_TOPOLOGY_LABEL_KEY: '2x4',
+    _FMT.ACCELERATOR_COUNT_LABEL_KEY: '4',
+}
+
+
+def _required(spec, kind):
+    return spec['spec'].get('affinity', {}).get(kind, {}).get(
+        'requiredDuringSchedulingIgnoredDuringExecution', [])
+
+
+def test_create_pods_places_each_slice_in_its_own_node_pool(monkeypatch):
+    """Without a queue, two 2x4 slices: each pod is labelled with its slice,
+    must share a node pool with its slice and keep other slices out."""
+    specs = _create_slice_pods(monkeypatch, 4, _SLICE_2X4)
+    slices = {
+        name: spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL]
+        for name, spec in specs.items()
+    }
+    assert slices == {
+        'c-head': 'c-0',
+        'c-worker1': 'c-0',
+        'c-worker2': 'c-1',
+        'c-worker3': 'c-1',
+    }
+    for name, spec in specs.items():
+        slice_name = slices[name]
+        assert _required(spec, 'podAffinity') == [{
+            'labelSelector': {
+                'matchLabels': {
+                    kubernetes_utils.TPU_SLICE_LABEL: slice_name
+                }
+            },
+            'topologyKey': 'cloud.google.com/gke-nodepool',
+        }]
+        assert _required(spec, 'podAntiAffinity') == [{
+            'labelSelector': {
+                'matchExpressions': [{
+                    'key': kubernetes_utils.TPU_SLICE_LABEL,
+                    'operator': 'Exists',
+                }, {
+                    'key': kubernetes_utils.TPU_SLICE_LABEL,
+                    'operator': 'NotIn',
+                    'values': [slice_name],
+                }]
+            },
+            'topologyKey': 'cloud.google.com/gke-nodepool',
+        }]
+        # The existing preferred spread across hosts is kept.
+        assert spec['spec']['affinity']['podAntiAffinity'][
+            'preferredDuringSchedulingIgnoredDuringExecution']
+
+
+@pytest.mark.parametrize('labels,provider_config', [
+    ({
+        'kueue.x-k8s.io/queue-name': 'default-queue'
+    }, None),
+    (None, {
+        'kai_queue': 'team-a'
+    }),
+])
+def test_create_pods_with_a_queue_labels_slices_only(monkeypatch, labels,
+                                                     provider_config):
+    """A queue places whole slices and groups the pods in its own order, so
+    the pods get the slice label but no required affinity."""
+    if provider_config:
+        monkeypatch.setattr(k8s_instance.kai, 'ensure_pod_group',
+                            lambda *a, **k: None)
+        monkeypatch.setattr(k8s_instance.kai, 'set_gang_size',
+                            lambda *a, **k: None)
+    specs = _create_slice_pods(monkeypatch,
+                               4,
+                               _SLICE_2X4,
+                               labels=labels,
+                               provider_config=provider_config)
+    assert specs['c-worker2']['metadata']['labels'][
+        kubernetes_utils.TPU_SLICE_LABEL] == 'c-1'
+    for spec in specs.values():
+        assert not _required(spec, 'podAffinity')
+        assert not _required(spec, 'podAntiAffinity')
+
+
+def test_create_pods_single_host_tpu_gets_no_slice_placement(monkeypatch):
+    specs = _create_slice_pods(monkeypatch, 2, {
+        _FMT.TPU_TOPOLOGY_LABEL_KEY: '2x4',
+        _FMT.ACCELERATOR_COUNT_LABEL_KEY: '8',
+    })
+    for spec in specs.values():
+        assert kubernetes_utils.TPU_SLICE_LABEL not in spec['metadata'][
+            'labels']
+        assert not _required(spec, 'podAffinity')
+        assert not _required(spec, 'podAntiAffinity')
+
+
+def _check_slices(pods, node_pools):
+    core_api = mock.MagicMock()
+    core_api.list_node.return_value = SimpleNamespace(items=[
+        SimpleNamespace(metadata=SimpleNamespace(
+            name=name, labels={'cloud.google.com/gke-nodepool': pool}))
+        for name, pool in node_pools.items()
+    ])
+    with mock.patch.object(k8s_instance.kubernetes_utils,
+                           'filter_pods',
+                           return_value=pods), \
+            mock.patch.object(k8s_instance.kubernetes,
+                              'core_api',
+                              return_value=core_api):
+        k8s_instance._check_tpu_slices_in_one_node_pool('ns', 'ctx', 'c')
+
+
+def test_check_tpu_slices_passes_for_whole_slices():
+    _check_slices(
+        {
+            'c-head': _pod('c-head', 'n-a-1', '10.0.0.1'),
+            'c-worker1': _pod('c-worker1', 'n-a-2', '10.0.0.2'),
+            'c-worker2': _pod('c-worker2', 'n-b-1', '10.0.0.3'),
+            'c-worker3': _pod('c-worker3', 'n-b-2', '10.0.0.4'),
+        }, {
+            'n-a-1': 'pool-a',
+            'n-a-2': 'pool-a',
+            'n-b-1': 'pool-b',
+            'n-b-2': 'pool-b',
+        })
+
+
+def test_check_tpu_slices_fails_when_a_slice_spans_node_pools():
+    with pytest.raises(k8s_instance.config_lib.KubernetesError,
+                       match="'pool-b' \\(1\\), 'pool-c' \\(1\\)"):
+        _check_slices(
+            {
+                'c-head': _pod('c-head', 'n-a-1', '10.0.0.1'),
+                'c-worker1': _pod('c-worker1', 'n-a-2', '10.0.0.2'),
+                'c-worker2': _pod('c-worker2', 'n-b-1', '10.0.0.3'),
+                'c-worker3': _pod('c-worker3', 'n-c-1', '10.0.0.4'),
+            }, {
+                'n-a-1': 'pool-a',
+                'n-a-2': 'pool-a',
+                'n-b-1': 'pool-b',
+                'n-c-1': 'pool-c',
+            })

@@ -1365,7 +1365,7 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             ('16CPU--64GB--tpu-v6e-16:1', None, 4, '4x4', True),
             ('16CPU--64GB--tpu-v6e-slice:256', None, 64, '16x16', True),
         ]
-        for instance_type, enforce, num_nodes, topology, one_pool in cases:
+        for instance_type, enforce, num_nodes, topology, _ in cases:
             with self.subTest(instance_type=instance_type, num_nodes=num_nodes):
                 self.resources.instance_type = instance_type
                 self.resources.accelerator_args = ({
@@ -1392,56 +1392,11 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
                         formatter.TPU_TOPOLOGY_LABEL_KEY: topology,
                         formatter.ACCELERATOR_COUNT_LABEL_KEY: '4',
                     })
-                pod_affinity = spec.get('affinity', {}).get('podAffinity')
-                if one_pool:
-                    term = pod_affinity[
-                        'requiredDuringSchedulingIgnoredDuringExecution'][0]
-                    self.assertEqual(term['topologyKey'],
-                                     'cloud.google.com/gke-nodepool')
-                    self.assertEqual(
-                        term['labelSelector']['matchLabels'],
-                        {'skypilot-cluster-name': self.cluster_name})
-                else:
-                    self.assertIsNone(pod_affinity)
+                # Same-slice placement is per pod (slice label, affinity),
+                # set when the pods are created, not in the shared fields.
+                self.assertIsNone(spec.get('affinity', {}).get('podAffinity'))
         # The slice shape comes from the request, not from node labels.
         mock_get_label_key_values.assert_not_called()
-
-        def deploy(num_nodes):
-            return k8s_cloud.make_deploy_resources_variables(
-                resources=self.resources,
-                cluster_name=resources_utils.ClusterName(
-                    display_name=self.cluster_name,
-                    name_on_cloud=self.cluster_name),
-                region=self.region,
-                zones=None,
-                num_nodes=num_nodes,
-                dryrun=False)
-
-        def pod_affinity(deploy_vars):
-            return deploy_vars['pod_fields']['spec'].get('affinity',
-                                                         {}).get('podAffinity')
-
-        self.resources.instance_type = '16CPU--64GB--tpu-v6e-slice:8'
-        self.resources.accelerator_args = {'multi_host': True}
-
-        # Several slices without a queue are accepted and get
-        # no podAffinity: one rule would put every slice in one pool.
-        self.assertIsNone(pod_affinity(deploy(4)))
-
-        with patch('sky.skypilot_config.get_effective_queue_name',
-                   return_value='default-queue'):
-            # One slice with a queue keeps the same-pool podAffinity: the
-            # queue alone does not keep a slice's pods together.
-            deploy_vars = deploy(2)
-            self.assertEqual(deploy_vars['k8s_kueue_local_queue_name'],
-                             'default-queue')
-            term = pod_affinity(deploy_vars)[
-                'requiredDuringSchedulingIgnoredDuringExecution'][0]
-            self.assertEqual(term['topologyKey'],
-                             'cloud.google.com/gke-nodepool')
-            # Several slices with a queue are accepted and get no podAffinity
-            # (it would put every slice in one pool).
-            self.assertIsNone(pod_affinity(deploy(4)))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
