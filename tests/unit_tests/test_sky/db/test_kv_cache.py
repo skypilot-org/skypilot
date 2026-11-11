@@ -64,31 +64,6 @@ def test_delete_cache_entries_by_prefix_no_matches(isolated_database):
     assert kv_cache.get_cache_entry('key1') == 'value1'
 
 
-def test_delete_cache_entries_by_prefix_suffix(isolated_database):
-    expires = time.time() + 3600
-    kv_cache.add_or_update_cache_entry('perm:ws:ws1:user1', '1', expires)
-    kv_cache.add_or_update_cache_entry('perm:ws:ws2:user1', '1', expires)
-    kv_cache.add_or_update_cache_entry('perm:ws:ws1:user2', '0', expires)
-    kv_cache.add_or_update_cache_entry('other:key', 'val', expires)
-
-    # Delete all entries for user1 across all workspaces
-    kv_cache.delete_cache_entries_by_prefix_suffix('perm:ws:', ':user1')
-
-    # user1 entries should be gone
-    assert kv_cache.get_cache_entry('perm:ws:ws1:user1') is None
-    assert kv_cache.get_cache_entry('perm:ws:ws2:user1') is None
-    # user2 and other entries should remain
-    assert kv_cache.get_cache_entry('perm:ws:ws1:user2') == '0'
-    assert kv_cache.get_cache_entry('other:key') == 'val'
-
-
-def test_delete_cache_entries_by_prefix_suffix_no_matches(isolated_database):
-    kv_cache.add_or_update_cache_entry('key1', 'value1', time.time() + 3600)
-    # Should not raise an error and should not delete unrelated entries
-    kv_cache.delete_cache_entries_by_prefix_suffix('perm:ws:', ':nonexistent')
-    assert kv_cache.get_cache_entry('key1') == 'value1'
-
-
 def test_delete_by_prefix_escapes_percent_in_data(isolated_database):
     """Verify that '%' in the prefix is treated literally, not as wildcard."""
     expires = time.time() + 3600

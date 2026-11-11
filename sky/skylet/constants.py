@@ -956,6 +956,13 @@ ENV_VAR_SERVER_JOBS_CONTROLLERS = (
 ENV_VAR_SERVER_UVICORN_WORKER_MEM_GB = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}UVICORN_WORKER_MEM_GB')
 
+# Growth of a request executor process's RSS, in MB, since its last memory
+# release that makes it release memory again after a request. 0 releases
+# after every request.
+ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}RELEASE_MEMORY_THRESHOLD_MB')
+DEFAULT_RELEASE_MEMORY_THRESHOLD_MB = 32
+
 # Concurrent state-DB connections a server process uses before it starts
 # queueing queries, when the burst size is left to the default.
 DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY = 5
