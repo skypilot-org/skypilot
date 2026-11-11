@@ -38,10 +38,16 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// Set when a running tour is torn down by a tree rebuild rather than by the
+// visitor. It survives the remount but not the tab, so the tour restarts once
+// on the rebuilt tree and a later reload does not bring it back.
+const TOUR_RESTART_KEY = 'skypilot-dashboard-tour-restart-pending';
+
 export function TourProvider({ children }) {
   const tourRef = useRef(null);
+  const discardRef = useRef(false);
   const router = useRouter();
-  const { isFirstVisit, markTourCompleted } = useFirstVisit();
+  const { isFirstVisit, markTourStarted, markTourCompleted } = useFirstVisit();
   const [tourAutoStarted, setTourAutoStarted] = useState(false);
   const [isTourActive, setIsTourActive] = useState(false);
   const [tourJustStarted, setTourJustStarted] = useState(false);
@@ -341,7 +347,12 @@ export function TourProvider({ children }) {
 
         setIsTourActive(false);
         setTourJustStarted(false);
-        markTourCompleted();
+        // A tour torn down by a tree rebuild was never finished by the
+        // visitor, so it must not mark itself complete: the rebuilt tree has
+        // to be free to start it again.
+        if (!discardRef.current) {
+          markTourCompleted();
+        }
       });
 
       tourRef.current.on('cancel', () => {
@@ -1722,15 +1733,33 @@ export function TourProvider({ children }) {
       });
     }
 
-    if (isFirstVisit && !tourAutoStarted) {
+    // A late app.providers wrapper registration remounts this provider along
+    // with the rest of the tree, and the mount-time visited marker from
+    // before the remount would otherwise make the rebuilt tree think the tour
+    // had already been seen. The restart flag says the opposite: the tour was
+    // running when that tree was discarded, so start it again.
+    const restartPending = sessionStorage.getItem(TOUR_RESTART_KEY) === '1';
+
+    if ((isFirstVisit || restartPending) && !tourAutoStarted) {
+      sessionStorage.removeItem(TOUR_RESTART_KEY);
+      // Consume the visit here, at the moment the tour appears, and before
+      // the chunk-loaded WelcomeNotification mounts: that marker is what
+      // keeps the welcome prompt from stacking on the running tour.
+      markTourStarted();
       startTour();
       setTourAutoStarted(true);
     }
 
     return () => {
-      // Cleanup tour on unmount
-      if (tourRef.current) {
+      // Cleanup tour on unmount. A never-started instance has no dialog to
+      // discard and completing it would fire its handlers, so only a running
+      // tour is affected -- and it is discarded, not completed, so the
+      // rebuilt tree starts a fresh one.
+      if (tourRef.current && tourRef.current.isActive()) {
+        sessionStorage.setItem(TOUR_RESTART_KEY, '1');
+        discardRef.current = true;
         tourRef.current.complete();
+        discardRef.current = false;
       }
     };
     // markTourCompleted/router/tourAutoStarted used in step callbacks, not as effect deps
