@@ -660,16 +660,22 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
                 next_arg = argv[i + 1]
                 # Ensure next_arg is a string and handle redaction safely
                 if isinstance(next_arg, str):
-                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
-                                      next_arg)
+                    # DOTALL: a multi-line value (e.g. a PEM key) must be
+                    # redacted past its first newline too.
+                    redacted = re.sub(r'^([^=]+)=.*',
+                                      r'\1=<redacted>',
+                                      next_arg,
+                                      flags=re.DOTALL)
                     result.append(redacted)
                 else:
                     result.append(next_arg)
                 i += 2
             elif arg.startswith('--secret='):
                 # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
-                                  arg)
+                redacted = re.sub(r'^(--secret=[^=]+)=.*',
+                                  r'\1=<redacted>',
+                                  arg,
+                                  flags=re.DOTALL)
                 result.append(redacted)
                 i += 1
             else:

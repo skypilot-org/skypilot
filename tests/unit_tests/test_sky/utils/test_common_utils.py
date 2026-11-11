@@ -391,6 +391,23 @@ class TestRedactSecretsValues:
         expected = ['sky', 'launch', '--secret=HF_TOKEN', 'app.yaml']
         assert result == expected
 
+    def test_secret_separate_multiline_value(self):
+        """Test --secret KEY=<multi-line value>, e.g. a PEM key."""
+        argv = [
+            'sky', 'launch', '--secret',
+            'KEY=-----BEGIN KEY-----\nabc\n-----END KEY-----', 'app.yaml'
+        ]
+        result = common_utils._redact_secrets_values(argv)
+        expected = ['sky', 'launch', '--secret', 'KEY=<redacted>', 'app.yaml']
+        assert result == expected
+
+    def test_secret_combined_multiline_value(self):
+        """Test --secret=KEY=<multi-line value>."""
+        argv = ['sky', 'launch', '--secret=KEY=line1\nline2', 'app.yaml']
+        result = common_utils._redact_secrets_values(argv)
+        expected = ['sky', 'launch', '--secret=KEY=<redacted>', 'app.yaml']
+        assert result == expected
+
     def test_multiple_secret_args(self):
         """Test multiple --secret arguments with different formats."""
         argv = [
