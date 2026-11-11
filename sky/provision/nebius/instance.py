@@ -65,34 +65,39 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 
 
 def _wait_until_no_pending(region: str, cluster_name_on_cloud: str,
-                           project_id: str) -> None:
-    """Waits until none of the cluster's instances is in a pending state.
+                           project_id: str) -> Dict[str, Any]:
+    """Waits until no cluster instance is pending or reconciling.
 
     Times out after MAX_RETRIES_TO_LAUNCH polls in a row in which no pending
-    instance left the pending states, not after a fixed total.
+    instance settled, not after a fixed total.
     """
     retry_count = 0
     prev_pending: Set[str] = set()
     while retry_count < MAX_RETRIES_TO_LAUNCH:
         instances = _filter_instances(region,
                                       cluster_name_on_cloud,
-                                      PENDING_STATUS,
+                                      None,
                                       project_id=project_id)
-        if not instances:
-            return
-        pending = set(instances)
+        # State alone is not terminal while Nebius reconciles an operation.
+        # a newly created instance can report STOPPED with reconciling=True.
+        pending = {
+            inst_id for inst_id, inst in instances.items()
+            if inst['status'] in PENDING_STATUS or inst['reconciling']
+        }
+        if not pending:
+            return instances
         if prev_pending - pending:
             retry_count = 0
         prev_pending = pending
-        logger.info(f'Waiting for {len(instances)} instances to leave '
-                    f'{"/".join(PENDING_STATUS)} '
+        logger.info(f'Waiting for {len(pending)} instances to settle '
                     f'(Attempt {retry_count + 1}/{MAX_RETRIES_TO_LAUNCH} '
                     'since one last did).')
         time.sleep(utils.POLL_INTERVAL)
         retry_count += 1
 
     raise TimeoutError(
-        f'No instance left {"/".join(PENDING_STATUS)} for '
+        f'No instance left {"/".join(PENDING_STATUS)} '
+        'or finished reconciling for '
         f'{MAX_RETRIES_TO_LAUNCH * utils.POLL_INTERVAL} seconds; '
         f'still waiting on {len(prev_pending)} instances.')
 
@@ -225,22 +230,26 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     project_id = utils.get_project_by_region(region)
-    _wait_until_no_pending(region, cluster_name_on_cloud, project_id=project_id)
+    # Validate the same settled observation; a second List could race with a
+    # new operation and reintroduce a transient STOPPED failure.
+    instances = _wait_until_no_pending(region,
+                                       cluster_name_on_cloud,
+                                       project_id=project_id)
     if state is not None:
         if state == status_lib.ClusterStatus.UP:
-            stopped_instances = _filter_instances(region,
-                                                  cluster_name_on_cloud,
-                                                  ['STOPPED'],
-                                                  project_id=project_id)
+            stopped_instances = [
+                inst for inst in instances.values()
+                if inst['status'] == 'STOPPED'
+            ]
             if stopped_instances:
                 raise RuntimeError(
                     f'Cluster {cluster_name_on_cloud} is in UP state, but '
                     f'{len(stopped_instances)} instances are stopped.')
         if state == status_lib.ClusterStatus.STOPPED:
-            running_instances = _filter_instances(region,
-                                                  cluster_name_on_cloud,
-                                                  ['RUNNING'],
-                                                  project_id=project_id)
+            running_instances = [
+                inst for inst in instances.values()
+                if inst['status'] == 'RUNNING'
+            ]
 
             if running_instances:
                 raise RuntimeError(
