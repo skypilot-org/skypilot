@@ -2,6 +2,7 @@
 
 import os
 import re
+import types
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -12,6 +13,7 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import modal as modal_adaptor
+from sky.provision.modal import modal_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -31,6 +33,18 @@ _AUTO_REGION = 'auto'
 _MAX_CLUSTER_LIFETIME_HOURS = 24
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _modal_catalog() -> types.ModuleType:
+    """The Modal catalog module, for what `sky.catalog` does not dispatch.
+
+    Imported on first use: the module reads its catalog through the cloud
+    registry when it is imported, and Modal is registered there only once
+    this module has loaded.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.catalog import modal_catalog
+    return modal_catalog
 
 
 @annotations.lru_cache(scope='request')
@@ -106,11 +120,7 @@ class Modal(clouds.Cloud):
         name, count = next(iter(accelerators.items()))
         if count == per_node:
             return None
-        # modal_catalog imports sky.clouds, so a top-level import here would
-        # be circular.
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import modal_catalog
-        max_count = modal_catalog.get_max_gpu_count(name)
+        max_count = _modal_catalog().get_max_gpu_count(name)
         if max_count is not None and max_count < per_node:
             return (f'{name} cannot form multi-node Modal clusters: they need '
                     f'{per_node} GPUs per node, and Modal offers at most '
@@ -268,13 +278,8 @@ class Modal(clouds.Cloud):
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
-        # Both modules import sky.clouds, so top-level imports here would be
-        # circular.
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import modal_catalog
-        from sky.provision.modal import modal_utils
         modal_gpu, modal_cpu, modal_memory = (
-            modal_catalog.get_modal_args_from_instance_type(
+            _modal_catalog().get_modal_args_from_instance_type(
                 resources.instance_type))
         modal_region = None
         if region.name != _AUTO_REGION:
@@ -324,14 +329,12 @@ class Modal(clouds.Cloud):
                                                 'modal'):
                 raise ValueError(
                     f'Invalid instance type: {resources.instance_type}')
-            # modal_catalog imports sky.clouds, so a top-level import here
-            # would be circular.
-            # pylint: disable=import-outside-toplevel
-            from sky.catalog import modal_catalog
-            if (not resources.use_spot and modal_catalog.is_gpu_instance_type(
-                    resources.instance_type)):
+            if (not resources.use_spot and
+                    _modal_catalog().is_gpu_instance_type(
+                        resources.instance_type)):
                 return resources_utils.FeasibleResources(
-                    [], [], modal_catalog.GPU_SPOT_ONLY_HINT)
+                    [], [],
+                    _modal_catalog().GPU_SPOT_ONLY_HINT)
             resources = resources.copy(accelerators=None,
                                        cpus=None,
                                        memory=None)
@@ -366,10 +369,9 @@ class Modal(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         if not resources.use_spot:
-            # pylint: disable=import-outside-toplevel
-            from sky.catalog import modal_catalog
             return resources_utils.FeasibleResources(
-                [], [], modal_catalog.GPU_SPOT_ONLY_HINT)
+                [], [],
+                _modal_catalog().GPU_SPOT_ONLY_HINT)
         acc, acc_count = list(accelerators.items())[0]
         (instance_list,
          fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(

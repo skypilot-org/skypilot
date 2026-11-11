@@ -1085,6 +1085,7 @@ def test_modal_run_instances_launches_function_call(monkeypatch):
                 'Gpu': 'H100',
                 'Cpu': 2.0,
                 'Memory': 16 * 1024,
+                'Nonpreemptible': False,
                 'Timeout': 24 * 60 * 60,
                 'DockerImage': 'ubuntu:22.04',
                 'ModalVolumes': [{
@@ -1166,16 +1167,6 @@ def test_modal_cpu_clusters_are_nonpreemptible(monkeypatch):
         'Memory': 1024,
         'Nonpreemptible': False
     })['nonpreemptible'] is False
-    # Clusters launched before spot was offered have no `Nonpreemptible`.
-    assert modal_instance._function_kwargs({
-        'Cpu': 2.0,
-        'Memory': 1024
-    })['nonpreemptible'] is True
-    assert modal_instance._function_kwargs({
-        'Cpu': 2.0,
-        'Memory': 1024,
-        'Gpu': 'T4'
-    })['nonpreemptible'] is False
 
 
 @pytest.mark.parametrize('modal_error,expected', [
@@ -1215,6 +1206,7 @@ def test_modal_run_instances_translates_account_errors(monkeypatch, modal_error,
                                          'Gpu': 'T4',
                                          'Cpu': 2.0,
                                          'Memory': 16 * 1024,
+                                         'Nonpreemptible': False,
                                          'Timeout': 24 * 60 * 60,
                                      }))
 
@@ -1526,6 +1518,55 @@ def test_modal_volume_usedby_matches_environment(monkeypatch,
                                                       if used else [])
 
 
+def test_modal_all_volumes_usedby_reads_the_clusters_once(monkeypatch):
+    """Not once per volume: the refresh covers every volume each cycle."""
+    reads = {'clusters': 0, 'yamls': 0}
+    handle = SimpleNamespace(
+        launched_resources=SimpleNamespace(cloud=clouds.Modal()),
+        cluster_yaml='/path/c.yaml')
+
+    def get_clusters():
+        reads['clusters'] += 1
+        return [{'name': 'c', 'handle': handle}]
+
+    def get_cluster_yaml_dict(path):
+        reads['yamls'] += 1
+        return {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'ModalVolumes': [{
+                            'VolumeNameOnCloud': 'v1',
+                            'EnvironmentName': 'dev'
+                        }]
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_clusters',
+                        get_clusters)
+    monkeypatch.setattr(modal_volume.global_user_state, 'get_cluster_yaml_dict',
+                        get_cluster_yaml_dict)
+    configs = [
+        models.VolumeConfig(name=name,
+                            type='modal-volume',
+                            cloud='modal',
+                            region=None,
+                            zone=None,
+                            name_on_cloud=name,
+                            size=None,
+                            config={'environment_name': 'dev'})
+        for name in ('v1', 'v2', 'v3')
+    ]
+
+    _, used_by_clusters, failed = modal_volume.get_all_volumes_usedby(configs)
+
+    assert used_by_clusters == {'v1': ['c'], 'v2': [], 'v3': []}
+    assert not failed
+    assert reads == {'clusters': 1, 'yamls': 1}
+
+
 def test_modal_volume_usedby_reads_cluster_yaml_by_path(monkeypatch):
     # Handles store the cluster YAML's path, not its contents.
     yamls = {
@@ -1620,8 +1661,10 @@ def test_modal_cloud_bucket_mount_specs():
     }]
 
 
-def test_modal_cloud_bucket_mount_uses_a_store_modal_can_mount():
+def test_modal_cloud_bucket_mount_uses_a_store_modal_can_mount(monkeypatch):
     """A storage with several stores: the first one Modal supports."""
+    monkeypatch.setenv('GOOGLE_ACCESS_KEY_ID', 'hmac-id')
+    monkeypatch.setenv('GOOGLE_ACCESS_KEY_SECRET', 'hmac-secret')
 
     class FakeStorage:
         mode = storage_lib.StorageMode.MOUNT
@@ -1642,9 +1685,41 @@ def test_modal_cloud_bucket_mount_uses_a_store_modal_can_mount():
     assert [(spec['StoreType'], spec['BucketName']) for spec in specs
            ] == [('GCS', 'gcs-bucket')]
 
-    FakeStorage.stores = {storage_lib.StoreType.AZURE: SimpleNamespace()}
-    with pytest.raises(exceptions.NotSupportedError, match='Got AZURE'):
+    # The mount needs credentials the API server can hand to Modal. Found
+    # out now, while the launch can still fail over, not in the provisioner.
+    monkeypatch.delenv('GOOGLE_ACCESS_KEY_SECRET')
+    with pytest.raises(exceptions.ResourcesUnavailableError,
+                       match='GCS mounts need HMAC credentials'):
         modal_utils.get_cloud_bucket_mount_specs({'/data': FakeStorage()})
+
+    FakeStorage.stores = {storage_lib.StoreType.AZURE: SimpleNamespace()}
+    with pytest.raises(exceptions.ResourcesUnavailableError, match='Got AZURE'):
+        modal_utils.get_cloud_bucket_mount_specs({'/data': FakeStorage()})
+
+
+@pytest.mark.parametrize('remote_identity,credentials,reason', [
+    ('LOCAL_CREDENTIALS', object(), None),
+    ('NO_UPLOAD', object(), 'must not be copied to a cluster'),
+    ('SERVICE_ACCOUNT', object(), 'must not be copied to a cluster'),
+    ('LOCAL_CREDENTIALS', None, 'no AWS credentials were found'),
+])
+def test_modal_s3_mount_respects_aws_remote_identity(monkeypatch,
+                                                     remote_identity,
+                                                     credentials, reason):
+    """An S3 mount copies the API server's AWS keys into a Modal Secret."""
+    monkeypatch.setattr(
+        modal_utils.skypilot_config, 'get_effective_region_config',
+        lambda cloud, region, keys, default_value: remote_identity)
+    monkeypatch.setattr(
+        modal_utils.aws, 'session',
+        lambda: SimpleNamespace(get_credentials=lambda: credentials))
+
+    # pylint: disable=protected-access
+    if reason is None:
+        modal_utils._check_bucket_mount_credentials('S3')
+    else:
+        with pytest.raises(exceptions.ResourcesUnavailableError, match=reason):
+            modal_utils._check_bucket_mount_credentials('S3')
 
 
 def test_modal_s3_mount_warns_about_temporary_credentials(monkeypatch):
@@ -1698,7 +1773,10 @@ def test_modal_cloud_bucket_mount_rejects_mount_cached():
 
     storage = SimpleNamespace(mode=storage_lib.StorageMode.MOUNT_CACHED)
 
-    with pytest.raises(exceptions.NotSupportedError, match='MOUNT_CACHED'):
+    # ResourcesUnavailableError, so the launch fails over to another cloud
+    # instead of aborting.
+    with pytest.raises(exceptions.ResourcesUnavailableError,
+                       match='MOUNT_CACHED'):
         modal_utils.get_cloud_bucket_mount_specs({'/bucket': storage})
 
 
@@ -1737,22 +1815,28 @@ def test_modal_get_image_from_registry(monkeypatch):
 class _FakeModal:
     """In-memory stand-in for the Modal Dict and FunctionCall APIs."""
 
-    class NotFoundError(Exception):
+    class Error(Exception):
+        """Base of modal's own errors, as modal.exception.Error."""
+
+    class NotFoundError(Error):
         pass
 
-    class RemoteError(Exception):
+    class RemoteError(Error):
         pass
 
-    class FunctionTimeoutError(Exception):
+    class FunctionTimeoutError(Error):
         pass
 
-    class OutputExpiredError(Exception):
+    class OutputExpiredError(Error):
         pass
 
-    class InternalFailure(Exception):
+    class InternalFailure(Error):
         pass
 
-    class ExecutionError(Exception):
+    class ExecutionError(Error):
+        pass
+
+    class ServiceError(Error):
         pass
 
     PENDING = 'pending'
@@ -1839,6 +1923,7 @@ class _FakeModal:
             call_graph=SimpleNamespace(InputStatus=SimpleNamespace(
                 PENDING=self.PENDING)),
             exception=SimpleNamespace(
+                Error=self.Error,
                 NotFoundError=self.NotFoundError,
                 RemoteError=self.RemoteError,
                 FunctionTimeoutError=self.FunctionTimeoutError,
@@ -1941,6 +2026,9 @@ def test_modal_get_cluster_state_propagates_api_errors(monkeypatch):
         # Modal lost the container, or the result cannot be unpickled here.
         (_FakeModal.InternalFailure('container lost'), False),
         (_FakeModal.ExecutionError('cannot deserialize'), False),
+        # The call's own exception, re-raised by modal: its container failed
+        # before the node ran, e.g. it could not unpickle the function.
+        (ModuleNotFoundError("No module named 'x'"), False),
     ])
 def test_modal_call_is_running(fake_modal, status, running):
     fake_modal.call_status['fc-1'] = status
@@ -1959,11 +2047,15 @@ def test_modal_cancel_call_ignores_a_call_modal_dropped(fake_modal):
         modal_utils.cancel_call('fc-2')
 
 
-def test_modal_call_is_running_propagates_api_errors(fake_modal):
+@pytest.mark.parametrize('api_error', [
+    _FakeModal.ServiceError('unavailable'),
+    ConnectionResetError('unavailable'),
+])
+def test_modal_call_is_running_propagates_api_errors(fake_modal, api_error):
     # A transient API error must not make SkyPilot drop a live cluster.
-    fake_modal.call_status['fc-1'] = RuntimeError('unavailable')
+    fake_modal.call_status['fc-1'] = api_error
 
-    with pytest.raises(RuntimeError, match='unavailable'):
+    with pytest.raises(type(api_error), match='unavailable'):
         modal_utils.call_is_running('fc-1')
 
 
@@ -2121,38 +2213,43 @@ def test_modal_node_returns_when_its_setup_fails(monkeypatch):
     assert result.startswith('The node failed: CalledProcessError')
 
 
-def test_modal_ssh_sessions_get_the_container_identity(tmp_path):
-    """skylet's autodown runs in an SSH session and must reach Modal."""
+def test_modal_ssh_sessions_get_the_container_environment(tmp_path):
+    """SSH sessions do not inherit it: skylet's autodown needs the
+    container's Modal identity, and commands need what the image sets."""
     # pylint: disable=protected-access
     profile = tmp_path / 'modal_container_env.sh'
     command = modal_utils._export_container_env_command(str(profile))
     assert modal_utils._export_container_env_command() in (
         modal_utils.get_ssh_start_command('ssh-ed25519 key'))
     env = {
-        'PATH': os.environ['PATH'],
+        'PATH': f'/opt/conda/bin:{os.environ["PATH"]}',
+        'HOME': '/container-home',
+        'PWD': '/container-cwd',
         'MODAL_IS_REMOTE': '1',
         'MODAL_TASK_ID': "ta-1 'quoted' $HOME",
-        'OTHER': 'x',
+        'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64',
+        'PYTHONPATH': '/pkg/:/root/',
     }
 
     subprocess.run(['bash', '-c', f'set -eux\n{command}'], check=True, env=env)
     shown = subprocess.run([
-        'bash', '-c', f'. {profile}; printf "%s|%s|%s" "$MODAL_IS_REMOTE" '
-        '"$MODAL_TASK_ID" "${OTHER-unset}"'
+        'bash', '-c', f'. {profile}; printf "%s|%s|%s|%s|%s" '
+        '"$MODAL_IS_REMOTE" "$MODAL_TASK_ID" "$LD_LIBRARY_PATH" '
+        '"${PATH%%:*}" "$HOME"'
     ],
                            check=True,
                            env={
-                               'PATH': os.environ['PATH']
+                               'PATH': os.environ['PATH'],
+                               'HOME': '/session-home'
                            },
                            capture_output=True,
                            text=True).stdout
-    assert shown == "1|ta-1 'quoted' $HOME|unset"
-
-    # No Modal variables (never the case in a container): still succeeds.
-    subprocess.run(['bash', '-c', f'set -eux\n{command}'],
-                   check=True,
-                   env={'PATH': os.environ['PATH']})
-    assert profile.read_text() == ''
+    # The session's own HOME (and PWD, ...) is not overwritten.
+    assert shown == ("1|ta-1 'quoted' $HOME|/usr/local/nvidia/lib64|"
+                     '/opt/conda/bin|/session-home')
+    assert 'PWD=' not in profile.read_text()
+    # Modal's client library is for the container's own Python only.
+    assert 'declare -x PYTHONPATH="/root/"' in profile.read_text()
 
 
 def test_modal_wait_for_nodes(fake_modal, monkeypatch):

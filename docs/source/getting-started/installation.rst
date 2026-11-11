@@ -1276,63 +1276,14 @@ Current limitations:
   mount when they expire; use long-lived credentials for clusters that outlive
   them.
 - Modal GCS bucket mounts require HMAC credentials in
-  ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``.
+  ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``, set in the
+  environment of the API server (not of the client). All GCS mounts use them.
+- Bucket mounts give Modal a copy of the API server's bucket credentials. S3
+  mounts are therefore refused when ``aws.remote_identity`` is not
+  ``LOCAL_CREDENTIALS``.
 - Docker images are supported through public registry image references such as
   ``image_id: docker:ubuntu:22.04``. Private registry credentials are not wired
   through Modal Secrets yet.
-
-Together AI |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
-
-1. Install the necessary dependencies for Kubernetes.
-
-.. tab-set::
-  .. tab-item:: uv venv
-    :sync: uv-venv-tab
-
-    .. code-block:: shell
-
-      # SkyPilot requires 3.7 <= python <= 3.13.
-      # From stable release
-      uv pip install "skypilot[kubernetes]"
-      # From nightly build
-      uv pip install "skypilot-nightly[kubernetes]"
-
-  .. tab-item:: uv tool
-    :sync: uv-tool-tab
-
-    .. code-block:: shell
-
-      # SkyPilot requires 3.7 <= python <= 3.13.
-      # From stable release
-      uv tool install --with pip "skypilot[kubernetes]"
-      # From nightly build
-      uv tool install --with pip "skypilot-nightly[kubernetes]"
-
-  .. tab-item:: pip
-    :sync: pip-tab
-
-    .. code-block:: shell
-
-      # SkyPilot requires 3.7 <= python <= 3.13.
-      # From stable release
-      pip install "skypilot[kubernetes]"
-      # From nightly build
-      pip install "skypilot-nightly[kubernetes]"
-      # From source
-      pip install -e ".[kubernetes]"
-
-2. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
-3. Get the Kubernetes config for the cluster
-4. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
-5. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
-
-.. code-block:: shell
-
-  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
-
 
 Paperspace |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

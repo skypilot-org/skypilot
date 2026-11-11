@@ -28,17 +28,23 @@ def _environment_name(
     return (provider_config or {}).get('environment_name')
 
 
+def _is_running(state: Optional[Dict[str, Any]]) -> bool:
+    """Whether a cluster state (see `get_cluster_state`) is of a live cluster.
+
+    `preempted` is checked first: Modal reran a node on a fresh container,
+    so the cluster is gone even if the call is still running.
+    """
+    return (state is not None and not state['preempted'] and
+            modal_utils.call_is_running(state['call_id']))
+
+
 def _running_cluster_state(
         cluster_name_on_cloud: str,
         environment_name: Optional[str]) -> Optional[Dict[str, Any]]:
     """The cluster's state if its Function call is still running."""
     state = modal_utils.get_cluster_state(cluster_name_on_cloud,
                                           environment_name)
-    if state is None or state['preempted']:
-        return None
-    if not modal_utils.call_is_running(state['call_id']):
-        return None
-    return state
+    return state if _is_running(state) else None
 
 
 def _function_kwargs(node_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,9 +68,8 @@ def _function_kwargs(node_config: Dict[str, Any]) -> Dict[str, Any]:
         'volumes': volumes,
         # On-demand clusters run non-preemptible, at 3x the CPU and memory
         # list price. Modal has that for CPU Functions only, so GPU clusters
-        # are always spot. Clusters launched before spot was offered have no
-        # `Nonpreemptible`: CPU-only ones were non-preemptible.
-        'nonpreemptible': node_config.get('Nonpreemptible', gpu is None),
+        # are always spot.
+        'nonpreemptible': node_config['Nonpreemptible'],
     }
 
 
@@ -85,8 +90,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     environment_name = _environment_name(config.provider_config)
     state = modal_utils.get_cluster_state(cluster_name_on_cloud,
                                           environment_name)
-    running = (state is not None and not state['preempted'] and
-               modal_utils.call_is_running(state['call_id']))
+    running = _is_running(state)
     if state is not None and not running:
         # launch_cluster() replaces the state, the only handle on the old
         # call. That call can still be running behind `preempted` (the other
@@ -237,8 +241,7 @@ def query_instances(
                                           environment_name)
     if state is None:
         return {}
-    running = (not state['preempted'] and
-               modal_utils.call_is_running(state['call_id']))
+    running = _is_running(state)
     if not running:
         # The cluster cannot come back. A status refresh drops it without
         # calling terminate_instances(), so clean up here.

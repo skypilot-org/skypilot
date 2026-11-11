@@ -9,11 +9,13 @@ import urllib.parse
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
 from sky.skylet import constants
+from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
 
@@ -50,6 +52,43 @@ def get_image(docker_image: Optional[str] = None):
         image = modal_adaptor.modal.Image.from_registry(
             docker_image, add_python=_IMAGE_PYTHON_VERSION)
     return image.apt_install(*_IMAGE_SYSTEM_PACKAGES)
+
+
+def _check_bucket_mount_credentials(store_type: str) -> None:
+    """Whether the credentials a CloudBucketMount needs can be given to Modal.
+
+    Modal mounts a bucket with credentials from a Modal Secret, which
+    SkyPilot fills from the API server's own. Checked when the mount is
+    planned, so the launch can fail over to another cloud.
+
+    Raises:
+        exceptions.ResourcesUnavailableError: they are missing, or must not
+            leave the API server.
+    """
+    reason = None
+    if store_type == 'S3':
+        remote_identity = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=None,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('aws'))
+        local_credentials = (
+            schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value)
+        if remote_identity != local_credentials:
+            reason = ('`aws.remote_identity` is not LOCAL_CREDENTIALS, so the '
+                      'AWS credentials must not be copied to a cluster.')
+        elif aws.session().get_credentials() is None:
+            reason = 'no AWS credentials were found.'
+    elif store_type == 'GCS':
+        if not (os.environ.get(_GCS_HMAC_ACCESS_KEY_ENV_VAR) and
+                os.environ.get(_GCS_HMAC_SECRET_KEY_ENV_VAR)):
+            reason = ('GCS mounts need HMAC credentials in '
+                      f'{_GCS_HMAC_ACCESS_KEY_ENV_VAR} and '
+                      f'{_GCS_HMAC_SECRET_KEY_ENV_VAR}, set for the API '
+                      'server.')
+    if reason is not None:
+        raise exceptions.ResourcesUnavailableError(
+            f'Cannot mount a {store_type} bucket on Modal: {reason}')
 
 
 def _get_s3_secret(region: Optional[str]):
@@ -144,6 +183,12 @@ def get_cloud_bucket_mount_specs(storage_mounts: Optional[Dict[str, Any]],
 
     They go into the cluster config (`CloudBucketMounts`), since Modal mounts
     buckets when the Function is launched.
+
+    Raises:
+        exceptions.ResourcesUnavailableError: Modal cannot mount one of them.
+            Not NotSupportedError: this is called while the cluster config
+            is written, where it would abort the launch instead of letting
+            it fail over to another cloud.
     """
     if not storage_mounts:
         return []
@@ -154,7 +199,7 @@ def get_cloud_bucket_mount_specs(storage_mounts: Optional[Dict[str, Any]],
         if mode == 'COPY':
             continue
         if mode == 'MOUNT_CACHED':
-            raise exceptions.NotSupportedError(
+            raise exceptions.ResourcesUnavailableError(
                 'Modal CloudBucketMounts support storage mode MOUNT, but not '
                 'MOUNT_CACHED.')
         if mode != 'MOUNT':
@@ -175,9 +220,10 @@ def get_cloud_bucket_mount_specs(storage_mounts: Optional[Dict[str, Any]],
         store_type_value = next(
             (name for name in stores if name in supported_store_types), None)
         if store_type_value is None:
-            raise exceptions.NotSupportedError(
+            raise exceptions.ResourcesUnavailableError(
                 'Modal CloudBucketMounts currently support S3, R2, and GCS '
                 f'storage mounts. Got {", ".join(stores)}.')
+        _check_bucket_mount_credentials(store_type_value)
         store = stores[store_type_value]
         if store is None:
             raise exceptions.StorageExternalDeletionError(
@@ -231,18 +277,29 @@ def get_cloud_bucket_mounts(
 
 def _export_container_env_command(
         profile_path: str = _CONTAINER_ENV_PROFILE) -> str:
-    """Shell command that gives login shells the container's Modal variables.
+    """Shell command that gives login shells the container's environment.
 
-    An SSH session does not inherit the container's environment, and with it
-    the identity Modal gives the container. With these variables the modal
-    SDK in a session authenticates as the container, like code in any Modal
-    Function. Autodown relies on it: skylet runs in such a session and has to
-    cancel the cluster's call. The API server's own token is not needed on
-    the cluster for that, and is not uploaded to it (`remote_identity`
-    defaults to NO_UPLOAD for Modal).
+    An SSH session does not inherit it. Two things are lost without it:
+
+    - what the image sets (Docker `ENV`: PATH, LD_LIBRARY_PATH, CUDA
+      variables, ...), so setup and run commands would not see the image as
+      `docker run` does. RunPod and Kubernetes export it the same way.
+    - the identity Modal gives the container (its `MODAL_*` variables). With
+      them the modal SDK in a session authenticates as the container, like
+      code in any Modal Function. Autodown relies on it: skylet runs in such
+      a session and has to cancel the cluster's call. The API server's own
+      token is not needed on the cluster for that, and is not uploaded to it
+      (`remote_identity` defaults to NO_UPLOAD for Modal).
+
+    Left out: the variables that describe the exporting shell itself, and
+    `/pkg/` on PYTHONPATH. That is Modal's client library for the
+    container's own Python, and would shadow packages of the SkyPilot
+    runtime and of the user's environment, which run other Pythons.
     """
-    return ("{ export -p | grep '^declare -x MODAL_' || true; } > "
-            f'{shlex.quote(profile_path)}')
+    shell_variables = shlex.quote('^declare -x (PWD|OLDPWD|SHLVL|HOME|TERM|_)=')
+    drop_pkg = shlex.quote('/^declare -x PYTHONPATH=/ s#/pkg/?:?##')
+    return (f'{{ export -p | grep -v -E {shell_variables} | '
+            f'sed -E {drop_pkg} || true; }} > {shlex.quote(profile_path)}')
 
 
 def get_ssh_start_command(public_key: str) -> str:
@@ -402,10 +459,13 @@ def call_is_running(call_id: str) -> bool:
     The call graph is not used, because Modal keeps reporting a finished
     call's input as pending and drops old inputs altogether.
 
-    A node never raises on its own (see `_make_node_function`), so an
-    exception other than the ones listed is an API error. It propagates
-    instead of being guessed at, so a transient failure cannot make SkyPilot
-    treat a live cluster as terminated.
+    Anything else `get` raises is one of two things. Modal's own errors and
+    transport errors are API errors: they propagate, so a transient failure
+    cannot make SkyPilot treat a live cluster as terminated. Any other
+    exception is the call's own, which Modal re-raises here: the node does
+    not raise (see `_make_node_function`), but its container can fail
+    before the node runs, e.g. when the function cannot be unpickled on a
+    custom image. The call has ended then.
     """
     modal = modal_adaptor.modal
     ended_errors = (
@@ -427,6 +487,14 @@ def call_is_running(call_id: str) -> bool:
     except TimeoutError:
         return True
     except ended_errors:
+        return False
+    except (modal.exception.Error, OSError):
+        raise
+    except Exception as e:  # pylint: disable=broad-except
+        if type(e).__module__.split('.', maxsplit=1)[0] == 'grpclib':
+            raise
+        logger.debug(f'Modal Function call {call_id} ended with '
+                     f'{type(e).__name__}: {e}')
         return False
     return False
 

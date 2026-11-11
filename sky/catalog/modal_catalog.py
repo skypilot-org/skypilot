@@ -20,14 +20,17 @@ on-demand runs non-preemptible, at the non-preemptible rate.
 import ast
 import math
 import re
+import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
 from sky.catalog import common
-from sky.clouds import cloud
 from sky.utils import resources_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky.clouds import cloud
 
 _CLOUD_NAME = 'modal'
 _DISPLAY_NAME = 'Modal'
@@ -215,8 +218,9 @@ class _RegionPrices:
         self._gpus: Dict[Tuple[str, int], float] = {}
         for row in region_rows.itertuples(index=False):
             if pd.notna(row.AcceleratorName):
-                # Catalogs fetched before GPUs became spot only have the
-                # price in `Price`.
+                # The hosted modal/vms.csv was published with GPU prices in
+                # `Price`, and stays so until its daily workflow reruns the
+                # fetcher from a SkyPilot that has this change.
                 price = row.SpotPrice if pd.notna(row.SpotPrice) else row.Price
                 self._gpus[(row.AcceleratorName,
                             int(row.AcceleratorCount))] = float(price)
@@ -427,7 +431,7 @@ def get_instance_type_for_accelerator(
 
 
 def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+                                       use_spot: bool) -> List['cloud.Region']:
     instance = ModalInstanceType.from_instance_type(instance_type)
     if _is_gpu(instance) and not use_spot:
         return []
@@ -464,7 +468,7 @@ def get_accelerator_hourly_cost(accelerator: str,
 def get_region_zones_for_accelerators(
         accelerator: str,
         count: int,
-        use_spot: bool = False) -> List[cloud.Region]:
+        use_spot: bool = False) -> List['cloud.Region']:
     if not use_spot or not _accelerator_offered(accelerator, count,
                                                 region=None):
         return []
@@ -572,7 +576,7 @@ def list_accelerators(
                                          all_regions)
 
 
-def regions() -> List[cloud.Region]:
+def regions() -> List['cloud.Region']:
     # Cheapest first, so `auto` precedes the broad and narrow regions. Every
     # region has every shape, so the spot prices (which all shapes have)
     # order them.
