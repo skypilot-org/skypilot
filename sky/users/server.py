@@ -598,7 +598,8 @@ def user_batch_update(request: fastapi.Request,
         resolver = user_resolver.UserResolver()
         all_users_map = resolver.id_to_user
         batch_workspaces = resource_checker.load_fresh_workspaces()
-        batch_resources = resource_checker.ResourceSnapshot.fetch_all()
+        batch_resources = resource_checker.ResourceSnapshot.fetch_for_users(
+            list(user_ids))
         # Pre-resolve each private workspace's allowed_users -> user_id
         # set ONCE for the batch. Without this, check_user_role_demotion
         # iterates private workspaces and calls get_workspace_users for

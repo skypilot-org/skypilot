@@ -127,7 +127,7 @@ class TestUserBatchUpdate:
             server.user_batch_update(admin_request, body)
         assert exc_info.value.status_code == 400
 
-    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_for_users',
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
@@ -172,7 +172,7 @@ class TestUserBatchUpdate:
         },
                                                   existing_users_only=True)
 
-    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_for_users',
                 return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})

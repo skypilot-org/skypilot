@@ -233,7 +233,7 @@ def test_get_volume_owners_skips_the_handle(isolated_database):
     assert [(o['name'], o['workspace']) for o in owners] == [('vol-a', 'ws-a')]
     assert set(owners[0]) == {'name', 'workspace', 'user_hash'}
     # And the workspace check's volume lister goes through it.
-    assert [v['name'] for v in resource_checker._list_volumes(['ws-a'])
+    assert [v['name'] for v in resource_checker._list_volumes(['ws-a'], None)
            ] == ['vol-a']
 
 

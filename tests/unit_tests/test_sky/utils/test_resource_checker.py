@@ -776,12 +776,13 @@ class TestRegisteredListers:
     @staticmethod
     def _register(kind, rows, calls=None):
 
-        def lister(workspace_names):
+        def lister(workspace_names, user_hashes):
             if calls is not None:
-                calls.append(workspace_names)
+                calls.append((workspace_names, user_hashes))
             return [
                 r for r in rows
-                if workspace_names is None or r['workspace'] in workspace_names
+                if (workspace_names is None or r['workspace'] in workspace_names
+                   ) and (user_hashes is None or r['user_hash'] in user_hashes)
             ]
 
         resource_checker.register_active_resource_lister(kind, lister)
@@ -794,8 +795,8 @@ class TestRegisteredListers:
         request_var = contextvars.ContextVar('request_var', default='server')
         seen = []
         resource_checker.register_active_resource_lister(
-            'endpoint',
-            lambda workspace_names: seen.append(request_var.get()) or [])
+            'endpoint', lambda workspace_names, user_hashes: seen.append(
+                request_var.get()) or [])
         token = request_var.set('request')
         try:
             resource_checker._get_active_resources(['ws-a'])
@@ -823,7 +824,7 @@ class TestRegisteredListers:
             "Cannot delete workspace 'ws-a' because it has 1 active "
             'endpoint(s): e1. Please terminate these resources first.')
         # One fetch, scoped to the checked workspace, clusters included.
-        assert calls == [['ws-a']]
+        assert calls == [(['ws-a'], None)]
         assert mock_get_clusters.call_args.kwargs['workspaces_filter'] == {
             'ws-a'
         }
@@ -865,7 +866,7 @@ class TestRegisteredListers:
                 return_value=[])
     def test_lister_failure_refuses_the_change(self, _):
 
-        def broken(workspace_names):
+        def broken(workspace_names, user_hashes):
             raise RuntimeError('db down')
 
         resource_checker.register_active_resource_lister('sandbox', broken)
@@ -916,7 +917,8 @@ class TestRegisteredListers:
         with pytest.raises(ValueError, match=r'1 active devspace\(s\): d1'):
             resource_checker.check_no_active_resources_for_users([('bob',
                                                                    'delete')])
-        assert calls == [None]
+        # Every workspace, but only the deleted user's rows.
+        assert calls == [(None, ['bob'])]
         resource_checker.check_no_active_resources_for_users([('alice',
                                                                'delete')])
 
@@ -985,9 +987,11 @@ class TestBuiltinListers:
     def test_volumes_skip_ephemeral_and_filter_workspaces(self, mock_get):
         rows = [{'name': 'v1', 'workspace': 'ws-a', 'user_hash': 'alice'}]
         mock_get.return_value = rows
-        assert resource_checker._list_volumes(['ws-a']) == rows
+        assert resource_checker._list_volumes(['ws-a'], None) == rows
         mock_get.assert_called_once_with(is_ephemeral=False,
                                          workspaces_filter={'ws-a'})
+        assert resource_checker._list_volumes(['ws-a'], ['bob']) == []
+        assert resource_checker._list_volumes(['ws-a'], ['alice']) == rows
 
     @pytest.mark.parametrize('pool', [False, True])
     @mock.patch(
@@ -1010,13 +1014,15 @@ class TestBuiltinListers:
         lister = resource_checker._service_lister(pool=pool)
 
         mock_consolidated.return_value = False
-        assert lister(['ws-a']) == []
+        assert lister(['ws-a'], None) == []
         mock_get.assert_not_called()
 
         mock_consolidated.return_value = True
-        assert [s['name'] for s in lister(['ws-a'])
+        assert [s['name'] for s in lister(['ws-a'], None)
                ] == (['pl'] if pool else ['svc'])
         mock_get.assert_called_once_with({'ws-a'})
+        assert lister(['ws-a'], ['bob']) == []
+        assert len(lister(['ws-a'], ['a'])) == 1
         mock_consolidated.assert_called_with(pool=pool)
 
     def test_builtins_are_registered(self):

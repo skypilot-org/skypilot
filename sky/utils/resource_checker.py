@@ -18,9 +18,11 @@ logger = sky_logging.init_logger(__name__)
 
 _Rows = List[Dict[str, Any]]
 
-# Lists live resources of one kind in the given workspace ids (every workspace
-# when None), as dicts with 'name', 'workspace' (an id) and 'user_hash'.
-ActiveResourceLister = Callable[[Optional[List[str]]], List[Dict[str, Any]]]
+# Lists live resources of one kind in the given workspace ids, owned by the
+# given user hashes (no filter when None), as dicts with 'name', 'workspace'
+# (an id) and 'user_hash'.
+ActiveResourceLister = Callable[[Optional[List[str]], Optional[List[str]]],
+                                List[Dict[str, Any]]]
 # Kind shown in messages ('volume', 'endpoint', ...) -> lister.
 _ACTIVE_RESOURCE_LISTERS: Dict[str, ActiveResourceLister] = {}
 # Serve replicas, pool workers and managed-job clusters.
@@ -93,8 +95,9 @@ def check_no_active_resources_for_users(
     def filter_by_user(user_id: str):
         return lambda resource: resource.get('user_hash') == user_id
 
-    _check_active_resources(user_operations, filter_by_user, 'user',
-                            ResourceSnapshot.fetch_all())
+    _check_active_resources(
+        user_operations, filter_by_user, 'user',
+        ResourceSnapshot.fetch_for_users([u for u, _ in user_operations]))
 
 
 def check_no_active_resources_for_workspaces(
@@ -327,9 +330,9 @@ class ResourceSnapshot:
                                                 ...]]] = None
 
     @classmethod
-    def fetch_all(cls) -> 'ResourceSnapshot':
-        """Fetch all active resources from the DB / controller."""
-        return cls(*_get_active_resources())
+    def fetch_for_users(cls, user_ids: List[str]) -> 'ResourceSnapshot':
+        """Fetch active resources; the listers return only these users'."""
+        return cls(*_get_active_resources(user_hashes=user_ids))
 
     @classmethod
     def fetch_for_workspaces(cls,
@@ -447,7 +450,7 @@ def check_user_role_demotion(
             caller should fetch this once and pass it in to avoid the
             per-call ``safe_reload_config`` + YAML read overhead.
         resources: Optional shared ``ResourceSnapshot``. Batch callers
-            should build one ``ResourceSnapshot.fetch_all()`` at the top
+            should build one ``ResourceSnapshot.fetch_for_users()`` at the top
             of the operation and pass it through, so the per-user lookup
             is O(1) (via the snapshot's user index) instead of an
             O(C+J) scan per user. When not provided, a transient
@@ -505,7 +508,7 @@ def check_user_role_demotion(
     # per-user index. Build a transient snapshot for the single-user
     # path; batch callers pass a shared one.
     if resources is None:
-        resources = ResourceSnapshot.fetch_all()
+        resources = ResourceSnapshot.fetch_for_users([user_id])
     user_resources = resources.for_user(user_id)
 
     workspace_set = set(inaccessible_workspaces)
@@ -537,17 +540,22 @@ def check_user_role_demotion(
         'to the allowed_users of those workspaces first.')
 
 
-def _list_volumes(workspace_names: Optional[List[str]]) -> List[Dict[str, Any]]:
+def _list_volumes(workspace_names: Optional[List[str]],
+                  user_hashes: Optional[List[str]]) -> List[Dict[str, Any]]:
     # Ephemeral volumes belong to a cluster, which is counted already.
-    return global_user_state.get_volume_owners(
+    volumes = global_user_state.get_volume_owners(
         is_ephemeral=False,
         workspaces_filter=(set(workspace_names)
                            if workspace_names is not None else None))
+    if user_hashes is None:
+        return volumes
+    return [v for v in volumes if v['user_hash'] in user_hashes]
 
 
 def _service_lister(pool: bool) -> ActiveResourceLister:
 
-    def lister(workspace_names: Optional[List[str]]) -> List[Dict[str, Any]]:
+    def lister(workspace_names: Optional[List[str]],
+               user_hashes: Optional[List[str]]) -> List[Dict[str, Any]]:
         # Only a consolidated controller's services table is local. Elsewhere
         # the services, and their replica and worker clusters, live in the
         # controller's own DB and are not checked.
@@ -555,7 +563,10 @@ def _service_lister(pool: bool) -> ActiveResourceLister:
             return []
         services = serve_state.get_live_services_in_workspaces(
             set(workspace_names) if workspace_names is not None else None)
-        return [s for s in services if s['pool'] == pool]
+        return [
+            s for s in services if s['pool'] == pool and
+            (user_hashes is None or s['user_hash'] in user_hashes)
+        ]
 
     return lister
 
@@ -566,7 +577,8 @@ register_active_resource_lister('pool', _service_lister(pool=True))
 
 
 def _get_active_resources(
-    workspace_names: Optional[List[str]] = None
+    workspace_names: Optional[List[str]] = None,
+    user_hashes: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Get all active clusters, managed jobs and other resources.
 
@@ -574,6 +586,8 @@ def _get_active_resources(
         workspace_names: If given, clusters and the registered listers are
             limited to these workspaces. Managed jobs are always fetched
             whole.
+        user_hashes: If given, the registered listers return only these
+            users' resources. Clusters and managed jobs are not narrowed.
 
     Returns:
         all_clusters: List[Dict[str, Any]], clusters not launched by a
@@ -610,7 +624,7 @@ def _get_active_resources(
         others: List[Dict[str, Any]] = []
         for kind, lister in list(_ACTIVE_RESOURCE_LISTERS.items()):
             try:
-                resources = lister(workspace_names)
+                resources = lister(workspace_names, user_hashes)
             except Exception as e:  # pylint: disable=broad-except
                 raise ValueError(f'Could not check for active {kind}(s): '
                                  f'{common_utils.format_exception(e)}') from e
