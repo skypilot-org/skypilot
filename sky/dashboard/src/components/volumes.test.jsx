@@ -25,6 +25,7 @@ jest.mock('@/hooks/useWorkspacesConfig', () => {
       workspacesConfig: mockWorkspaces.config,
       isWorkspaceWritable: (ws) =>
         mockWorkspaces.config[ws || 'default']?.writable !== false,
+      loaded: true,
     }),
   };
 });
@@ -456,8 +457,9 @@ describe('VolumesTable workspace column', () => {
     const deleteButton = (name) =>
       Array.from(container.querySelectorAll('table tbody tr'))
         .find((row) => row.textContent.includes(name))
-        .querySelector('button[class*="text-red-600"]');
+        .querySelector('button[title="Delete volume"]');
     expect(deleteButton('vol-a').disabled).toBe(false);
     expect(deleteButton('vol-b').disabled).toBe(true);
+    expect(deleteButton('vol-b').closest('span').title).toMatch(/Read-only/);
   });
 });

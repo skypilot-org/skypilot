@@ -23,6 +23,7 @@ jest.mock('@/hooks/useWorkspacesConfig', () => {
       workspacesConfig: mockWorkspaces.config,
       isWorkspaceWritable: (ws) =>
         mockWorkspaces.config[ws || 'default']?.writable !== false,
+      loaded: true,
     }),
   };
 });
@@ -47,6 +48,11 @@ import {
 import dashboardCache from '@/lib/cache';
 import { VolumesTable } from '@/components/volumes';
 
+// Workspace ids that share nothing with their names, so a filter can only
+// match on the name.
+const WORKSPACE_IDS = { 'team-a': 'ws-1', 'team-b': 'ws-2' };
+mockWorkspaces.config = { 'ws-2': { name: 'team-b' } };
+
 const volume = (name, status, user = 'alice', workspace = 'team-a') => ({
   name,
   status,
@@ -55,8 +61,9 @@ const volume = (name, status, user = 'alice', workspace = 'team-a') => ({
   infra: 'Kubernetes/ctx',
   size: 1,
   user_name: user,
-  workspace: `${workspace}-id`,
-  workspace_name: workspace,
+  workspace: WORKSPACE_IDS[workspace],
+  // An older server sends no name: the table looks it up by id.
+  ...(workspace === 'team-b' ? {} : { workspace_name: workspace }),
 });
 
 // The real VolumeStatus values. The shared `evaluateCondition` matches on

@@ -538,7 +538,8 @@ export function VolumesTable({
   const [data, setData] = useState([]);
   // Names for the Workspace column, and which workspaces the user may delete
   // volumes from.
-  const { isWorkspaceWritable, workspacesConfig } = useWorkspacesConfig();
+  const { isWorkspaceWritable, workspacesConfig, loaded } =
+    useWorkspacesConfig();
   // Rows carry the workspace name, which filters and sorting go by; older
   // servers send only the id.
   const rows = useMemo(
@@ -937,14 +938,16 @@ export function VolumesTable({
         // The server refuses to delete a volume in a workspace the user can
         // only read.
         const writable = isWorkspaceWritable(volume.workspace);
+        // Until the workspaces load, delete is disabled without a reason.
+        const readOnly = loaded && !writable;
         return (
           <TableCell>
-            {/* On a wrapper: a disabled button shows no tooltip. */}
+            {/* Also on a wrapper: a disabled button shows no tooltip. */}
             <span
               title={
-                writable
-                  ? 'Delete volume'
-                  : 'Read-only: you are not a member of this volume’s workspace'
+                readOnly
+                  ? 'Read-only: you are not a member of this volume’s workspace'
+                  : undefined
               }
             >
               <Button
@@ -953,6 +956,8 @@ export function VolumesTable({
                 onClick={() => onDeleteVolume(volume)}
                 disabled={!writable}
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                title="Delete volume"
+                aria-label="Delete volume"
               >
                 <Trash2Icon className="w-4 h-4" />
               </Button>
