@@ -100,6 +100,22 @@ class TestSequentialReads:
         assert first is second
         assert get_nested.call_count == 1
 
+    def test_alternating_configs_stay_cached(self):
+        # Jobs that run at once switch between their configs on every
+        # lookup; each config must keep its own entry instead of evicting
+        # the others.
+        configs = [_config(f'ws-{i}') for i in range(3)]
+        for _ in range(5):
+            for i, config in enumerate(configs):
+                skypilot_config._set_loaded_config(config)
+                assert f'ws-{i}' in workspaces_core._load_workspaces()
+                workspaces_core.workspaces_for_user('u')
+        # One miss for each config, however many switches.
+        assert (workspaces_core._load_workspaces_for_config.cache_info().misses
+                == len(configs))
+        assert (workspaces_core._workspaces_for_user_and_config.cache_info().
+                misses == len(configs))
+
     def test_workspaces_for_user_follows_the_config(self):
         skypilot_config._set_loaded_config(_config('old'))
         assert 'new' not in workspaces_core.workspaces_for_user('u')

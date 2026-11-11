@@ -98,7 +98,14 @@ def _load_workspaces() -> Dict[str, Any]:
 # key kept the workspaces of whichever job filled it first. A job in a
 # workspace created after that then had its own cluster filtered out of
 # lookups.
-@annotations.lru_cache(scope='request', maxsize=1)
+#
+# The size covers the jobs that run at once in one controller: each holds its
+# own config object, and a one-entry cache would evict on every switch between
+# them. Entries keep their config alive, so the size also bounds that memory.
+_CONFIG_CACHE_SIZE = 64
+
+
+@annotations.lru_cache(scope='request', maxsize=_CONFIG_CACHE_SIZE)
 def _load_workspaces_for_config(
         config_key: skypilot_config.LoadedConfigKey) -> Dict[str, Any]:
     del config_key  # Only the cache key; the config is read below.
@@ -1451,7 +1458,7 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
 
 # Keyed on the loaded config for the reason given at
 # `_load_workspaces_for_config`.
-@annotations.lru_cache(scope='request', maxsize=1)
+@annotations.lru_cache(scope='request', maxsize=_CONFIG_CACHE_SIZE)
 def _workspaces_for_user_and_config(
         user_id: str,
         config_key: skypilot_config.LoadedConfigKey) -> Dict[str, Any]:
