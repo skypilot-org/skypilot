@@ -169,6 +169,45 @@ def test_on_demand_executor_prestart():
         executor.shutdown()
 
 
+def test_on_demand_executor_queue_when_full():
+    executor = OnDemandThreadExecutor(name='test',
+                                      max_workers=2,
+                                      queue_when_full=True)
+    release_event = threading.Event()
+    try:
+        futs = [executor.submit(blocking_task, release_event) for _ in range(5)]
+        assert len(executor._threads) == 2
+        assert not any(f.done() for f in futs)
+        release_event.set()
+        assert all(f.result(timeout=5) for f in futs)
+        assert len(executor._threads) == 2
+        assert executor.running.get() == 0
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
+def test_on_demand_executor_skips_cancelled_queued_task():
+    executor = OnDemandThreadExecutor(name='test',
+                                      max_workers=1,
+                                      queue_when_full=True)
+    release_event = threading.Event()
+    ran = threading.Event()
+    try:
+        first = executor.submit(blocking_task, release_event)
+        queued = executor.submit(ran.set)
+        assert queued.cancel()
+        release_event.set()
+        assert first.result(timeout=5) is True
+        # Runs after the cancelled task in FIFO order.
+        assert executor.submit(dummy_task, 0).result(timeout=5) is True
+        assert not ran.is_set()
+        assert executor.running.get() == 0
+    finally:
+        release_event.set()
+        executor.shutdown()
+
+
 def test_on_demand_executor_asyncio_cancel_while_running():
     executor = OnDemandThreadExecutor(name='test', max_workers=1)
     started = threading.Event()
@@ -294,6 +333,11 @@ def test_on_demand_executor_metrics(monkeypatch):
 
         f1 = executor.submit(blocking_task, release_event)
         f2 = executor.submit(blocking_task, release_event)
+        # Counted once a thread starts running the task.
+        deadline = time.time() + 5
+        while (_gauge_value('sky_apiserver_threads_active', name) < 2 and
+               time.time() < deadline):
+            time.sleep(0.01)
         assert _gauge_value('sky_apiserver_threads_active', name) == 2
 
         with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):

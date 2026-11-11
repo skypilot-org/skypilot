@@ -257,9 +257,10 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the auth thread executor for current process.
 
     For short, latency-sensitive work on the request hot path -- primarily the
-    DB lookups done by authentication middleware. Do not submit long-running or
-    streaming work here; that belongs in ``get_request_thread_executor()``,
-    whose exhaustion must not be able to lock users out.
+    DB lookups done by authentication middleware. A lookup that finds every
+    thread busy waits for one; callers bound the wait with a deadline. Do not
+    submit long-running or streaming work here; that belongs in
+    ``get_request_thread_executor()``.
     """
     global _AUTH_THREAD_EXECUTOR
     if _AUTH_THREAD_EXECUTOR is not None:
@@ -267,7 +268,9 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
     with _AUTH_THREAD_EXECUTOR_LOCK:
         if _AUTH_THREAD_EXECUTOR is None:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
-                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+                name='auth_thread_executor',
+                max_workers=_AUTH_THREADS_LIMIT,
+                queue_when_full=True)
         return _AUTH_THREAD_EXECUTOR
 
 

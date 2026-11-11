@@ -87,21 +87,24 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
     Threads are daemons so that long-running tasks (e.g. log streaming) do
     not block interpreter exit.
 
-    Note(dev):
-    We raise an error instead of queuing the request if the limit is reached, so
-    that:
+    When max_workers tasks are running, submit() raises
+    ConcurrentWorkerExhaustedError by default, so that:
     1. the request might be handled by other processes that have idle workers
        upon retry;
     2. if not, then users can be clearly hinted that they need to scale the API
        server to support higher concurrency.
-    So this executor is only suitable for carefully selected cases where the
-    error can be properly handled by caller. To make this executor general, we
-    need to support configuring the queuing behavior (exception or queueing).
+    With queue_when_full, the task waits for a free thread instead; callers
+    bound the wait, e.g. with asyncio.wait_for. A task whose future is
+    cancelled before a thread picks it up is skipped.
     """
 
-    def __init__(self, name: str, max_workers: int):
+    def __init__(self,
+                 name: str,
+                 max_workers: int,
+                 queue_when_full: bool = False):
         self.name: str = name
         self.max_workers: int = max_workers
+        self.queue_when_full: bool = queue_when_full
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
         self._shutdown: bool = False
         self._shutdown_lock: threading.Lock = threading.Lock()
@@ -163,8 +166,15 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         result: Any = None
         error: Optional[BaseException] = None
         cancelled = False
+        started = False
         try:
-            result = fn(*args, **kwargs)
+            if fut.cancelled():
+                logger.debug(f'Executor [{self.name}] skipped cancelled {fn}')
+            else:
+                started = True
+                if self._active_gauge is not None:
+                    self._active_gauge.inc()
+                result = fn(*args, **kwargs)
         except asyncio.CancelledError:
             logger.debug(f'Executor [{self.name}] cancelled {fn}')
             cancelled = True
@@ -175,9 +185,11 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             # Free the slot before resolving the future, so that a caller
             # that submits again right after the result sees a free thread.
             self.running.decrement()
-            if self._active_gauge is not None:
+            if started and self._active_gauge is not None:
                 self._active_gauge.dec()
             self._idle.release()
+        if fut.cancelled():
+            return
         try:
             if cancelled:
                 # Cancellation is an expected terminal state, not an error.
@@ -228,9 +240,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             if self._shutdown:
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
-            self.check_available(borrow=True)
-            if self._active_gauge is not None:
-                self._active_gauge.inc()
+            if self.queue_when_full:
+                self.running.increment()
+            else:
+                self.check_available(borrow=True)
             fut: concurrent.futures.Future = concurrent.futures.Future()
             if not self._idle.acquire(blocking=False):
                 try:
@@ -239,8 +252,6 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                             self._start_thread(idle_at_start=False)
                 except Exception as e:
                     self.running.decrement()
-                    if self._active_gauge is not None:
-                        self._active_gauge.dec()
                     fut.set_exception(e)
                     raise
             self._work_queue.put((fn, fut, args, kwargs))
