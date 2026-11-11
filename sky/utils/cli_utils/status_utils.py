@@ -6,7 +6,7 @@ import click
 import colorama
 
 from sky import backends
-from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.adaptors import common as adaptors_common
 from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -16,6 +16,9 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
+else:
+    kubernetes_utils = adaptors_common.LazyImport(
+        'sky.provision.kubernetes.utils')
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
