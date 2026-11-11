@@ -1506,6 +1506,7 @@ class TestPoolEmergencyDuplicateGuard:
 
         task = MagicMock()
         task.num_nodes = 1
+        task.candidate_num_nodes.return_value = [1]
         callback, _ = _make_callback()
 
         with pytest.raises(_StopLoop):
@@ -1602,6 +1603,7 @@ class TestEmergencyReattachEvent:
         jc._update_live_log_links = AsyncMock(return_value=True)
         task = MagicMock()
         task.num_nodes = 1
+        task.candidate_num_nodes.return_value = [1]
         calls = {'n': 0}
 
         async def _get_job_status(*args, **kwargs):

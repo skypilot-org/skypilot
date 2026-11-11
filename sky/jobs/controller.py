@@ -1810,8 +1810,10 @@ class JobController:
             # immediately (depending on user program) when only some of the
             # nodes are preempted or failed, need to check the actual cluster
             # status.
+            # Resources candidates may differ in node count, so only treat
+            # the job as single-node if every candidate is.
             if (job_status is not None and not job_status.is_terminal() and
-                    task.num_nodes == 1):
+                    max(task.candidate_num_nodes()) == 1):
                 await _record_reattach_if_pending()
                 continue
 

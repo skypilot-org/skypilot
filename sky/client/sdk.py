@@ -468,6 +468,23 @@ def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
                 f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
 
 
+def _check_resources_num_nodes_api_version(dag: 'sky.Dag') -> None:
+    if not any(r.num_nodes is not None
+               for task in dag.tasks
+               for r in task.resources):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_RESOURCES_NUM_NODES_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                '`num_nodes` inside `resources` is not supported by this API '
+                'server. Please upgrade the API server to a version that '
+                'supports API_VERSION >= '
+                f'{server_constants.MIN_RESOURCES_NUM_NODES_API_VERSION}, or '
+                'set `num_nodes` at the task level instead.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -497,6 +514,7 @@ def optimize(
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_resources_num_nodes_api_version(dag)
     _omit_job_section_for_older_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -638,6 +656,7 @@ def validate(
             the paths when it runs the request.
     """
     _check_slurm_host_path_volume_api_version(dag)
+    _check_resources_num_nodes_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -1029,7 +1048,21 @@ def _launch(
             resume_str = ''
             if cluster_status == status_lib.ClusterStatus.STOPPED:
                 resume_str = ' The stopped cluster will be restarted.'
-            if current_nodes is None:
+            # Resources candidates may set their own node counts. The
+            # cluster is resized to the count of the candidate that matches
+            # its hardware, which only the server works out.
+            candidate_num_nodes = sorted(set(
+                dag.tasks[0].candidate_num_nodes()))
+            if len(candidate_num_nodes) > 1:
+                from_str = (f'from {current_nodes} node(s) '
+                            if current_nodes is not None else '')
+                counts_str = ', '.join(map(str, candidate_num_nodes))
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'{from_str}to the node count of the resources '
+                          'candidate that matches its hardware (one of '
+                          f'{counts_str}). If that is fewer nodes, excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
+            elif current_nodes is None:
                 # Record is missing the 'nodes' field (e.g. older server or
                 # partial status response). Avoid TypeError from comparing
                 # int to None; show a generic resize prompt without the

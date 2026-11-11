@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 36  # add _kubernetes_identity, _remote_identity_none.
+    _VERSION = 37  # add _num_nodes.
 
     def __init__(
         self,
@@ -167,6 +167,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         infra: Optional[str] = None,
+        num_nodes: Optional[int] = None,
         use_spot: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
                                      str]] = None,
@@ -235,6 +236,12 @@ class Resources:
             `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
             specifying cloud, region, and zone separately. If provided, it
             takes precedence over cloud, region, and zone parameters.
+          num_nodes: the number of nodes to launch when these resources are
+            chosen. If None, the task's ``num_nodes`` is used. Setting it on
+            each candidate of ``any_of``/``ordered`` lets candidates differ in
+            node count (e.g., 1x H200:8 vs 2x H100:8); the optimizer then
+            compares the total cost of each candidate. Cannot be combined
+            with a ``num_nodes`` set on the task.
           use_spot: whether to use spot instances. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
@@ -478,6 +485,7 @@ class Resources:
         self._priority: Optional[int] = None
         self._priority_class: Optional[str] = None
 
+        self._set_num_nodes(num_nodes)
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
@@ -591,6 +599,10 @@ class Resources:
         if self.ports is not None:
             ports = f', ports={self.ports}'
 
+        num_nodes = ''
+        if self._num_nodes is not None:
+            num_nodes = f', num_nodes={self._num_nodes}'
+
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
         else:
@@ -603,7 +615,7 @@ class Resources:
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
             f'{disk_tier}{network_tier}{disk_size}'
-            f'{local_disk}{max_hourly_cost}{ports}')
+            f'{local_disk}{max_hourly_cost}{ports}{num_nodes}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -654,6 +666,14 @@ class Resources:
     @property
     def instance_type(self) -> Optional[str]:
         return self._instance_type
+
+    @property
+    def num_nodes(self) -> Optional[int]:
+        """Number of nodes to launch with these resources.
+
+        None means the task's ``num_nodes`` applies.
+        """
+        return self._num_nodes
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1031,6 +1051,16 @@ class Resources:
         self._accelerators: Optional[Dict[str, Union[int,
                                                      float]]] = accelerators
         self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+
+    def _set_num_nodes(self, num_nodes: Optional[int]) -> None:
+        # bool is a subclass of int; reject it explicitly.
+        if num_nodes is not None and (isinstance(num_nodes, bool) or
+                                      not isinstance(num_nodes, int) or
+                                      num_nodes <= 0):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes!r}')
+        self._num_nodes = num_nodes
 
     def _set_autostop_config(
         self,
@@ -2158,6 +2188,12 @@ class Resources:
             is_matched = False
         if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
             is_matched = False
+        # A failure to get N nodes does not rule out getting fewer nodes of the
+        # same type in the same place, so a blocked entry with a node count
+        # only blocks candidates asking for at least as many nodes.
+        if (blocked.num_nodes is not None and self.num_nodes is not None and
+                self.num_nodes < blocked.num_nodes):
+            is_matched = False
         return is_matched
 
     def is_empty(self) -> bool:
@@ -2177,6 +2213,7 @@ class Resources:
             self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
+            self._num_nodes is None,
         ])
 
     def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
@@ -2357,6 +2394,7 @@ class Resources:
             priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
             infra=override.pop('infra', None),
+            num_nodes=override.pop('num_nodes', self._num_nodes),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -2668,6 +2706,7 @@ class Resources:
         resources_fields['zone'] = config.pop('zone', None)
 
         resources_fields['instance_type'] = config.pop('instance_type', None)
+        resources_fields['num_nodes'] = config.pop('num_nodes', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
         resources_fields['accelerators'] = config.pop('accelerators', None)
@@ -2778,6 +2817,7 @@ class Resources:
         add_if_not_none('infra', infra)
 
         add_if_not_none('instance_type', self.instance_type)
+        add_if_not_none('num_nodes', self._num_nodes)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
@@ -3036,6 +3076,9 @@ class Resources:
         if version < 36:
             self._kubernetes_identity = None
             self._remote_identity_none = None
+
+        if version < 37:
+            self._num_nodes = None
 
         if version < 35:
             state.pop('_ephemeral_storage', None)

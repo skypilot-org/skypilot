@@ -4878,6 +4878,21 @@ def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
     return int(math.ceil(acc_count))
 
 
+def get_task_num_nodes_str(task: 'task_lib.Task',
+                           all_candidates: bool = False) -> str:
+    """Returns the task's node count for display.
+
+    Resources candidates may differ in node count; until one is chosen (or
+    if all_candidates is set), the range is shown (e.g., '2-4').
+    """
+    if task.best_resources is not None and not all_candidates:
+        return str(task.num_nodes)
+    counts = task.candidate_num_nodes()
+    if min(counts) == max(counts):
+        return str(counts[0])
+    return f'{min(counts)}-{max(counts)}'
+
+
 def get_task_resources_str(task: 'task_lib.Task',
                            is_managed_job: bool = False) -> str:
     """Returns the resources string of the task.
@@ -4932,7 +4947,7 @@ def get_task_resources_str(task: 'task_lib.Task',
             resources_str = ', '.join(set(resource_accelerators))
         else:
             resources_str = f'CPU:{task_cpu_demand}'
-    resources_str = f'{task.num_nodes}x[{resources_str}]{spot_str}'
+    resources_str = f'{get_task_num_nodes_str(task)}x[{resources_str}]{spot_str}'
     return resources_str
 
 

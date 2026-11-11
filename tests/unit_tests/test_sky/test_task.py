@@ -787,6 +787,7 @@ def make_mock_resource(cloud=None, region=None, zone=None):
             self.region = region
             self.zone = zone
             self.priority = 0
+            self.num_nodes = None
 
         def copy(self, **override):
             # Return a new instance with overridden attributes

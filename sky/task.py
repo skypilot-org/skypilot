@@ -316,6 +316,22 @@ def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
         docker_config['password'] = '<redacted>'
 
 
+def _check_num_nodes_set_once(
+        task_num_nodes: int,
+        resources: Iterable['resources_lib.Resources']) -> None:
+    """Raises if `num_nodes` is set on both a task and its resources."""
+    resources_num_nodes = sorted(
+        {r.num_nodes for r in resources if r.num_nodes is not None})
+    if resources_num_nodes:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'num_nodes is set on both the task ({task_num_nodes}) and '
+                f'its resources ({", ".join(map(str, resources_num_nodes))}). '
+                'Set it in one place only: either at the top level of the '
+                'task, or in `resources` (once for all candidates, or per '
+                '`any_of`/`ordered` candidate).')
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -403,7 +419,9 @@ class Task:
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
-            documented above.
+            documented above. Alternatively, resources may set their own
+            ``num_nodes`` (e.g., per ``any_of``/``ordered`` candidate); the
+            two cannot be combined.
           file_mounts: An optional dict of ``{remote_path: (local_path|cloud
             URI)}``, where remote means the VM(s) on which this Task will
             eventually run on, and local means the node from which the task is
@@ -479,10 +497,10 @@ class Task:
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.event_callback = event_callback
-        # Ignore type error due to a mypy bug.
-        # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
-        self.num_nodes = num_nodes  # type: ignore
+        # Whether `num_nodes` was set on the task itself, as opposed to the
+        # default. Setting it on both the task and its resources is an error.
+        self._num_nodes_explicit = False
 
         self.inputs: Optional[str] = None
         self.outputs: Optional[str] = None
@@ -493,6 +511,10 @@ class Task:
                               Set['resources_lib.Resources']] = {
                                   resources_lib.Resources()
                               }
+        # Set after the default resources, which it is checked against.
+        # Ignore type error due to a mypy bug.
+        # https://github.com/python/mypy/issues/3004
+        self.num_nodes = num_nodes  # type: ignore
         self._service: Optional[service_spec.SkyServiceSpec] = None
 
         # Resources that this task cannot run on.
@@ -1129,7 +1151,7 @@ class Task:
             volume_mounts.append(volume_mount)
         # Disable certain access modes
         disabled_modes = {}
-        if self.num_nodes > 1:
+        if max(self.candidate_num_nodes()) > 1:
             disabled_modes[
                 volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
                     'access mode ReadWriteOnce is not supported for '
@@ -1198,17 +1220,62 @@ class Task:
 
     @property
     def num_nodes(self) -> int:
-        return self._num_nodes
+        """The number of nodes the task launches and runs on.
+
+        ``num_nodes`` is set either on the task, so every resources candidate
+        uses it, or on the resources (e.g., per ``any_of`` / ``ordered``
+        candidate). So this is the node count of the resources chosen by the
+        optimizer (``best_resources``), or the count all candidates share.
+        Before a candidate is chosen, candidates that differ in node count
+        have no single count; the smallest one is returned.
+        """
+        if self.best_resources is not None:
+            return self.num_nodes_for(self.best_resources)
+        return min(self.candidate_num_nodes())
 
     @num_nodes.setter
     def num_nodes(self, num_nodes: Optional[int]) -> None:
         if num_nodes is None:
-            num_nodes = 1
+            self._num_nodes = 1
+            self._num_nodes_explicit = False
+            return
         if not isinstance(num_nodes, int) or num_nodes <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
+        _check_num_nodes_set_once(num_nodes, self.resources)
         self._num_nodes = num_nodes
+        self._num_nodes_explicit = True
+
+    @property
+    def num_nodes_on_task(self) -> bool:
+        """Whether ``num_nodes`` is set on the task itself.
+
+        If so, its resources cannot set their own.
+
+        INTERNAL: this method is internal-facing.
+        """
+        return self._num_nodes_explicit
+
+    def num_nodes_for(self, resources: 'resources_lib.Resources') -> int:
+        """The number of nodes to launch if the given resources are chosen.
+
+        Either the resources' own count or the task's, as at most one of the
+        two is set.
+
+        INTERNAL: this method is internal-facing.
+        """
+        if resources.num_nodes is not None:
+            return resources.num_nodes
+        return self._num_nodes
+
+    def candidate_num_nodes(self) -> List[int]:
+        """Node counts of all resources candidates (never empty).
+
+        INTERNAL: this method is internal-facing.
+        """
+        return ([self.num_nodes_for(r) for r in self.resources] or
+                [self._num_nodes])
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -1440,6 +1507,8 @@ class Task:
         elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
         self._ensure_consistent_priority(resources)
+        if self._num_nodes_explicit:
+            _check_num_nodes_set_once(self._num_nodes, resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
                                                    self.secrets)
@@ -2078,8 +2147,8 @@ class Task:
         # `--name` / `--num-nodes`.
         if self.name is not None and self.name != config.get('name'):
             config['name'] = self.name
-        if self.num_nodes != config.get('num_nodes', 1):
-            config['num_nodes'] = self.num_nodes
+        if self._num_nodes != config.get('num_nodes', 1):
+            config['num_nodes'] = self._num_nodes
         # `--git-url` / `--git-ref` make the workdir a git repo, which reads
         # the same anywhere. A local workdir is left as the user wrote it: on
         # the API server it has been rewritten to the uploaded copy's path,
@@ -2123,7 +2192,10 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
-        add_if_not_none('num_nodes', self.num_nodes)
+        # Only a count set on the task itself: resources carry their own, if
+        # any, and the two cannot be combined.
+        if self._num_nodes_explicit:
+            add_if_not_none('num_nodes', self._num_nodes)
         add_if_not_none('job', self.job, no_empty=True)
 
         if self.inputs is not None:
@@ -2239,8 +2311,10 @@ class Task:
         """
         required_features = set()
 
-        # Multi-node
-        if self.num_nodes > 1:
+        # Multi-node. Resources candidates may differ in node count; the
+        # optimizer checks the feature per candidate, so only require it
+        # task-wide if every candidate is multi-node.
+        if min(self.candidate_num_nodes()) > 1:
             required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
