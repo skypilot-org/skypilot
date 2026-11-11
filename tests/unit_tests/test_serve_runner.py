@@ -169,6 +169,39 @@ class TestDefaultRunnerLegacyPath:
                                           pool=True)
 
 
+class TestDefaultRunnerConsolidationPath:
+    """Consolidation mode: the controller DB is local, so read in-process."""
+
+    def test_reads_in_process_without_rpc_or_codegen(self):
+        runner = impl._DefaultServiceStatusRunner()
+        handle = _handle_mock(grpc_enabled=True)
+        records = [{'name': 'p1', 'status': 'READY'}]
+        with mock.patch(
+                'sky.serve.server.impl.serve_utils.is_consolidation_mode',
+                return_value=True) as consolidation, \
+             mock.patch(
+                'sky.serve.server.impl.serve_utils.get_service_status',
+                return_value=records) as in_process, \
+             mock.patch(
+                'sky.serve.server.impl.serve_rpc_utils.RpcRunner.'
+                'get_service_status') as rpc, \
+             mock.patch(
+                'sky.serve.server.impl.serve_utils.ServeCodeGen.'
+                'get_service_status') as codegen, \
+             mock.patch(
+                'sky.serve.server.impl.backend_utils.'
+                'get_backend_from_handle') as get_backend:
+            result = runner.get_service_status(handle=handle,
+                                               service_names=None,
+                                               pool=True)
+        assert result == records
+        consolidation.assert_called_once_with(True)
+        in_process.assert_called_once_with(None, pool=True)
+        rpc.assert_not_called()
+        codegen.assert_not_called()
+        get_backend.assert_not_called()
+
+
 class TestStatusDelegatesToRunner:
     """`status()` entry point passes the right args to the registered runner."""
 
