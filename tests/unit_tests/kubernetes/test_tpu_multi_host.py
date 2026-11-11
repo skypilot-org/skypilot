@@ -531,7 +531,7 @@ def test_create_pods_places_each_slice_in_its_own_node_pool(monkeypatch):
 def test_create_pods_with_a_queue_labels_slices_only(monkeypatch, labels,
                                                      provider_config):
     """A queue places whole slices and groups the pods in its own order, so
-    the pods get the slice label but no required affinity."""
+    the pods get no slice label and no required affinity."""
     if provider_config:
         monkeypatch.setattr(k8s_instance.kai, 'ensure_pod_group',
                             lambda *a, **k: None)
@@ -542,9 +542,9 @@ def test_create_pods_with_a_queue_labels_slices_only(monkeypatch, labels,
                                _SLICE_2X4,
                                labels=labels,
                                provider_config=provider_config)
-    assert specs['c-worker2']['metadata']['labels'][
-        kubernetes_utils.TPU_SLICE_LABEL] == 'c-1'
     for spec in specs.values():
+        assert kubernetes_utils.TPU_SLICE_LABEL not in spec['metadata'][
+            'labels']
         assert not _required(spec, 'podAffinity')
         assert not _required(spec, 'podAntiAffinity')
 

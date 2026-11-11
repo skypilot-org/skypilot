@@ -2599,12 +2599,13 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Pods of a multi-host TPU slice: one node pool per slice. A queue (Kueue
     # or KAI) places whole slices itself and groups the pods into slices in
-    # its own order, so with a queue the pods only get the slice label.
+    # its own order, so with a queue the pods get no slice label or rules;
+    # _check_tpu_slices_in_one_node_pool() still checks the result.
     tpu_vms_per_slice = _multi_host_tpu_vms_per_slice(
         pod_spec['spec'].get('nodeSelector'))
-    tpu_slice_placement_rules = not (_KUEUE_QUEUE_NAME_LABEL
-                                     in pod_spec['metadata']['labels'] or
-                                     kai.uses_kai(provider_config))
+    tpu_slice_placement = bool(tpu_vms_per_slice) and not (
+        _KUEUE_QUEUE_NAME_LABEL in pod_spec['metadata']['labels'] or
+        kai.uses_kai(provider_config))
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
@@ -2632,13 +2633,12 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
-        if tpu_vms_per_slice:
+        if tpu_slice_placement:
             # Pod i is in slice i // VMs per slice, the same split the task
             # nodes use (num_nodes slices of VMs-per-slice pods each).
             _add_tpu_slice_placement(
                 pod_spec_copy,
-                f'{cluster_name_on_cloud}-{i // tpu_vms_per_slice}',
-                tpu_slice_placement_rules)
+                f'{cluster_name_on_cloud}-{i // tpu_vms_per_slice}')
 
         if host_network_port_blocks:
             assert head_gcs_port is not None
@@ -3344,26 +3344,19 @@ def _multi_host_tpu_vms_per_slice(node_selector: Any) -> int:
     return chips_in_slice // int(chips_per_vm)
 
 
-def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str,
-                             placement_rules: bool) -> None:
-    """Labels a pod of a multi-host TPU slice and, optionally, places it.
+def _add_tpu_slice_placement(pod_spec: Dict[str, Any], slice_name: str) -> None:
+    """Places a pod of a multi-host TPU slice launched without a queue.
 
     One multi-host GKE node pool is one slice, and each pod takes all chips
     of one VM, so a slice's pods must share a node pool that holds no other
-    slice. The label names the pod's slice. With ``placement_rules``, a
-    required podAffinity keeps the pods of a slice in one node pool and a
-    required podAntiAffinity keeps pods of any other slice (of this cluster
-    or another) out of it. The first pod of a slice matches only itself, so
-    it may go to any node pool without another slice.
-
-    Without placement rules (a queue places the pods) the label still lets
-    other clusters' anti-affinity keep their slices out of this one's pools,
-    since Kubernetes applies required anti-affinity in both directions.
+    slice. The label names the pod's slice. A required podAffinity keeps the
+    pods of a slice in one node pool and a required podAntiAffinity keeps
+    pods of any other slice (of this cluster or another) out of it. The first
+    pod of a slice matches only itself, so it may go to any node pool without
+    another slice.
     """
     pod_spec['metadata']['labels'][kubernetes_utils.TPU_SLICE_LABEL] = (
         slice_name)
-    if not placement_rules:
-        return
     affinity = pod_spec['spec'].setdefault('affinity', {})
     affinity.setdefault('podAffinity', {}).setdefault(
         'requiredDuringSchedulingIgnoredDuringExecution', []).append({

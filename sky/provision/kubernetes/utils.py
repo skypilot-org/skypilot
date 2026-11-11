@@ -465,7 +465,8 @@ TPU_WORKER_HOSTNAMES_TAG = 'skypilot-tpu-worker-hostnames'
 TPU_SLICE_NAME_TAG = 'skypilot-tpu-slice-name'
 
 # Pod label naming the multi-host TPU slice a pod belongs to,
-# `<cluster name on cloud>-<slice index>` (see instance._create_pods()).
+# `<cluster name on cloud>-<slice index>`. Set only on clusters launched
+# without a queue (see instance._create_pods()).
 TPU_SLICE_LABEL = 'skypilot-tpu-slice'
 
 
