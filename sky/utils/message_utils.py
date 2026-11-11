@@ -2,7 +2,7 @@
 import json
 import re
 import typing
-from typing import Any, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload(.*?)>(.*?)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload{type}>{content}</sky-payload>\n'
@@ -93,3 +93,26 @@ def decode_payload(
         raise ValueError(f'Invalid payload string: \n{payload_str}')
     else:
         return False, payload_str
+
+
+def decode_all_payloads(
+        payload_str: str,
+        payload_type: Optional[str] = None) -> List[Tuple[str, Any]]:
+    """Decode all payload strings found in payload_str.
+
+    Args:
+        payload_str: A string that may contain one or more encoded payloads.
+        payload_type: Optional payload type filter.
+
+    Returns:
+        A list of tuples (payload_type_str, decoded_payload).
+    """
+    matched = _PAYLOAD_PATTERN.findall(payload_str)
+    results: List[Tuple[str, Any]] = []
+    for payload_type_str, body_str in matched:
+        if payload_type is None or payload_type == payload_type_str:
+            try:
+                results.append((payload_type_str, json.loads(body_str)))
+            except (ValueError, RecursionError):
+                continue
+    return results
