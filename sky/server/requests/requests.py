@@ -525,8 +525,13 @@ def list_requests_json(req_filter: 'RequestTaskFilter',
     """
     encoded = encode_requests(get_request_tasks(req_filter),
                               caller_user_id=caller_user_id)
-    return b'[' + b','.join(
-        payload.model_dump_json().encode('utf-8') for payload in encoded) + b']'
+    # Per row: one dump of the whole list holds the GIL, and so blocks the
+    # event loop, for tens of milliseconds.
+    return b''.join([
+        b'[', b','.join(
+            payload.model_dump_json().encode('utf-8') for payload in encoded),
+        b']'
+    ])
 
 
 def _update_request_row_fields(

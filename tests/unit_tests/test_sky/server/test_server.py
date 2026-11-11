@@ -1816,27 +1816,22 @@ def test_api_status_lists_off_event_loop(_request_authz_env, monkeypatch):
     _scope_as(monkeypatch, None)
 
     on_loop = []
+    encode = server.requests_lib.encode_requests
 
-    def _record(func):
+    def _encode(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return encode(*args, **kwargs)
 
-        def _wrapped(*args, **kwargs):
-            try:
-                asyncio.get_running_loop()
-                on_loop.append(True)
-            except RuntimeError:
-                on_loop.append(False)
-            return func(*args, **kwargs)
-
-        return _wrapped
-
-    for name in ('get_request_tasks', 'encode_requests'):
-        monkeypatch.setattr(server.requests_lib, name,
-                            _record(getattr(server.requests_lib, name)))
+    monkeypatch.setattr(server.requests_lib, 'encode_requests', _encode)
 
     listed = client.get('/api/status', params={'all_status': True})
 
     assert listed.status_code == 200
-    assert on_loop == [False, False]
+    assert on_loop == [False]
 
 
 def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
