@@ -1016,18 +1016,20 @@ The :code:`~/.oci/config` file should contain the following fields:
   # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
   key_file=~/.oci/oci_api_key.pem
 
-Profiles created by :code:`oci session authenticate` (session-token authentication, the usual choice for federated / SSO logins) are supported too. Such a profile carries :code:`security_token_file` and a session :code:`key_file` instead of :code:`user` and :code:`fingerprint`, and SkyPilot signs requests with the session token just like :code:`oci --auth security_token` does:
+Profiles created by :code:`oci session authenticate` (session-token authentication, the usual choice for federated / SSO logins) are supported too. Such a profile has no :code:`user`; instead it carries :code:`security_token_file` and a session :code:`key_file` (with that key's :code:`fingerprint`), and SkyPilot signs requests with the session token just like :code:`oci --auth security_token` does. The CLI writes absolute paths, for example:
 
 .. code-block:: text
 
   [DEFAULT]
   fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  key_file=/home/username/.oci/sessions/DEFAULT/oci_api_key.pem
   tenancy=ocid1.tenancy.oc1..aaaaaaaa
   region=us-sanjose-1
-  key_file=~/.oci/sessions/DEFAULT/oci_api_key.pem
-  security_token_file=~/.oci/sessions/DEFAULT/token
+  security_token_file=/home/username/.oci/sessions/DEFAULT/token
 
-Session tokens expire after about an hour. Run :code:`oci session refresh --profile <name>` (or :code:`oci session authenticate` again) before launching; :code:`sky check oci` reports an expired token. The token is copied to the cluster together with the config, so operations the cluster runs on its own behalf, such as autostop, stop working once that copy has expired.
+There is no need to edit these paths: when the files are under your home directory, SkyPilot copies them to the same place under the home directory on the cluster and adjusts the paths in the copied config.
+
+Session tokens expire after about an hour. Run :code:`oci session refresh --profile <name>` (or :code:`oci session authenticate` again) before launching; :code:`sky check oci` reports an expired token. The token is copied to the cluster together with the config and is not refreshed there, so operations the cluster runs on its own behalf stop working once that copy has expired: autostop, and, for a :ref:`managed jobs <managed-jobs>` or :ref:`SkyServe <sky-serve>` controller, launching, recovering and tearing down OCI clusters. SkyPilot warns when a controller is launched with such a profile; use an API-key profile for long-running controllers.
 
 To use a profile other than :code:`DEFAULT`, set :code:`oci_config_profile` in :code:`~/.sky/config.yaml` (see below).
 

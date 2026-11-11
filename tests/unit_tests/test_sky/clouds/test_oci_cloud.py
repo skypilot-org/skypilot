@@ -1,6 +1,7 @@
 """Tests for the OCI cloud."""
 from concurrent import futures
 import functools
+import os
 import threading
 from unittest import mock
 
@@ -266,6 +267,9 @@ def fixture_credential_mounts(tmp_path, monkeypatch):
     file. `install` returns the path of the (empty) OCI config file.
     """
     monkeypatch.setattr(oci_s3, 'use_s3_api', lambda: False)
+    # A home directory that does not contain tmp_path, so the files below
+    # keep their paths on the cluster wherever the test runs.
+    monkeypatch.setenv('HOME', str(tmp_path / 'not-the-files-home'))
     config_file = tmp_path / 'config'
     config_file.write_text('')
     monkeypatch.setattr(oci_adaptor, 'get_config_file',
@@ -393,6 +397,94 @@ def test_credential_file_mounts_skip_a_profile_missing_from_config(
     warning = logger.warning.call_args.args[0]
     assert warning.startswith(f"OCI profile 'ASHBURN' is not defined in "
                               f'{config_file}')
+
+
+def test_credential_file_mounts_move_home_paths_under_tilde(
+        tmp_path, monkeypatch, credential_mounts):
+    # `oci session authenticate` writes absolute paths under the local home
+    # (e.g. /Users/<u>/.oci/sessions/...). Mounted at the same path, the
+    # cluster user (not <u>) could not create the directory, so the files go
+    # under ~ and the copied config points there.
+    home = tmp_path / 'home' / 'alice'
+    monkeypatch.setenv('HOME', str(home))
+    session_dir = home / '.oci' / 'sessions' / 'TOKEN'
+    session_dir.mkdir(parents=True)
+    key_file = session_dir / 'oci_api_key.pem'
+    token_file = session_dir / 'token'
+    key_file.write_text('key')
+    token_file.write_text('token')
+    elsewhere = tmp_path / 'keys' / 'api.pem'
+    elsewhere.parent.mkdir()
+    elsewhere.write_text('key')
+    token = {
+        'tenancy': _TENANCY,
+        'region': 'us-phoenix-1',
+        'key_file': str(key_file),
+        'security_token_file': str(token_file),
+    }
+    ashburn = {'user': _USER, 'tenancy': _TENANCY, 'key_file': str(elsewhere)}
+    config_file = credential_mounts(_REGIONAL_PROFILES,
+                                    TOKEN=token,
+                                    ASHBURN=ashburn)
+    original = ('[TOKEN]\n'
+                'fingerprint=aa:bb\n'
+                f'key_file={key_file}\n'
+                f'tenancy={_TENANCY}\n'
+                'region=us-phoenix-1\n'
+                f'security_token_file = {token_file}\n'
+                '\n'
+                '[ASHBURN]\n'
+                f'user={_USER}\n'
+                f'key_file={elsewhere}\n')
+    with open(config_file, 'w', encoding='utf-8') as f:
+        f.write(original)
+
+    mounts = oci_cloud.OCI().get_credential_file_mounts()
+
+    copied_config = mounts.pop(config_file)
+    assert mounts == {
+        '~/.oci/sessions/TOKEN/oci_api_key.pem': str(key_file),
+        '~/.oci/sessions/TOKEN/token': str(token_file),
+        # Outside the home directory: unchanged.
+        str(elsewhere): str(elsewhere),
+    }
+    with open(copied_config, 'r', encoding='utf-8') as f:
+        assert f.read() == original.replace(
+            f'key_file={key_file}',
+            'key_file=~/.oci/sessions/TOKEN/oci_api_key.pem').replace(
+                f'security_token_file = {token_file}',
+                'security_token_file = ~/.oci/sessions/TOKEN/token')
+    # The user's own config is untouched, and the copy is private.
+    with open(config_file, 'r', encoding='utf-8') as f:
+        assert f.read() == original
+    assert (os.stat(copied_config).st_mode & 0o777) == 0o600
+    # The same content maps to the same file, keeping the mounts hash stable.
+    again = oci_cloud.OCI().get_credential_file_mounts()
+    assert again[config_file] == copied_config
+
+
+def test_api_key_profile_credentials_do_not_expire(oci_credentials):
+    pytest.importorskip('oci')
+    oci_credentials(_api_key_config(), mock.MagicMock())
+    assert not oci_cloud.OCI().can_credential_expire()
+
+
+def test_session_token_profile_credentials_expire(oci_credentials):
+    pytest.importorskip('oci')
+    # So that `sky jobs launch` / `sky serve up` warn that the controller
+    # may leak clusters once the copied token expires.
+    oci_credentials(_session_token_config(), mock.MagicMock())
+    assert oci_cloud.OCI().can_credential_expire()
+
+
+def test_regional_session_token_profile_credentials_expire(
+        monkeypatch, oci_credentials):
+    pytest.importorskip('oci')
+    oci_credentials(_api_key_config(),
+                    mock.MagicMock(),
+                    ASHBURN=(_session_token_config(), mock.MagicMock()))
+    _use_region_configs(monkeypatch, _REGIONAL_PROFILES)
+    assert oci_cloud.OCI().can_credential_expire()
 
 
 def test_config_schema_accepts_oci_config_profile_per_region():

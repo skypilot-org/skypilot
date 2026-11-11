@@ -96,8 +96,8 @@ def get_oci_signer(oci_config: Dict[str, Any],
     """Returns the request signer for `oci_config`, or None for API keys.
 
     `oci session authenticate` writes profiles that carry a
-    `security_token_file` and a session `key_file` but no `user` or
-    `fingerprint`. The SDK rejects such a config unless the signer is
+    `security_token_file`, a session `key_file` and its `fingerprint`, but
+    no `user`. The SDK rejects such a config unless the signer is
     supplied explicitly, so build the `SecurityTokenSigner` here, mirroring
     what the OCI CLI does for `--auth security_token`. API-key profiles
     return None and keep passing the plain config dict to the clients.

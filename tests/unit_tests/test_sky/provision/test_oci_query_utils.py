@@ -3,8 +3,10 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
+from sky.provision.oci import instance as oci_instance
 from sky.provision.oci import query_utils
 
 _COMPARTMENT = 'ocid1.compartment.oc1..aaaaaaaalaunchhere'
@@ -225,3 +227,116 @@ def test_terminate_instances_by_tags_counts_terminate_failures(
     # One failure is reported, and the second instance is still terminated.
     assert failed == 1
     assert core.terminate_instance.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Fallback to Resource Search outside the launch compartment
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(name='empty_launch_compartment')
+def fixture_empty_launch_compartment(monkeypatch):
+    """The launch compartment lists nothing; returns `(core, search)`."""
+    pytest.importorskip('oci')
+    monkeypatch.setattr(oci_utils.oci_config,
+                        'get_profile',
+                        lambda region=None: 'TOKEN')
+    monkeypatch.setattr(query_utils.QueryHelper, 'find_compartment',
+                        classmethod(lambda cls, region: _COMPARTMENT))
+    monkeypatch.setattr(oci_adaptor.oci.pagination, 'list_call_get_all_results',
+                        lambda call, **kwargs: call(**kwargs))
+    core = mock.MagicMock()
+    core.list_instances.return_value.data = []
+    search = mock.MagicMock()
+    monkeypatch.setattr(oci_adaptor,
+                        'get_core_client',
+                        lambda region=None, profile='DEFAULT': core)
+    monkeypatch.setattr(oci_adaptor,
+                        'get_search_client',
+                        lambda region=None, profile='DEFAULT': search)
+    return core, search
+
+
+def test_query_instances_by_tags_searches_outside_the_launch_compartment(
+        empty_launch_compartment):
+    oci_sdk = pytest.importorskip('oci')
+    core, search = empty_launch_compartment
+    # Launched before `compartment_ocid` changed: the search index still
+    # finds them; one of them was terminated since it was indexed, one is
+    # gone entirely.
+    search.search_resources.return_value.data.items = [
+        mock.MagicMock(identifier='old-head'),
+        mock.MagicMock(identifier='just-terminated'),
+        mock.MagicMock(identifier='deleted'),
+    ]
+    live = {
+        'old-head': _instance('old-head', 'RUNNING',
+                              {'ray-cluster-name': 'c-1'}),
+        'just-terminated': _instance('just-terminated', 'TERMINATING',
+                                     {'ray-cluster-name': 'c-1'}),
+    }
+
+    def _get_instance(instance_id):
+        if instance_id not in live:
+            raise oci_sdk.exceptions.ServiceError(
+                status=404,
+                code='NotAuthorizedOrNotFound',
+                headers={},
+                message='Not found.')
+        return mock.MagicMock(data=live[instance_id])
+
+    core.get_instance.side_effect = _get_instance
+
+    found = query_utils.query_helper.query_instances_by_tags(
+        {'ray-cluster-name': 'c-1'}, 'us-phoenix-1')
+
+    # Instance objects, re-read so that index lag does not resurrect a
+    # terminated instance.
+    assert [inst.id for inst in found] == ['old-head']
+    query = search.search_resources.call_args.args[0].query
+    assert "freeformTags.key = 'ray-cluster-name'" in query
+    assert "freeformTags.value = 'c-1'" in query
+
+
+def test_query_instances_by_tags_skips_search_when_compartment_has_match(
+        empty_launch_compartment):
+    core, search = empty_launch_compartment
+    core.list_instances.return_value.data = [
+        _instance('head', 'RUNNING', {'ray-cluster-name': 'c-1'})
+    ]
+
+    found = query_utils.query_helper.query_instances_by_tags(
+        {'ray-cluster-name': 'c-1'}, 'us-phoenix-1')
+
+    assert [inst.id for inst in found] == ['head']
+    search.search_resources.assert_not_called()
+
+
+def test_query_instances_by_tags_search_error_is_raised(
+        empty_launch_compartment):
+    oci_sdk = pytest.importorskip('oci')
+    core, search = empty_launch_compartment
+    search.search_resources.return_value.data.items = [
+        mock.MagicMock(identifier='head')
+    ]
+    core.get_instance.side_effect = oci_sdk.exceptions.ServiceError(
+        status=500, code='InternalError', headers={}, message='Boom.')
+
+    with pytest.raises(oci_sdk.exceptions.ServiceError):
+        query_utils.query_helper.query_instances_by_tags(
+            {'ray-cluster-name': 'c-1'}, 'us-phoenix-1')
+
+
+def test_status_query_wraps_an_expired_session_token(monkeypatch):
+    pytest.importorskip('oci')
+
+    def _raise(tag_filters, region):
+        raise oci_adaptor.OCISessionTokenError('The token has expired.')
+
+    monkeypatch.setattr(query_utils.query_helper, 'query_instances_by_tags',
+                        _raise)
+    with pytest.raises(exceptions.ClusterStatusFetchingError) as exc_info:
+        # pylint: disable=protected-access
+        oci_instance._get_filtered_nodes('us-phoenix-1',
+                                         {'ray-cluster-name': 'c-1'})
+    assert 'The token has expired.' in str(exc_info.value)

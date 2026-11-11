@@ -33,6 +33,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# Lifecycle states of instances that are, or are about to be, gone.
+_GONE_STATES = ('TERMINATED', 'TERMINATING')
+
 
 def debug_enabled(log: Logger):
 
@@ -67,6 +70,13 @@ class QueryHelper:
         through cross-tenancy policies (a freshly launched head node is
         then never found and the cluster is left behind), and its index
         also lags behind new instances.
+
+        When the compartment has no match, Resource Search is tried as well:
+        the launch compartment is resolved from the current configuration,
+        so a cluster launched before `compartment_ocid` was changed (or
+        before a `skypilot` compartment was created) lives elsewhere, and
+        `sky down` / `sky status -r` must still find it rather than drop the
+        record and leave the instance running.
         """
         core_client = oci_adaptor.get_core_client(
             region, oci_utils.oci_config.get_profile(region))
@@ -74,12 +84,57 @@ class QueryHelper:
             core_client.list_instances,
             compartment_id=cls.find_compartment(region)).data
 
-        return [
-            inst for inst in instances if inst.lifecycle_state not in (
-                'TERMINATED', 'TERMINATING') and all(
-                    (inst.freeform_tags or {}).get(key) == value
-                    for key, value in tag_filters.items())
+        found = [
+            inst for inst in instances
+            if inst.lifecycle_state not in _GONE_STATES and all(
+                (inst.freeform_tags or {}).get(key) == value
+                for key, value in tag_filters.items())
         ]
+        if found:
+            return found
+        return cls._search_instances_by_tags(tag_filters, region, core_client)
+
+    @classmethod
+    def _search_instances_by_tags(cls, tag_filters, region, core_client):
+        """Live instances carrying `tag_filters` anywhere in the tenancy.
+
+        Uses Resource Search, which covers the profile's home tenancy, then
+        re-reads each hit with `get_instance`: the search index lags, so a
+        just-terminated instance can still be indexed as RUNNING. Returns
+        `Instance` objects, like the compartment listing.
+        """
+        where_clause_tags = ' && '.join(f'(freeformTags.key = \'{key}\' && '
+                                        f'freeformTags.value = \'{value}\')'
+                                        for key, value in tag_filters.items())
+        qv_str = (f'query instance resources where {where_clause_tags}'
+                  f' && (lifecycleState != \'TERMINATED\''
+                  f' && lifecycleState != \'TERMINATING\')')
+        qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
+            query=qv_str,
+            type='Structured',
+            matching_context_type=oci_adaptor.oci.resource_search.models.
+            SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
+        )
+        hits = oci_adaptor.get_search_client(
+            region, oci_utils.oci_config.get_profile(region)).search_resources(
+                qv).data.items
+
+        found = []
+        for hit in hits:
+            try:
+                inst = core_client.get_instance(hit.identifier).data
+            except oci_adaptor.oci.exceptions.ServiceError as e:
+                if e.status == 404:
+                    # Gone since it was indexed.
+                    continue
+                raise
+            if inst.lifecycle_state in _GONE_STATES:
+                continue
+            logger.debug(f'Found {inst.id} in compartment '
+                         f'{inst.compartment_id} via Resource Search; it is '
+                         'outside the configured launch compartment.')
+            found.append(inst)
+        return found
 
     @classmethod
     @debug_enabled(logger)

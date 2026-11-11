@@ -20,8 +20,10 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
    Support more OS types additional to ubuntu for OCI resources.
 """
+import hashlib
 import logging
 import os
+import re
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -34,6 +36,7 @@ from sky.adaptors import oci as oci_adaptor
 from sky.adaptors import oci_s3
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -52,6 +55,71 @@ logger = logging.getLogger(__name__)
 # can launch into compartments of different tenancies.
 _ad_prefixes: Dict[str, str] = {}
 _ad_prefixes_lock = threading.Lock()
+
+# Where the copy of the OCI config with home-relative paths is written (see
+# OCI.get_credential_file_mounts).
+_GENERATED_OCI_CONFIG_DIR = os.path.join(constants.SKY_USER_FILE_PATH, 'oci')
+# The keys of an OCI config profile that name a file to copy to the cluster.
+_OCI_CONFIG_FILE_KEYS = ('key_file', oci_adaptor.SECURITY_TOKEN_FILE_KEY)
+_OCI_CONFIG_FILE_LINE_RE = re.compile(r'^(\s*(?:' +
+                                      '|'.join(_OCI_CONFIG_FILE_KEYS) +
+                                      r')\s*=\s*)(.*?)(\s*)$')
+
+
+def _home_relative_path(path: str) -> Optional[str]:
+    """'~/<rel>' for an absolute path under the local home, else None.
+
+    `oci session authenticate` writes absolute paths such as
+    `/Users/<u>/.oci/sessions/<profile>/token`. Mounted at that same path,
+    the file would need `/Users/<u>` on the cluster, which a non-root user
+    cannot create; under `~` it lands in the cluster user's home instead.
+    """
+    if not os.path.isabs(path):
+        return None
+    home = os.path.expanduser('~')
+    if not os.path.isabs(home) or os.path.dirname(home) == home:
+        return None
+    path = os.path.normpath(path)
+    if os.path.commonpath([home, path]) != home or path == home:
+        return None
+    return '~/' + os.path.relpath(path, home).replace(os.sep, '/')
+
+
+def _write_home_relative_oci_config(conf_file: str, rewrites: Dict[str,
+                                                                   str]) -> str:
+    """A copy of `conf_file` with the file paths in `rewrites` replaced.
+
+    Only `key_file` / `security_token_file` values that appear in
+    `rewrites` are changed; everything else is kept byte for byte. The
+    copy's name is derived from its content, so repeated launches reuse the
+    same file and the file-mounts hash stays stable.
+    """
+    with open(os.path.expanduser(conf_file), 'r', encoding='utf-8') as f:
+        lines = f.read().splitlines(keepends=True)
+    out = []
+    for line in lines:
+        body = line.rstrip('\r\n')
+        newline = line[len(body):]
+        match = _OCI_CONFIG_FILE_LINE_RE.match(body)
+        if match is not None and match.group(2) in rewrites:
+            body = (match.group(1) + rewrites[match.group(2)] + match.group(3))
+        out.append(body + newline)
+    content = ''.join(out)
+    digest = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+    directory = os.path.expanduser(_GENERATED_OCI_CONFIG_DIR)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f'config-{digest}')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            if f.read() == content:
+                return path
+    except OSError:
+        pass
+    # The config may hold a key pass phrase: keep the copy private.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return path
 
 
 def _get_availability_domain_prefix(region: str) -> Optional[str]:
@@ -541,8 +609,8 @@ class OCI(clouds.Cloud):
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem\n'
             f'{cls._INDENT_PREFIX}Session-token profiles written by '
-            '`oci session authenticate` (security_token_file + key_file, '
-            'no user/fingerprint) are supported as well.')
+            '`oci session authenticate` (security_token_file + session '
+            'key_file, no user) are supported as well.')
 
         uses_session_token = False
         try:
@@ -615,13 +683,29 @@ class OCI(clouds.Cloud):
             # region can authenticate as its own profile and provisioning on
             # the cluster resolves the profile the same way as here. Files
             # keep their path on the cluster so the paths inside the copied
-            # config file stay valid.
-            credential_files = [oci_cfg_file]
+            # config file stay valid, except absolute paths under the local
+            # home (what `oci session authenticate` writes): those go under
+            # `~` on the cluster, and the copied config is rewritten to
+            # match.
+            credential_files: List[str] = []
             for region, profile in oci_utils.oci_config.get_profiles_in_use():
                 for path in self._profile_credential_files(
                         oci_cfg_file, region, profile):
                     if path not in credential_files:
                         credential_files.append(path)
+            rewrites: Dict[str, str] = {}
+            for path in credential_files:
+                remote_path = _home_relative_path(path)
+                if remote_path is None:
+                    file_mounts[path] = path
+                else:
+                    file_mounts[remote_path] = path
+                    rewrites[path] = remote_path
+            if rewrites:
+                file_mounts[oci_cfg_file] = _write_home_relative_oci_config(
+                    oci_cfg_file, rewrites)
+            else:
+                file_mounts[oci_cfg_file] = oci_cfg_file
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
         # Must catch ImportError before any oci_adaptor.oci.exceptions
         # because oci_adaptor.oci.exceptions can throw ImportError.
@@ -632,10 +716,7 @@ class OCI(clouds.Cloud):
 
         # Sky config file is optional
         if os.path.exists(os.path.expanduser(sky_cfg_file)):
-            credential_files.append(sky_cfg_file)
-
-        file_mounts.update(
-            {f'{filename}': f'{filename}' for filename in credential_files})
+            file_mounts[sky_cfg_file] = sky_cfg_file
 
         logger.debug(f'OCI credential file mounts: {file_mounts}')
         return file_mounts
@@ -668,6 +749,32 @@ class OCI(clouds.Cloud):
                 continue
             files.append(path)
         return files
+
+    def can_credential_expire(self) -> bool:
+        """Whether any profile in use authenticates with a session token.
+
+        Tokens from `oci session authenticate` expire after about an hour and
+        the copy on a cluster is never refreshed, so a jobs/serve controller
+        launched with one can no longer manage (or tear down) its OCI
+        clusters once it expires.
+        """
+        try:
+            for region, profile in oci_utils.oci_config.get_profiles_in_use():
+                try:
+                    oci_cfg = oci_adaptor.get_oci_config(region=region,
+                                                         profile=profile)
+                except oci_adaptor.oci.exceptions.ProfileNotFound:
+                    continue
+                if oci_adaptor.is_session_token_config(oci_cfg):
+                    return True
+        # Must catch ImportError before any oci_adaptor.oci.exceptions
+        # because oci_adaptor.oci.exceptions can throw ImportError.
+        except ImportError:
+            return False
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig):
+            return False
+        return False
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

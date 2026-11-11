@@ -377,7 +377,10 @@ def _get_filtered_nodes(region: str,
 
     try:
         insts = query_helper.query_instances_by_tags(tag_filters, region)
-    except oci_adaptor.oci.exceptions.ServiceError as e:
+    except (oci_adaptor.oci.exceptions.ServiceError,
+            oci_adaptor.OCISessionTokenError) as e:
+        # A session-token profile whose token expired fails when the client
+        # is built, before any request is sent.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query status for OCI cluster {tag_filters}.'
