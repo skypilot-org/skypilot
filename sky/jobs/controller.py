@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import contextlib
 import enum
 import io
 import json
@@ -45,7 +46,6 @@ from sky.skylet import job_lib
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import cloud_api_retries
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
@@ -411,6 +411,38 @@ def _has_pending_cancel_signal(job_id: int) -> bool:
     """Whether a user cancel signal awaits ControllerManager.cancel_job()."""
     return os.path.exists(
         os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH, str(job_id)))
+
+
+def _download_logs_from_named_cluster(controller: 'JobController',
+                                      task_id: Optional[int], cluster_name: str,
+                                      job_id_on_cluster: Optional[int]) -> bool:
+    """Downloads a task's logs from its cluster, found by name.
+
+    The lookup has no workspace filter, matching
+    `managed_job_utils.terminate_cluster`. A filtered lookup
+    (`backend_utils.get_clusters`) only sees the clusters that the job's user
+    can read in this process, so it can miss a live cluster that teardown
+    then deletes, and the logs are lost.
+
+    Runs in a worker thread: the download is pinned to the cluster's recorded
+    workspace, which is thread-local.
+
+    Returns:
+        False if the cluster has no record, so no download was attempted.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name,
+                                                     include_user_info=False,
+                                                     summary_response=True)
+    if record is None:
+        return False
+    workspace = record.get('workspace')
+    workspace_ctx: contextlib.AbstractContextManager = (
+        skypilot_config.local_active_workspace_ctx(workspace)
+        if workspace else contextlib.nullcontext())
+    with workspace_ctx:
+        controller.download_log_and_stream(task_id, record.get('handle'),
+                                           job_id_on_cluster)
+    return True
 
 
 def _stream_task_logs_to_controller_log() -> bool:
@@ -1750,19 +1782,15 @@ class JobController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await asyncio.to_thread(
-                        backend_utils.get_clusters,
-                        cluster_names=[cluster_name],
-                        refresh=common.StatusRefreshMode.NONE,
-                        all_users=True,
-                        _include_is_managed=True)
-                    if clusters:
-                        assert len(clusters) == 1, (clusters, cluster_name)
-                        handle = clusters[0].get('handle')
-                        # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self.download_log_and_stream,
-                                                task_id, handle,
-                                                job_id_on_pool_cluster)
+                    # Best effort to download and stream the logs.
+                    found = await asyncio.to_thread(
+                        _download_logs_from_named_cluster, self, task_id,
+                        cluster_name, job_id_on_pool_cluster)
+                    if not found:
+                        logger.warning(
+                            f'Cluster {cluster_name} not found for job '
+                            f'{self._job_id}, task {task_id}. Skipping log '
+                            'download.')
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -4111,26 +4139,16 @@ class ControllerManager:
             job_id_on_cluster: Optional[int] = None) -> None:
         """Download logs for a single task from its cluster.
 
-        Looks up the cluster by name and downloads logs via the controller's
-        download_log_and_stream method. Skips gracefully if the cluster is
-        not found.
+        Looks up the cluster by name (without a workspace filter) and
+        downloads logs via the controller's download_log_and_stream method.
+        Skips gracefully if the cluster is not found.
         """
-        clusters = await asyncio.to_thread(
-            backend_utils.get_clusters,
-            cluster_names=[cluster_name],
-            refresh=common.StatusRefreshMode.NONE,
-            all_users=True,
-            _include_is_managed=True)
-
-        if not clusters:
+        found = await asyncio.to_thread(_download_logs_from_named_cluster,
+                                        controller, task_id, cluster_name,
+                                        job_id_on_cluster)
+        if not found:
             logger.info(f'Cluster {cluster_name} not found for job {job_id}, '
                         f'task {task_id}. Skipping log download.')
-            return
-
-        assert len(clusters) == 1, (clusters, cluster_name)
-        handle = clusters[0].get('handle')
-        await asyncio.to_thread(controller.download_log_and_stream, task_id,
-                                handle, job_id_on_cluster)
 
     async def _download_logs_for_cancelled_job(self, controller: JobController,
                                                job_id: int, task_ids: List[int],
