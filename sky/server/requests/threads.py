@@ -67,11 +67,10 @@ def keep_anyio_worker_threads() -> None:
     try:
         # pylint: disable=import-outside-toplevel
         from anyio._backends import _asyncio as anyio_asyncio
-    except ImportError:
-        return
-    worker_thread = getattr(anyio_asyncio, 'WorkerThread', None)
-    if worker_thread is not None and hasattr(worker_thread, 'MAX_IDLE_TIME'):
-        worker_thread.MAX_IDLE_TIME = _ANYIO_WORKER_MAX_IDLE_SECONDS
+        anyio_asyncio.WorkerThread.MAX_IDLE_TIME = (
+            _ANYIO_WORKER_MAX_IDLE_SECONDS)
+    except (ImportError, AttributeError):
+        pass
 
 
 _WorkItem = Tuple[Callable, concurrent.futures.Future, Tuple[Any, ...],
@@ -129,9 +128,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             metrics_utils.SKY_APISERVER_THREADS_MAX.labels(
                 pid=pid, name=name).set(max_workers)
 
-    def _worker(self, idle_at_start: bool) -> None:
-        if idle_at_start:
-            self._idle.release()
+    def _worker(self) -> None:
         while True:
             work = self._work_queue.get()
             if work is None:
@@ -140,11 +137,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             # Do not keep the last task's arguments alive while idle.
             del work
 
-    def _start_thread(self, idle_at_start: bool) -> None:
+    def _start_thread(self) -> None:
         """Starts a worker thread; the caller must hold self._threads_lock."""
         thread = threading.Thread(target=self._worker,
                                   name=f'{self.name}-{len(self._threads) + 1}',
-                                  args=(idle_at_start,),
                                   daemon=True)
         thread.start()
         self._threads.add(thread)
@@ -159,22 +155,23 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 if (self._shutdown or
                         len(self._threads) >= min(count, self.max_workers)):
                     return
-                self._start_thread(idle_at_start=True)
+                self._start_thread()
+                self._idle.release()
 
     def _run_task(self, fn: Callable, fut: concurrent.futures.Future,
                   args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
+        if fut.cancelled():
+            logger.debug(f'Executor [{self.name}] skipped cancelled {fn}')
+            self.running.decrement()
+            self._idle.release()
+            return
         result: Any = None
         error: Optional[BaseException] = None
         cancelled = False
-        started = False
+        if self._active_gauge is not None:
+            self._active_gauge.inc()
         try:
-            if fut.cancelled():
-                logger.debug(f'Executor [{self.name}] skipped cancelled {fn}')
-            else:
-                started = True
-                if self._active_gauge is not None:
-                    self._active_gauge.inc()
-                result = fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
         except asyncio.CancelledError:
             logger.debug(f'Executor [{self.name}] cancelled {fn}')
             cancelled = True
@@ -185,11 +182,9 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             # Free the slot before resolving the future, so that a caller
             # that submits again right after the result sees a free thread.
             self.running.decrement()
-            if started and self._active_gauge is not None:
+            if self._active_gauge is not None:
                 self._active_gauge.dec()
             self._idle.release()
-        if fut.cancelled():
-            return
         try:
             if cancelled:
                 # Cancellation is an expected terminal state, not an error.
@@ -249,7 +244,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 try:
                     with self._threads_lock:
                         if len(self._threads) < self.max_workers:
-                            self._start_thread(idle_at_start=False)
+                            self._start_thread()
                 except Exception as e:
                     self.running.decrement()
                     fut.set_exception(e)
