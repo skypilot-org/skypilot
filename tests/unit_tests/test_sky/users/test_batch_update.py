@@ -165,6 +165,8 @@ class TestUserBatchUpdate:
         assert sorted(result['succeeded']) == ['u1', 'u3']
         assert len(result['failed']) == 1
         assert result['failed'][0]['user_id'] == 'u2'
+        # One fetch, scoped to the users being demoted.
+        mock_get_active_resources.assert_called_once_with(['u1', 'u2', 'u3'])
         # Only the two that passed the check are written.
         mock_update_roles.assert_called_once_with({
             'u1': 'user',

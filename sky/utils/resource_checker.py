@@ -43,7 +43,9 @@ def register_active_resource_lister(kind: str,
     server startup (plugin loading, single-threaded), so no lock is needed.
 
     The lister runs on each such change, so it must be cheap: one DB query, no
-    cloud or Kubernetes calls. If it raises, the change is refused.
+    cloud or Kubernetes calls. It should filter by both arguments in that
+    query; user delete passes the user hashes with every workspace. If it
+    raises, the change is refused.
     """
     _ACTIVE_RESOURCE_LISTERS[kind] = fn
 
