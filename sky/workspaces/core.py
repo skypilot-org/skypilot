@@ -637,9 +637,8 @@ def _validate_workspace_config_changes(
         logger.info(f'Non-user-access configuration changes detected for'
                     f' workspace {ws_label}. Checking that workspace has'
                     f' no active resources.')
-        resource_checker.check_no_active_resources_for_workspaces([
-            (workspace_name, 'update')
-        ])
+        resource_checker.check_no_active_resources_for_workspaces(
+            [(workspace_name, 'update')], resources=resources)
 
 
 def _check_expected_workspace_config(
@@ -919,6 +918,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Collect all workspaces that need to be checked for active resources
     workspaces_to_check: List[Tuple[str, str]] = []
+    # One fetch for every changed or deleted workspace, made only if a check
+    # needs it.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces([
+        name for name in current_workspaces
+        if current_workspaces[name] != new_workspaces.get(name)
+    ])
 
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
@@ -936,7 +941,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             _validate_workspace_config(workspace_name, new_workspace_config,
                                        current_workspace_config)
             _validate_workspace_config_changes_with_lock(
-                workspace_name, current_workspace_config, new_workspace_config)
+                workspace_name,
+                current_workspace_config,
+                new_workspace_config,
+                resources=resources)
 
     # Check for workspace deletions
     for workspace_name in current_workspaces:
@@ -949,7 +957,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Check all workspaces for active resources in one efficient call
     resource_checker.check_no_active_resources_for_workspaces(
-        workspaces_to_check)
+        workspaces_to_check, resources=resources)
 
     _save_config_and_sync_members(config)
 
@@ -1251,8 +1259,11 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
 
 
 @usage_lib.entrypoint
-def batch_remove_users_from_workspaces(workspace_names: List[str],
-                                       user_ids: List[str]) -> Dict[str, Any]:
+def batch_remove_users_from_workspaces(
+        workspace_names: List[str],
+        user_ids: List[str],
+        *,
+        check_resources: bool = True) -> Dict[str, Any]:
     """Removes users from the ``allowed_users`` of multiple private workspaces.
 
     Per-workspace failures are isolated. Removal of a user with active
@@ -1263,6 +1274,10 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
         workspace_names: Names of workspaces to update.
         user_ids: User IDs to remove. Both the user_id and the username
             forms are stripped from each workspace's ``allowed_users``.
+        check_resources: If False, a user is removed even while owning
+            active resources in the workspace. Only for in-process callers
+            that revoke access (identity provider sync); not exposed over
+            the API.
 
     Returns:
         ``{'succeeded': [workspace_name, ...], 'failed': [{
@@ -1307,14 +1322,13 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # workers/servers can't clobber each other via a stale read-modify-write.
     validated_changes: Set[str] = set()
 
-    # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
+    # Fetch active resources for the WHOLE batch of workspaces at most ONCE.
     # Otherwise each per-workspace _validate_workspace_config_changes call
-    # would re-query clusters + managed jobs from scratch (the
-    # managed-jobs fetch in particular is a blocking RPC to the
-    # controller), giving O(W * (C+J)) instead of O(C+J). The
-    # snapshot's per-workspace index is built lazily on first
-    # ``for_workspace`` call.
-    resources = resource_checker.ResourceSnapshot.fetch_for_workspaces(
+    # would re-query them from scratch (the managed-jobs fetch in
+    # particular is a blocking RPC to the controller), giving
+    # O(W * (C+J)) instead of O(C+J). Deferred, so a batch that changes
+    # nothing fetches nothing.
+    resources = resource_checker.ResourceSnapshot.deferred_for_workspaces(
         workspace_names)
 
     for workspace_name in workspace_names:
@@ -1347,11 +1361,13 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             new_ws_config['allowed_users'] = new_allowed
             _validate_workspace_config(workspace_name, new_ws_config,
                                        current_ws_config)
-            _validate_workspace_config_changes_with_lock(workspace_name,
-                                                         current_ws_config,
-                                                         new_ws_config,
-                                                         resources=resources,
-                                                         resolver=resolver)
+            if check_resources:
+                _validate_workspace_config_changes_with_lock(
+                    workspace_name,
+                    current_ws_config,
+                    new_ws_config,
+                    resources=resources,
+                    resolver=resolver)
             validated_changes.add(workspace_name)
         except ValueError as e:
             failed.append({

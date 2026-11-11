@@ -18,6 +18,7 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -467,7 +468,8 @@ def _start(service_name: str,
                 controller_ip=pod_ip,
                 entrypoint=entrypoint,
                 user_hash=user_hash,
-                file_mounts_blob_id=file_mounts_blob_id)
+                file_mounts_blob_id=file_mounts_blob_id,
+                workspace=skypilot_config.get_active_workspace())
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:

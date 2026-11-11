@@ -8,6 +8,16 @@ from sky import exceptions
 from sky import models
 from sky.utils import resource_checker
 
+# Taken before any fixture clears the registry.
+_REGISTERED_AT_IMPORT = set(resource_checker._ACTIVE_RESOURCE_LISTERS)
+
+
+@pytest.fixture(autouse=True)
+def _no_registered_listers():
+    """Keep the built-in and plugin listers off the real DBs."""
+    with mock.patch.dict(resource_checker._ACTIVE_RESOURCE_LISTERS, clear=True):
+        yield
+
 
 class TestResourceChecker:
     """Test cases for resource checker functionality."""
@@ -494,7 +504,7 @@ class TestResourceChecker:
 
         workspaces = ['default', 'production']
 
-        clusters, jobs = resource_checker._get_active_resources_for_workspaces(
+        clusters, jobs, _ = resource_checker._get_active_resources_for_workspaces(
             workspaces)
 
         # Should return all resources from specified workspaces
@@ -519,7 +529,7 @@ class TestResourceChecker:
 
         workspaces = ['default']
 
-        clusters, jobs = resource_checker._get_active_resources_for_workspaces(
+        clusters, jobs, _ = resource_checker._get_active_resources_for_workspaces(
             workspaces)
 
         # Should return only resources from default workspace
@@ -545,7 +555,7 @@ class TestResourceChecker:
             self, mock_queue, mock_get_clusters):
         """Test getting active resources for empty workspace list."""
         # Should return empty lists without making API calls
-        clusters, jobs = resource_checker._get_active_resources_for_workspaces(
+        clusters, jobs, _ = resource_checker._get_active_resources_for_workspaces(
             [])
 
         assert clusters == []
@@ -567,7 +577,7 @@ class TestResourceChecker:
 
         workspaces = ['nonexistent-workspace']
 
-        clusters, jobs = resource_checker._get_active_resources_for_workspaces(
+        clusters, jobs, _ = resource_checker._get_active_resources_for_workspaces(
             workspaces)
 
         # Should return empty lists since no resources match
@@ -619,7 +629,7 @@ class TestResourceChecker:
 
         workspaces = ['default']
 
-        clusters, jobs = resource_checker._get_active_resources_for_workspaces(
+        clusters, jobs, _ = resource_checker._get_active_resources_for_workspaces(
             workspaces)
 
         # Should still return clusters but empty jobs list
@@ -645,7 +655,7 @@ class TestResourceChecker:
 
         # Test filtering by user IDs
         user_ids = ['user123', 'sa-service123']
-        clusters, jobs = resource_checker._get_active_resources_by_names(
+        clusters, jobs, _ = resource_checker._get_active_resources_by_names(
             user_ids, test_filter_factory)
 
         # Should return only resources belonging to specified users
@@ -751,3 +761,252 @@ class TestResourceChecker:
         # Should identify both unauthorized users
         assert 'bob@company.com' in missed_users
         assert 'charlie@company.com' in missed_users
+
+
+class TestRegisteredListers:
+    """Listers registered beyond clusters and managed jobs."""
+
+    @pytest.fixture(autouse=True)
+    def _no_jobs(self):
+        with mock.patch('sky.jobs.server.core.queue_v2',
+                        return_value=([], 0, {}, 0, 0)):
+            yield
+
+    @staticmethod
+    def _register(kind, rows, calls=None):
+
+        def lister(workspace_names):
+            if calls is not None:
+                calls.append(workspace_names)
+            return [
+                r for r in rows
+                if workspace_names is None or r['workspace'] in workspace_names
+            ]
+
+        resource_checker.register_active_resource_lister(kind, lister)
+
+    @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
+                side_effect=lambda ws: ws)
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_lister_rows_block_their_workspace_only(self, mock_get_clusters, _):
+        calls = []
+        self._register('endpoint', [{
+            'name': 'e1',
+            'workspace': 'ws-a',
+            'user_hash': 'alice'
+        }], calls)
+
+        with pytest.raises(ValueError) as e:
+            resource_checker.check_no_active_resources_for_workspaces([
+                ('ws-a', 'delete')
+            ])
+        assert str(e.value) == (
+            "Cannot delete workspace 'ws-a' because it has 1 active "
+            'endpoint(s): e1. Please terminate these resources first.')
+        # One fetch, scoped to the checked workspace, clusters included.
+        assert calls == [['ws-a']]
+        assert mock_get_clusters.call_args.kwargs['workspaces_filter'] == {
+            'ws-a'
+        }
+
+        resource_checker.check_no_active_resources_for_workspaces([('ws-b',
+                                                                    'delete')])
+
+    @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
+                side_effect=lambda ws: ws)
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
+    def test_controller_launched_clusters_are_their_own_kind(
+            self, mock_get_clusters, _):
+        mock_get_clusters.return_value = [
+            {
+                'name': 'svc-1',
+                'workspace': 'ws-a',
+                'user_hash': 'alice',
+                'is_managed': True
+            },
+            {
+                'name': 'dev',
+                'workspace': 'ws-a',
+                'user_hash': 'alice',
+                'is_managed': False
+            },
+        ]
+        with pytest.raises(ValueError) as e:
+            resource_checker.check_no_active_resources_for_workspaces([
+                ('ws-a', 'delete')
+            ])
+        assert ('1 active cluster(s): dev and 1 active service/pool/job '
+                'cluster(s): svc-1.') in str(e.value)
+        assert 'goes away when its service, pool or managed job' in str(e.value)
+        # Managed clusters must be read, not filtered out in SQL.
+        assert not mock_get_clusters.call_args.kwargs.get(
+            'exclude_managed_clusters')
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_lister_failure_refuses_the_change(self, _):
+
+        def broken(workspace_names):
+            raise RuntimeError('db down')
+
+        resource_checker.register_active_resource_lister('sandbox', broken)
+        with pytest.raises(ValueError,
+                           match='Could not check for active '
+                           r'sandbox\(s\): .*db down'):
+            resource_checker.check_no_active_resources_for_workspaces([
+                ('ws-a', 'delete')
+            ])
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_all_users')
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_user_scoped_check_names_the_owner(self, _, mock_get_all_users):
+        mock_get_all_users.return_value = [
+            models.User(id='bob', name='bob@x'),
+            models.User(id='alice', name='alice@x')
+        ]
+        self._register('sandbox', [{
+            'name': 's1',
+            'workspace': 'ws-a',
+            'user_hash': 'bob'
+        }, {
+            'name': 's2',
+            'workspace': 'ws-a',
+            'user_hash': 'alice'
+        }])
+        summary, names, by_id = (
+            resource_checker.check_users_workspaces_active_resources(['alice'],
+                                                                     ['ws-a']))
+        assert summary == '1 active sandbox(s): s1'
+        assert names == ['bob@x'] and by_id == {'bob': 'bob@x'}
+        # Everyone who owns something stays allowed: nothing to report.
+        assert resource_checker.check_users_workspaces_active_resources(
+            ['alice', 'bob'], ['ws-a'])[0] == ''
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_user',
+                return_value=None)
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_user_delete_sees_lister_rows(self, *_):
+        calls = []
+        self._register('devspace', [{
+            'name': 'd1',
+            'workspace': 'ws-a',
+            'user_hash': 'bob'
+        }], calls)
+        with pytest.raises(ValueError, match=r'1 active devspace\(s\): d1'):
+            resource_checker.check_no_active_resources_for_users([('bob',
+                                                                   'delete')])
+        assert calls == [None]
+        resource_checker.check_no_active_resources_for_users([('alice',
+                                                               'delete')])
+
+    def test_names_are_capped_per_kind(self):
+        names = [f'n{i}' for i in range(25)]
+        assert resource_checker._format_names(names) == (', '.join(names[:10]) +
+                                                         ' and 15 more')
+        assert resource_checker._format_names(names[:10]) == ', '.join(
+            names[:10])
+
+    def test_deferred_snapshot_keeps_failing_after_a_failed_fetch(self):
+        with mock.patch(
+                'sky.utils.resource_checker.ResourceSnapshot.fetch_for_workspaces',
+                side_effect=ValueError(
+                    'Could not check for active sandbox(s)')) as mock_fetch:
+            snapshot = resource_checker.ResourceSnapshot.deferred_for_workspaces(
+                ['ws-a', 'ws-b'])
+            for _ in range(2):
+                with pytest.raises(ValueError, match='Could not check'):
+                    snapshot.for_workspace('ws-b')
+            mock_fetch.assert_called_once()
+
+    @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
+                side_effect=lambda ws: ws)
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_demotion_sees_lister_rows(self, *_):
+        self._register('endpoint', [{
+            'name': 'e1',
+            'workspace': 'private-ws',
+            'user_hash': 'u1'
+        }])
+        workspaces = {'private-ws': {'private': True, 'allowed_users': []}}
+        with pytest.raises(ValueError, match=r'1 active endpoint\(s\): e1'):
+            resource_checker.check_user_role_demotion(
+                models.User(id='u1', name='alice'),
+                workspaces=workspaces,
+                workspaces_allowed_users={'private-ws': set()})
+        # Allowed in the workspace: keeps access, nothing to refuse.
+        resource_checker.check_user_role_demotion(
+            models.User(id='u1', name='alice'),
+            workspaces=workspaces,
+            workspaces_allowed_users={'private-ws': {'u1'}})
+
+    def test_deferred_snapshot_fetches_once_on_first_use(self):
+        with mock.patch(
+                'sky.utils.resource_checker._get_active_resources_for_workspaces',
+                return_value=([], [], [{
+                    'kind': 'volume',
+                    'name': 'v',
+                    'workspace': 'ws-a'
+                }])) as mock_fetch:
+            snapshot = resource_checker.ResourceSnapshot.deferred_for_workspaces(
+                ['ws-a'])
+            mock_fetch.assert_not_called()
+            assert snapshot.for_workspace('ws-a')[2][0]['name'] == 'v'
+            assert snapshot.others[0]['name'] == 'v'
+            mock_fetch.assert_called_once_with(['ws-a'])
+
+
+class TestBuiltinListers:
+    """The volume, service and pool listers OSS registers itself."""
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_volumes')
+    def test_volumes_skip_ephemeral_and_filter_workspaces(self, mock_get):
+        mock_get.return_value = [{
+            'name': 'v1',
+            'workspace': 'ws-a',
+            'user_hash': 'alice',
+            'handle': object()
+        }]
+        assert resource_checker._list_volumes(['ws-a']) == [{
+            'name': 'v1',
+            'workspace': 'ws-a',
+            'user_hash': 'alice'
+        }]
+        mock_get.assert_called_once_with(is_ephemeral=False,
+                                         workspaces_filter={'ws-a'})
+
+    @pytest.mark.parametrize('pool', [False, True])
+    @mock.patch(
+        'sky.utils.resource_checker.serve_state.get_live_services_in_workspaces'
+    )
+    @mock.patch('sky.utils.resource_checker.serve_utils.is_consolidation_mode')
+    def test_services_read_only_from_a_local_serve_db(self, mock_consolidated,
+                                                      mock_get, pool):
+        mock_get.return_value = [{
+            'name': 'svc',
+            'pool': False,
+            'workspace': 'ws-a',
+            'user_hash': 'a'
+        }, {
+            'name': 'pl',
+            'pool': True,
+            'workspace': 'ws-a',
+            'user_hash': 'a'
+        }]
+        lister = resource_checker._service_lister(pool=pool)
+
+        mock_consolidated.return_value = False
+        assert lister(['ws-a']) == []
+        mock_get.assert_not_called()
+
+        mock_consolidated.return_value = True
+        assert [s['name'] for s in lister(['ws-a'])
+               ] == (['pl'] if pool else ['svc'])
+        mock_get.assert_called_once_with({'ws-a'})
+        mock_consolidated.assert_called_with(pool=pool)
+
+    def test_builtins_are_registered(self):
+        assert {'volume', 'service', 'pool'} <= _REGISTERED_AT_IMPORT

@@ -712,8 +712,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Should call workspace resource checker
-        mock_check_resources.assert_called_once_with([('test-workspace',
-                                                       'update')])
+        mock_check_resources.assert_called_once_with(
+            [('test-workspace', 'update')], resources=None)
 
     @mock.patch('sky.utils.resource_checker.check_no_active_resources_for_users'
                )
@@ -944,8 +944,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         core._validate_workspace_config_changes('test-workspace', {}, {})
 
         # Non-additive change -> teardown guard still enforced.
-        mock_check_resources.assert_called_once_with([('test-workspace',
-                                                       'update')])
+        mock_check_resources.assert_called_once_with(
+            [('test-workspace', 'update')], resources=None)
 
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
@@ -1161,6 +1161,99 @@ class TestUpdateConfigDoesNotRunCheckInline(unittest.TestCase):
         self.assertEqual(result, new_config)
         mock_update_no_lock.assert_called_once()
         mock_sky_check.assert_not_called()
+
+
+class TestUpdateConfigFetchesResourcesOnce(unittest.TestCase):
+    """Changed and deleted workspaces share one active-resource fetch."""
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path',
+                return_value='/tmp/test-lock')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema', return_value={})
+    @mock.patch('sky.utils.common_utils.validate_schema', return_value=None)
+    @mock.patch('sky.users.permission.permission_service')
+    @mock.patch('sky.workspaces.core.locks.get_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_one_fetch_for_every_checked_workspace(self, mock_compare, *_):
+        mock_compare.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            additive_allowed_contexts=False)
+        current = {
+            'workspaces': {
+                'default': {},
+                'a': {
+                    'gcp': {
+                        'project_id': 'p1'
+                    }
+                },
+                'b': {
+                    'gcp': {
+                        'project_id': 'p1'
+                    }
+                },
+                'c': {},
+                'unchanged': {},
+            }
+        }
+        new = {
+            'workspaces': {
+                'default': {},
+                'a': {
+                    'gcp': {
+                        'project_id': 'p2'
+                    }
+                },
+                'b': {
+                    'gcp': {
+                        'project_id': 'p2'
+                    }
+                },
+                'unchanged': {},
+            }
+        }
+        core.skypilot_config.to_dict.return_value = current
+        with mock.patch(
+                'sky.utils.resource_checker.'
+                '_get_active_resources_for_workspaces',
+                return_value=([], [], [])) as mock_fetch:
+            core.update_config(new)
+        mock_fetch.assert_called_once()
+        self.assertEqual(sorted(mock_fetch.call_args.args[0]), ['a', 'b', 'c'])
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path',
+                return_value='/tmp/test-lock')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema', return_value={})
+    @mock.patch('sky.utils.common_utils.validate_schema', return_value=None)
+    @mock.patch('sky.users.permission.permission_service')
+    def test_no_fetch_without_a_workspace_change(self, *_):
+        core.skypilot_config.to_dict.return_value = {
+            'workspaces': {
+                'default': {}
+            }
+        }
+        with mock.patch('sky.utils.resource_checker.'
+                        '_get_active_resources_for_workspaces') as mock_fetch:
+            core.update_config({
+                'workspaces': {
+                    'default': {}
+                },
+                'gcp': {
+                    'project_id': 'p'
+                }
+            })
+        mock_fetch.assert_not_called()
 
 
 if __name__ == '__main__':
