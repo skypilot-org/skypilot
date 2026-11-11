@@ -5,7 +5,8 @@ import { useFirstVisit } from '@/hooks/useFirstVisit';
 
 export function WelcomeNotification() {
   const { startTour } = useTour();
-  const { shouldShowTourPrompt, markTourCompleted } = useFirstVisit();
+  const { shouldShowTourPrompt, markTourPromptShown, markTourCompleted } =
+    useFirstVisit();
   const [isVisible, setIsVisible] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
@@ -14,11 +15,18 @@ export function WelcomeNotification() {
     if (shouldShowTourPrompt) {
       // Show notification after a short delay for better UX
       const timer = setTimeout(() => {
-        setIsVisible(true);
+        // Consume the first visit only now that the prompt is really showing.
+        // If this component is remounted while the delay is pending (a late
+        // app.providers wrapper registration rebuilds the whole tree), the
+        // fresh mount still counts as the first visit and reschedules, so the
+        // prompt is never silently lost.
+        if (markTourPromptShown()) {
+          setIsVisible(true);
+        }
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [shouldShowTourPrompt]);
+  }, [shouldShowTourPrompt, markTourPromptShown]);
 
   const handleStartTour = () => {
     setIsVisible(false);
