@@ -24,7 +24,7 @@ Machine learning examples:
 
 - [**`ray_resilient_training/`**](./ray_resilient_training/README.md): Run resilient Ray training with a CPU-only head, GPU worker recovery, RocksDB-backed GCS state, and optional NVLink domain-aware placement.
 
-- [**`torchft_resilient_training/`**](./torchft_resilient_training/README.md): Run resilient PyTorch training with torchft: healthy trainers keep stepping through a failure, and a replacement trainer copies the weights from a live one instead of restarting from a checkpoint.
+- [**`torchft_fault_tolerant_training/`**](./torchft_fault_tolerant_training/README.md): Run fault-tolerant PyTorch training with torchft: healthy trainers keep stepping through a failure, and a replacement trainer copies the weights from a live one instead of restarting from a checkpoint.
 
 - [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
 

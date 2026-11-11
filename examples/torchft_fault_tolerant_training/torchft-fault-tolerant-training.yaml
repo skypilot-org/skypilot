@@ -3,9 +3,9 @@
 #
 # Launch:
 #   sky jobs launch \
-#     examples/torchft_resilient_training/torchft-resilient-training.yaml
+#     examples/torchft_fault_tolerant_training/torchft-fault-tolerant-training.yaml
 ---
-name: torchft-resilient-training
+name: torchft-fault-tolerant-training
 execution: parallel
 inter_connection: true
 primary_tasks: [trainers]
@@ -82,7 +82,7 @@ setup: |
 
 run: |
   set -euo pipefail
-  python examples/torchft_resilient_training/train.py \
+  python examples/torchft_fault_tolerant_training/train.py \
     --lighthouse-host "lighthouse-0.${SKYPILOT_JOBGROUP_NAME}" \
     --steps "${TOTAL_STEPS}" \
     --step-seconds "${STEP_SECONDS}" \

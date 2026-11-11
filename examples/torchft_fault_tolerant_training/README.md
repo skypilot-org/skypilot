@@ -1,4 +1,4 @@
-# Resilient PyTorch training with torchft on SkyPilot
+# Fault-tolerant PyTorch training with torchft on SkyPilot
 
 This example keeps a multi-node PyTorch training job training through node
 failures, with no restart from a checkpoint. Dynamic Node Sets replace only the
@@ -53,7 +53,7 @@ From the SkyPilot repository root, launch the Job Group:
 
 ```bash
 sky jobs launch \
-  examples/torchft_resilient_training/torchft-resilient-training.yaml
+  examples/torchft_fault_tolerant_training/torchft-fault-tolerant-training.yaml
 ```
 
 Use the returned job ID to follow the trainers:
@@ -117,7 +117,7 @@ it starts. For shorter replacement times, build an image that contains them.
 
 ## Several GPUs per node
 
-`torchft-multi-gpu-resilient-training.yaml` runs two trainers with two GPUs
+`torchft-multi-gpu-fault-tolerant-training.yaml` runs two trainers with two GPUs
 each. The GPUs of one trainer form one replica group: `train.py` starts one
 process per GPU, the same GPU index of each trainer runs the fault-tolerant
 all-reduce, and the GPUs of one trainer then average their gradients among
@@ -126,7 +126,7 @@ NVLink where the node has it. Between pods it uses the pod network.
 
 ```bash
 sky jobs launch \
-  examples/torchft_resilient_training/torchft-multi-gpu-resilient-training.yaml
+  examples/torchft_fault_tolerant_training/torchft-multi-gpu-fault-tolerant-training.yaml
 ```
 
 A replica group fails as a unit: when one of its processes dies, the pod exits,

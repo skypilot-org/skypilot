@@ -4,9 +4,9 @@
 #
 # Launch:
 #   sky jobs launch \
-#     examples/torchft_resilient_training/torchft-multi-gpu-resilient-training.yaml
+#     examples/torchft_fault_tolerant_training/torchft-multi-gpu-fault-tolerant-training.yaml
 ---
-name: torchft-multi-gpu-resilient-training
+name: torchft-multi-gpu-fault-tolerant-training
 execution: parallel
 inter_connection: true
 primary_tasks: [trainers]
@@ -89,7 +89,7 @@ run: |
 
   GROUP_PIDS=()
   for group_rank in $(seq 0 $((GPUS_PER_NODE - 1))); do
-    python examples/torchft_resilient_training/train.py \
+    python examples/torchft_fault_tolerant_training/train.py \
       --lighthouse-host "lighthouse-0.${SKYPILOT_JOBGROUP_NAME}" \
       --group-rank "${group_rank}" \
       --group-size "${GPUS_PER_NODE}" \
