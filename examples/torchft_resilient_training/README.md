@@ -80,7 +80,19 @@ replacement pod, which joins as a fourth group at the current step. The job
 stays `RUNNING` and `sky jobs queue` shows no recovery.
 
 Delete two or three trainers at once to go further. The remaining trainers
-keep training, and each replacement joins as it comes up.
+keep training, down to a single one, and each replacement joins as it comes
+up. If a trainer dies in the middle of a step, the others wait out
+`TIMEOUT_SECONDS` and discard that step before they continue.
+
+Delete the `lighthouse` pod to exercise coordinator recovery:
+
+```bash
+kubectl delete pod <lighthouse-pod>
+```
+
+Training pauses while no lighthouse is reachable. SkyPilot replaces the pod
+under the same hostname, the trainers reconnect, and they form a quorum again.
+The steps around the switch may be discarded.
 
 ## Configuration
 
@@ -99,6 +111,9 @@ timeout it sets the longest pause after a failure.
 
 The cross-trainer all-reduce uses Gloo over TCP, which reconfigures quickly
 after a failure. Pass `--process-group nccl` to `train.py` to use NCCL instead.
+
+The PyTorch image has neither git nor torchft, so every pod installs both when
+it starts. For shorter replacement times, build an image that contains them.
 
 ## Several GPUs per node
 
@@ -125,8 +140,12 @@ model across the GPUs of a replica group with FSDP, see
 
 ## Limits
 
-- The lighthouse is a single coordinator. Training pauses while it is
-  unavailable.
+- The lighthouse is a single coordinator and keeps its state in memory.
+  Training pauses while it is unavailable. A replacement lighthouse starts
+  without the previous membership, so with `MIN_REPLICAS: 1` trainers can take
+  a few steps apart before they rejoin and the ones behind copy the weights of
+  the one ahead. Set `MIN_REPLICAS` to a majority of the trainers to rule that
+  out.
 - The live trainers hold the only copy of the weights. Real training code
   should still write periodic checkpoints to durable storage, for the case
   where every trainer is lost at once.
