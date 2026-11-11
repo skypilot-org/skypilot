@@ -752,6 +752,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Enforced by the jobs controllers from the server's config, so the jobs
     # queue must explain held jobs with the same value.
     ('jobs', 'max_launching_jobs_per_user'),
+    # Opt-in for the deprecated managed-job `event_callback`; set by the API
+    # server's administrator, not by clients.
+    ('jobs', 'allow_event_callback'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
     ('jobs', 'controller', 'stream_task_logs_to_controller_log'),

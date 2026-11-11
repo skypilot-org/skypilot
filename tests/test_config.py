@@ -1240,6 +1240,26 @@ def test_client_cannot_override_workspace_read_access(monkeypatch, tmp_path):
             ('workspace_config', 'read_access'), None) is None
 
 
+def test_client_cannot_enable_event_callbacks(monkeypatch, tmp_path):
+    """A client override must not enable managed-job event callbacks."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+        jobs:
+            allow_event_callback: false
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.safe_reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'jobs': {
+            'allow_event_callback': True
+        }}):
+        assert skypilot_config.get_nested(('jobs', 'allow_event_callback'),
+                                          None) is False
+
+
 def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
     """A client override must not replace the server's admin policy."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
