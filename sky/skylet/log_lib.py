@@ -333,6 +333,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
     timeout: Optional[int] = None,
+    reap_escaped_writers: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -350,6 +351,11 @@ def run_with_log(
         timeout: Optional timeout in seconds. If the command does not complete
             within this time, it will be terminated and TimeoutExpired will be
             raised. None means no timeout (default).
+        reap_escaped_writers: Whether to terminate processes that left the
+            command's session and still hold its output open after it exits,
+            so the exit code is returned. Only for job commands: for other
+            callers such a process may be shared, e.g. an SSH ControlMaster
+            that multiplexes other sessions.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -460,7 +466,7 @@ def run_with_log(
                 subprocess_utils.kill_children_processes(proc.pid)
 
             reaper_stop = output_escaped = None
-            if proc.stdout is not None:
+            if reap_escaped_writers and proc.stdout is not None:
                 reaper_stop, output_escaped = _start_escaped_writer_reaper(proc)
 
             if timeout is not None:
@@ -604,7 +610,8 @@ def run_bash_command_with_log(bash_command: str,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
                             streaming_prefix=streaming_prefix,
-                            shell=True)
+                            shell=True,
+                            reap_escaped_writers=True)
 
 
 def run_bash_command_with_log_and_return_pid(

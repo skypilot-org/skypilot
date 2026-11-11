@@ -184,6 +184,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 'setsid sleep 300 & echo $!; exit 3',
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
                 require_outputs=True,
             )
         self.assertEqual(returncode, 3)
@@ -210,6 +211,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 'setsid sleep 300 & exit 0',
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
             )
         self.assertEqual(returncode, 0)
         self.assertEqual(len(calls), 2)
@@ -221,6 +223,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 'setsid sleep 300 & exit 0',
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
                 timeout=4,
             )
         self.assertEqual(returncode, 0)
@@ -232,6 +235,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 'sleep 300 >/dev/null 2>&1 & setsid sleep 300 & exit 0',
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
             )
         self.assertEqual(returncode, 0)
         self.assertLess(time.monotonic() - start, 30)
@@ -244,6 +248,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 "timeout 60 bash -c 'sleep 4; echo done' & exit 0",
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
                 require_outputs=True,
             )
         self.assertEqual(returncode, 0)
@@ -258,6 +263,7 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 '(sleep 6; echo done) & sleep 3; exit 0',
                 f.name,
                 shell=True,
+                reap_escaped_writers=True,
                 require_outputs=True,
             )
         self.assertEqual(returncode, 0)
@@ -274,7 +280,26 @@ class TestRunWithLogEscapedWriters(unittest.TestCase):
                 log_lib.run_with_log(f'{hidden_writer} & exit 0',
                                      f.name,
                                      shell=True,
-                                     timeout=3)
+                                     timeout=3,
+                                     reap_escaped_writers=True)
+
+    def test_escaped_process_kept_without_opt_in(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f:
+            start = time.monotonic()
+            returncode = log_lib.run_with_log(
+                'setsid sleep 4 & exit 3',
+                f.name,
+                shell=True,
+            )
+        self.assertEqual(returncode, 3)
+        self.assertGreaterEqual(time.monotonic() - start, 3)
+
+    def test_bash_command_opts_in(self):
+        with tempfile.NamedTemporaryFile(suffix='.log') as f, \
+                mock.patch.object(log_lib, 'run_with_log',
+                                  return_value=0) as run_with_log:
+            log_lib.run_bash_command_with_log('true', f.name)
+        self.assertTrue(run_with_log.call_args.kwargs['reap_escaped_writers'])
 
     def test_pipe_writers_ignores_read_end_holders(self):
         read_fd, write_fd = os.pipe()
