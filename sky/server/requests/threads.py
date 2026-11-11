@@ -11,6 +11,11 @@ from typing import Any, Callable, Dict, Optional, Set, Tuple, TypeVar
 
 import prometheus_client as prom
 
+try:
+    from anyio._backends import _asyncio as anyio_asyncio
+except ImportError:  # Private to AnyIO and may move.
+    anyio_asyncio = None  # type: ignore[assignment]
+
 from sky import exceptions
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
@@ -63,14 +68,9 @@ def count_thread_starts() -> None:
 def keep_anyio_worker_threads() -> None:
     """Keeps idle AnyIO worker threads, which run sync routes and
     anyio.to_thread calls, alive between bursts."""
-    # Imported here: WorkerThread lives in a private AnyIO module that may move.
-    try:
-        # pylint: disable=import-outside-toplevel
-        from anyio._backends import _asyncio as anyio_asyncio
-        anyio_asyncio.WorkerThread.MAX_IDLE_TIME = (
-            _ANYIO_WORKER_MAX_IDLE_SECONDS)
-    except (ImportError, AttributeError):
-        pass
+    worker_thread = getattr(anyio_asyncio, 'WorkerThread', None)
+    if worker_thread is not None:
+        worker_thread.MAX_IDLE_TIME = _ANYIO_WORKER_MAX_IDLE_SECONDS
 
 
 _WorkItem = Tuple[Callable, concurrent.futures.Future, Tuple[Any, ...],
@@ -86,24 +86,20 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
     Threads are daemons so that long-running tasks (e.g. log streaming) do
     not block interpreter exit.
 
-    When max_workers tasks are running, submit() raises
-    ConcurrentWorkerExhaustedError by default, so that:
+    Up to max_queued tasks (0 by default) beyond max_workers wait for a free
+    thread; callers bound the wait, e.g. with asyncio.wait_for. A task whose
+    future is cancelled before a thread picks it up is skipped. Beyond that,
+    submit() raises ConcurrentWorkerExhaustedError, so that:
     1. the request might be handled by other processes that have idle workers
        upon retry;
     2. if not, then users can be clearly hinted that they need to scale the API
        server to support higher concurrency.
-    With queue_when_full, the task waits for a free thread instead; callers
-    bound the wait, e.g. with asyncio.wait_for. A task whose future is
-    cancelled before a thread picks it up is skipped.
     """
 
-    def __init__(self,
-                 name: str,
-                 max_workers: int,
-                 queue_when_full: bool = False):
+    def __init__(self, name: str, max_workers: int, max_queued: int = 0):
         self.name: str = name
         self.max_workers: int = max_workers
-        self.queue_when_full: bool = queue_when_full
+        self.max_queued: int = max_queued
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
         self._shutdown: bool = False
         self._shutdown_lock: threading.Lock = threading.Lock()
@@ -218,7 +214,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 executor after the task is completed.
         """
         count = self.running.increment()
-        if count > self.max_workers:
+        if count > self.max_workers + self.max_queued:
             self.running.decrement()
             if self._exhausted_counter is not None:
                 self._exhausted_counter.inc()
@@ -235,10 +231,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             if self._shutdown:
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
-            if self.queue_when_full:
-                self.running.increment()
-            else:
-                self.check_available(borrow=True)
+            self.check_available(borrow=True)
             fut: concurrent.futures.Future = concurrent.futures.Future()
             if not self._idle.acquire(blocking=False):
                 try:
@@ -258,6 +251,15 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                  cancel_futures: bool = False) -> None:
         with self._shutdown_lock:
             self._shutdown = True
+        if cancel_futures:
+            while True:
+                try:
+                    work = self._work_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if work is not None:
+                    work[1].cancel()
+                    self.running.decrement()
         with self._threads_lock:
             threads = list(self._threads)
         # Each thread exits after running the tasks queued before its sentinel.

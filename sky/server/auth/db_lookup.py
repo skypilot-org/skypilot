@@ -15,7 +15,9 @@ pooler (no server connection is assigned yet) or waiting for a pool
 checkout. On timeout the request fails fast with a 503 the client retries
 with backoff; note the executor thread itself keeps running until the DB
 layer releases it. Lookups beyond the auth executor's threads wait in its
-queue, within the same deadline, and are skipped if their caller timed out.
+bounded queue, within the same deadline, and are skipped if their caller
+timed out; once the queue is full too, requests fail fast with the
+worker-exhausted 503.
 
 Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
@@ -187,7 +189,9 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
 
     Raises ``asyncio.TimeoutError`` when the deadline elapses, including
     time spent waiting for a free thread (or when the database cut the call
-    off at its own, aligned timeout -- see `_SERVER_TIMEOUT_PGCODES`).
+    off at its own, aligned timeout -- see `_SERVER_TIMEOUT_PGCODES`), and
+    ``ConcurrentWorkerExhaustedError`` when the executor and its queue are
+    full.
     """
     return await _run_with_deadline(executor.get_auth_thread_executor(),
                                     POOL_AUTH, func, *args)

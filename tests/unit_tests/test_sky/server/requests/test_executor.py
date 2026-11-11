@@ -2202,8 +2202,8 @@ def test_auth_and_request_executors_are_distinct():
         auth_executor = executor.get_auth_thread_executor()
         assert request_executor is not auth_executor
         assert request_executor.name != auth_executor.name
-        assert auth_executor.queue_when_full
-        assert not request_executor.queue_when_full
+        assert auth_executor.max_queued > 0
+        assert request_executor.max_queued == 0
         # Each getter still memoizes per process.
         assert executor.get_request_thread_executor() is request_executor
         assert executor.get_auth_thread_executor() is auth_executor

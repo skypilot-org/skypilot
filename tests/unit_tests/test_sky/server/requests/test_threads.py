@@ -169,15 +169,15 @@ def test_on_demand_executor_prestart():
         executor.shutdown()
 
 
-def test_on_demand_executor_queue_when_full():
-    executor = OnDemandThreadExecutor(name='test',
-                                      max_workers=2,
-                                      queue_when_full=True)
+def test_on_demand_executor_max_queued():
+    executor = OnDemandThreadExecutor(name='test', max_workers=2, max_queued=3)
     release_event = threading.Event()
     try:
         futs = [executor.submit(blocking_task, release_event) for _ in range(5)]
         assert len(executor._threads) == 2
         assert not any(f.done() for f in futs)
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(blocking_task, release_event)
         release_event.set()
         assert all(f.result(timeout=5) for f in futs)
         assert len(executor._threads) == 2
@@ -188,9 +188,7 @@ def test_on_demand_executor_queue_when_full():
 
 
 def test_on_demand_executor_skips_cancelled_queued_task():
-    executor = OnDemandThreadExecutor(name='test',
-                                      max_workers=1,
-                                      queue_when_full=True)
+    executor = OnDemandThreadExecutor(name='test', max_workers=1, max_queued=1)
     release_event = threading.Event()
     ran = threading.Event()
     try:
@@ -253,6 +251,22 @@ def test_on_demand_executor_shutdown_waits_and_stops_threads():
     assert not any(t.is_alive() for t in executor._threads)
     executor.prestart(1)
     assert not any(t.is_alive() for t in executor._threads)
+
+
+def test_on_demand_executor_shutdown_cancels_queued_tasks():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1, max_queued=1)
+    release_event = threading.Event()
+    ran = threading.Event()
+    first = executor.submit(blocking_task, release_event)
+    queued = executor.submit(ran.set)
+    executor.shutdown(wait=False, cancel_futures=True)
+    assert queued.cancelled()
+    release_event.set()
+    assert first.result(timeout=5) is True
+    for t in executor._threads:
+        t.join(timeout=5)
+    assert not ran.is_set()
+    assert executor.running.get() == 0
 
 
 def test_on_demand_executor_threads_are_daemons():

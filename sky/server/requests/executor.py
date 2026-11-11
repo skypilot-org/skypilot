@@ -111,6 +111,8 @@ _REQUEST_THREADS_LIMIT = 128
 # point where the sheer number of threads in one process starts slowing its
 # request handling down.
 _AUTH_THREADS_LIMIT = 32
+# Auth lookups that may wait for a free auth thread; the next one gets a 503.
+_AUTH_QUEUED_LIMIT = 4 * _AUTH_THREADS_LIMIT
 # Threads each executor starts when the server process starts; the rest start
 # on demand and are kept for reuse.
 _REQUEST_THREADS_WARM = 16
@@ -258,7 +260,8 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
 
     For short, latency-sensitive work on the request hot path -- primarily the
     DB lookups done by authentication middleware. A lookup that finds every
-    thread busy waits for one; callers bound the wait with a deadline. Do not
+    thread busy waits for one, up to _AUTH_QUEUED_LIMIT of them; callers bound
+    the wait with a deadline. Do not
     submit long-running or streaming work here; that belongs in
     ``get_request_thread_executor()``.
     """
@@ -270,7 +273,7 @@ def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
             _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
                 name='auth_thread_executor',
                 max_workers=_AUTH_THREADS_LIMIT,
-                queue_when_full=True)
+                max_queued=_AUTH_QUEUED_LIMIT)
         return _AUTH_THREAD_EXECUTOR
 
 
