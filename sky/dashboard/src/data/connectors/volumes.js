@@ -22,6 +22,8 @@ export async function getVolumes() {
           user_hash: volume.user_hash,
           user_name: volume.user_name || '-',
           workspace: volume.workspace || '-',
+          // The name, for display and filters; older servers send none.
+          workspace_name: volume.workspace_name || null,
           last_attached_at: volume.last_attached_at,
           status: volume.status,
           type: volume.type,
