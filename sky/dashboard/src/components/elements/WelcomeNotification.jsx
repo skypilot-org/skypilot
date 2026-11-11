@@ -4,7 +4,7 @@ import { useTour } from '@/hooks/useTour';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
 
 export function WelcomeNotification() {
-  const { startTour } = useTour();
+  const { startTour, tour } = useTour();
   const { shouldShowTourPrompt, markTourPromptShown, markTourCompleted } =
     useFirstVisit();
   const [isVisible, setIsVisible] = useState(false);
@@ -15,18 +15,23 @@ export function WelcomeNotification() {
     if (shouldShowTourPrompt) {
       // Show notification after a short delay for better UX
       const timer = setTimeout(() => {
-        // Consume the first visit only now that the prompt is really showing.
-        // If this component is remounted while the delay is pending (a late
-        // app.providers wrapper registration rebuilds the whole tree), the
-        // fresh mount still counts as the first visit and reschedules, so the
-        // prompt is never silently lost.
+        // TourProvider consumes the visit when it starts a tour, so this
+        // branch is the no-tour case; still, never stack the prompt onto a
+        // running tour. Leaving the visit unconsumed keeps a later mount
+        // free to prompt: if this component is remounted while the delay is
+        // pending (a late app.providers wrapper registration rebuilds the
+        // whole tree), the fresh mount reschedules and the prompt is never
+        // silently lost.
+        if (tour && tour.isActive()) {
+          return;
+        }
         if (markTourPromptShown()) {
           setIsVisible(true);
         }
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [shouldShowTourPrompt, markTourPromptShown]);
+  }, [shouldShowTourPrompt, markTourPromptShown, tour]);
 
   const handleStartTour = () => {
     setIsVisible(false);

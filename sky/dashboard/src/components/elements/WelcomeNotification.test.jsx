@@ -17,8 +17,10 @@ import { act, render, renderHook, screen } from '@testing-library/react';
 import { WelcomeNotification } from './WelcomeNotification';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
 
+let mockTour = null;
+
 jest.mock('@/hooks/useTour', () => ({
-  useTour: () => ({ startTour: jest.fn() }),
+  useTour: () => ({ startTour: jest.fn(), tour: mockTour }),
 }));
 
 const FIRST_VISIT_KEY = 'skypilot-dashboard-first-visit';
@@ -31,6 +33,7 @@ const SHOW_DELAY_MS = 2000;
 beforeEach(() => {
   jest.useFakeTimers();
   localStorage.clear();
+  mockTour = null;
 });
 
 afterEach(() => {

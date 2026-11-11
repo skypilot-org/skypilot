@@ -36,6 +36,14 @@ export function useFirstVisit() {
     }
   }, []);
 
+  // Called when the first-visit tour actually starts. TourProvider consumes
+  // the visit at that moment: the started tour is a seen welcome, and the
+  // marker must already be set before WelcomeNotification mounts (it is
+  // chunk-loaded) so the two surfaces never stack.
+  const markTourStarted = useCallback(() => {
+    localStorage.setItem(FIRST_VISIT_KEY, 'true');
+  }, []);
+
   // Called when the first-visit prompt becomes visible. Returns false when
   // the prompt must not be shown after all (the tour was completed while the
   // show delay was pending, e.g. by the auto-started tour or another tab).
@@ -67,6 +75,7 @@ export function useFirstVisit() {
     tourCompleted: isClient ? tourCompleted : false,
     shouldShowTourPrompt,
     shouldPulseHelpButton,
+    markTourStarted,
     markTourPromptShown,
     markTourCompleted,
     resetFirstVisit,
