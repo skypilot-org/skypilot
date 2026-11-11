@@ -199,8 +199,6 @@ def check_users_workspaces_active_resources(
     Args:
         user_ids: List of user_id.
         workspace_names: List of workspaces to check.
-        owners: If given, only resources owned by these users count, e.g.
-            the users being removed.
         resources: Optional shared ``ResourceSnapshot`` covering at
             least the given workspaces. Batch callers should construct
             one ``ResourceSnapshot.fetch_for_workspaces`` and pass it
@@ -208,6 +206,8 @@ def check_users_workspaces_active_resources(
             snapshot's workspace index. When not provided, a transient
             snapshot scoped to ``workspace_names`` is fetched
             internally.
+        owners: If given, only resources owned by these users count, e.g.
+            the users being removed.
 
     Returns:
         resource_error_summary: str

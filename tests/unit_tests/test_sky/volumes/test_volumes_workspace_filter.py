@@ -11,6 +11,7 @@ import sqlalchemy
 
 from sky import global_user_state
 from sky import models
+from sky.utils import resource_checker
 from sky.utils import status_lib
 from sky.volumes.server import core as volumes_core
 from sky.workspaces import constants as workspace_constants
@@ -231,6 +232,9 @@ def test_get_volume_owners_skips_the_handle(isolated_database):
 
     assert [(o['name'], o['workspace']) for o in owners] == [('vol-a', 'ws-a')]
     assert set(owners[0]) == {'name', 'workspace', 'user_hash'}
+    # And the workspace check's volume lister goes through it.
+    assert [v['name'] for v in resource_checker._list_volumes(['ws-a'])
+           ] == ['vol-a']
 
 
 def test_set_volume_workspace_moves_only_the_named_volumes(isolated_database):

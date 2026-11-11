@@ -1,5 +1,6 @@
 """Tests for resource checker utilities for active resources protection."""
 
+import contextvars
 import unittest.mock as mock
 
 import pytest
@@ -784,6 +785,23 @@ class TestRegisteredListers:
             ]
 
         resource_checker.register_active_resource_lister(kind, lister)
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_listers_see_the_request_context(self, _):
+        # A lister reading config or the user must see the request's, not
+        # the thread pool's.
+        request_var = contextvars.ContextVar('request_var', default='server')
+        seen = []
+        resource_checker.register_active_resource_lister(
+            'endpoint',
+            lambda workspace_names: seen.append(request_var.get()) or [])
+        token = request_var.set('request')
+        try:
+            resource_checker._get_active_resources(['ws-a'])
+        finally:
+            request_var.reset(token)
+        assert seen == ['request']
 
     @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
                 side_effect=lambda ws: ws)
