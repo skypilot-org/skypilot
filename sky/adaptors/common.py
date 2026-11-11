@@ -2,6 +2,7 @@
 from importlib import util as importlib_util
 import functools
 import importlib
+import sys
 import threading
 import types
 from typing import Any, Callable, List, Optional, Tuple
@@ -50,15 +51,17 @@ class LazyImport(types.ModuleType):
         return self._module
 
     def __getattr__(self, name: str) -> Any:
-        # Attempt to access the attribute, if it fails, assume it's a submodule
-        # and lazily import it
+        module = self.load_module()
         try:
-            if name in self.__dict__:
-                return self.__dict__[name]
-            return getattr(self.load_module(), name)
+            return getattr(module, name)
         except AttributeError:
-            # Dynamically create a new LazyImport instance for the submodule
             submodule_name = f'{self._module_name}.{name}'
+            # Only cache real submodules. An import or attribute failure must
+            # not leave a proxy that shadows an attribute on later attempts.
+            if (sys.modules.get(submodule_name) is None and
+                (not hasattr(module, '__path__') or
+                 importlib_util.find_spec(submodule_name) is None)):
+                raise
             lazy_submodule = LazyImport(submodule_name,
                                         self._import_error_message)
             setattr(self, name, lazy_submodule)
