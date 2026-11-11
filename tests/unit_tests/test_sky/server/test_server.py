@@ -117,6 +117,37 @@ def test_no_deploy_flag_uses_default_workers(mock_executor_start,
 
 
 @pytest.mark.asyncio
+async def test_validate_keeps_the_shared_log_handler():
+    """`/validate` runs in a thread of the API server process.
+
+    That process serves other requests, so the env/config override must not
+    rebuild the process-wide log handler at this client's log level
+    (sync_refresh=True); otherwise a `SKYPILOT_DEBUG=1` validate leaves the
+    handler at DEBUG and later requests in the process, such as the
+    in-process `sky jobs logs` stream, carry the server's debug lines.
+    """
+    mock_dag = mock.MagicMock()
+    mock_validate_body = mock.MagicMock()
+    mock_validate_body.dag = 'test_dag_yaml'
+    mock_validate_body.request_options = {}
+    mock_validate_body.env_vars = {'SKYPILOT_DEBUG': '1'}
+    mock_request = mock.MagicMock()
+    mock_request.state.auth_user = models.User(id='alice', name='alice')
+
+    with mock.patch('sky.server.server.executor.override_request_env_and_config',
+                    return_value=contextlib.nullcontext()) as mock_override, \
+         mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
+                   return_value=mock_dag), \
+         mock.patch('sky.server.server.admin_policy_utils.apply',
+                   return_value=(mock_dag, config_utils.Config())), \
+         mock.patch.object(mock_dag, 'validate'):
+        await server.validate(mock_validate_body, mock_request)
+
+    mock_override.assert_called_once()
+    assert mock_override.call_args.kwargs.get('sync_refresh') is True
+
+
+@pytest.mark.asyncio
 async def test_validate():
     """Test the validate endpoint."""
     mock_dag = mock.MagicMock()

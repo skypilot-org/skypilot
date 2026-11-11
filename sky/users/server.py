@@ -521,15 +521,21 @@ def user_update(request: fastapi.Request,
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_info.id):
+        # A user deleted since the check above gets no password and no role:
+        # both writes only update an existing user.
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
-            global_user_state.add_or_update_user(
-                models.User(id=user_info.id,
-                            name=user_info.name,
-                            password=password_hash))
+            if not global_user_state.set_user_password(user_info.id,
+                                                       password_hash):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
         if role and need_update_role:
-            # Update user role in casbin policy
-            permission.permission_service.update_role(user_info.id, role)
+            if not permission.permission_service.update_role(
+                    user_info.id, role, existing_user_only=True):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'User {user_info.id} does not exist')
 
 
 @router.post('/batch_update')
@@ -601,8 +607,10 @@ def user_batch_update(request: fastapi.Request,
         batch_workspaces_allowed_users = (
             resolver.resolve_workspaces_allowed_users(batch_workspaces))
 
-    succeeded: List[str] = []
+    done: Set[str] = set()
     failed: List[Dict[str, str]] = []
+    # Users whose role changes, written together after the checks below.
+    to_update: List[str] = []
 
     for user_id in user_ids:
         try:
@@ -626,7 +634,7 @@ def user_batch_update(request: fastapi.Request,
                                 role != target_user_roles[0])
             if not need_update_role:
                 # Already in the desired role; record as success no-op.
-                succeeded.append(user_id)
+                done.add(user_id)
                 continue
             # When demoting from admin to a non-admin role (user / viewer),
             # ensure the user has no active resources in private workspaces
@@ -641,15 +649,36 @@ def user_batch_update(request: fastapi.Request,
                     workspaces=batch_workspaces,
                     resources=batch_resources,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
-            with _user_lock(user_info.id):
-                permission.permission_service.update_role(user_info.id, role)
-            succeeded.append(user_id)
+            to_update.append(user_info.id)
         except ValueError as e:
             failed.append({'user_id': user_id, 'error': str(e)})
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Failed to update role for user {user_id}')
             failed.append({'user_id': user_id, 'error': str(e)})
 
+    # No per-user locks: the checks above ran without them, and update_roles
+    # writes every role in one transaction under the policy lock, which
+    # serialises with other writers across processes and replicas.
+    targets = sorted(set(to_update))
+    if targets:
+        try:
+            # A user deleted since the checks above gets no role.
+            missing = permission.permission_service.update_roles(
+                {user_id: role for user_id in targets},
+                existing_users_only=True)
+            done.update(set(targets) - set(missing))
+            failed.extend({
+                'user_id': user_id,
+                'error': f'User {user_id} does not exist'
+            } for user_id in missing)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Failed to update roles for users {targets}')
+            failed.extend({
+                'user_id': user_id,
+                'error': str(e)
+            } for user_id in targets)
+
+    succeeded = [user_id for user_id in user_ids if user_id in done]
     return {'succeeded': succeeded, 'failed': failed}
 
 
@@ -673,8 +702,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_id):
-        global_user_state.delete_user(user_id)
-        permission.permission_service.delete_user(user_id)
+        permission.permission_service.delete_user_and_record(user_id)
 
 
 @router.post('/delete')

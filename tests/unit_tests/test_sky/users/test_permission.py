@@ -16,6 +16,9 @@ from sky.users import permission
 from sky.users import rbac
 from sky.utils import common
 from sky.utils import locks
+from sky.utils.db import migration_utils
+
+_MODEL_PATH = os.path.join(os.path.dirname(permission.__file__), 'model.conf')
 
 
 @pytest.fixture
@@ -48,6 +51,98 @@ def cleanup_env_vars():
     for env_var in env_vars_to_remove:
         if env_var in os.environ:
             del os.environ[env_var]
+
+
+@pytest.fixture
+def policy_engine(tmp_path, monkeypatch):
+    """A state database migrated by the real migrations.
+
+    `initialize_and_get_db()` points here too, so services built by
+    `_lazy_initialize` use it.
+    """
+    url = f'sqlite:///{tmp_path}/state.db'
+    migration_utils.safe_alembic_upgrade(
+        sqlalchemy.create_engine(url),
+        migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
+    engine = sqlalchemy.create_engine(url)
+    monkeypatch.setattr(permission.global_user_state, 'initialize_and_get_db',
+                        lambda: engine)
+    yield engine
+    engine.dispose()
+
+
+def _service_over(engine):
+    """A PermissionService with its own enforcer over `engine`."""
+    service = permission.PermissionService()
+    service.enforcer = casbin.SyncedEnforcer(
+        _MODEL_PATH,
+        sqlalchemy_adapter.Adapter(engine,
+                                   db_class=sqlalchemy_adapter.CasbinRule))
+    return service
+
+
+def _stored(engine, ptype):
+    """Stored rules of `ptype`, sorted, duplicates kept."""
+    fields = 'v0, v1' if ptype == 'g' else 'v0, v1, v2'
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sqlalchemy.text(
+                f'SELECT {fields} FROM casbin_rule WHERE ptype = :ptype'),
+            {'ptype': ptype})
+        return sorted(tuple(row) for row in rows)
+
+
+def _insert(engine, ptype, *rules):
+    """Stores rules directly, as another process would."""
+    fields = ['v0', 'v1', 'v2']
+    with engine.begin() as conn:
+        for rule in rules:
+            names = fields[:len(rule)]
+            conn.execute(
+                sqlalchemy.text(
+                    f'INSERT INTO casbin_rule (ptype, {", ".join(names)}) '
+                    f'VALUES (:ptype, {", ".join(":" + n for n in names)})'), {
+                        'ptype': ptype,
+                        **dict(zip(names, rule))
+                    })
+
+
+def _add_user_row(engine, user_id):
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text('INSERT INTO users (id, name) '
+                            'VALUES (:id, :id)'), {'id': user_id})
+
+
+def _user_ids(engine):
+    with engine.connect() as conn:
+        return sorted(
+            row[0]
+            for row in conn.execute(sqlalchemy.text('SELECT id FROM users')))
+
+
+class _PolicyWrites:
+    """Counts the casbin_rule writes issued on an engine."""
+
+    def __init__(self, engine):
+        self.count = 0
+        self._engine = engine
+
+    def _before(self, conn, cursor, statement, *args):  # pylint: disable=unused-argument
+        if ('casbin_rule' in statement and
+                statement.lstrip().upper().startswith(
+                    ('INSERT', 'DELETE', 'UPDATE'))):
+            self.count += 1
+
+    def __enter__(self):
+        sqlalchemy.event.listen(self._engine, 'before_cursor_execute',
+                                self._before)
+        return self
+
+    def __exit__(self, *args):
+        sqlalchemy.event.remove(self._engine, 'before_cursor_execute',
+                                self._before)
 
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")
@@ -95,28 +190,11 @@ class TestPermissionService:
     @mock.patch('sky.users.rbac.get_workspace_policy_permissions')
     @mock.patch('sky.users.rbac.get_role_permissions')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_maybe_initialize_policies_new_setup(self, mock_get_users,
-                                                 mock_get_role_perms,
-                                                 mock_get_workspace_perms,
-                                                 mock_get_plugin_rules,
-                                                 mock_policy_lock, mock_users):
+    def test_maybe_initialize_policies_new_setup(
+            self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test policy initialization for a new setup."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = []  # No existing policies
-        mock_enforcer.get_grouping_policy.return_value = []  # No existing roles
-        # Users don't have roles yet (used by _add_user_if_not_exists_no_lock)
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_enforcer.add_policy.return_value = True
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        # Mock plugin RBAC rules (empty by default)
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions
         mock_get_role_perms.return_value = {
             'admin': {
                 'permissions': {
@@ -132,47 +210,33 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions
         mock_get_workspace_perms.return_value = {
             'default': ['*'],
             'private-ws': ['user1', 'user2']
         }
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
         service._maybe_initialize_policies()
 
-        # Verify plugin RBAC rules were fetched
         mock_get_plugin_rules.assert_called_once()
-
-        # Verify policies were added for user role blocklist
-        mock_enforcer.add_policy.assert_any_call('user', '/workspaces/config',
-                                                 'POST')
-
-        # Verify workspace policies were added
-        mock_enforcer.add_policy.assert_any_call('*', 'default', '*')
-        mock_enforcer.add_policy.assert_any_call('user1', 'private-ws', '*')
-        mock_enforcer.add_policy.assert_any_call('user2', 'private-ws', '*')
-
-        # Verify users were assigned default roles
-        for user in mock_users:
-            mock_enforcer.add_grouping_policy.assert_any_call(
-                user.id, rbac.get_default_role())
-
-        # Verify built-in system users are seeded with the expected roles:
-        # the existing system user + SERVER_ID are admin; the new
-        # system-viewer is viewer.
-        mock_enforcer.add_grouping_policy.assert_any_call(
-            common.SERVER_ID, rbac.RoleName.ADMIN.value)
-        mock_enforcer.add_grouping_policy.assert_any_call(
-            constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value)
-        mock_enforcer.add_grouping_policy.assert_any_call(
-            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
-            rbac.RoleName.VIEWER.value)
+        # The user role's blocklist and the workspace grants.
+        assert _stored(policy_engine, 'p') == sorted([
+            ('user', '/workspaces/config', 'POST'),
+            ('*', 'default', '*'),
+            ('user1', 'private-ws', '*'),
+            ('user2', 'private-ws', '*'),
+        ])
+        # Every user gets the default role; the built-in system users get
+        # their own: SERVER_ID and the system user admin, the system viewer
+        # viewer.
+        assert _stored(policy_engine, 'g') == sorted(
+            [(user.id, rbac.get_default_role()) for user in mock_users] + [
+                (common.SERVER_ID, rbac.RoleName.ADMIN.value),
+                (constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value),
+                (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+                 rbac.RoleName.VIEWER.value),
+            ])
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -181,30 +245,14 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_maybe_initialize_policies_existing_policies(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test policy initialization when policies already exist (idempotent)."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        # Simulate existing policies that match expected policies
-        existing_policies = [['user', '/workspaces/config', 'POST'],
-                             ['*', 'default', '*'],
-                             ['user1', 'private-ws', '*'],
-                             ['user2', 'private-ws', '*']]
-        mock_enforcer.get_policy.return_value = existing_policies
-        # Users already have roles (returned as grouping policies)
-        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
-                                                          ['user2', 'user'],
-                                                          ['user3', 'user']]
-        mock_enforcer.add_policy.return_value = True
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        # Mock plugin RBAC rules
+        existing_policies = [('user', '/workspaces/config', 'POST'),
+                             ('*', 'default', '*'),
+                             ('user1', 'private-ws', '*'),
+                             ('user2', 'private-ws', '*')]
+        _insert(policy_engine, 'p', *existing_policies)
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions
         mock_get_role_perms.return_value = {
             'admin': {
                 'permissions': {
@@ -220,22 +268,17 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions
         mock_get_workspace_perms.return_value = {
             'default': ['*'],
             'private-ws': ['user1', 'user2']
         }
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
         service._maybe_initialize_policies()
 
-        # Verify no new policies were added (since they already exist)
-        mock_enforcer.add_policy.assert_not_called()
+        # Nothing added twice, nothing dropped.
+        assert _stored(policy_engine, 'p') == sorted(existing_policies)
 
     def test_add_user_if_not_exists_new_user(self):
         """Test adding a new user that doesn't exist."""
@@ -268,192 +311,42 @@ class TestPermissionService:
         mock_enforcer.add_grouping_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_new_role(self, mock_policy_lock):
+    def test_update_role_new_role(self, mock_policy_lock, policy_engine):
         """Test updating user role to a new role."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = ['user']  # Current role
-        mock_enforcer.remove_filtered_grouping_policy.return_value = [[
-            'user1', 'user'
-        ]]
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
+        _insert(policy_engine, 'g', ('user1', 'user'))
+        service = _service_over(policy_engine)
 
         service.update_role('user1', 'admin')
 
-        # Every existing role is dropped, then the new one added.
-        mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
-            0, 'user1')
-        mock_enforcer.add_grouping_policy.assert_called_once_with(
-            'user1', 'admin')
+        # The old role is dropped, not kept beside the new one.
+        assert _stored(policy_engine, 'g') == [('user1', 'admin')]
+        assert service.get_user_roles('user1') == ['admin']
 
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_no_existing_roles(self, mock_policy_lock):
+    def test_update_role_no_existing_roles(self, mock_policy_lock,
+                                           policy_engine):
         """Test updating role for a user who has no existing roles."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []  # No current roles
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
+        service = _service_over(policy_engine)
 
         service.update_role('user1', 'user')
 
-        # Verify no removal was attempted (no existing role to remove)
-        mock_enforcer.remove_grouping_policy.assert_not_called()
-        # Verify the new role was added
-        mock_enforcer.add_grouping_policy.assert_called_once_with(
-            'user1', 'user')
+        assert _stored(policy_engine, 'g') == [('user1', 'user')]
 
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_same_role(self, mock_policy_lock):
+    def test_update_role_same_role(self, mock_policy_lock, policy_engine):
         """Test updating user role to the same role (no-op)."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
+        _insert(policy_engine, 'g', ('user1', 'admin'))
+        service = _service_over(policy_engine)
 
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = ['admin'
-                                                        ]  # Current role
+        with _PolicyWrites(policy_engine) as writes:
+            service.update_role('user1', 'admin')
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
+        assert writes.count == 0
+        assert _stored(policy_engine, 'g') == [('user1', 'admin')]
 
-        service.update_role('user1', 'admin')
-
-        # Verify no changes were made
-        mock_enforcer.remove_grouping_policy.assert_not_called()
-        mock_enforcer.add_grouping_policy.assert_not_called()
-
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_invalidates_cache_after_the_write(
-            self, mock_policy_lock, mock_kv_cache):
-        """The cache must not be cleared before the new role is persisted.
-
-        Clearing first opens a window where a reader repopulates it from the
-        old role and the entry survives the update.
-        """
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        call_order = []
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = ['user']
-        # Auto-save persists inside the mutator, so that is the write.
-        mock_enforcer.add_grouping_policy.side_effect = (
-            lambda *a: call_order.append('add_grouping_policy'))
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            lambda *a, **kw: call_order.append('invalidate'))
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.update_role('user1', 'admin')
-
-        # Verify cache invalidation was called after the write
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-        assert call_order == ['add_grouping_policy', 'invalidate']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_no_existing_role_still_invalidates(
-            self, mock_policy_lock, mock_kv_cache):
-        """Test that update_role invalidates even when user had no prior role.
-
-        A first role assignment can grant workspace access that was previously
-        denied and cached as '0', so we must always invalidate.
-        """
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.update_role('user1', 'user')
-
-        mock_enforcer.add_grouping_policy.assert_called_once_with(
-            'user1', 'user')
-        # Cache must be invalidated even for first role assignment
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_invalidates_cache_after_the_write(
-            self, mock_policy_lock, mock_kv_cache):
-        """Seeding a role-less user clears their cached workspace denials.
-
-        A user checked while role-less may have a cached '0' for a workspace
-        that their new role grants; it must not outlive the seed.
-        """
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        call_order = []
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_enforcer.add_grouping_policy.side_effect = (
-            lambda *a: call_order.append('add_grouping_policy'))
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            lambda *a, **kw: call_order.append('invalidate'))
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.add_user_if_not_exists('user1')
-
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'user1' in call_kwargs['suffix']
-        assert call_order == ['add_grouping_policy', 'invalidate']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_survives_cache_clear_failure(
-            self, mock_policy_lock, mock_kv_cache):
-        """The role is saved even if clearing the cache then fails."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.side_effect = (
-            RuntimeError('cache db unavailable'))
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.add_user_if_not_exists('user1')
-
-        mock_enforcer.add_grouping_policy.assert_called_once()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_add_user_if_not_exists_keeps_cache_for_existing_role(
-            self, mock_policy_lock, mock_kv_cache):
-        """No role written, nothing to invalidate."""
+    def test_add_user_if_not_exists_keeps_existing_role(self, mock_policy_lock):
+        """A user who already has a role gets no new one."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -467,7 +360,6 @@ class TestPermissionService:
         service.add_user_if_not_exists('user1')
 
         mock_enforcer.add_grouping_policy.assert_not_called()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
     def test_get_user_roles(self):
         """Test getting user roles."""
@@ -620,129 +512,34 @@ class TestPermissionService:
         mock_enforcer.enforce.assert_called_once_with('user1', 'test-workspace',
                                                       '*')
 
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_hit_allowed(self, mock_kv_cache):
-        """Test cache hit returning allowed ('1') skips enforcer."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        mock_kv_cache.get_cache_entry.return_value = '1'
-
-        mock_enforcer = mock.Mock()
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is True
-        # Enforcer should NOT be called on cache hit
-        mock_enforcer.enforce.assert_not_called()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_hit_denied(self, mock_kv_cache):
-        """Test cache hit returning denied ('0') skips enforcer."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        mock_kv_cache.get_cache_entry.return_value = '0'
-
-        mock_enforcer = mock.Mock()
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is False
-        mock_enforcer.enforce.assert_not_called()
-
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_check_workspace_permission_cache_write_failure(
-            self, mock_kv_cache):
-        """Test that permission is still returned when cache write fails."""
-        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        # Cache miss
-        mock_kv_cache.get_cache_entry.return_value = None
-        # Cache write raises
-        mock_kv_cache.add_or_update_cache_entry.side_effect = RuntimeError(
-            'db locked')
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.enforce.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service.get_user_roles = mock.Mock(return_value=['user'])
-
-        # Should still return the correct result despite cache write failure
-        result = service.check_workspace_permission('user1', 'test-workspace')
-
-        assert result is True
-        mock_enforcer.enforce.assert_called_once()
-
     @mock.patch('sky.users.permission._policy_lock')
-    def test_add_workspace_policy(self, mock_policy_lock):
+    def test_add_workspace_policy(self, mock_policy_lock, policy_engine):
         """Test adding workspace policy."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
 
         service.add_workspace_policy('test-workspace', ['user1', 'user2'])
 
-        # Verify policies were added for each user
-        mock_enforcer.add_policy.assert_any_call('user1', 'test-workspace', '*')
-        mock_enforcer.add_policy.assert_any_call('user2', 'test-workspace', '*')
+        assert _stored(policy_engine, 'p') == [
+            ('user1', 'test-workspace', '*'),
+            ('user2', 'test-workspace', '*'),
+        ]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_add_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                    mock_kv_cache):
-        """Test that add_workspace_policy invalidates stale cached denials."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
-        service.add_workspace_policy('test-workspace', ['user1', 'user2'])
-
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                       mock_kv_cache):
-        """Test that update_workspace_policy invalidates permission cache."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
+    def test_update_workspace_policy(self, mock_policy_lock, policy_engine):
+        """Test that update_workspace_policy replaces the members."""
+        _insert(policy_engine, 'p', ('user0', 'test-workspace', '*'))
+        service = _service_over(policy_engine)
 
         service.update_workspace_policy('test-workspace', ['user1', 'user2'])
 
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
+        assert _stored(policy_engine, 'p') == [
+            ('user1', 'test-workspace', '*'),
+            ('user2', 'test-workspace', '*'),
+        ]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_remove_workspace_policy_invalidates_cache(self, mock_policy_lock,
-                                                       mock_kv_cache):
-        """Test that remove_workspace_policy invalidates permission cache."""
+    def test_remove_workspace_policy(self, mock_policy_lock):
+        """Test that remove_workspace_policy removes the workspace's policy."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -756,11 +553,6 @@ class TestPermissionService:
         # Verify enforcer policy removal
         mock_enforcer.remove_filtered_policy.assert_called_once_with(
             1, 'test-workspace')
-        # Verify cache invalidation was called
-        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
-        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
-            0]
-        assert 'test-workspace' in prefix_arg
 
     @mock.patch('sky.users.permission.locks.get_lock')
     def test_policy_lock_context_manager(self, mock_get_lock):
@@ -796,54 +588,29 @@ class TestPermissionService:
         assert 'Failed to update policy due to a timeout' in str(exc_info.value)
         assert 'casbin policy lock' in str(exc_info.value)
 
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_delete_user_with_role(self, mock_kv_cache):
+    def test_delete_user_with_role(self, policy_engine):
         """Test deleting a user who has a role."""
-        mock_enforcer = mock.Mock()
-        # User has a role, no workspace grants
-        mock_enforcer.remove_filtered_grouping_policy.return_value = [[
-            'user1', 'user'
-        ]]
-        mock_enforcer.remove_filtered_policy.return_value = []
+        _add_user_row(policy_engine, 'user1')
+        _add_user_row(policy_engine, 'user2')
+        _insert(policy_engine, 'g', ('user1', 'user'), ('user2', 'user'))
+        service = _service_over(policy_engine)
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        with mock.patch('sky.users.permission._policy_lock'):
+            service.delete_user_and_record('user1')
 
-            service.delete_user('user1')
+        # The record and the role go; the other user's stay.
+        assert _user_ids(policy_engine) == ['user2']
+        assert _stored(policy_engine, 'g') == [('user2', 'user')]
 
-            mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
-                0, 'user1')
-            # Verify cache invalidation
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once(
-            )
-            call_kwargs = (mock_kv_cache.delete_cache_entries_by_prefix_suffix.
-                           call_args[1])
-            assert 'user1' in call_kwargs['suffix']
-
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_delete_user_without_role(self, mock_kv_cache):
+    def test_delete_user_without_role(self, policy_engine):
         """Test deleting a user who has no roles."""
-        mock_enforcer = mock.Mock()
-        # User has neither roles nor workspace grants: nothing matched.
-        mock_enforcer.remove_filtered_grouping_policy.return_value = []
-        mock_enforcer.remove_filtered_policy.return_value = []
+        _add_user_row(policy_engine, 'user2')
+        service = _service_over(policy_engine)
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        with mock.patch('sky.users.permission._policy_lock'):
+            service.delete_user_and_record('user2')
 
-            service.delete_user('user2')
-
-            mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
-                0, 'user2')
-            # No cache invalidation for user without role (early return)
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called(
-            )
+        assert _user_ids(policy_engine) == []
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
@@ -1037,19 +804,8 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_maybe_initialize_policies_with_plugin_rules(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test policy initialization with plugin RBAC rules."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = []
-        mock_enforcer.get_grouping_policy.return_value = []
-        mock_enforcer.add_policy.return_value = True
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        # Mock plugin RBAC rules
         mock_get_plugin_rules.return_value = {
             'user': [{
                 'path': '/plugins/api/test',
@@ -1059,7 +815,6 @@ class TestPermissionService:
                 'method': 'DELETE'
             }]
         }
-
         # Mock role permissions (should include plugin rules)
         mock_get_role_perms.return_value = {
             'user': {
@@ -1077,27 +832,17 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions
         mock_get_workspace_perms.return_value = {'default': ['*']}
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
         service._maybe_initialize_policies()
 
-        # Verify plugin rules were fetched
         mock_get_plugin_rules.assert_called_once()
-
-        # Verify policies were added including plugin rules
-        mock_enforcer.add_policy.assert_any_call('user', '/workspaces/config',
-                                                 'POST')
-        mock_enforcer.add_policy.assert_any_call('user', '/plugins/api/test',
-                                                 'POST')
-        mock_enforcer.add_policy.assert_any_call('user', '/plugins/api/test',
-                                                 'DELETE')
+        stored = _stored(policy_engine, 'p')
+        assert ('user', '/workspaces/config', 'POST') in stored
+        assert ('user', '/plugins/api/test', 'POST') in stored
+        assert ('user', '/plugins/api/test', 'DELETE') in stored
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1106,22 +851,10 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_maybe_initialize_policies_plugin_rules_import_error(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test policy initialization when plugin module is not available."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = []
-        mock_enforcer.get_grouping_policy.return_value = []
-        mock_enforcer.add_policy.return_value = True
-        mock_enforcer.add_grouping_policy.return_value = True
-
         # Simulate ImportError - return empty dict (as the actual method would)
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions (without plugin rules)
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
@@ -1132,24 +865,17 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions
         mock_get_workspace_perms.return_value = {'default': ['*']}
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-
+        service = _service_over(policy_engine)
         # Should not raise an exception, should handle gracefully
         service._maybe_initialize_policies()
 
-        # Verify plugin rules were attempted to be fetched
         mock_get_plugin_rules.assert_called_once()
         # Verify policies were still initialized correctly
-        mock_enforcer.add_policy.assert_any_call('user', '/workspaces/config',
-                                                 'POST')
+        assert ('user', '/workspaces/config',
+                'POST') in _stored(policy_engine, 'p')
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1158,24 +884,15 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_maybe_initialize_policies_writes_nothing_when_in_sync(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """A boot that finds the policy already correct must not write."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer with existing policies matching expected
-        existing_policies = [['user', '/workspaces/config', 'POST'],
-                             ['*', 'default', '*']]
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = existing_policies
-        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
-                                                          ['user2', 'user'],
-                                                          ['user3', 'user']]
-
-        # Mock plugin RBAC rules
+        _insert(policy_engine, 'p', ('user', '/workspaces/config', 'POST'),
+                ('*', 'default', '*'))
+        _insert(policy_engine, 'g', ('user1', 'user'), ('user2', 'user'),
+                ('user3', 'user'), (common.SERVER_ID, 'admin'),
+                (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
+                (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'))
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions matching existing policies
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
@@ -1186,20 +903,14 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions matching existing policies
         mock_get_workspace_perms.return_value = {'default': ['*']}
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._maybe_initialize_policies()
+        service = _service_over(policy_engine)
+        with _PolicyWrites(policy_engine) as writes:
+            service._maybe_initialize_policies()
 
-        # Verify no policies were added or removed
-        mock_enforcer.add_policy.assert_not_called()
-        mock_enforcer.remove_policy.assert_not_called()
+        assert writes.count == 0
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1208,31 +919,12 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_maybe_initialize_policies_remove_redundant(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test policy initialization removes redundant policies."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        # Simulate existing policies, including a redundant one
-        existing_policies = [
-            ['user', '/workspaces/config', 'POST'],
-            ['*', 'default', '*'],
-            ['user-to-be-removed', 'some-workspace', '*']  # Redundant
-        ]
-        mock_enforcer.get_policy.return_value = existing_policies
-        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
-                                                          ['user2', 'user'],
-                                                          ['user3', 'user']]
-        mock_enforcer.add_policy.return_value = True
-        mock_enforcer.remove_policy.return_value = True
-        mock_enforcer.add_grouping_policy.return_value = True
-
-        # Mock plugin RBAC rules
+        _insert(policy_engine, 'p', ('user', '/workspaces/config', 'POST'),
+                ('*', 'default', '*'),
+                ('user-to-be-removed', 'some-workspace', '*'))
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions (only one policy expected)
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
@@ -1243,52 +935,16 @@ class TestPermissionService:
                 }
             }
         }
-
-        # Mock workspace permissions (only one policy expected)
         mock_get_workspace_perms.return_value = {'default': ['*']}
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
         service._maybe_initialize_policies()
 
-        # Verify redundant policy was removed
-        mock_enforcer.remove_policy.assert_called_once_with(
-            'user-to-be-removed', 'some-workspace', '*')
-
-    def test_cache_key_format(self):
-        """Test that cache keys use the expected prefix and separator."""
-        service = permission.PermissionService()
-        service.enforcer = mock.Mock()
-
-        key = service._workspace_perm_cache_key('my-workspace', 'user123')
-        # Only the action-agnostic member result is cached, so the key has no
-        # action dimension: perm:ws:<workspace>:<user>. It keeps the
-        # by-workspace prefix and by-user suffix so invalidation still matches.
-        assert key == 'perm:ws:my-workspace:user123'
-        assert key.startswith('perm:ws:my-workspace:')  # prefix invalidation
-        assert key.endswith(':user123')  # suffix invalidation
-
-    @mock.patch('sky.users.permission.kv_cache')
-    @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_same_role_no_invalidation(self, mock_policy_lock,
-                                                   mock_kv_cache):
-        """Test that update_role does not invalidate when role is unchanged."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_roles_for_user.return_value = ['admin']
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
-        service._load_policy_no_lock = mock.Mock()
-
-        service.update_role('user1', 'admin')
-
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+        assert _stored(policy_engine, 'p') == sorted([
+            ('user', '/workspaces/config', 'POST'),
+            ('*', 'default', '*'),
+        ])
 
     def test_sa_token_permission_viewer_denied_for_own(self):
         """Viewers cannot manage even their own SA tokens."""
@@ -1336,38 +992,12 @@ class TestPermissionServiceMultiProcess:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_concurrent_initialization_no_duplicate_policies(
             self, mock_get_users, mock_get_role_perms, mock_get_workspace_perms,
-            mock_get_plugin_rules, mock_policy_lock, mock_users):
+            mock_get_plugin_rules, mock_policy_lock, mock_users, policy_engine):
         """Test that concurrent initialization doesn't create duplicate policies."""
-        # This simulates multiple threads trying to initialize policies simultaneously
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Track calls to add_policy and add_grouping_policy
-        policy_calls = []
-        grouping_policy_calls = []
-
-        def track_add_policy(*args):
-            policy_calls.append(args)
-            return True
-
-        def track_add_grouping_policy(*args):
-            grouping_policy_calls.append(args)
-            return True
-
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = [
-        ]  # No existing policies initially
-        mock_enforcer.get_grouping_policy.return_value = []  # No existing roles
-        # Users don't have roles yet (used by _add_user_if_not_exists_no_lock)
-        mock_enforcer.get_roles_for_user.return_value = []
-        mock_enforcer.add_policy.side_effect = track_add_policy
-        mock_enforcer.add_grouping_policy.side_effect = track_add_grouping_policy
-
-        # Mock plugin RBAC rules
+        # Callers hold `_policy_lock()`; a thread lock stands in for it.
+        thread_lock = threading.Lock()
+        mock_policy_lock.return_value = thread_lock
         mock_get_plugin_rules.return_value = {}
-
-        # Mock role permissions
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
@@ -1378,70 +1008,45 @@ class TestPermissionServiceMultiProcess:
                 }
             }
         }
-
-        # Mock workspace permissions
         mock_get_workspace_perms.return_value = {
             'workspace1': ['user1', 'user2']
         }
-
-        # Mock users
         mock_get_users.return_value = mock_users
 
-        # Simulate concurrent initialization
-        services = []
         errors = []
 
         def create_service():
+            # Each thread is its own server process, with its own enforcer.
             try:
-                service = permission.PermissionService()
-                service.enforcer = mock_enforcer
-                service._maybe_initialize_policies()
-                services.append(service)
-            except Exception as e:
+                service = _service_over(policy_engine)
+                with permission._policy_lock():
+                    service._maybe_initialize_policies()
+            except Exception as e:  # pylint: disable=broad-except
                 errors.append(e)
 
-        # Create multiple threads to simulate concurrent access
-        threads = []
-        for _ in range(5):
-            thread = threading.Thread(target=create_service)
-            threads.append(thread)
-
-        # Start all threads simultaneously
+        threads = [threading.Thread(target=create_service) for _ in range(5)]
         for thread in threads:
             thread.start()
-
-        # Wait for all threads to complete
         for thread in threads:
             thread.join()
 
-        # Verify no errors occurred
-        assert len(
-            errors) == 0, f"Errors during concurrent initialization: {errors}"
-
-        # Verify that each policy and grouping policy was only added once per user
-        # (even though multiple threads tried to initialize)
-        unique_policy_calls = set(policy_calls)
-        unique_grouping_policy_calls = set(grouping_policy_calls)
-
-        # Should have one policy call per workspace-user combination
-        expected_policy_calls = {('user', '/workspaces/config', 'POST'),
-                                 ('user1', 'workspace1', '*'),
-                                 ('user2', 'workspace1', '*')}
-
-        # Should have one grouping policy call per user (for default role assignment)
-        # plus the three built-in system users — SERVER_ID and the system
-        # admin user with admin role, and the system viewer user with viewer.
-        expected_grouping_policy_calls = {
+        assert not errors, f'Errors during concurrent initialization: {errors}'
+        # Each rule stored exactly once, however many processes initialized.
+        assert _stored(policy_engine, 'p') == sorted([
+            ('user', '/workspaces/config', 'POST'),
+            ('user1', 'workspace1', '*'),
+            ('user2', 'workspace1', '*'),
+        ])
+        # One role per user, plus the three built-in system users: SERVER_ID
+        # and the system admin user with admin, the system viewer with viewer.
+        assert _stored(policy_engine, 'g') == sorted([
             ('user1', rbac.get_default_role()),
             ('user2', rbac.get_default_role()),
             ('user3', rbac.get_default_role()),
             (common.SERVER_ID, 'admin'),
             (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
             (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'),
-        }
-
-        assert unique_policy_calls == expected_policy_calls
-        assert unique_grouping_policy_calls == expected_grouping_policy_calls
+        ])
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.PermissionService._get_plugin_rbac_rules')
@@ -1451,62 +1056,9 @@ class TestPermissionServiceMultiProcess:
     def test_idempotent_user_addition(self, mock_get_users, mock_get_role_perms,
                                       mock_get_workspace_perms,
                                       mock_get_plugin_rules, mock_policy_lock,
-                                      mock_users):
+                                      mock_users, policy_engine):
         """Test that adding the same user multiple times is idempotent."""
-        mock_policy_lock.return_value.__enter__ = mock.Mock()
-        mock_policy_lock.return_value.__exit__ = mock.Mock()
-
-        # Track calls to add_grouping_policy
-        grouping_policy_calls = []
-
-        def track_add_grouping_policy(*args):
-            grouping_policy_calls.append(args)
-            return True
-
-        # Mock enforcer - simulate that users already have roles after first call
-        mock_enforcer = mock.Mock()
-        mock_enforcer.get_policy.return_value = []
-        mock_enforcer.add_policy.return_value = True
-
-        # Track initialization calls
-        init_call_count = 0
-        user_roles_map = {}  # Track which users have been assigned roles
-
-        def get_grouping_policy_side_effect():
-            nonlocal init_call_count
-            init_call_count += 1
-            if init_call_count <= 1:  # First initialization call
-                return []  # No roles initially
-            else:
-                # Users have roles after first call (including system users)
-                result = [
-                    [user.id, rbac.get_default_role()] for user in mock_users
-                ]
-                result.append([common.SERVER_ID, 'admin'])
-                result.append([constants.SKYPILOT_SYSTEM_USER_ID, 'admin'])
-                result.append(
-                    [constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'])
-                return result
-
-        def get_roles_for_user_side_effect(user_id):
-            # This is called by _add_user_if_not_exists_no_lock
-            # Return roles if user has been assigned (tracked in user_roles_map)
-            return user_roles_map.get(user_id, [])
-
-        def add_grouping_policy_tracked(*args):
-            # Track when roles are assigned
-            user_id, role = args
-            user_roles_map[user_id] = [role]
-            return track_add_grouping_policy(*args)
-
-        mock_enforcer.get_grouping_policy.side_effect = get_grouping_policy_side_effect
-        mock_enforcer.get_roles_for_user.side_effect = get_roles_for_user_side_effect
-        mock_enforcer.add_grouping_policy.side_effect = add_grouping_policy_tracked
-
-        # Mock plugin RBAC rules
         mock_get_plugin_rules.return_value = {}
-
-        # Mock other dependencies
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
@@ -1517,29 +1069,23 @@ class TestPermissionServiceMultiProcess:
         mock_get_workspace_perms.return_value = {}
         mock_get_users.return_value = mock_users
 
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
 
         # Initialize policies multiple times
         service._maybe_initialize_policies()
         service._maybe_initialize_policies()
         service._maybe_initialize_policies()
 
-        # Each user should only be added once (3 mock users + 3 system users)
-        expected_calls = {
-            (user.id, rbac.get_default_role()) for user in mock_users
-        }
-        expected_calls.add((common.SERVER_ID, 'admin'))
-        expected_calls.add((constants.SKYPILOT_SYSTEM_USER_ID, 'admin'))
-        expected_calls.add((constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'))
-        assert len(grouping_policy_calls) == len(expected_calls)
-
-        # Verify each user was added exactly once
-        actual_calls = set(grouping_policy_calls)
-        assert actual_calls == expected_calls
+        # Each user holds exactly one role (3 mock users + 3 system users).
+        expected = [(user.id, rbac.get_default_role()) for user in mock_users]
+        expected += [(common.SERVER_ID, 'admin'),
+                     (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
+                     (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer')]
+        assert _stored(policy_engine, 'g') == sorted(expected)
 
     @mock.patch('sky.users.permission._policy_lock')
-    def test_concurrent_policy_updates_use_lock(self, mock_policy_lock):
+    def test_concurrent_policy_updates_use_lock(self, mock_policy_lock,
+                                                policy_engine):
         """Test that concurrent policy updates properly use locks."""
         lock_calls = []
 
@@ -1556,12 +1102,7 @@ class TestPermissionServiceMultiProcess:
 
         mock_policy_lock.return_value = MockContextManager()
 
-        # Mock enforcer
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
-
-        service = permission.PermissionService()
-        service.enforcer = mock_enforcer
+        service = _service_over(policy_engine)
 
         # Test a single workspace policy update to verify lock is used
         service.add_workspace_policy('test-workspace', ['user1'])
@@ -1693,21 +1234,26 @@ class TestResyncWorkspacePoliciesForNewUser:
     When the user record is created, this re-sync must add the policy.
     """
 
-    def _make_service(self, enforcer):
-        service = permission.PermissionService()
-        service.enforcer = enforcer
-        service._load_policy_no_lock = mock.Mock()
-        return service
+    @pytest.fixture(autouse=True)
+    def _engine(self, policy_engine):
+        self.engine = policy_engine
+
+    def _make_service(self):
+        return _service_over(self.engine)
+
+    def _grants(self):
+        return _stored(self.engine, 'p')
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_username_gets_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_new_user_matched_by_username_gets_policy(self, mock_get_users,
+                                                      mock_get_nested,
+                                                      mock_policy_lock,
+                                                      mock_config_lock,
+                                                      mock_reload):
         """A pre-login allowed_users entry (username) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1725,31 +1271,24 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
-        mock_enforcer.add_policy.assert_called_once_with(
-            'u-alice', 'private-ws', '*')
-        # The user's cached (stale) denial must be invalidated.
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
-        call_kwargs = (
-            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
-        assert 'u-alice' in call_kwargs['suffix']
+        assert self._grants() == [('u-alice', 'private-ws', '*')]
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_user_id_gets_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_new_user_matched_by_user_id_gets_policy(self, mock_get_users,
+                                                     mock_get_nested,
+                                                     mock_policy_lock,
+                                                     mock_config_lock,
+                                                     mock_reload):
         """A pre-login allowed_users entry (user_id) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1764,25 +1303,20 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['u-alice'],
             },
         }
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
-        mock_enforcer.add_policy.assert_called_once_with(
-            'u-alice', 'private-ws', '*')
+        assert self._grants() == [('u-alice', 'private-ws', '*')]
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_user_not_in_any_allowed_users_gets_no_policy(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache):
-        """A user listed in no workspace gets no policy and no save/invalidate."""
+            self, mock_get_users, mock_get_nested, mock_policy_lock):
+        """A user listed in no workspace gets no policy."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -1797,20 +1331,17 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-bob')
 
-        mock_enforcer.add_policy.assert_not_called()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+        assert self._grants() == []
 
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_public_workspace_is_skipped(self, mock_get_users, mock_get_nested,
-                                         mock_policy_lock, mock_kv_cache):
+                                         mock_policy_lock):
         """Only private workspaces are re-synced; public ones are ignored."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1826,23 +1357,23 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
-        mock_enforcer.add_policy.assert_not_called()
+        assert self._grants() == []
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_idempotent_when_policy_already_exists(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
-        """If the policy already exists, no save or cache invalidation."""
+    def test_idempotent_when_policy_already_exists(self, mock_get_users,
+                                                   mock_get_nested,
+                                                   mock_policy_lock,
+                                                   mock_config_lock,
+                                                   mock_reload):
+        """If the policy already exists, no duplicate is written."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -1856,29 +1387,26 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
-        # Policy already exists -> add_policy is a no-op returning False.
-        mock_enforcer.add_policy.return_value = False
+        # The grant is already stored.
+        _insert(self.engine, 'p', ('u-alice', 'private-ws', '*'))
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
-        mock_enforcer.add_policy.assert_called_once_with(
-            'u-alice', 'private-ws', '*')
-        # Nothing changed, so no invalidation.
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+        assert self._grants() == [('u-alice', 'private-ws', '*')]
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_no_grant_when_user_removed_before_lock(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_no_grant_when_user_removed_before_lock(self, mock_get_users,
+                                                    mock_get_nested,
+                                                    mock_policy_lock,
+                                                    mock_config_lock,
+                                                    mock_reload):
         """An admin removal that lands before the lock must win.
 
         The pre-lock match is only an early-exit optimization; matches are
@@ -1910,27 +1438,23 @@ class TestResyncWorkspacePoliciesForNewUser:
                 },
             },
         ]
-        mock_enforcer = mock.Mock()
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         assert mock_get_nested.call_count == 2
-        mock_enforcer.add_policy.assert_not_called()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+        assert self._grants() == []
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
     def test_config_lock_timeout_skips_grant(self, mock_get_users,
                                              mock_get_nested, mock_policy_lock,
-                                             mock_kv_cache, mock_config_lock,
-                                             mock_reload):
+                                             mock_config_lock, mock_reload):
         """A config-lock timeout skips the grant instead of using stale
         config (the zero-accessible resolver retry picks it up later)."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
@@ -1946,25 +1470,24 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')  # No raise.
 
         mock_policy_lock.assert_not_called()
         mock_reload.assert_not_called()
-        mock_enforcer.add_policy.assert_not_called()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+        assert self._grants() == []
 
     @mock.patch('sky.users.permission.skypilot_config.reload_config')
     @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
-    @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_config_lock_acquired_before_policy_lock(
-            self, mock_get_users, mock_get_nested, mock_policy_lock,
-            mock_kv_cache, mock_config_lock, mock_reload):
+    def test_config_lock_acquired_before_policy_lock(self, mock_get_users,
+                                                     mock_get_nested,
+                                                     mock_policy_lock,
+                                                     mock_config_lock,
+                                                     mock_reload):
         """Lock order must match update_workspace: config lock, THEN policy
         lock — the reverse order deadlocks against a concurrent workspace
         update (AB-BA)."""
@@ -1986,15 +1509,13 @@ class TestResyncWorkspacePoliciesForNewUser:
                 'allowed_users': ['alice@corp.com'],
             },
         }
-        mock_enforcer = mock.Mock()
-        mock_enforcer.add_policy.return_value = True
 
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         assert order == ['config', 'policy']
         mock_reload.assert_called_once()
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
+        assert self._grants() == [('u-alice', 'private-ws', '*')]
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
@@ -2005,14 +1526,13 @@ class TestResyncWorkspacePoliciesForNewUser:
         if constants.ENV_VAR_IS_SKYPILOT_SERVER in os.environ:
             del os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER]
 
-        mock_enforcer = mock.Mock()
-        service = self._make_service(mock_enforcer)
+        service = self._make_service()
         service.resync_workspace_policies_for_new_user('u-alice')
 
         mock_get_nested.assert_not_called()
         mock_get_users.assert_not_called()
         mock_policy_lock.assert_not_called()
-        mock_enforcer.add_policy.assert_not_called()
+        assert self._grants() == []
 
 
 class TestWorkspaceReadOnlyAccess:
@@ -2047,29 +1567,21 @@ class TestWorkspaceReadOnlyAccess:
         return service, mock_enforcer
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_read_allows_live_readonly_workspace(self, mock_kv_cache,
-                                                 mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_read_allows_live_readonly_workspace(self, mock_is_ro):
         mock_is_ro.return_value = True  # config says ws is read-only
         service, _ = self._service(member=False)  # non-member
         assert service.check_workspace_permission('u1', 'ws-ro',
                                                   action='read') is True
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_read_denies_non_readonly_workspace(self, mock_kv_cache,
-                                                mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_read_denies_non_readonly_workspace(self, mock_is_ro):
         mock_is_ro.return_value = False  # config says not read-only
         service, _ = self._service(member=False)
         assert service.check_workspace_permission(
             'u1', 'ws-priv', action='read') is False
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_write_ignores_readonly(self, mock_kv_cache, mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_write_ignores_readonly(self, mock_is_ro):
         mock_is_ro.return_value = True  # even though ws is read-only
         service, _ = self._service(member=False)
         # A non-member write is denied regardless of read-only visibility...
@@ -2079,33 +1591,12 @@ class TestWorkspaceReadOnlyAccess:
         mock_is_ro.assert_not_called()
 
     @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_member_allowed_without_consulting_readonly(self, mock_kv_cache,
-                                                        mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
+    def test_member_allowed_without_consulting_readonly(self, mock_is_ro):
         service, _ = self._service(member=True)  # member
         assert service.check_workspace_permission('u1', 'ws', 'read') is True
         assert service.check_workspace_permission('u1', 'ws', 'write') is True
         # A member short-circuits before the read-only branch.
         mock_is_ro.assert_not_called()
-
-    @mock.patch('sky.workspaces.utils.is_read_only_workspace')
-    @mock.patch('sky.users.permission.kv_cache')
-    def test_member_cache_key_is_action_agnostic(self, mock_kv_cache,
-                                                 mock_is_ro):
-        mock_kv_cache.get_cache_entry.return_value = None
-        mock_is_ro.return_value = True
-        service, _ = self._service(member=False)
-        service.check_workspace_permission('u1', 'ws-ro', action='read')
-        service.check_workspace_permission('u1', 'ws-ro', action='write')
-        keys = [
-            c.args[0]
-            for c in mock_kv_cache.add_or_update_cache_entry.call_args_list
-        ]
-        # Only the (action-agnostic) member result is cached, under one key.
-        assert keys, 'member result should be cached'
-        assert len(set(keys)) == 1
-        assert all(':read:' not in k and ':write:' not in k for k in keys)
 
     @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
     def test_get_accessible_read_includes_live_readonly_write_excludes(
@@ -2160,42 +1651,25 @@ class TestWorkspaceReadOnlyAccess:
         service.get_user_roles.return_value = ['user']
         assert service.get_readable_workspace_names('u1', names) is None
 
-    def test_add_workspace_policy_only_member_grants(self):
-        service, enf = self._service()
+    def test_add_workspace_policy_only_member_grants(self, policy_engine):
+        service = _service_over(policy_engine)
         with mock.patch('sky.users.permission._policy_lock'):
             service.add_workspace_policy('ws', ['u1', 'u2'])
-        calls = [c.args for c in enf.add_policy.call_args_list]
-        assert ('u1', 'ws', '*') in calls
-        assert ('u2', 'ws', '*') in calls
-        # No materialized read-only wildcard is ever written.
-        assert all(c[2] == '*' for c in calls)
+        # Only the member grants; no materialized read-only wildcard.
+        assert _stored(policy_engine, 'p') == [('u1', 'ws', '*'),
+                                               ('u2', 'ws', '*')]
 
 
 @pytest.fixture
-def two_workers(tmp_path):
+def two_workers(policy_engine):
     """Two PermissionServices over one database, as two API-server workers.
 
     Each uvicorn worker holds its own in-memory casbin model, so a write by one
     is invisible to the other until it reloads. Two enforcers over one SQLite
     file reproduce that exactly, without needing two processes.
     """
-    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/policy.db')
-    model_path = os.path.join(os.path.dirname(permission.__file__),
-                              'model.conf')
-
-    def _worker():
-        service = permission.PermissionService()
-        adapter = sqlalchemy_adapter.Adapter(
-            engine, db_class=sqlalchemy_adapter.CasbinRule)
-        service.enforcer = casbin.SyncedEnforcer(model_path, adapter)
-        return service
-
-    with mock.patch('sky.users.permission._policy_lock'), \
-         mock.patch.object(permission.PermissionService,
-                           'invalidate_user_permission_cache'), \
-         mock.patch.object(permission.PermissionService,
-                           'invalidate_workspace_permission_cache'):
-        yield _worker(), _worker()
+    with mock.patch('sky.users.permission._policy_lock'):
+        yield _service_over(policy_engine), _service_over(policy_engine)
 
 
 def _grouping_rows(service, user_id):
@@ -2205,11 +1679,10 @@ def _grouping_rows(service, user_id):
 
 
 class TestStalePolicyWrites:
-    """A worker must reload inside the lock before it mutates the policy.
+    """A worker must decide a write against the stored policy, not its model.
 
-    Every one of these fails if the corresponding `_load_policy_no_lock()` is
-    removed, because worker B's in-memory model is deliberately older than
-    worker A's write.
+    Worker B's in-memory model is deliberately older than worker A's write, so
+    each of these fails if B's write is decided against that model.
     """
 
     def test_add_user_if_not_exists_does_not_duplicate_role(self, two_workers):
@@ -2362,21 +1835,15 @@ class TestRoleReplacement:
 
 
 @pytest.fixture
-def policy_db(tmp_path):
+def policy_db(policy_engine):
     """A real sqlite-backed enforcer, so blocklist semantics are the real ones.
 
     Yields a factory: each call returns an independent PermissionService over
     the same database, which is what two API-server worker processes are.
     """
-    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/policy.db')
-    model_path = os.path.join(os.path.dirname(permission.__file__),
-                              'model.conf')
 
     def _worker():
-        service = permission.PermissionService()
-        adapter = sqlalchemy_adapter.Adapter(
-            engine, db_class=sqlalchemy_adapter.CasbinRule)
-        service.enforcer = casbin.SyncedEnforcer(model_path, adapter)
+        service = _service_over(policy_engine)
         # The viewer allowlist is in-process state, not casbin policy. Without
         # it every path looks disallowed and the viewer branch would block
         # everything for the wrong reason.
