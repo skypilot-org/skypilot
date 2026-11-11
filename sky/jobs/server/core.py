@@ -2213,13 +2213,16 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    # Dedicated controllers are not checked: their job state is on the
+    # controller, so a check would cost a queue round-trip per request.
     readable = (workspaces_core.get_readable_workspace_names()
                 if managed_job_utils.is_consolidation_mode() else None)
     if readable is not None:
         if (requested_job_id is not None and requested_job_id != job_id and
                 managed_job_state.get_workspace(requested_job_id)
                 not in readable):
-            # The dynamic task's parent is hidden: answer about that id.
+            # A dynamic task shares its parent's workspace; answering about
+            # the parent id keeps the parent -> task job id mapping hidden.
             job_id = requested_job_id
         job_id, message, exit_code = _resolve_readable_tail_job_id(
             readable, job_id, name, controller)

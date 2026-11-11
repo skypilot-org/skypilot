@@ -227,18 +227,18 @@ class TestTailLogs:
         server.backend.sync_down_managed_job_logs.assert_not_called()
 
     def test_hidden_parent_of_a_dynamic_task(self, server, monkeypatch, capsys):
-        # Job 4 (hidden) launched job 1 (readable) as its task 2.
-        monkeypatch.setattr(core, '_resolve_job_task',
-                            lambda job_id, task, **kwargs: (1, None))
-        assert _tail(job_id=4, task=2) == _NOT_FOUND
-        assert 'Job 4 not found.' in capsys.readouterr().out
-        assert server.runner.calls == []
+        # A dynamic task's job is in its parent's workspace.
+        _seed(server.engine, 5, 'child', 'ws-a')
 
-    def test_hidden_dynamic_task_of_a_readable_parent(self, server,
-                                                      monkeypatch):
-        monkeypatch.setattr(core, '_resolve_job_task',
-                            lambda job_id, task, **kwargs: (4, None))
-        assert _tail(job_id=1, task=2) == _NOT_FOUND
+        def _resolve_job_task(job_id, task, **kwargs):
+            del kwargs  # Unused.
+            assert (job_id, task) == (4, 2)
+            return 5, None  # Job 4's dynamic task 2 is job 5.
+
+        monkeypatch.setattr(core, '_resolve_job_task', _resolve_job_task)
+        assert _tail(job_id=4, task=2) == _NOT_FOUND
+        # Named by the id asked for, not the task's own job id.
+        assert 'Job 4 not found.' in capsys.readouterr().out
         assert server.runner.calls == []
 
     def test_resolution_never_forks_or_dumps_the_queue(self, server,
