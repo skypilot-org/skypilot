@@ -1052,6 +1052,31 @@ def check_cluster_write_permission(user: models.User,
             f'the workspace of cluster {cluster_name!r}')
 
 
+def check_volume_write_permission(user: models.User, volume_name: str) -> None:
+    """Checks a user may delete or mount an existing volume.
+
+    The volume counterpart of ``check_cluster_write_permission``: gated by the
+    workspace the volume belongs to, not the caller's active workspace. A
+    missing volume is left to the caller's own not-found handling.
+
+    Raises:
+        PermissionDeniedError: If the user cannot write to the volume's
+            workspace.
+    """
+    record = global_user_state.get_volume_by_name(volume_name)
+    if record is None:
+        return
+    # Volumes recorded before workspaces existed belong to the default one.
+    workspace = (record.get('workspace') or
+                 constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace,
+            action=workspace_constants.WORKSPACE_ACTION_WRITE):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have permission to access '
+            f'the workspace of volume {volume_name!r}')
+
+
 def _save_config_and_sync_members(config: Optional[Dict[str, Any]]) -> None:
     """Saves `config`, then syncs every workspace's members with it.
 

@@ -7,13 +7,17 @@ import uuid
 
 import filelock
 
+from sky import check as sky_check
+from sky import clouds
 from sky import global_user_state
 from sky import models
 from sky import provision
 from sky import sky_logging
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.schemas.api import responses
 from sky.server import plugin_hooks
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -484,6 +488,68 @@ def _initial_volume_status(
     return status_lib.VolumeStatus.READY, None
 
 
+def _caller_can_read_workspace(workspace: str) -> bool:
+    readable = workspaces_core.get_readable_workspace_names()
+    return readable is None or workspace in readable
+
+
+def _check_existing_volume(name: str, record: Dict[str, Any],
+                           is_ephemeral: bool) -> None:
+    """Re-applying a volume is a no-op only from its own workspace.
+
+    Raises:
+        ValueError: If the volume belongs to another workspace.
+    """
+    # A cluster's ephemeral volumes are re-applied by `sky start`, which runs
+    # in the caller's active workspace rather than the cluster's.
+    if not is_ephemeral:
+        workspace = (record.get('workspace') or
+                     constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if workspace != skypilot_config.get_active_workspace():
+            where = 'another workspace'
+            if _caller_can_read_workspace(workspace):
+                where = (f'workspace '
+                         f'{skypilot_config.get_workspace_name(workspace)!r}')
+            raise ValueError(f'Volume {name!r} already exists in {where}. '
+                             'Use a different name.')
+    logger.info(f'Volume {name} already exists.')
+
+
+def check_volume_infra_allowed(cloud: str, region: Optional[str]) -> None:
+    """Refuses a volume on infra the active workspace cannot launch on.
+
+    Raises:
+        ValueError: If the cloud is not enabled for the workspace, or the
+            Kubernetes context is not one of its allowed contexts.
+    """
+    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
+    assert cloud_obj is not None
+    capability = sky_cloud.CloudCapability.COMPUTE
+    # As the optimizer does: a cloud missing from the cache is checked again
+    # before it is refused, in case it was enabled since.
+    if cloud_obj not in sky_check.get_cached_enabled_clouds_or_refresh(
+            capability):
+        sky_check.recheck_clouds(capability, [str(cloud_obj)])
+        if cloud_obj not in sky_check.get_cached_enabled_clouds_or_refresh(
+                capability):
+            workspace = skypilot_config.get_workspace_name(
+                skypilot_config.get_active_workspace())
+            raise ValueError(
+                f'{cloud_obj.display_name()} is not enabled for workspace '
+                f'{workspace!r}. Run `sky check` to see which infra it can '
+                'use.')
+    # An SSH node pool is a Kubernetes subclass, and its pools are checked
+    # against the workspace by SSH.validate_region_zone.
+    if (isinstance(cloud_obj, clouds.Kubernetes) and
+            not isinstance(cloud_obj, clouds.SSH) and region is not None):
+        allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(
+            silent=True)
+        if region not in allowed_contexts:
+            raise ValueError(
+                f'Kubernetes context {region!r} is not allowed in the active '
+                f'workspace. Allowed contexts: {allowed_contexts}')
+
+
 def volume_apply(
     name: str,
     volume_type: str,
@@ -520,6 +586,16 @@ def volume_apply(
         # generate the storage name on cloud.
         cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
+        # Checked before the infra checks, so that re-applying a volume whose
+        # context was since removed stays a no-op.
+        current_volume = global_user_state.get_volume_by_name(name)
+        if current_volume is not None:
+            _check_existing_volume(name, current_volume, is_ephemeral)
+            return
+        # The optimizer chose an ephemeral volume's infra. Outside the lock: a
+        # stale enabled-clouds cache is refreshed by probing the cloud.
+        if not is_ephemeral:
+            check_volume_infra_allowed(cloud, region)
         region, zone = cloud_obj.validate_region_zone(region, zone)
         if use_existing:
             name_on_cloud = name
@@ -544,7 +620,7 @@ def volume_apply(
         with _volume_lock(name):
             current_volume = global_user_state.get_volume_by_name(name)
             if current_volume is not None:
-                logger.info(f'Volume {name} already exists.')
+                _check_existing_volume(name, current_volume, is_ephemeral)
                 return
             volume_config = provision.apply_volume(cloud, volume_config)
             # Only check for duplicates when registering an existing
@@ -624,6 +700,16 @@ def _check_duplicate_backend_resource(name: str,
         if vol_config is None:
             continue
         if _same_backend_resource(config, vol_config):
+            # The whole table is scanned, but a volume the caller cannot read
+            # is not named.
+            if not _caller_can_read_workspace(
+                    vol.get('workspace') or
+                    constants.SKYPILOT_DEFAULT_WORKSPACE):
+                raise ValueError(
+                    f'Volume {name!r} maps to the same backend resource as a '
+                    'volume in another workspace '
+                    f'(cloud={config.cloud}, '
+                    f'name_on_cloud={config.name_on_cloud!r}).')
             raise ValueError(
                 f'Volume {name!r} maps to the same backend resource '
                 f'as existing volume {vol_name!r} '

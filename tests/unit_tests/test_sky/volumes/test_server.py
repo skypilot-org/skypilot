@@ -1,5 +1,6 @@
 """Unit tests for volume server API."""
 
+import contextlib
 import inspect
 from unittest import mock
 
@@ -13,6 +14,19 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.utils import volume
 from sky.volumes.server import server
+
+
+@contextlib.contextmanager
+def _validate_request_patches():
+    """Stands in for the middleware state and the request env/workspace."""
+    with mock.patch.object(fastapi.Request, 'state') as mock_state, \
+            mock.patch.object(executor, 'stamp_request_body'), \
+            mock.patch.object(executor, 'override_request_env_and_config',
+                              return_value=contextlib.nullcontext()), \
+            mock.patch.object(server.core, 'check_volume_infra_allowed'):
+        mock_state.request_id = 'test-request-id'
+        mock_state.auth_user = None
+        yield
 
 
 class TestVolumeServer:
@@ -497,7 +511,8 @@ class TestVolumeServer:
         }
 
         # Mock volume_lib.Volume
-        with mock.patch('sky.volumes.volume.Volume', mock_volume_class):
+        with mock.patch('sky.volumes.volume.Volume', mock_volume_class), \
+                _validate_request_patches():
             # Make request
             response = client.post('/volumes/validate', json=validate_body)
 
@@ -542,7 +557,8 @@ class TestVolumeServer:
         }
 
         # Mock volume_lib.Volume
-        with mock.patch('sky.volumes.volume.Volume', mock_volume_class):
+        with mock.patch('sky.volumes.volume.Volume', mock_volume_class), \
+                _validate_request_patches():
             # Make request and expect error
             response = client.post('/volumes/validate', json=validate_body)
 

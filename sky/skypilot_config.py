@@ -443,6 +443,22 @@ def get_effective_workspace_region_config(
                                        override_configs)
 
 
+def get_server_region_config(cloud: str,
+                             keys: Tuple[str, ...],
+                             region: Optional[str] = None) -> Any:
+    """Like get_effective_region_config, from the server's own config only.
+
+    Ignores the client config a request merged in and any task override.
+    """
+    ctx = _get_config_context()
+    config = (ctx.server_config
+              if ctx.server_config is not None else ctx.config)
+    return config_utils.get_cloud_config_value_from_dict(dict_config=config,
+                                                         cloud=cloud,
+                                                         keys=keys,
+                                                         region=region)
+
+
 def get_server_workspace_region_config(cloud: str,
                                        keys: Tuple[str, ...],
                                        region: Optional[str] = None,
@@ -1271,6 +1287,19 @@ def override_skypilot_config(
         if value != original_config.get_nested(
             (cloud_name, 'ssh_proxy_command'), default_value=None):
             disallowed_diff_keys.append(f'{cloud_name}.ssh_proxy_command')
+    if not from_loopback:
+        # The per-context form of ('kubernetes', 'auto_mounts') above.
+        context_configs = override_configs.get_nested(
+            ('kubernetes', 'context_configs'), default_value=None)
+        if not isinstance(context_configs, dict):
+            # Malformed; the schema check below reports it.
+            context_configs = {}
+        for context_name in context_configs:
+            key = ('kubernetes', 'context_configs', context_name, 'auto_mounts')
+            value = override_configs.pop_nested(key, default_value=None)
+            if (value is not None and value != original_config.get_nested(
+                    key, default_value=None)):
+                disallowed_diff_keys.append('.'.join(key))
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
