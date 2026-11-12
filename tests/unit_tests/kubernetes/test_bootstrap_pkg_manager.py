@@ -412,15 +412,18 @@ def _apt_loop(updates,
     """Runs the real apt fallback loop against a scripted `apt-get update`.
 
     updates: one entry per `apt-get update` call -- 'zero' (reaches no source),
-    'partial' (reaches one, fails another), 'ok', or 'only-m2' (ok only once
-    the sources point at the m2.example mirror). deb822_only: the image keeps
+    'partial' (reaches one, fails another), 'quiet-partial' (like partial, but
+    an image apt.conf with `quiet 2` hides Hit lines unless `-o quiet=0` is
+    passed), 'ok', or 'only-m2' (ok only once the sources point at the
+    m2.example mirror). deb822_only: the image keeps
     its sources only in sources.list.d/debian.sources (Debian 12+), so a
     mirror has nothing to rewrite. after_loop: shell run after the loop.
     Returns the apt-get calls (updates tagged with the source host) and
     INSTALL_SUCCESS.
     """
-    helpers = _extract('# Set when the last `apt-get update` reached no source',
-                       '# Surface /tmp/apt-update.log to the pod')
+    helpers = _extract(
+        '# Set by apt_update_with_retries when none of its attempts',
+        '# Surface /tmp/apt-update.log to the pod')
     loop = _extract('run_apt_install_with_fallback() {',
                     '# Non-apt install path (dnf/microdnf/yum/apk/zypper)')
     tmp = tempfile.mkdtemp()
@@ -453,6 +456,9 @@ def _apt_loop(updates,
                 ok) echo "Hit:1 $host jammy InRelease" ;;
                 partial) echo "Hit:1 $host jammy InRelease"
                          echo "W: Failed to fetch http://security.ubuntu.com" ;;
+                quiet-partial)
+                  case " $* " in *" quiet=0 "*) echo "Hit:1 $host jammy InRelease" ;; esac
+                  echo "W: Failed to fetch http://security.ubuntu.com" ;;
                 *) echo "W: Failed to fetch $host" ;;
               esac
               exit 0
@@ -561,6 +567,18 @@ def test_apt_call_after_a_mirror_won_keeps_its_retries():
     assert any('docker-ce-cli' in c for c in made), made
 
 
+def test_apt_installs_when_an_earlier_attempt_reached_a_source():
+    """Lists from a partly successful refresh stay usable after a later blip."""
+    made, _ = _apt_loop(['partial', 'partial', 'zero'], mirrors='')
+    assert len(_updates(made)) == 3
+    assert any(c.startswith('install') for c in made), made
+
+
+def test_apt_reach_is_detected_under_a_quiet_apt_config():
+    made, _ = _apt_loop(['quiet-partial'] * 3, mirrors='')
+    assert any(c.startswith('install') for c in made), made
+
+
 def test_apt_partly_reachable_source_keeps_todays_retries():
     """Reaching some source is not an outage: retry it, then install anyway."""
     made, _ = _apt_loop(['partial'] * 3, mirrors='')
@@ -568,8 +586,10 @@ def test_apt_partly_reachable_source_keeps_todays_retries():
     assert any(c.startswith('install') for c in made), made
 
 
-def _sshd_block(sshd_present: bool, tmp: str) -> str:
-    body = _extract('HAS_SSHD=false', '# Also cosmetic, and ~/.profile')
+def _sshd_block(sshd_present: bool, tmp: str, host_network=False) -> str:
+    body = _extract('HAS_SSHD=false',
+                    '# Also cosmetic, and ~/.profile',
+                    k8s_host_network=host_network)
     body = body.replace('/etc/ssh',
                         f'{tmp}/etc/ssh').replace('/var/run/sshd',
                                                   f'{tmp}/var/run/sshd')
@@ -589,6 +609,20 @@ def test_missing_sshd_warns_and_continues():
         assert result.returncode == 0, result.stderr
         assert 'WARNING: sshd is not installed' in result.stdout
         assert os.path.exists(os.path.join(tmp, '.ssh', 'authorized_keys'))
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_missing_sshd_fails_clearly_under_host_networking():
+    """Host networking records its verified ports in sshd_config."""
+    tmp = tempfile.mkdtemp()
+    try:
+        result = _run(_sshd_block(sshd_present=False,
+                                  tmp=tmp,
+                                  host_network=True),
+                      errexit=True)
+        assert result.returncode != 0
+        assert 'host networking needs openssh-server' in result.stdout
     finally:
         shutil.rmtree(tmp)
 

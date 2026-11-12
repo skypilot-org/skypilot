@@ -915,12 +915,13 @@ available_node_types:
                 APT_INSTALL_CMD_TIMEOUT=90
                 APT_OPTS="-o Acquire::http::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::https::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::Retries=0"
 
-                # Set when the last `apt-get update` reached no source at all
-                # (no `Hit`/`Get` line). Without network each attempt costs a
-                # full timeout, so a fallback mirror that reaches nothing is not
-                # retried, and no install is attempted after such a refresh.
-                # The image's own sources keep their retries: they may be the
-                # only ones an egress allowlist lets through.
+                # Set by apt_update_with_retries when none of its attempts
+                # reached any source (no `Hit`/`Get` line). Without network
+                # each attempt costs a full timeout, so a fallback mirror that
+                # reaches nothing is not retried, and no install is attempted
+                # after such a refresh. The image's own sources keep their
+                # retries: they may be the only ones an egress allowlist lets
+                # through.
                 APT_ZERO_REACH=false
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
@@ -930,15 +931,17 @@ available_node_types:
                   local tries=3
                   local delay=1
                   local i
+                  local reached=false
+                  APT_ZERO_REACH=false
                   for i in $(seq 1 $tries); do
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators. LC_ALL=C:
-                    # apt translates the strings matched here.
+                    # apt translates the strings matched here; quiet=0: an
+                    # image's apt.conf may otherwise hide the Hit/Get lines.
                     local output
-                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update -o quiet=0 $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
-                    APT_ZERO_REACH=false
                     if [ $rc -eq 124 ]; then
                       echo "apt-get update timed out after ${APT_CMD_TIMEOUT}s (attempt $i/$tries)" >> "$log"
                     elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
@@ -946,17 +949,24 @@ available_node_types:
                     else
                       echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
                     fi
-                    if ! echo "$output" | grep -qE '^(Hit|Get)[: ]'; then
-                      APT_ZERO_REACH=true
+                    if echo "$output" | grep -qE '^(Hit|Get)[: ]'; then
+                      reached=true
+                    else
                       echo "apt-get update reached no source" >> "$log"
-                      # apt_mirror_candidate: set (as a local) only by the
-                      # mirror fallback loop below.
+                      # apt_mirror_candidate is a `local` of the mirror loop
+                      # below (bash scoping makes it visible here); it is
+                      # unset for every other caller, which keep retrying.
                       if [ "${apt_mirror_candidate:-false}" = "true" ]; then
-                        set -e; return 1
+                        break
                       fi
                     fi
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
+                  # Lists from an attempt that reached a source may be usable,
+                  # even if a later attempt reached nothing.
+                  if [ "$reached" = "false" ]; then
+                    APT_ZERO_REACH=true
+                  fi
                   set -e
                   return 1
                 }
@@ -1467,7 +1477,14 @@ available_node_types:
                 $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd || true;
                 cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
                 else
+                {% if k8s_host_network %}
+                # Host networking records its verified ports in sshd_config;
+                # without sshd a later Ray restart would re-probe its own ports.
+                echo "Error: kubernetes host networking needs openssh-server in the image, and it is not installed and could not be installed."
+                exit 1
+                {% else %}
                 echo "WARNING: sshd is not installed in this image and could not be installed; 'ssh <cluster>' will not work. Install openssh-server in the image to enable it."
+                {% endif %}
                 fi
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
