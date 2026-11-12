@@ -225,13 +225,14 @@ class PostgresLock(DistributedLock):
         # Session-scoped advisory locks hold one connection across their whole
         # lifetime, which is unsafe through a transaction-mode pooler (the
         # backend can change between statements). Use a direct engine so the
-        # lock connection bypasses any configured pooler; when none is
-        # configured this is the same engine global_user_state uses.
-        engine = db_utils.get_engine(None, direct=True)
+        # lock connection bypasses any configured pooler. Keep it out of the
+        # state pool too: long-lived lock holders
+        # must not consume the connections needed for metadata under the lock.
+        engine = db_utils.get_lock_engine()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool. Idempotent under
+        # Borrow a dedicated connection from the engine. Idempotent under
         # retry: raw_connection() either returns a checked-out conn or
         # raises with nothing taken — no partial state, no leak.
         connection = engine.raw_connection()
@@ -252,11 +253,7 @@ class PostgresLock(DistributedLock):
         if self._acquired:
             return AcquireReturnProxy(self)
 
-        self._connection = self._get_connection()
-        cursor = self._connection.cursor()
-
         start_time = time.time()
-
         if self._shared_lock:
             lock_func = 'pg_try_advisory_lock_shared'
         else:
@@ -264,6 +261,9 @@ class PostgresLock(DistributedLock):
 
         try:
             while True:
+                self._connection = self._get_connection()
+                assert self._connection is not None
+                cursor = self._connection.cursor()
                 cursor.execute(f'SELECT {lock_func}(%s)', (self._lock_key,))
                 result = cursor.fetchone()[0]
 
@@ -284,6 +284,7 @@ class PostgresLock(DistributedLock):
                         f'{self.lock_id} within {self.timeout} '
                         f'seconds')
 
+                self._close_connection()
                 time.sleep(self.poll_interval)
 
         except Exception:

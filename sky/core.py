@@ -519,8 +519,11 @@ def cost_report(days: Optional[int] = None,
 
         def get_total_cost(cluster_report: dict) -> float:
             duration = cluster_report['duration']
-            launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
+            # launched_resources describes one task node (one slice for a
+            # multi-host TPU slice on Kubernetes, which has a pod per VM).
+            launched_nodes = kubernetes_utils.num_task_nodes(
+                cluster_report['num_nodes'], launched_resources)
 
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
@@ -725,7 +728,10 @@ def _start(
 
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
+        # num_nodes counts task nodes: one per slice for a multi-host TPU
+        # slice on Kubernetes, whose cluster has one node per VM.
+        dummy_task.num_nodes = kubernetes_utils.num_task_nodes(
+            handle.launched_nodes, handle.launched_resources)
     (handle, _) = backend.provision(dummy_task,
                                     to_provision=handle.launched_resources,
                                     dryrun=False,
@@ -1873,6 +1879,20 @@ def realtime_kubernetes_gpu_availability(
             context_list = kubernetes_contexts
     else:
         context_list = [context]
+    unreachable: Dict[Optional[str], str] = {}
+    for ctx in context_list:
+        reason = kubernetes_utils.known_unreachable_reason(ctx)
+        if reason is not None:
+            unreachable[ctx] = reason
+    context_list = [ctx for ctx in context_list if ctx not in unreachable]
+    if unreachable:
+        skipped = ', '.join(
+            f'{ctx!r} ({reason})' for ctx, reason in unreachable.items())
+        logger.debug(f'Skipping unreachable Kubernetes contexts: {skipped}')
+    if not context_list and unreachable:
+        raise ValueError(' '.join(
+            f'Kubernetes context {ctx!r} is unreachable: {reason}.'
+            for ctx, reason in unreachable.items()))
 
     def _realtime_kubernetes_gpu_availability_single(
         context: Optional[str] = None,

@@ -1236,6 +1236,168 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.region = mock.MagicMock()
         self.region.name = "my-k8s-cluster"
 
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_gke_tpu_chip_count_reaches_pod(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_label_key_values):
+        """Both spellings of a GKE TPU request put the requested chip count
+        and its slice topology on the pod: tpu-v6e-slice:N keeps N."""
+        mock_detect_network_type.return_value = (
+            kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'my-k8s-cluster'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-image:latest'
+
+        formatter = kubernetes_utils.GKELabelFormatter
+
+        def label_key_values(context, acc_type, acc_count):
+            del context
+            return (formatter.TPU_LABEL_KEY, [acc_type],
+                    formatter.TPU_TOPOLOGY_LABEL_KEY,
+                    formatter.get_tpu_topology_label_value(acc_type, acc_count))
+
+        mock_get_label_key_values.side_effect = label_key_values
+
+        k8s_cloud = kubernetes.Kubernetes()
+        cases = [
+            ('4CPU--16GB--tpu-v6e-slice:1', '1', '1x1'),
+            ('4CPU--16GB--tpu-v6e-slice:4', '4', '2x2'),
+            ('4CPU--16GB--tpu-v6e-slice:8', '8', '2x4'),
+            ('4CPU--16GB--tpu-v6e-4:1', '4', '2x2'),
+            ('4CPU--16GB--tpu-v6e-8:1', '8', '2x4'),
+        ]
+        for instance_type, chips, topology in cases:
+            with self.subTest(instance_type=instance_type):
+                self.resources.instance_type = instance_type
+                deploy_vars = k8s_cloud.make_deploy_resources_variables(
+                    resources=self.resources,
+                    cluster_name=resources_utils.ClusterName(
+                        display_name=self.cluster_name,
+                        name_on_cloud=self.cluster_name),
+                    region=self.region,
+                    zones=None,
+                    num_nodes=1,
+                    dryrun=False)
+                self.assertEqual(deploy_vars['accelerator_count'], chips)
+                self.assertTrue(deploy_vars['tpu_requested'])
+                self.assertEqual(deploy_vars['k8s_acc_label_values'],
+                                 ['tpu-v6e-slice'])
+                node_selector = deploy_vars['pod_fields']['spec'][
+                    'nodeSelector']
+                self.assertEqual(
+                    node_selector[formatter.TPU_TOPOLOGY_LABEL_KEY], topology)
+                self.assertEqual(deploy_vars['k8s_resource_key'],
+                                 kubernetes_utils.TPU_RESOURCE_KEY)
+
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_gke_tpu_multi_host_slice_pods(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_label_key_values):
+        """A multi-host slice request builds one pod per VM: each pod takes
+        the VM's 4 chips and selects the slice topology and 4 chips per VM.
+        A single slice keeps all pods in one node pool, with or without a
+        queue; several slices get no same-pool rule."""
+        mock_detect_network_type.return_value = (
+            kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'my-k8s-cluster'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-image:latest'
+
+        formatter = kubernetes_utils.GKELabelFormatter
+        k8s_cloud = kubernetes.Kubernetes()
+        # (instance type, multi_host, num_nodes, topology,
+        #  single node pool). All are one slice; several slices are checked
+        #  below.
+        cases = [
+            ('16CPU--64GB--tpu-v6e-8:1', True, 2, '2x4', True),
+            ('16CPU--64GB--tpu-v6e-16:1', None, 4, '4x4', True),
+            ('16CPU--64GB--tpu-v6e-slice:256', None, 64, '16x16', True),
+        ]
+        for instance_type, enforce, num_nodes, topology, _ in cases:
+            with self.subTest(instance_type=instance_type, num_nodes=num_nodes):
+                self.resources.instance_type = instance_type
+                self.resources.accelerator_args = ({
+                    'multi_host': True
+                } if enforce else {})
+                deploy_vars = k8s_cloud.make_deploy_resources_variables(
+                    resources=self.resources,
+                    cluster_name=resources_utils.ClusterName(
+                        display_name=self.cluster_name,
+                        name_on_cloud=self.cluster_name),
+                    region=self.region,
+                    zones=None,
+                    num_nodes=num_nodes,
+                    dryrun=False)
+                self.assertEqual(deploy_vars['accelerator_count'], '4')
+                self.assertTrue(deploy_vars['tpu_requested'])
+                self.assertEqual(deploy_vars['k8s_resource_key'],
+                                 kubernetes_utils.TPU_RESOURCE_KEY)
+                self.assertEqual(deploy_vars['k8s_acc_label_values'],
+                                 ['tpu-v6e-slice'])
+                spec = deploy_vars['pod_fields']['spec']
+                self.assertEqual(
+                    spec['nodeSelector'], {
+                        formatter.TPU_TOPOLOGY_LABEL_KEY: topology,
+                        formatter.ACCELERATOR_COUNT_LABEL_KEY: '4',
+                    })
+                # Same-slice placement is per pod (slice label, affinity),
+                # set when the pods are created, not in the shared fields.
+                self.assertIsNone(spec.get('affinity', {}).get('podAffinity'))
+        # The slice shape comes from the request, not from node labels.
+        mock_get_label_key_values.assert_not_called()
+
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
@@ -2134,6 +2296,192 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertNotIn(
             'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
             rendered)
+
+    def _deploy_vars_with_kai(self, kai):
+        with patch('sky.skypilot_config.get_effective_kai_value',
+                   side_effect=lambda key, **kwargs: kai.get(key)):
+            return kubernetes.Kubernetes().make_deploy_resources_variables(
+                resources=self.resources,
+                cluster_name=resources_utils.ClusterName(
+                    display_name=self.cluster_name,
+                    name_on_cloud=self.cluster_name),
+                region=self.region,
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_queue_is_resolved_for_the_template(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A KAI queue and topology are passed to the template."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({
+            'queue': 'team-queue',
+            'preemptibility': 'preemptible',
+            'topology': 'fabric',
+            'preferred_topology_level': 'leaf',
+        })
+
+        self.assertEqual(deploy_vars['k8s_kai_queue_name'], 'team-queue')
+        self.assertEqual(deploy_vars['k8s_kai_preemptibility'], 'preemptible')
+        self.assertEqual(deploy_vars['k8s_kai_topology'], 'fabric')
+        self.assertIsNone(deploy_vars['k8s_kai_required_topology_level'])
+        self.assertEqual(deploy_vars['k8s_kai_preferred_topology_level'],
+                         'leaf')
+        self.assertEqual(deploy_vars['k8s_kai_scheduler_name'], 'kai-scheduler')
+        self.assertIsNone(deploy_vars['k8s_kueue_local_queue_name'])
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_no_kai_queue_leaves_the_template_unchanged(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Without kubernetes.kai the KAI template fields stay unset."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        deploy_vars = self._deploy_vars_with_kai({})
+
+        self.assertIsNone(deploy_vars['k8s_kai_queue_name'])
+        self.assertIsNone(deploy_vars['k8s_kai_preemptibility'])
+
+    @patch('sky.skypilot_config.get_effective_queue_name',
+           return_value='user-queue')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kai_and_kueue_queues_are_exclusive(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes, mock_get_queue_name):
+        """One cluster cannot be admitted by both KAI and Kueue."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        with self.assertRaisesRegex(ValueError, 'both a KAI queue'):
+            self._deploy_vars_with_kai({'queue': 'team-queue'})
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_incomplete_kai_config_is_rejected(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Settings that would have no PodGroup, or no level, are refused."""
+        self._setup_mocks_for_pod_resource_limits_test(
+            mock_detect_network_type,
+            mock_get_image,
+            mock_get_port_mode,
+            mock_get_workspace_cloud,
+            mock_get_workspace_region_config,
+            mock_get_cloud_config_value,
+            mock_is_exec_auth,
+            mock_get_accelerator_label_keys,
+            mock_get_namespace,
+            mock_get_current_context,
+            set_pod_resource_limits_value=False)
+        for kai, error in [
+            ({
+                'preemptibility': 'preemptible'
+            }, 'without kubernetes.kai.queue'),
+            ({
+                'topology': 'fabric',
+                'required_topology_level': 'leaf'
+            }, 'without kubernetes.kai.queue'),
+                # KAI ignores a topology without a level, and a level without a
+                # topology.
+            ({
+                'queue': 'q',
+                'topology': 'fabric'
+            }, 'together with'),
+            ({
+                'queue': 'q',
+                'preferred_topology_level': 'leaf'
+            }, 'together with'),
+        ]:
+            with self.subTest(kai=kai):
+                with self.assertRaisesRegex(ValueError, error):
+                    self._deploy_vars_with_kai(kai)
 
 
 class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):

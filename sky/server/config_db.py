@@ -44,6 +44,13 @@ _db_manager: Optional[db_utils.DatabaseManager] = None
 _ENSURE_LOCK = threading.Lock()
 
 
+def _create_table(engine: 'Engine') -> None:
+    """Initialize the config database with migrations."""
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
+        migration_utils.SKYPILOT_CONFIG_VERSION)
+
+
 def ensure_config_db_schema() -> None:
     """Initialize config ORM metadata and the DatabaseManager (idempotent).
 
@@ -66,12 +73,6 @@ def ensure_config_db_schema() -> None:
             sqlalchemy.Column('value', sqlalchemy.Text),
         )
 
-        def _create_table(engine: 'Engine') -> None:
-            """Initialize the config database with migrations."""
-            migration_utils.safe_alembic_upgrade(
-                engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-                migration_utils.SKYPILOT_CONFIG_VERSION)
-
         # Config YAML is only stored when using Postgres; no sqlite db_name.
         _db_manager = db_utils.DatabaseManager(db_name='config',
                                                create_table_fn=_create_table)
@@ -84,14 +85,20 @@ def get_engine() -> 'Engine':
     return _db_manager.get_engine()
 
 
-def get_config_yaml(key: str) -> Optional[dict]:
-    """Load a YAML config document by key from the config DB."""
+def get_config_yaml_value(key: str) -> Optional[str]:
+    """Return the raw YAML text stored under key in the config DB, if any."""
     ensure_config_db_schema()
     assert config_yaml_table is not None
     with orm.Session(get_engine()) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
-    if row:
-        return yaml_utils.safe_load(row.value)
+    return row.value if row else None
+
+
+def get_config_yaml(key: str) -> Optional[dict]:
+    """Load a YAML config document by key from the config DB."""
+    value = get_config_yaml_value(key)
+    if value is not None:
+        return yaml_utils.safe_load(value)
     return None
 
 

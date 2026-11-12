@@ -1074,7 +1074,7 @@ def test_ibm_storage_mounts():
 @pytest.mark.parametrize('ignore_file',
                          [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
 def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
-    """Tests that .skyignore patterns correctly exclude files when using sky launch and sky jobs launch.
+    """Tests ignore exclusions and .skyignore negations with clusters and jobs.
 
     Creates a temporary directory with various files and folders, adds a .skyignore file
     that excludes specific files and folders, then verifies the exclusions work properly
@@ -1093,7 +1093,7 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
         # Create directory structure
         dirs = [
             'keep_dir', 'exclude_dir', 'nested/keep_subdir',
-            'nested/exclude_subdir'
+            'nested/exclude_subdir', '.cfg'
         ]
         files = [
             'script.py',  # Keep (not relevant as we don't use it)
@@ -1104,6 +1104,10 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
             'exclude_dir/notes.md',  # Directory excluded
             'nested/keep_subdir/test.py',  # Keep
             'nested/exclude_subdir/test.sh',  # Directory excluded
+            'keep.json',  # Re-included by .skyignore
+            'other.json',  # Excluded only by .skyignore
+            '.cfg/keep.json',  # Re-included inside a hidden directory
+            '.cfg/other.yaml',  # Excluded only by .skyignore
         ]
 
         # Create directories
@@ -1116,7 +1120,7 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(f'Content for {file_path}')
 
-        # Create .skyignore file
+        # Create the selected ignore file.
         ignore_content = """
 # Exclude specific files
 exclude.py
@@ -1125,6 +1129,14 @@ exclude.py
 # Exclude directories
 /exclude_dir
 /nested/exclude_subdir
+"""
+        if ignore_file == constants.SKY_IGNORE_FILE:
+            # The rsync .gitignore path does not support negation.
+            ignore_content += """
+# Re-include JSON files, including paths inside hidden directories
+*.json
+.cfg/*
+!keep.json
 """
         with open(os.path.join(temp_dir, ignore_file), 'w',
                   encoding='utf-8') as f:

@@ -22,12 +22,13 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import fuse as kubernetes_fuse
+from sky.provision.kubernetes import kai
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import oci_nccl
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
-from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common
@@ -684,6 +685,15 @@ class Kubernetes(clouds.Cloud):
                     continue
             regions = filtered_regions
 
+        tpu_multi_host_shape = None
+        if resources is not None and resources.accelerators and len(
+                resources.accelerators) == 1:
+            acc, acc_count = next(iter(resources.accelerators.items()))
+            tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
+                acc, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
+
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
@@ -701,10 +711,14 @@ class Kubernetes(clouds.Cloud):
                 ephemeral_storage_gb = (resources.disk_size
                                         if resources is not None and
                                         resources.disk_size_specified else None)
+                fit_kwargs = ({
+                    'tpu_multi_host_shape': tpu_multi_host_shape
+                } if tpu_multi_host_shape is not None else {})
                 fits, reason = kubernetes_utils.check_instance_fits(
                     context,
                     instance_type,
-                    ephemeral_storage_gb=ephemeral_storage_gb)
+                    ephemeral_storage_gb=ephemeral_storage_gb,
+                    **fit_kwargs)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 if (unreachable_errors is not None and
@@ -751,7 +765,9 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
             logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
             if autoscaler.can_create_new_instance_of_type(
-                    context, instance_type):
+                    context, instance_type,
+                    *((tpu_multi_host_shape,)
+                      if tpu_multi_host_shape is not None else ())):
                 logger.debug(f'Kubernetes cluster {context} can be '
                              'autoscaled to create instance type '
                              f'{instance_type}. Including {context} '
@@ -972,8 +988,18 @@ class Kubernetes(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
+        tpu_multi_host_shape = None
         if acc_type is not None and is_tpu_on_gke(acc_type):
-            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            tpu_multi_host_shape = kubernetes_utils.get_tpu_multi_host_shape(
+                acc_type, acc_count,
+                kubernetes_utils.multi_host_requested(
+                    resources.accelerator_args))
+            acc_type, acc_count = normalize_tpu_accelerator(acc_type, acc_count)
+            if tpu_multi_host_shape is not None:
+                # One pod per VM of the slice, each taking all of its VM's
+                # chips; the cluster has one pod per VM per slice (see
+                # kubernetes_utils.tpu_vms_per_slice()).
+                acc_count = tpu_multi_host_shape.chips_per_vm
         else:
             acc_count = acc_count or 0
 
@@ -1013,7 +1039,19 @@ class Kubernetes(clouds.Cloud):
         avoid_label_keys = None
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
-        if acc_count > 0 and acc_type is not None:
+        tpu_chips_per_vm = None
+        if tpu_multi_host_shape is not None:
+            # A multi-host slice is selected by its type, its whole-slice
+            # topology and the chips on each VM.
+            k8s_acc_label_key = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+            k8s_acc_label_values = [tpu_multi_host_shape.accelerator]
+            k8s_topology_label_key = (
+                kubernetes_utils.GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY)
+            k8s_topology_label_value = tpu_multi_host_shape.topology
+            tpu_chips_per_vm = tpu_multi_host_shape.chips_per_vm
+            tpu_requested = True
+            k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+        elif acc_count > 0 and acc_type is not None:
             (k8s_acc_label_key, k8s_acc_label_values, k8s_topology_label_key,
              k8s_topology_label_value) = (
                  kubernetes_utils.get_accelerator_label_key_values(
@@ -1199,6 +1237,46 @@ class Kubernetes(clouds.Cloud):
                 cloud='kubernetes',
                 region=context,
                 override_configs=resources.cluster_config_overrides))
+        k8s_kai_queue_name = skypilot_config.get_effective_kai_value(
+            'queue',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_preemptibility = skypilot_config.get_effective_kai_value(
+            'preemptibility',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        if k8s_kai_queue_name is not None and (k8s_kueue_local_queue_name
+                                               is not None):
+            raise ValueError(f'Context {context} sets both a KAI queue '
+                             f'({k8s_kai_queue_name!r}) and a Kueue queue '
+                             f'({k8s_kueue_local_queue_name!r}); set only one.')
+        if k8s_kai_preemptibility is not None and k8s_kai_queue_name is None:
+            raise ValueError(
+                f'kubernetes.kai.preemptibility is set for context {context} '
+                'without kubernetes.kai.queue.')
+        k8s_kai_topology = skypilot_config.get_effective_kai_value(
+            'topology',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_required_level = skypilot_config.get_effective_kai_value(
+            'required_topology_level',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        k8s_kai_preferred_level = skypilot_config.get_effective_kai_value(
+            'preferred_topology_level',
+            region=context,
+            override_configs=resources.cluster_config_overrides)
+        has_topology_level = (k8s_kai_required_level is not None or
+                              k8s_kai_preferred_level is not None)
+        if k8s_kai_topology is not None and k8s_kai_queue_name is None:
+            raise ValueError(
+                f'kubernetes.kai.topology is set for context {context} '
+                'without kubernetes.kai.queue.')
+        if (k8s_kai_topology is not None) != has_topology_level:
+            raise ValueError(
+                f'Context {context} must set kubernetes.kai.topology together '
+                'with kubernetes.kai.required_topology_level or '
+                'kubernetes.kai.preferred_topology_level.')
 
         # Check DWS configuration for GKE.
         (enable_flex_start, enable_flex_start_queued_provisioning,
@@ -1228,7 +1306,8 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-        is_using_kueue = k8s_kueue_local_queue_name is not None
+        is_using_queueing = (k8s_kueue_local_queue_name is not None or
+                             k8s_kai_queue_name is not None)
         # auto_mounts volumes are injected later, in write_cluster_config(), so
         # they never reach volume_mounts. Resolve them here as well, or an
         # auto-mounted ReadWriteMany volume would be held to the base timeout
@@ -1238,7 +1317,7 @@ class Kubernetes(clouds.Cloud):
             num_nodes,
             volume_mounts,
             enable_flex_start or enable_flex_start_queued_provisioning,
-            is_using_kueue,
+            is_using_queueing,
             auto_mounts=auto_mounts)
 
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
@@ -1442,7 +1521,8 @@ class Kubernetes(clouds.Cloud):
                 topology_label_value=k8s_topology_label_value,
                 spot_label_key=spot_label_key,
                 spot_label_value=spot_label_value,
-                enable_flex_start=enable_flex_start),
+                enable_flex_start=enable_flex_start,
+                tpu_chips_per_vm=tpu_chips_per_vm),
             'k8s_service_account_name': k8s_service_account_name,
             # Gates the provisioner-only roles: only a controller pod
             # provisions, and only in non-consolidation deployments --
@@ -1454,6 +1534,12 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             'k8s_kueue_admission_timeout': k8s_kueue_admission_timeout,
+            'k8s_kai_queue_name': k8s_kai_queue_name,
+            'k8s_kai_preemptibility': k8s_kai_preemptibility,
+            'k8s_kai_topology': k8s_kai_topology,
+            'k8s_kai_required_topology_level': k8s_kai_required_level,
+            'k8s_kai_preferred_topology_level': k8s_kai_preferred_level,
+            'k8s_kai_scheduler_name': kai.SCHEDULER_NAME,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
@@ -1687,8 +1773,29 @@ class Kubernetes(clouds.Cloud):
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            per_pod_acc_count = acc_count
+            if kubernetes_utils.is_tpu_on_gke(acc_type):
+                normalized, chips = kubernetes_utils.normalize_tpu_accelerator(
+                    acc_type, acc_count)
+                if normalized != acc_type and acc_count > 1:
+                    # tpu-v6e-16 names one 16-chip slice; a count after it
+                    # is ambiguous (use num_nodes for several slices).
+                    return resources_utils.FeasibleResources(
+                        [], [], f'{acc_type}:{acc_count} is not supported on '
+                        f'Kubernetes: {acc_type} already names a slice of '
+                        f'{chips} chips. Use num_nodes to request several '
+                        'slices.')
+                shape = kubernetes_utils.get_tpu_multi_host_shape(
+                    acc_type, acc_count,
+                    kubernetes_utils.multi_host_requested(
+                        resources.accelerator_args))
+                if shape is not None:
+                    # A multi-host slice runs one pod per VM; size each pod
+                    # for its VM's chips.
+                    per_pod_acc_count = shape.chips_per_vm
             if resources.cpus is None:
-                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
+                gpu_task_cpus = (self._DEFAULT_NUM_VCPUS_WITH_GPU *
+                                 per_pod_acc_count)
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *

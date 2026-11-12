@@ -35,9 +35,9 @@ def _caller_is_admin(request: fastapi.Request) -> bool:
 def get_ssh_node_pools(request: fastapi.Request) -> Dict[str, Any]:
     """Get all SSH Node Pool configurations.
 
-    The stored config carries each host's sudo password. Only admins, the
-    one role allowed to change the pools, receive it; any other caller gets
-    the config with credential fields removed.
+    The stored config carries each host's sudo password and SSH key path.
+    Only admins, the one role allowed to change the pools, receive them; any
+    other caller gets the config with credential fields removed.
     """
     try:
         pools = core.get_all_pools()
