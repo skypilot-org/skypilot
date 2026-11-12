@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 import sky.batch
+from sky.batch import coordinator as coordinator_lib
 from sky.batch import utils
 
 # ---------------------------------------------------------------------------
@@ -684,7 +685,6 @@ class TestWorkerStartupCodeQuoting:
     a quote cannot break out of the string and inject commands."""
 
     def _make_coordinator(self, *, serialized_fn, output_path):
-        from sky.batch import coordinator as coordinator_lib
 
         class _Fmt:
 
