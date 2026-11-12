@@ -123,8 +123,13 @@ def _check_kubernetes_contexts(
     if not allowed:
         # The full check reports why no context can be checked.
         return sky_clouds.Kubernetes.check_contexts_compute_credentials(None)
-    cached = global_user_state.get_cached_check_results(workspace).get(
-        _KUBERNETES_REPR, {})
+    try:
+        cached = global_user_state.get_cached_check_results(workspace).get(
+            _KUBERNETES_REPR, {})
+    except Exception as e:  # pylint: disable=broad-except
+        # With no cached results, every allowed context is checked.
+        logger.warning(f'Failed to read cached check results: {e}')
+        cached = {}
     to_check = [c for c in allowed if c in contexts or c not in cached]
     ok, reason = sky_clouds.Kubernetes.check_contexts_compute_credentials(
         to_check)
@@ -199,14 +204,16 @@ def check_capabilities(
     rows are left alone, so `workspace` only needs to be readable by the
     caller rather than writable.
 
-    With `kubernetes_contexts`, Kubernetes checks only the allowed contexts in
-    it, plus allowed contexts with no cached result. The other allowed
-    contexts keep their cached results and count toward whether Kubernetes is
-    enabled.
+    With `kubernetes_contexts` (requires `clouds`), Kubernetes checks only the
+    allowed contexts in it, plus allowed contexts with no cached result. The
+    other allowed contexts keep their cached results and count toward whether
+    Kubernetes is enabled.
     """
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
 
+    if kubernetes_contexts is not None and clouds is None:
+        raise ValueError('kubernetes_contexts requires clouds.')
     contexts_to_check: Optional[Set[str]] = (None if kubernetes_contexts is None
                                              else set(kubernetes_contexts))
     echo = (lambda *_args, **_kwargs: None
@@ -464,16 +471,6 @@ def check_capabilities(
             try:
                 results_to_persist = _build_check_results(
                     cloud2ctx2text, check_results_dict)
-                if (clouds is None and contexts_to_check is not None and
-                        _KUBERNETES_REPR in results_to_persist):
-                    # A full run replaces the row; contexts it skipped keep
-                    # their cached results. Scoped runs merge per context.
-                    cached = global_user_state.get_cached_check_results(
-                        current_workspace_name).get(_KUBERNETES_REPR, {})
-                    results_to_persist[_KUBERNETES_REPR] = {
-                        **cached,
-                        **results_to_persist[_KUBERNETES_REPR]
-                    }
                 global_user_state.set_check_results(
                     results_to_persist,
                     current_workspace_name,

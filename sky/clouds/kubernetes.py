@@ -1872,7 +1872,7 @@ class Kubernetes(clouds.Cloud):
 
         Returns whether any checked context is usable, and a dict mapping each
         checked context to its status, or a string reason when the check
-        cannot run. An empty `contexts` checks nothing and returns (False, {}).
+        cannot run. An empty `contexts` checks no context.
         """
         # Check for port forward dependencies
         logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
