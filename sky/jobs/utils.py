@@ -37,6 +37,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
+from sky.jobs import cancel_signal
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
@@ -1932,17 +1933,13 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                                'graceful shutdown not supported.')
         else:
             # New controller process.
+            content = ''
+            if graceful:
+                content = _JOBS_GRACEFUL_CANCEL_SIGNAL
+                if graceful_timeout is not None:
+                    content += f':{graceful_timeout}'
             try:
-                signal_file = pathlib.Path(
-                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                with filelock.FileLock(str(signal_file) + '.lock'):
-                    if graceful:
-                        content = _JOBS_GRACEFUL_CANCEL_SIGNAL
-                        if graceful_timeout is not None:
-                            content += f':{graceful_timeout}'
-                        signal_file.write_text(content, encoding='utf-8')
-                    else:
-                        signal_file.touch()
+                cancel_signal.write(job_id, content)
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
