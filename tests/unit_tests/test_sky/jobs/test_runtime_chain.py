@@ -4,11 +4,14 @@ Covers ``register``, ``replace``, ``_is_runtime_candidate``, and the
 module-level dispatch's short-circuit on legacy handles.
 """
 # pylint: disable=protected-access,missing-class-docstring
+import pickle
 import types
 from unittest import mock
 
 import pytest
 
+from sky import resources
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import runtime as runtime_chain
 
 
@@ -478,17 +481,21 @@ class TestCostUnits:
         owner.cost_units.assert_not_called()
 
 
-def test_parked_cost_dispatch_does_not_need_provisioned_metadata():
-    # A parked launch has a rendered provider config but may still have the
-    # default Ray metadata. Each hook checks its own provider config.
-    old = _OldRuntime()
-    first = types.SimpleNamespace(parked_cost_units=mock.Mock(
-        return_value=None))
-    second = types.SimpleNamespace(parked_cost_units=mock.Mock(return_value=2))
-    for runtime in (old, first, second):
-        runtime_chain.register(runtime)
-    handle = _make_handle(has_ray=True)
-    assert runtime_chain.parked_cost_units(handle) == 2
-    first.parked_cost_units.assert_called_once_with(handle)
-    second.parked_cost_units.assert_called_once_with(handle)
-    assert runtime_chain.parked_cost_units(None) is None
+def test_cost_dispatch_reaches_the_owner_before_provision_returns():
+    # Launch persists this handle before provisioning, including a launch that
+    # parks. Use its real initial metadata and storage round trip.
+    handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
+        cluster_name='parked',
+        cluster_name_on_cloud='parked-on-cloud',
+        cluster_yaml='/nonexistent/parked.yaml',
+        launched_nodes=1,
+        launched_resources=resources.Resources(),
+    )
+    handle = pickle.loads(pickle.dumps(handle))
+    assert not handle.provision_runtime_metadata.has_ray
+    assert not handle.provision_runtime_metadata.run_started
+    owner = _CostRuntime(owns_return=True, handle_cost=2)
+    runtime_chain.register(owner)
+
+    assert runtime_chain.cost_units(handle) == 2
+    owner.cost_units.assert_called_once_with(handle)

@@ -4579,21 +4579,20 @@ class TestJobCostUnits:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('reported,expected', [(1, 1), (None, 5)])
-    @pytest.mark.parametrize('parked', [False, True])
-    async def test_launch_sets_the_cost_of_the_cluster(self, reported, expected,
-                                                       parked):
+    async def test_launch_sets_the_cost_of_the_cluster(self, reported,
+                                                       expected):
         job_costs = {1: 3}
         jc = self._job_controller(job_costs)
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'parked_cost_units' if parked else 'cost_units',
+             patch.object(runtime, 'cost_units',
                           return_value=reported) as hook, \
              patch.object(controller_module.global_user_state,
                           'get_handle_from_cluster_name',
                           return_value='handle'), \
              patch.object(controller_module.controller_utils,
                           'JOB_COST_UNITS', 5):
-            await jc._update_cost_units('cluster', parked=parked)
+            await jc._update_cost_units('cluster')
         hook.assert_called_once_with('handle')
         assert job_costs == {1: expected}
 
@@ -4605,7 +4604,7 @@ class TestJobCostUnits:
         jc._strategy_executor = MagicMock(cluster_name='cluster')
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'parked_cost_units', return_value=full // 5), \
+             patch.object(runtime, 'cost_units', return_value=full // 5), \
              patch.object(controller_module.global_user_state,
                           'get_handle_from_cluster_name', return_value='handle'):
             await jc._on_launch_wait(True)
@@ -4643,16 +4642,15 @@ class TestJobCostUnits:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('pool,job_group', [('pool', False), (None, True)])
-    @pytest.mark.parametrize('parked', [False, True])
     async def test_pools_and_job_groups_keep_the_full_cost(
-            self, pool, job_group, parked):
+            self, pool, job_group):
         job_costs = {1: 5}
         jc = self._job_controller(job_costs, pool=pool, job_group=job_group)
         runtime = controller_module.managed_job_runtime
         with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'parked_cost_units' if parked else 'cost_units',
+             patch.object(runtime, 'cost_units',
                           return_value=1) as hook:
-            await jc._update_cost_units('cluster', parked=parked)
+            await jc._update_cost_units('cluster')
         hook.assert_not_called()
         assert job_costs == {1: 5}
 

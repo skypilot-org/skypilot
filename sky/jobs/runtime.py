@@ -316,26 +316,11 @@ class ManagedJobRuntime(Protocol):
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[int]:
-        """Controller cost units of a job running on this cluster.
+        """Controller cost units of a job parked or running on this cluster.
 
         Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
-        ``None`` for the full cost. Active launches count in full; parked
-        launch requests can report a separate cost through
-        ``parked_cost_units``."""
-        ...
-
-    def parked_cost_units(
-        self,
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    ) -> Optional[int]:
-        """Controller cost units while this cluster's launch is parked.
-
-        Called only while the launch request has yielded its executor worker.
-        The handle may not yet have runtime metadata, so this hook is offered
-        to every runtime without the usual ``owns``/Ray metadata guard. Check
-        the actual cluster provider configuration before returning a cost.
-        Return None for other runtimes or an unidentified cluster.
-        """
+        ``None`` for the full cost. Active launches count in full. A parked
+        launch uses its runtime's cost until it resumes."""
         ...
 
 
@@ -631,21 +616,6 @@ def cost_units(
         return None
     for r in _claimants(handle):
         hook = getattr(r, 'cost_units', None)
-        if hook is None:
-            continue
-        result = hook(handle)
-        if result is not None:
-            return result
-    return None
-
-
-def parked_cost_units(
-    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
-) -> Optional[int]:
-    if handle is None:
-        return None
-    for runtime in _runtimes:
-        hook = getattr(runtime, 'parked_cost_units', None)
         if hook is None:
             continue
         result = hook(handle)
