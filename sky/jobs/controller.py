@@ -1101,7 +1101,8 @@ class JobController:
             self.starting_lock,
             self.starting_signal,
             file_mounts_blob_id=file_mounts_blob_id,
-            job_costs=(self._job_costs if self._pool is None and
+            job_costs=(self._job_costs
+                       if self._job_costs is not None and self._pool is None and
                        not self._dag.is_job_group() else None))
         if not is_resume:
             submitted_at = time.time()
