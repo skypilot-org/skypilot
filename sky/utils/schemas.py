@@ -606,6 +606,9 @@ def _get_single_resources_schema():
                     'gcp_queued_resource': {
                         'type': 'boolean',
                     },
+                    'multi_host': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
