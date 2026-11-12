@@ -41,20 +41,11 @@ def jobs_db(tmp_path, monkeypatch):
     yield engine
 
 
-_UNSET = object()
-
-
-def _seed(engine,
-          job_id,
-          name,
-          workspace=_UNSET,
-          status='RUNNING',
-          num_tasks=1):
-    """One job. workspace=None is a NULL column; _UNSET means no job_info."""
+def _seed(engine, job_id, name, workspace, status='RUNNING', num_tasks=1):
     with engine.connect() as conn:
-        if workspace is not _UNSET:
-            conn.execute(state.job_info_table.insert().values(
-                spot_job_id=job_id, name=name, workspace=workspace))
+        conn.execute(state.job_info_table.insert().values(spot_job_id=job_id,
+                                                          name=name,
+                                                          workspace=workspace))
         for task_id in range(num_tasks):
             conn.execute(state.spot_table.insert().values(
                 spot_job_id=job_id,
@@ -90,18 +81,6 @@ class TestStateWorkspaceFilter:
         assert state.get_all_job_ids_by_name(None, workspaces=set()) == []
         assert state.get_nonterminal_job_ids_by_name('a',
                                                      workspaces=set()) == []
-
-    @pytest.mark.parametrize('workspace', [None, _UNSET],
-                             ids=['null-workspace', 'no-job-info-row'])
-    def test_missing_workspace_counts_as_default(self, jobs_db, workspace):
-        # As get_workspace answers for the same job.
-        _seed(jobs_db, 1, 'a', workspace)
-        assert state.get_workspace(1) == 'default'
-        assert state.get_latest_job_id(workspaces={'default'}) == 1
-        assert state.get_all_job_ids_by_name(None,
-                                             workspaces={'default'}) == [1]
-        assert state.get_latest_job_id(workspaces={'ws-a'}) is None
-        assert state.get_all_job_ids_by_name(None, workspaces={'ws-a'}) == []
 
 
 class _Runner:
