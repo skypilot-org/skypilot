@@ -90,7 +90,9 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
-    'bcrypt==4.0.1',
+    # bcrypt is called directly in sky/server/common.py rather than through
+    # passlib, whose bcrypt backend does not work with bcrypt>=5.0.
+    'bcrypt>=4.0.1',
     'pyjwt',
     'gitpython',
     'paramiko',
