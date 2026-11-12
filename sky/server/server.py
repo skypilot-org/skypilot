@@ -96,6 +96,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import threads
 from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.skylet import runtime_utils
@@ -1154,6 +1155,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Unused: the middleware-order check that used to live here runs at
     # import instead, right after the metrics middleware registration.
     del app
+    threads.count_thread_starts()
+    threads.keep_anyio_worker_threads()
+    await asyncio.to_thread(executor.warm_thread_executors)
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
@@ -3552,7 +3556,7 @@ async def api_cancel(
     )
 
 
-@app.get('/api/status')
+@app.get('/api/status', response_model=List[payloads.RequestPayload])
 async def api_status(
     request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
@@ -3567,7 +3571,7 @@ async def api_status(
                      'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
-) -> List[payloads.RequestPayload]:
+) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
     # Scope the request body to the caller: the owner sees it, others get null
     # (see _request_body_for_display).
@@ -3587,21 +3591,21 @@ async def api_status(
         statuses = None
         if not all_status:
             statuses = requests_lib.RequestStatus.active_statuses()
-        request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=statuses,
-                cluster_names=[cluster_name] if cluster_name else None,
-                user_id=scope_user_id,
-                exclude_request_names=[
-                    server_constants.REQUEST_NAME_PREFIX + d.value
-                    for d in daemons.HIDDEN_REQUEST_NAMES
-                ],
-                limit=limit,
-                fields=fields or requests_lib.DISPLAY_COLUMNS,
-                sort=True,
-            ))
-        return requests_lib.encode_requests(request_tasks,
-                                            caller_user_id=caller_user_id)
+        req_filter = requests_lib.RequestTaskFilter(
+            status=statuses,
+            cluster_names=[cluster_name] if cluster_name else None,
+            user_id=scope_user_id,
+            exclude_request_names=[
+                server_constants.REQUEST_NAME_PREFIX + d.value
+                for d in daemons.HIDDEN_REQUEST_NAMES
+            ],
+            limit=limit,
+            fields=fields or requests_lib.DISPLAY_COLUMNS,
+            sort=True,
+        )
+        content = await asyncio.to_thread(requests_lib.list_requests_json,
+                                          req_filter, caller_user_id)
+        return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -4471,9 +4475,26 @@ async def complete_cluster_name(incomplete: str,) -> List[str]:
 
 
 @app.get('/api/completion/storage_name')
-async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_storage_names_start_with, incomplete)
+async def complete_storage_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    # Completion is a listing: it shows only what `sky storage ls` would.
+    # Without an authenticated user the server has no identity to scope to
+    # (a single-user server, or auth terminated upstream), as for
+    # `role_filter.request_owner_scope`.
+    auth_user = request.state.auth_user
+
+    def _complete() -> List[str]:
+        workspaces_filter = None
+        if auth_user is not None:
+            # This process does not get the executor's per-request config
+            # reload; without it a workspace created after boot is missing.
+            common.refresh_workspace_state_for_sync_handler()
+            workspaces_filter = (
+                workspaces_core.readable_workspace_names_for_user(auth_user.id))
+        return global_user_state.get_storage_names_start_with(
+            incomplete, workspaces_filter)
+
+    return await asyncio.to_thread(_complete)
 
 
 @app.get('/api/completion/volume_name')

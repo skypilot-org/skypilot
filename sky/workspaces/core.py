@@ -171,9 +171,13 @@ def get_readable_workspace_names() -> Optional[Set[str]]:
 
     See `PermissionService.get_readable_workspace_names`.
     """
-    workspaces = _load_workspaces()
+    return readable_workspace_names_for_user(common_utils.get_current_user().id)
+
+
+def readable_workspace_names_for_user(user_id: str) -> Optional[Set[str]]:
+    """`get_readable_workspace_names` for the given user."""
     return permission.permission_service.get_readable_workspace_names(
-        common_utils.get_current_user().id, set(workspaces.keys()))
+        user_id, set(_load_workspaces().keys()))
 
 
 def workspace_label_for_caller(workspace_id: str) -> str:

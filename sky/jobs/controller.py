@@ -4068,17 +4068,21 @@ class ControllerManager:
             # construct() auto-creates missing buckets, so if the user deletes
             # their bucket right after the job finishes (`sky storage delete`),
             # this cleanup would silently re-create and leak it.
-            try:
-                for storage in task.storage_mounts.values():
-                    if not storage.persistent:
-                        storage.construct()
-            except (exceptions.StorageSpecError, exceptions.StorageError) as e:
-                logger.warning(
-                    f'Failed to construct storage object for teardown: {e}\n'
-                    'This may happen because storage construction already '
-                    'failed during launch, storage was deleted externally, '
-                    'credentials expired/changed, or network connectivity '
-                    'issues.')
+            # Each mount on its own: one that cannot be constructed must not
+            # keep the others from being torn down.
+            for storage in task.storage_mounts.values():
+                if storage.persistent:
+                    continue
+                try:
+                    storage.construct()
+                except (exceptions.StorageSpecError,
+                        exceptions.StorageError) as e:
+                    logger.warning(
+                        'Failed to construct storage object for teardown: '
+                        f'{e}\nThis may happen because storage construction '
+                        'already failed during launch, storage was deleted '
+                        'externally, credentials expired/changed, or network '
+                        'connectivity issues.')
             try:
                 # Deleting again is safe: a store already removed is skipped.
                 common_utils.retry(
