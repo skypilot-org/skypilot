@@ -44,6 +44,7 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import grpc
@@ -140,6 +141,18 @@ def _maybe_display_run_warning(task: 'task_lib.Task') -> None:
             f'`run` section.{colorama.Style.RESET_ALL}')
 
 
+def _check_storage_mounts_accessible(task: 'task_lib.Task') -> None:
+    """Refuses a storage the service's controller could not reuse by name.
+
+    The controller runs for the active workspace and reaches the storage
+    of that workspace only. A storage of another workspace would be
+    accepted here and synced into, then left behind at teardown. Checked
+    before any bucket is made for the task.
+    """
+    for storage in (task.storage_mounts or {}).values():
+        storage.check_accessible()
+
+
 def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
@@ -192,6 +205,7 @@ def up(
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
+    _check_storage_mounts_accessible(task)
 
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Initializing {noun}')):
@@ -558,6 +572,26 @@ def update(
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
 
+    # An update with a task records its storage, the new version's file
+    # mounts bucket included, in the active workspace, and the controller
+    # tears down only the storage of the workspace it was launched in. A
+    # controller that cannot say which (an older one, or its config lost
+    # to a pod restart) is not held to this.
+    service_workspace = service_record.get('workspace')
+    if task is not None and service_workspace is not None:
+        service_workspace = skypilot_config.resolve_workspace_ref(
+            service_workspace)
+        active_workspace = skypilot_config.get_active_workspace()
+        if service_workspace != active_workspace:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'{capnoun} {service_name!r} runs in workspace '
+                    f'{skypilot_config.get_workspace_name(service_workspace)!r}'
+                    ' and the active workspace is '
+                    f'{skypilot_config.get_workspace_name(active_workspace)!r}'
+                    f'. The {noun} reuses and tears down the storage of its '
+                    'own workspace only, so update it from that workspace.')
+
     # If task is None and workers is specified, load existing configuration
     # and update replica count.
     if task is None:
@@ -637,6 +671,7 @@ def update(
                 'The service will continue to use the current load balancing '
                 f'policy.{colorama.Style.RESET_ALL}')
 
+    _check_storage_mounts_accessible(task)
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Initializing {noun}')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
@@ -999,9 +1034,22 @@ def status(
                                                 '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
+    _withhold_workspaces_of_unreadable(service_records)
     _resolve_user_names(service_records)
 
     return service_records
+
+
+def _withhold_workspaces_of_unreadable(
+        service_records: List[Dict[str, Any]]) -> None:
+    """Drops the workspace from records in workspaces the caller cannot
+    read; status lists every user's services."""
+    readable = workspaces_core.get_readable_workspace_names()
+    if readable is None:
+        return
+    for record in service_records:
+        if record.get('workspace') not in readable:
+            record['workspace'] = None
 
 
 ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]

@@ -4471,9 +4471,26 @@ async def complete_cluster_name(incomplete: str,) -> List[str]:
 
 
 @app.get('/api/completion/storage_name')
-async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_storage_names_start_with, incomplete)
+async def complete_storage_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    # Completion is a listing: it shows only what `sky storage ls` would.
+    # Without an authenticated user the server has no identity to scope to
+    # (a single-user server, or auth terminated upstream), as for
+    # `role_filter.request_owner_scope`.
+    auth_user = request.state.auth_user
+
+    def _complete() -> List[str]:
+        workspaces_filter = None
+        if auth_user is not None:
+            # This process does not get the executor's per-request config
+            # reload; without it a workspace created after boot is missing.
+            common.refresh_workspace_state_for_sync_handler()
+            workspaces_filter = (
+                workspaces_core.readable_workspace_names_for_user(auth_user.id))
+        return global_user_state.get_storage_names_start_with(
+            incomplete, workspaces_filter)
+
+    return await asyncio.to_thread(_complete)
 
 
 @app.get('/api/completion/volume_name')

@@ -640,6 +640,27 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'config.yaml')
 
 
+def get_service_workspace(service_name: str) -> Optional[str]:
+    """The workspace the controller of a service runs for: the active
+    workspace of the config ``up`` placed next to the service's YAML, which
+    an update does not change. A config without one means the default
+    workspace. None when the file cannot be read: in consolidation mode it
+    may be gone after a pod restart, and a guess would be wrong either way.
+    """
+    path = os.path.expanduser(
+        generate_remote_config_yaml_file_name(service_name))
+    try:
+        config = yaml_utils.read_yaml(path)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not isinstance(config, dict):
+        return None
+    workspace = config.get('active_workspace')
+    if not isinstance(workspace, str) or not workspace:
+        return skylet_constants.SKYPILOT_DEFAULT_WORKSPACE
+    return workspace
+
+
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
@@ -872,6 +893,7 @@ def _get_service_status(
     if record['pool'] != pool:
         return None
 
+    record['workspace'] = get_service_workspace(service_name)
     record['pool_yaml'] = ''
     if record['pool']:
         version = record['version']

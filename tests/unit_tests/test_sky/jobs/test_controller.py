@@ -1013,6 +1013,30 @@ class TestTaskCleanup:
             teardown.call_count == controller_module._STORAGE_TEARDOWN_ATTEMPTS)
 
     @pytest.mark.asyncio
+    async def test_one_unconstructable_mount_does_not_stop_the_rest(
+            self, cleanup_patches):
+        """Each non-persistent mount is constructed on its own: one that
+        raises does not keep the next from being constructed for teardown."""
+        refused = MagicMock(persistent=False)
+        refused.construct.side_effect = exceptions.StorageWorkspaceError('no')
+        mine = MagicMock(persistent=False)
+        kept = MagicMock(persistent=True)
+        task = self._make_task()
+        task.metadata = {}
+        task.storage_mounts = {'/a': refused, '/b': mine, '/c': kept}
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1)
+
+        mine.construct.assert_called_once_with()
+        kept.construct.assert_not_called()
+        (cleanup_patches['backend'].return_value.teardown_ephemeral_storage.
+         assert_called_once_with(task))
+
+    @pytest.mark.asyncio
     async def test_record_gone_pool_job_cancels_the_known_submission(
             self, cleanup_patches):
         """A pool job's worker and pool-side job ID live in the missing

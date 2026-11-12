@@ -1095,6 +1095,13 @@ def _launch(
             raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
+    # Every storage the tasks name is checked here, whichever branch of
+    # _upload_files_to_controller runs: without a jobs bucket the tasks go
+    # to the controller as they are, and the controller constructs their
+    # storage outside any request, where there is no caller to check.
+    for task_ in dag.tasks:
+        for storage in (task_.storage_mounts or {}).values():
+            storage.check_accessible()
     if pool is None:  # A pool job launches no cluster of its own.
         clouds.Kubernetes.check_request_keeps_server_none()
         for task_ in dag.tasks:
