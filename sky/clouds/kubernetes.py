@@ -1862,6 +1862,18 @@ class Kubernetes(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        return cls.check_contexts_compute_credentials(None)
+
+    @classmethod
+    def check_contexts_compute_credentials(
+        cls, contexts: Optional[List[str]]
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks compute access to `contexts`, or to every allowed context.
+
+        Returns whether any checked context is usable, and a dict mapping each
+        checked context to its status, or a string reason when the check
+        cannot run. An empty `contexts` checks nothing and returns (False, {}).
+        """
         # Check for port forward dependencies
         logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
@@ -1871,26 +1883,27 @@ class Kubernetes(clouds.Cloud):
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
 
-        # Test using python API
-        try:
-            existing_allowed_contexts = cls.existing_allowed_contexts()
-        except ImportError as e:
-            return (False,
-                    f'{common_utils.format_exception(e, use_bracket=True)}')
-        if not existing_allowed_contexts:
-            if skypilot_config.loaded_config_path() is None:
-                check_skypilot_config_msg = ''
-            else:
-                check_skypilot_config_msg = (
-                    ' and check "allowed_contexts" in your '
-                    f'{skypilot_config.loaded_config_path()} file.')
-            return (False, 'No available context found in kubeconfig. '
-                    'Check if you have a valid kubeconfig file' +
-                    check_skypilot_config_msg)
+        if contexts is None:
+            # Test using python API
+            try:
+                contexts = cls.existing_allowed_contexts()
+            except ImportError as e:
+                return (False,
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+            if not contexts:
+                if skypilot_config.loaded_config_path() is None:
+                    check_skypilot_config_msg = ''
+                else:
+                    check_skypilot_config_msg = (
+                        ' and check "allowed_contexts" in your '
+                        f'{skypilot_config.loaded_config_path()} file.')
+                return (False, 'No available context found in kubeconfig. '
+                        'Check if you have a valid kubeconfig file' +
+                        check_skypilot_config_msg)
 
         ctx2text = {}
         success = False
-        for context in existing_allowed_contexts:
+        for context in contexts:
             suc, text = cls._check_single_context(context)
             success = success or suc
             ctx2text[context] = text

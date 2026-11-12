@@ -40,6 +40,7 @@ STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME,
 logger = sky_logging.init_logger(__name__)
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+_KUBERNETES_REPR = repr(sky_clouds.Kubernetes())
 
 
 def _is_storage_only(cloud_name: str) -> bool:
@@ -106,6 +107,27 @@ def _build_check_results(
     return out
 
 
+def _check_kubernetes_contexts(
+    contexts: Set[str], cached: Dict[str, Dict[str, Any]]
+) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+    """Checks the allowed Kubernetes contexts in `contexts`.
+
+    Allowed contexts with no entry in `cached` are checked too. Kubernetes is
+    usable if any checked context is, or any other allowed context is cached
+    as enabled.
+    """
+    allowed = sky_clouds.Kubernetes.existing_allowed_contexts()
+    if not allowed:
+        return sky_clouds.Kubernetes.check_contexts_compute_credentials(None)
+    to_check = [c for c in allowed if c in contexts or c not in cached]
+    ok, reason = sky_clouds.Kubernetes.check_contexts_compute_credentials(
+        to_check)
+    if not isinstance(reason, dict):
+        return ok, reason
+    kept = [c for c in allowed if c not in to_check]
+    return ok or any(cached[c].get('enabled') for c in kept), reason
+
+
 def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # Use allowed_clouds from config if it exists, otherwise check all
     # clouds. Also validate names with get_cloud_tuple.
@@ -162,16 +184,24 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
     persist: bool = True,
+    kubernetes_contexts: Optional[Iterable[str]] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
     """Checks the clouds' credentials and caches the result per workspace.
 
     With `persist=False` the result is only returned: the workspace's cached
     rows are left alone, so `workspace` only needs to be readable by the
     caller rather than writable.
+
+    With `kubernetes_contexts`, Kubernetes checks only the allowed contexts in
+    it, plus allowed contexts with no cached result. The other allowed
+    contexts keep their cached results and count toward whether Kubernetes is
+    enabled.
     """
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
 
+    contexts_to_check: Optional[Set[str]] = (None if kubernetes_contexts is None
+                                             else set(kubernetes_contexts))
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
@@ -227,7 +257,13 @@ def check_capabilities(
                 # local_active_workspace_ctx is thread-local.
                 _, cloud = cloud_tuple
                 try:
-                    ok, reason = cloud.check_credentials(capability)
+                    if (contexts_to_check is not None and
+                            cloud_tuple[0] == _KUBERNETES_REPR and
+                            capability == sky_cloud.CloudCapability.COMPUTE):
+                        ok, reason = _check_kubernetes_contexts(
+                            contexts_to_check, cached_kubernetes)
+                    else:
+                        ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     return None
                 except Exception:  # pylint: disable=broad-except
@@ -330,6 +366,10 @@ def check_capabilities(
                     combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
+        cached_kubernetes: Dict[str, Dict[str, Any]] = {}
+        if contexts_to_check is not None:
+            cached_kubernetes = global_user_state.get_cached_check_results(
+                current_workspace_name).get(_KUBERNETES_REPR, {})
 
         workspace_str = (
             ' for workspace: '
@@ -424,7 +464,8 @@ def check_capabilities(
                 global_user_state.set_check_results(
                     results_to_persist,
                     current_workspace_name,
-                    is_full_workspace_run=(clouds is None),
+                    is_full_workspace_run=(clouds is None and
+                                           contexts_to_check is None),
                 )
             except Exception as e:  # pylint: disable=broad-except
                 label = skypilot_config.workspace_label(current_workspace_name)
@@ -545,6 +586,7 @@ def check(
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
     workspace_ref: Optional[str] = None,
+    kubernetes_contexts: Optional[Iterable[str]] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
     if workspace is not None:
         # Import here to avoid circular import:
@@ -554,9 +596,13 @@ def check(
             common_utils.get_current_user(),
             workspace,
             workspace_ref=workspace_ref)
-    capabilities_result = check_capabilities(quiet, verbose, clouds,
-                                             sky_cloud.ALL_CAPABILITIES,
-                                             workspace)
+    capabilities_result = check_capabilities(
+        quiet,
+        verbose,
+        clouds,
+        sky_cloud.ALL_CAPABILITIES,
+        workspace,
+        kubernetes_contexts=kubernetes_contexts)
     # Convert CloudCapability enums to strings for JSON serialization.
     result: Dict[str, Dict[str, List[str]]] = {}
     for ws_name, clouds_with_caps in capabilities_result.items():
