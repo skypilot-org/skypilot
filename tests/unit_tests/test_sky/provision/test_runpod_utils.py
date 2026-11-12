@@ -1,4 +1,5 @@
 """Unit tests for sky.provision.runpod.utils."""
+import subprocess
 from unittest import mock
 
 import pytest
@@ -435,3 +436,24 @@ class TestRegisterSshKey:
         })
         runpod_utils.register_ssh_key('ssh-ed25519 BBBB skypilot')
         assert [c[0] for c in rest.calls] == ['GET']
+
+
+@pytest.mark.parametrize('installed,expected_apt', [
+    ('openssh-server rsync curl patch', ''),
+    ('rsync curl', 'update\ninstall -y openssh-server patch\n'),
+])
+def test_pod_setup_installs_only_missing_packages(tmp_path, installed,
+                                                  expected_apt):
+    # Execute the generated shell command; stub only the external executables.
+    shell_functions = (
+        'prefix_cmd() { :; }; '
+        f'dpkg-query() {{ case " {installed} " in *" $4 "*) '
+        'printf "install ok installed" ;; *) return 1 ;; esac; }; '
+        f'apt() {{ echo "$*" >> {tmp_path}/apt; }}; ')
+    subprocess.run([
+        'bash', '-c', shell_functions + runpod_utils._POD_PACKAGES_INSTALL_CMD
+    ],
+                   check=True)
+
+    apt_log = tmp_path / 'apt'
+    assert (apt_log.read_text() if apt_log.exists() else '') == expected_apt
