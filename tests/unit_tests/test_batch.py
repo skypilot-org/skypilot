@@ -6,6 +6,7 @@ functions.
 import base64
 import json
 import os
+import subprocess
 import tempfile
 from unittest.mock import patch
 
@@ -675,3 +676,48 @@ class TestIoFormatsNoExec:
             'path': 's3://bucket/data.jsonl',
         })
         assert isinstance(reader, io_formats.JsonReader)
+
+
+class TestWorkerStartupCodeQuoting:
+    """The worker startup script interpolates task metadata into shell
+    ``export`` lines. Those values must be shell-quoted so a value containing
+    a quote cannot break out of the string and inject commands."""
+
+    def _make_coordinator(self, *, serialized_fn, output_path):
+        from sky.batch import coordinator as coordinator_lib
+
+        class _Fmt:
+
+            def to_dict(self):
+                return {'format': 'json', 'path': output_path}
+
+        c = coordinator_lib.BatchCoordinator.__new__(
+            coordinator_lib.BatchCoordinator)
+        c._managed_job_id = 1
+        c.activate_env = ''
+        c.serialized_fn = serialized_fn
+        c.output_path = output_path
+        c._input_format = _Fmt()
+        c._output_formats_dict = [{'format': 'json', 'path': output_path}]
+        return c
+
+    def test_values_with_single_quotes_do_not_break_out(self):
+        # A value crafted to close the quoting and append a command.
+        evil = "x'; touch /tmp/sky_batch_pwned; echo '"
+        c = self._make_coordinator(serialized_fn=evil, output_path=evil)
+        script = c._generate_worker_startup_code()
+
+        # Run just the export lines in a real shell and confirm the injected
+        # command did not execute and the value is preserved verbatim.
+        exports = '\n'.join(line for line in script.splitlines()
+                            if line.strip().startswith('export SKY_BATCH_'))
+        probe = (f'{exports}\n'
+                 'test -e /tmp/sky_batch_pwned && echo INJECTED\n'
+                 'printf %s "$SKY_BATCH_OUTPUT_PATH"\n')
+        result = subprocess.run(['bash', '-c', probe],
+                                capture_output=True,
+                                text=True,
+                                check=True)
+        assert 'INJECTED' not in result.stdout
+        assert not os.path.exists('/tmp/sky_batch_pwned')
+        assert result.stdout.strip() == evil
