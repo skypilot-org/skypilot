@@ -4774,7 +4774,7 @@ if __name__ == '__main__':
     # Initialize global user state db
     db_utils.set_max_connections(1)
     # Fail with install hint before ORM init (not TypeError on missing SA).
-    sqlalchemy_deps.require_sqlalchemy()
+    sqlalchemy_deps.require_server_dependencies()
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')

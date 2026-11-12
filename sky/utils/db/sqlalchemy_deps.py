@@ -18,11 +18,26 @@ from sky.adaptors import common as adaptors_common
 # Matches sky/setup_files/dependencies.py ``server_dependencies``.
 _MIN_SQLALCHEMY_VERSION = version_lib.Version('2.0.16')
 
+_INSTALL_HINT = 'Install with: pip install "skypilot[server]"'
+
 SQLALCHEMY_INSTALL_MSG = (
-    'SQLAlchemy >= 2.0.16 is required for SkyPilot API server / controller '
-    'database access. Install server dependencies with: '
-    'pip install "skypilot[server]" '
-    '(or a cloud extra such as "skypilot[kubernetes]").')
+    f'SkyPilot server dependencies are missing. {_INSTALL_HINT}')
+
+SERVER_START_INSTALL_MSG = ('Failed to start SkyPilot API server due to '
+                            f'missing dependencies. {_INSTALL_HINT}')
+
+# Import names of the server-only packages in ``server_dependencies`` (see
+# sky/setup_files/dependencies.py) that a client-only install lacks.
+_SERVER_MODULES = [
+    'sqlalchemy',
+    'psycopg2',
+    'aiosqlite',
+    'asyncpg',
+    'greenlet',
+    'alembic',
+    'casbin',
+    'sqlalchemy_adapter',
+]
 
 
 @functools.lru_cache(maxsize=1)
@@ -49,6 +64,19 @@ def require_sqlalchemy() -> None:
     """Raise ImportError when SQLAlchemy is missing or too old."""
     if not sqlalchemy_available():
         raise ImportError(SQLALCHEMY_INSTALL_MSG)
+
+
+def require_server_dependencies() -> None:
+    """Raise ImportError when a package the API server needs is missing.
+
+    Checked before starting an API server, which would otherwise exit on its
+    first missing import and leave only a failed health check behind.
+    """
+    if not (sqlalchemy_available() and
+            adaptors_common.can_import_modules(_SERVER_MODULES)):
+        # `from None`: callers start the server while handling a failed
+        # connection, which is expected here and only hides this cause.
+        raise ImportError(SERVER_START_INSTALL_MSG) from None
 
 
 class UnavailableDatabaseManager:

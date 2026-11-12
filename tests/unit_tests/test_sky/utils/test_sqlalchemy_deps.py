@@ -163,3 +163,37 @@ def test_client_db_api_calls_raise_install_hint():
                 raise AssertionError('expected the install hint')
     """)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_require_server_dependencies_checks_every_server_package(monkeypatch):
+    """SQLAlchemy alone is not enough to start a server: any missing server
+    package fails with the start message."""
+    sqlalchemy_deps.require_server_dependencies()
+    monkeypatch.setattr(sqlalchemy_deps, '_SERVER_MODULES',
+                        ['sqlalchemy', 'sky_no_such_server_module'])
+    with pytest.raises(ImportError) as e:
+        sqlalchemy_deps.require_server_dependencies()
+    assert str(e.value) == sqlalchemy_deps.SERVER_START_INSTALL_MSG
+
+
+def test_server_start_without_db_stack_shows_only_the_install_hint():
+    """Starting a local server on a client-only install fails with the start
+    message alone, not chained under the expected connection failure."""
+    result = _run_without_db_stack("""
+        from sky import exceptions
+        from sky.server import common
+        from sky.utils.db import sqlalchemy_deps
+
+        try:
+            # The auto-start path starts the server while handling this.
+            try:
+                raise exceptions.ApiServerConnectionError('http://x')
+            except exceptions.ApiServerConnectionError:
+                common._start_api_server()
+        except ImportError as e:
+            assert str(e) == sqlalchemy_deps.SERVER_START_INSTALL_MSG, str(e)
+            assert e.__suppress_context__, 'connection error would be shown'
+        else:
+            raise AssertionError('expected the install hint')
+    """)
+    assert result.returncode == 0, result.stdout + result.stderr

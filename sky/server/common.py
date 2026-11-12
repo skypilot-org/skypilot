@@ -930,8 +930,8 @@ def _start_api_server(deploy: bool = False,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
     # Local API server needs the DB/ORM stack. Fail with the install hint
-    # before spawning a process that would crash without SQLAlchemy.
-    sqlalchemy_deps.require_sqlalchemy()
+    # before spawning a process that would crash without it.
+    sqlalchemy_deps.require_server_dependencies()
     check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
     assert server_url in get_available_local_api_server_urls(), (
