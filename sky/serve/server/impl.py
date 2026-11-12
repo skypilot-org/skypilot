@@ -34,6 +34,8 @@ from sky.server import common as server_common
 from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.users import permission
+from sky.users import rbac
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -41,6 +43,8 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
@@ -52,6 +56,391 @@ else:
     grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _caller_is_admin() -> bool:
+    """Whether the user behind the current request holds the admin role.
+
+    Off the API server there is no role to check: authorization happened on
+    the server before the work reached a controller, the same assumption
+    the workspace permission check makes.
+    """
+    if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    roles = permission.permission_service.get_user_roles(
+        common_utils.get_current_user().id)
+    return rbac.RoleName.ADMIN.value in roles
+
+
+def _names_str(service_records: List[Dict[str, Any]]) -> str:
+    return ', '.join(
+        repr(name) for name in sorted(
+            str(record.get('name')) for record in service_records))
+
+
+def _check_service_ownership(service_records: List[Dict[str, Any]],
+                             pool: bool) -> None:
+    """Refuses to act on a service the current user did not create.
+
+    The services table records the creator of each service. The check
+    lives here, on the API server, because one controller runs every
+    user's services and has no caller to check against. Admins may act on
+    any service. A record with no creator was written by a version that
+    did not record one, or came from a controller that does not report
+    it, so only an admin can act on it; the error says so, since to its
+    creator it would otherwise read as someone else's.
+
+    Raises:
+        exceptions.PermissionDeniedError: If the caller is not an admin and
+            any of the records was created by someone else.
+    """
+    user = common_utils.get_current_user()
+    denied = [
+        record for record in service_records
+        if record.get('user_hash') != user.id
+    ]
+    if not denied or _caller_is_admin():
+        return
+    noun = 'pool' if pool else 'service'
+    others = [r for r in denied if r.get('user_hash') is not None]
+    unrecorded = [r for r in denied if r.get('user_hash') is None]
+    reasons = []
+    if others:
+        reasons.append(f'{noun}{"s" if len(others) > 1 else ""} '
+                       f'{_names_str(others)} created by another user')
+    if unrecorded:
+        reasons.append(
+            f'{noun}{"s" if len(unrecorded) > 1 else ""} '
+            f'{_names_str(unrecorded)} with no recorded creator (created by '
+            'an older version, or reported by a controller that predates '
+            'creator records)')
+    raise exceptions.PermissionDeniedError(
+        f'User {user.name} ({user.id}) cannot manage {" and ".join(reasons)}. '
+        f'Only the creator of a {noun} or an admin can manage it; a {noun} '
+        'with no recorded creator needs an admin.')
+
+
+def _matches_service_pattern(name: str, pattern: str) -> bool:
+    """Whether ``name`` is what a ``down``-style ``pattern`` means: ``*`` is
+    the only wildcard, everything else is literal."""
+    regex = '.*'.join(re.escape(part) for part in pattern.split('*'))
+    return re.fullmatch(regex, name) is not None
+
+
+def _name_reached_by(name: str, pattern: str) -> bool:
+    """Whether an older controller's expansion of ``pattern`` reaches
+    ``name``: it turned a name into a SQL ``LIKE`` pattern without escaping
+    ``_`` and ``%``, and SQLite compares ASCII letters case-insensitively.
+    """
+    regex = ''.join(
+        '.*' if char in '*%' else '.' if char == '_' else re.escape(char)
+        for char in pattern)
+    return re.fullmatch(regex, name, re.IGNORECASE) is not None
+
+
+# The serve protocol version from which the controller terminates exactly
+# the names it is handed (see serve_constants.SERVE_VERSION).
+_EXACT_NAME_SERVE_VERSION = 6
+
+
+def _controller_matches_names_exactly(
+        service_records: List[Dict[str, Any]]) -> bool:
+    """Whether the controller behind these records terminates exactly the
+    names it is handed. Each record carries the controller's protocol
+    version from version 6 on; a record without one is from an older
+    controller, which expands names (see ``_name_reached_by``)."""
+    return all(
+        record.get('serve_version', 0) >= _EXACT_NAME_SERVE_VERSION
+        for record in service_records)
+
+
+def _check_names_reach_only_targets(service_names: List[str],
+                                    service_records: List[Dict[str, Any]],
+                                    pool: bool) -> None:
+    """Refuses a name whose expansion on an older controller (see
+    ``_name_reached_by``) reaches a service that was not asked for, whoever
+    owns it: the controller would terminate it too, silently."""
+    if _controller_matches_names_exactly(service_records):
+        return
+    sent = set(service_names)
+    reached = [
+        record for record in service_records
+        if record['name'] not in sent and any(
+            _name_reached_by(record['name'], name) for name in service_names)
+    ]
+    if not reached:
+        return
+    noun = 'pool' if pool else 'service'
+    pairs = sorted({(name, record['name'])
+                    for record in reached
+                    for name in service_names
+                    if _name_reached_by(record['name'], name)})
+    detail = '; '.join(
+        f'{name!r} also reaches {other!r}' for name, other in pairs)
+    explanation = (f'Cannot terminate by name on this controller: {detail}. '
+                   'The controller reads "_" as a wildcard and may match '
+                   'names case-insensitively.')
+    user = common_utils.get_current_user()
+    others = [r for r in reached if r.get('user_hash') != user.id]
+    if others and not _caller_is_admin():
+        raise exceptions.PermissionDeniedError(
+            f'{explanation} User {user.name} ({user.id}) cannot manage the '
+            f'{noun}{"s" if len(others) > 1 else ""} reached that way.')
+    with ux_utils.print_exception_no_traceback():
+        raise ValueError(f'{explanation} Name every {noun} reached to '
+                         'terminate them together, or upgrade the '
+                         'controller.')
+
+
+def _folded_service_name(service_name: str) -> str:
+    """The part of a service name kept everywhere it is used: the
+    controller's directory folds ``-`` to ``_``, and the cloud name folds
+    ``.`` and ``_`` to ``-`` and lowercases."""
+    return re.sub(r'[._-]', '-', service_name).lower()
+
+
+def _service_dirs_on_controller(
+        handle: backends.CloudVmRayResourceHandle) -> List[str]:
+    """The per-service directory names on the controller, read over SSH."""
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    returncode, stdout, stderr = backend.run_on_head(
+        handle,
+        f'ls -1 {serve_constants.SKYSERVE_METADATA_DIR} 2>/dev/null || true',
+        require_outputs=True,
+        stream_logs=False)
+    if returncode != 0:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Could not list the service directories on the '
+                               f'controller: {stderr}')
+    return stdout.split()
+
+
+def _check_service_name_unused(service_name: str, pool: bool) -> None:
+    """Refuses a name that is taken, by its folded form, before the launch
+    file-mounts this request's per-name files (TLS key, config, task YAML)
+    over the existing service's; the controller's own duplicate check
+    comes after that. Pools are checked against services, and the reverse,
+    only when both controllers run consolidated and share the directory.
+    """
+    controller_type = controller_utils.get_controller_for_pool(pool)
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type, stopped_message='')
+    except exceptions.ClusterNotUpError as e:
+        # Nothing provisioned yet, or STOPPED: a stopped controller restarts
+        # with every service marked CONTROLLER_FAILED, which only `down`
+        # acts on. One that SSH cannot reach may run services.
+        if (e.cluster_status in (None, status_lib.ClusterStatus.STOPPED) or
+                getattr(e.handle, 'head_ip', None) is None):
+            return
+        if _caller_is_admin():
+            # The launch that follows is what repairs such a controller.
+            logger.warning('The controller is not reachable; not checking '
+                           f'the name {service_name!r}.')
+            return
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Could not check that the name {service_name!r} is free: '
+                'the controller is not reachable. Try again.') from e
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    wanted = _folded_service_name(service_name)
+    noun = 'pool' if pool else 'service'
+    kinds = [pool]
+    if (serve_utils.is_consolidation_mode(pool) and
+            serve_utils.is_consolidation_mode(not pool)):
+        kinds.append(not pool)
+    for records_pool in kinds:
+        try:
+            records = serve_runner.current().get_service_status(
+                handle=handle, service_names=None, pool=records_pool)
+        except Exception as e:  # pylint: disable=broad-except
+            # This is the only guard against the file overwrite, so a failed
+            # lookup refuses the name. The one exception is a controller
+            # still setting up (INIT, e.g. after an interrupted earlier up):
+            # it cannot answer, and the launch that follows repairs it.
+            controller_status = global_user_state.get_status_from_cluster_name(
+                controller_type.value.cluster_name)
+            if controller_status == status_lib.ClusterStatus.INIT:
+                # Any `up` re-provisions the shared controller through INIT,
+                # so INIT alone does not mean it holds no services. Check the
+                # per-service directories, which are what the launch would
+                # write over.
+                logger.warning(
+                    'Could not list the services on the controller, which is '
+                    f'still setting up; checking its service directories for '
+                    f'the name {service_name!r} instead: '
+                    f'{common_utils.format_exception(e)}')
+                for dir_name in _service_dirs_on_controller(handle):
+                    if _folded_service_name(dir_name) == wanted:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'{noun.capitalize()} name {service_name!r} '
+                                'is taken on the controller. Choose another '
+                                'name.') from e
+                continue
+            if _caller_is_admin():
+                # An older controller fails the listing on one broken
+                # service, and `up` is what upgrades it; an admin may go on.
+                logger.warning(
+                    f'Could not list the {noun}s on the controller; not '
+                    f'checking the name {service_name!r}: '
+                    f'{common_utils.format_exception(e)}')
+                continue
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Could not check that the {noun} name {service_name!r} '
+                    'is free: listing the services on the controller failed: '
+                    f'{common_utils.format_exception(e)}. Try again.') from e
+        for record in records:
+            if _folded_service_name(record['name']) != wanted:
+                continue
+            if record['name'] == service_name and records_pool == pool:
+                msg = (f'{noun.capitalize()} {service_name!r} already exists. '
+                       f'Choose another name, or tear the existing {noun} '
+                       'down first.')
+            else:
+                taken_by = 'pool' if records_pool else 'service'
+                msg = (f'{noun.capitalize()} name {service_name!r} is taken '
+                       f'by {taken_by} {record["name"]!r}: names that differ '
+                       'only in case or in ".", "-" and "_" are not told '
+                       'apart everywhere a name is used. Choose another '
+                       'name.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(msg)
+
+
+_WITHHELD_YAML_NOTE = ('# Created by another user: only the resources '
+                       'section is shown.\n')
+
+
+def _schema_object_keys(schema: Dict[str, Any]) -> Optional[Set[str]]:
+    """The keys an object schema (or one of its ``anyOf`` branches) names;
+    None for a free-form one such as ``labels``."""
+    if 'properties' in schema:
+        return {k for k in schema['properties'] if not k.startswith('_')}
+    for branch in schema.get('anyOf', []):
+        keys = _schema_object_keys(branch)
+        if keys is not None:
+            return keys
+    return None
+
+
+def _only_keys(obj: Any, keys: Set[str]) -> Any:
+    if not isinstance(obj, dict):
+        return obj
+    return {k: v for k, v in obj.items() if k in keys}
+
+
+def _public_resources(entry: Any) -> Any:
+    """``entry`` with only the public keys of the resources schema: no
+    ``_``-prefixed key (a docker login, cluster config overrides), no key the
+    schema does not know (``hooks``), and no legacy ``autostop.hook``
+    command. The text is kept as written rather than re-parsed, which would
+    reach the catalog and log deprecation warnings on every status call."""
+    if not isinstance(entry, dict):
+        return entry
+    properties = schemas.get_resources_schema()['properties']
+    public = {
+        k: v
+        for k, v in entry.items()
+        if k in properties and not k.startswith('_')
+    }
+    for key, value in public.items():
+        # A nested object can allow extra keys (`job_recovery` is a plugin
+        # extension point), so keep only the keys its schema names.
+        schema = properties[key]
+        if isinstance(value, list):
+            schema = schema.get('items', {})
+        known = _schema_object_keys(schema)
+        if known is None:
+            continue
+        if isinstance(value, list):
+            public[key] = [_only_keys(item, known) for item in value]
+        else:
+            public[key] = _only_keys(value, known)
+    if isinstance(public.get('autostop'), dict):
+        public['autostop'] = {
+            k: v
+            for k, v in public['autostop'].items()
+            if k not in ('hook', 'hook_timeout')
+        }
+    return public
+
+
+def _resources_only_yaml(yaml_content: Any) -> Optional[str]:
+    """The ``resources`` section of a task YAML, public keys only (see
+    ``_public_resources``), and nothing else; None when there is none."""
+    if not isinstance(yaml_content, str) or not yaml_content.strip():
+        return None
+    try:
+        config = yaml_utils.safe_load(yaml_content)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not isinstance(config, dict):
+        return None
+    if not isinstance(config.get('resources'), dict):
+        return None
+    resources = _public_resources(config['resources'])
+    for key in ('any_of', 'ordered'):
+        if isinstance(resources.get(key), list):
+            resources[key] = [
+                _public_resources(entry) for entry in resources[key]
+            ]
+    return _WITHHELD_YAML_NOTE + yaml_utils.dump_yaml_str(
+        {'resources': resources})
+
+
+def _withhold_details_of_others(service_records: List[Dict[str, Any]]) -> None:
+    """Cuts the records of services the caller did not create down to what
+    another user has a use for. The task YAML carries the service's secrets
+    wherever the task refers to them, so only its resources section is
+    kept, which is what the batch coordinator runs jobs on another user's
+    pool with; a replica's handle carries the launched resources with the
+    docker login, the ssh user and the provider config; the entrypoint is
+    the caller's command line, flag values and all. Admins see every record
+    as it is."""
+    user_id = common_utils.get_current_user().id
+    others = [
+        record for record in service_records
+        if record.get('user_hash') != user_id
+    ]
+    if not others or _caller_is_admin():
+        return
+    for record in others:
+        for key in ('yaml_content', 'pool_yaml'):
+            if key in record:
+                record[key] = _resources_only_yaml(record[key])
+        for replica in record.get('replica_info') or []:
+            if isinstance(replica, dict) and 'handle' in replica:
+                replica['handle'] = None
+        if 'entrypoint' in record:
+            record['entrypoint'] = None
+
+
+def _own_service_records(
+        service_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The records created by the current user, or all of them for an admin."""
+    if _caller_is_admin():
+        return service_records
+    user_id = common_utils.get_current_user().id
+    return [
+        record for record in service_records
+        if record.get('user_hash') == user_id
+    ]
+
+
+def check_service_owned_by_caller(
+        service_name: str, pool: bool,
+        handle: backends.CloudVmRayResourceHandle) -> None:
+    """Looks a service up on the controller and checks the caller owns it.
+    A service that does not exist passes: the operation that follows reports
+    it as missing, the same as before."""
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    service_record = _get_service_record(service_name, pool, handle, backend)
+    if service_record is not None:
+        _check_service_ownership([service_record], pool)
 
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
@@ -188,6 +577,7 @@ def up(
                              f'ensure it is fully matched by regex (e.g., '
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
+    _check_service_name_unused(service_name, pool)
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Always apply the policy again here, even though it might have been applied
@@ -571,6 +961,7 @@ def update(
             raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
+    _check_service_ownership([service_record], pool)
 
     # An update with a task records its storage, the new version's file
     # mounts bucket included, in the active workspace, and the controller
@@ -863,10 +1254,55 @@ def down(
         raise ValueError(f'Can only specify one of {noun}_names or all. '
                          f'Provided {argument_str!r}.')
 
-    service_names = None if all else service_names
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
 
     try:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        # Resolve the request to concrete records first, so each can be
+        # checked against its creator. Every record is fetched: an older
+        # controller expands each name it is handed (see _name_reached_by),
+        # so what a request reaches is decided against the whole table.
+        service_records: Optional[List[Dict[str, Any]]]
+        try:
+            service_records = serve_runner.current().get_service_status(
+                handle=handle, service_names=None, pool=pool)
+        except Exception as e:  # pylint: disable=broad-except
+            # An older controller fails the listing on one broken service.
+            # An admin may still tear down by exact name, as before.
+            if all or not _caller_is_admin():
+                raise
+            logger.warning(
+                f'Could not list the {noun}s on the controller; handing it '
+                f'{service_names_str} unchecked (an older controller also '
+                'matches names differing in case or "_"): '
+                f'{common_utils.format_exception(e)}')
+            service_records = None
+        if service_records is not None:
+            if all:
+                # `down --all` from a non-admin means all of the caller's own.
+                targets = _own_service_records(service_records)
+                skipped = len(service_records) - len(targets)
+                if skipped:
+                    logger.info(
+                        f'Skipped {skipped} {noun}{"s" if skipped > 1 else ""} '
+                        'not owned by you.')
+            else:
+                targets = [
+                    record for record in service_records if any(
+                        _matches_service_pattern(record['name'], pattern)
+                        for pattern in service_names)
+                ]
+                _check_service_ownership(targets, pool)
+            service_names = [record['name'] for record in targets]
+            if not service_names:
+                # Decided here rather than by handing the controller an empty
+                # list, which it must not mistake for "every service".
+                logger.info(f'No {noun} to terminate.')
+                return
+            # The controller expands even an exact name; refuse one that would
+            # reach a service that was not asked for.
+            _check_names_reach_only_targets(service_names, service_records,
+                                            pool)
+
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -1036,6 +1472,7 @@ def status(
 
     _withhold_workspaces_of_unreadable(service_records)
     _resolve_user_names(service_records)
+    _withhold_details_of_others(service_records)
 
     return service_records
 
@@ -1089,6 +1526,10 @@ def tail_logs(
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    # Logs carry the service's output; only its creator or an admin reads
+    # them, checked before anything streams.
+    check_service_owned_by_caller(service_name, pool, handle)
 
     if target != serve_utils.ServiceComponent.REPLICA:
         code = serve_utils.ServeCodeGen.stream_serve_process_logs(
@@ -1193,6 +1634,8 @@ def sync_down_logs(
             stopped_message=controller_type.value.default_hint_if_non_existent)
         backend: backends.CloudVmRayBackend = (
             backend_utils.get_backend_from_handle(handle))
+        # Same rule as tail_logs: the creator or an admin, checked first.
+        check_service_owned_by_caller(service_name, pool, handle)
 
     requested_components: Set[serve_utils.ServiceComponent] = set()
     if not targets:
