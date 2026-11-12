@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 
 // All Telemetry panels — GPU (DCGM) and per-pod CPU/Memory (cAdvisor) — live
 // in the same SkyPilot cluster-filter dashboard so a single var-cluster
@@ -53,7 +54,7 @@ const TELEMETRY_PANELS = [
  * CPU/Memory (cAdvisor) panels via the kube_pod_labels join in each
  * panel's PromQL.
  */
-const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
+const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange, theme) => {
   const grafanaUrl = getGrafanaUrl();
   const params = new URLSearchParams({
     orgId: GRAFANA_ORG_ID,
@@ -63,7 +64,8 @@ const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
     'var-cluster': clusterNameOnCloud,
     'var-node': '$__all',
     'var-gpu': '$__all',
-    theme: 'light',
+    // Grafana's own theme, matched to the dashboard's.
+    theme: theme === THEME_DARK ? 'dark' : 'light',
     panelId: panel.id,
   });
   return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}&__feature.dashboardSceneSolo`;
@@ -91,6 +93,7 @@ export function TelemetrySection({
   noMetricsMessage = 'No telemetry available.',
   hasGpu = true,
 }) {
+  const { resolvedTheme } = useTheme();
   const visiblePanels = hasGpu
     ? TELEMETRY_PANELS
     : TELEMETRY_PANELS.filter((p) => p.family !== 'gpu');
@@ -212,7 +215,8 @@ export function TelemetrySection({
                         src={buildGrafanaPanelUrl(
                           panel,
                           clusterNameOnCloud,
-                          timeRange
+                          timeRange,
+                          resolvedTheme
                         )}
                         width="100%"
                         height="400"
