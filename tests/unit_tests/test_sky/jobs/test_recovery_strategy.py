@@ -8,7 +8,10 @@ from unittest import mock
 
 import pytest
 
+from sky import backends
 from sky import exceptions
+from sky import resources as resources_lib
+from sky import task as task_lib
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
 from sky.skylet import constants
@@ -67,6 +70,26 @@ def _make_bare_executor():
         recovery_strategy.StrategyExecutor)
     executor.job_costs = None
     return executor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('job_costs', [None, {1: 1_000_000}])
+async def test_strategy_factory_keeps_the_shared_cost_table(job_costs):
+    lock = asyncio.Lock()
+    task = task_lib.Task(run='true').set_resources(
+        resources_lib.Resources(job_recovery={'strategy': 'FAILOVER'}))
+    executor = recovery_strategy.StrategyExecutor.make(
+        'test-cluster',
+        mock.Mock(spec=backends.CloudVmRayBackend),
+        task,
+        1,
+        0,
+        None,
+        set(),
+        lock,
+        asyncio.Condition(lock),
+        job_costs=job_costs)
+    assert executor.job_costs is job_costs
 
 
 def _request_payload(status: str, status_msg=None):
@@ -372,6 +395,8 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
             in patches.set_backoff_pending.await_args.kwargs['reason'])
     # The task was set back to STARTING on resume.
     patches.set_restarting.assert_awaited_once_with(1, 0, False)
+    # Parking must not tear down the partially provisioned cluster.
+    executor._cleanup_cluster.assert_not_called()
 
 
 @pytest.mark.asyncio

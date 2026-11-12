@@ -315,7 +315,14 @@ async def update_job_cost_units(
     job_id: int,
     cluster_name: str,
 ) -> None:
-    """Refresh a held job's estimate from its runtime, without phase policy."""
+    """Refresh the controller claim cost for a job with one dedicated cluster.
+
+    Initial launch and recovery start at full cost. At park entry, and after
+    launch or recovery completes, use the owning runtime's estimate. Once a
+    launch parks, that estimate persists through resume or a fresh attempt
+    within the same launch call. Launch slots bound concurrent active work.
+    Pools and job groups keep full cost and do not supply a cost table here.
+    """
     if job_costs is None or not managed_job_runtime.is_registered():
         return
     try:
@@ -1462,16 +1469,17 @@ class StrategyExecutor:
                     await update_job_cost_units(self.job_costs,
                                                 self.starting_lock, self.job_id,
                                                 self.cluster_name)
-                    resumed_id = await self._wait_for_parked_request(
+                    resumed_request_id = await self._wait_for_parked_request(
                         parked_request_id)
-                    if (resumed_id is None and parked_stream_task is not None):
+                    if (resumed_request_id is None and
+                            parked_stream_task is not None):
                         # The request vanished; its carried stream will fail
                         # or finish on its own - consume its result and make
                         # a fresh launch attempt.
                         parked_stream_task.add_done_callback(
                             _consume_task_exception)
                         parked_stream_task = None
-                    parked_request_id = resumed_id
+                    parked_request_id = resumed_request_id
                 async with scheduler.scheduled_launch(
                         self.job_id,
                         self.starting,

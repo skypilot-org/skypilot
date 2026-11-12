@@ -1101,9 +1101,7 @@ class JobController:
             self.starting_lock,
             self.starting_signal,
             file_mounts_blob_id=file_mounts_blob_id,
-            job_costs=(self._job_costs
-                       if self._job_costs is not None and self._pool is None and
-                       not self._dag.is_job_group() else None))
+            job_costs=self._job_costs if self._pool is None else None)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -2256,8 +2254,8 @@ class JobController:
                         'run to completion): '
                         f'{common_utils.format_exception(e)}')
 
-            # A relaunch launches, or waits for resources, like any launching
-            # job: count the job in full until the new cluster reports its cost.
+            # Reset the previous cluster's estimate before recovery. A park
+            # or the completed relaunch refreshes it from the new runtime.
             await self._count_in_full()
             recovered_time = await executor.recover()
             # The relaunch may have persisted runtime observations of its own.
@@ -4654,12 +4652,10 @@ class ControllerManager:
                                   pool: Optional[str]) -> int:
         """The cost units a job counts for from the moment it is claimed.
 
-        A job claimed again, for example after a controller restart, may
-        already have its cluster up. It counts at that cluster's cost at once,
-        rather than in full until it resumes, so this process keeps claiming
-        while its jobs come back. Any other job counts in full until a launch
-        brings its cluster up (JobController._update_cost_units). Pool jobs
-        always count in full.
+        A reclaimed job with a persisted handle, including a parked launch,
+        counts at the runtime's estimate. A fresh job starts at full cost
+        until park entry or launch completion refreshes it. Pool jobs always
+        count in full.
         """
         full = controller_utils.JOB_COST_UNITS
         if pool is not None or not managed_job_runtime.is_registered():

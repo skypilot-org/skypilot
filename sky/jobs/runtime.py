@@ -321,7 +321,11 @@ class ManagedJobRuntime(Protocol):
         Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
         ``None`` for the full cost. The controller refreshes this estimate
         when a launch parks, after launch or recovery, and when reclaiming
-        a job after a controller restart."""
+        a job after a controller restart. Before provisioning completes,
+        ``run_started`` is False; return ``None`` for those handles to keep
+        new launches at full cost. Existing implementations that
+        return a running cost for every owned handle also discount parks.
+        """
         ...
 
 
