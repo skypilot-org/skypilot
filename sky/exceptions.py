@@ -398,6 +398,12 @@ class StorageSpecError(ValueError):
     pass
 
 
+class StorageWorkspaceError(StorageSpecError):
+    """The storage named exists, but not in a workspace the caller can read,
+    or the controller runs for, or the active one when that is required."""
+    pass
+
+
 class StorageInitError(StorageError):
     # Error raised when Initialization fails - either due to permissions,
     # unavailable name, or other reasons.
@@ -815,6 +821,15 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class StorageReadOnlyError(StorageSpecError, PermissionDeniedError):
+    """The storage named is in a workspace the caller can only read.
+
+    A ``StorageSpecError`` so a managed job naming it fails its prechecks,
+    and a ``PermissionDeniedError`` so callers that handle denials still
+    catch it."""
     pass
 
 

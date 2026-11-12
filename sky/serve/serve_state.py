@@ -538,6 +538,10 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'entrypoint': r['entrypoint'],
         'user_hash': r['user_hash'],
         'yaml_content': r.get('yaml_content'),
+        # The protocol version of the controller that produced the record,
+        # so the API server can tell what the controller does with the
+        # names it is handed. Records from older controllers carry none.
+        'serve_version': constants.SERVE_VERSION,
     }
     latest_spec = get_spec(r['name'], current_version)
     if latest_spec is not None:
@@ -703,12 +707,30 @@ def get_glob_service_names(
         else:
             rows = []
             for service_name in service_names:
+                if '*' not in service_name:
+                    # An exact name matches itself only. As a LIKE pattern
+                    # it would read `_` as a one-character wildcard and, on
+                    # SQLite, compare case-insensitively, so one name could
+                    # reach another service.
+                    condition = services_table.c.name == service_name
+                else:
+                    condition = services_table.c.name.like(
+                        _glob_to_like_pattern(service_name), escape='\\')
                 pattern_rows = session.execute(
-                    sqlalchemy.select(services_table.c.name).where(
-                        services_table.c.name.like(
-                            service_name.replace('*', '%')))).fetchall()
+                    sqlalchemy.select(
+                        services_table.c.name).where(condition)).fetchall()
                 rows.extend(pattern_rows)
     return list({row[0] for row in rows})
+
+
+def _glob_to_like_pattern(glob: str) -> str:
+    """Turns a glob, where only `*` is a wildcard, into a LIKE pattern.
+
+    `_` and `%` are literal in the glob but wildcards in LIKE, so they are
+    escaped, as is the escape character itself.
+    """
+    escaped = glob.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return escaped.replace('*', '%')
 
 
 # === Replica functions ===

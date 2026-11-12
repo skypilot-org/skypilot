@@ -519,8 +519,11 @@ def cost_report(days: Optional[int] = None,
 
         def get_total_cost(cluster_report: dict) -> float:
             duration = cluster_report['duration']
-            launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
+            # launched_resources describes one task node (one slice for a
+            # multi-host TPU slice on Kubernetes, which has a pod per VM).
+            launched_nodes = kubernetes_utils.num_task_nodes(
+                cluster_report['num_nodes'], launched_resources)
 
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
@@ -725,7 +728,10 @@ def _start(
 
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
+        # num_nodes counts task nodes: one per slice for a multi-host TPU
+        # slice on Kubernetes, whose cluster has one node per VM.
+        dummy_task.num_nodes = kubernetes_utils.num_task_nodes(
+            handle.launched_nodes, handle.launched_resources)
     (handle, _) = backend.provision(dummy_task,
                                     to_provision=handle.launched_resources,
                                     dryrun=False,
@@ -1726,12 +1732,25 @@ def storage_ls() -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the storages.
 
+    Only storage in workspaces the calling user can read is returned, the
+    same as for clusters, managed jobs and volumes.
+
     Returns:
         List[responses.StorageRecord]: A list of storage records.
     """
-    storages = global_user_state.get_storage()
+    # Visibility, not usability: a read-only workspace's storage is listed.
+    # None (an admin) lists everything, storage in a workspace since removed
+    # from the config included.
+    storages = global_user_state.get_storage(
+        workspaces_filter=workspaces_core.get_readable_workspace_names())
+    users = global_user_state.get_users({
+        storage['user_hash']
+        for storage in storages
+        if storage['user_hash'] is not None
+    })
     storage_records = []
     for storage in storages:
+        user = users.get(storage['user_hash'])
         storage_records.append(
             responses.StorageRecord(
                 name=storage['name'],
@@ -1739,6 +1758,11 @@ def storage_ls() -> List[responses.StorageRecord]:
                 store=list(storage.pop('handle').sky_stores.keys()),
                 last_use=storage['last_use'],
                 status=storage['status'],
+                user_hash=storage['user_hash'],
+                user_name=user.name if user is not None else None,
+                workspace=storage['workspace'],
+                workspace_name=skypilot_config.get_workspace_name(
+                    storage['workspace']),
             ))
     return storage_records
 
@@ -1748,16 +1772,24 @@ def storage_delete(name: str) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Deletes a storage.
 
+    The workspace is the authorization boundary, as for clusters: storage in
+    a workspace the caller cannot read is reported as missing, and storage
+    in one the caller can only read cannot be deleted.
+
     Raises:
         ValueError: If the storage does not exist.
+        exceptions.PermissionDeniedError: If the caller cannot write to the
+            storage's workspace.
     """
-    # TODO(zhwu): check the storage owner matches the current user
-    handle = global_user_state.get_handle_from_storage_name(name)
-    if handle is None:
+    record = global_user_state.get_storage_by_name(name)
+    readable_workspaces = workspaces_core.get_readable_workspace_names()
+    if record is None or (readable_workspaces is not None and
+                          record['workspace'] not in readable_workspaces):
         raise ValueError(f'Storage name {name!r} not found.')
-    else:
-        storage_object = data.Storage.from_handle(handle)
-        storage_object.delete()
+    workspaces_core.check_workspace_permission(common_utils.get_current_user(),
+                                               record['workspace'])
+    storage_object = data.Storage.from_handle(record['handle'])
+    storage_object.delete()
 
 
 # ===================

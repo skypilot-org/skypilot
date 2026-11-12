@@ -129,6 +129,34 @@ def check_no_active_resources_for_workspaces(
             [name for name, _ in workspace_operations])
     _check_active_resources(workspace_operations, filter_by_workspace,
                             'workspace', resources)
+    _check_no_storage_in_deleted_workspaces(workspace_operations)
+
+
+def _check_no_storage_in_deleted_workspaces(
+        workspace_operations: List[Tuple[str, str]]) -> None:
+    """Refuses to delete a workspace that still holds storage: it would be
+    hidden from everyone but admins, its name unusable and its bucket
+    orphaned.
+
+    Raises:
+        ValueError: If a workspace to delete has storage.
+    """
+    error_messages = []
+    for workspace_name, operation in workspace_operations:
+        if operation != 'delete':
+            continue
+        storage_names = sorted(record['name']
+                               for record in global_user_state.get_storage(
+                                   workspaces_filter={workspace_name}))
+        if storage_names:
+            label = skypilot_config.get_workspace_name(workspace_name)
+            error_messages.append(
+                f'Cannot delete workspace {label!r} because it has '
+                f'{len(storage_names)} storage(s): '
+                f'{", ".join(storage_names)}.')
+    if error_messages:
+        raise ValueError('\n'.join(error_messages) +
+                         ' Please delete these storages first.')
 
 
 def _check_active_resources(resource_operations: List[Tuple[str, str]],

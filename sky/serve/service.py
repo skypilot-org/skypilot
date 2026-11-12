@@ -115,6 +115,15 @@ def cleanup_storage(yaml_content: str) -> bool:
                              f'{storage_name!r} already gone, treating as '
                              f'already cleaned: {e}')
                 del task.storage_mounts[storage_name]
+            except exceptions.StorageWorkspaceError as e:
+                # Recorded in another workspace (by an update made from
+                # there before updates were held to the service's): not
+                # this service's to remove, and failing over it would fail
+                # again on every recovery.
+                logger.warning(f'cleanup_storage: storage {storage_name!r} '
+                               'is not reachable from the workspace this '
+                               f'service runs in; leaving it: {e}')
+                del task.storage_mounts[storage_name]
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '
