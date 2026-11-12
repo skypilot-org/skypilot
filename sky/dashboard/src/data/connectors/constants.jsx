@@ -101,6 +101,7 @@ export const CLOUDS_LIST = [
   'DO',
   'Nebius',
   'Verda',
+  'Runcrate',
 ];
 
 export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
