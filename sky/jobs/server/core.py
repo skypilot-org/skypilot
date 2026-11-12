@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -53,6 +53,7 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import infra_utils
@@ -2191,6 +2192,7 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    requested_job_id = job_id
     # `sky jobs logs 39 2`: task 2 may be a dynamic task (a job launched
     # from inside job 39, numbered on from its declared tasks); then it is that
     # job's log. Declared tasks resolve as before. Dynamic tasks exist in
@@ -2218,6 +2220,27 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
+    # Dedicated controllers are not checked: their job state is on the
+    # controller, so a check would cost a queue round-trip per request.
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        if (requested_job_id is not None and requested_job_id != job_id and
+                managed_job_state.get_workspace(requested_job_id)
+                not in readable):
+            # A dynamic task shares its parent's workspace; answering about
+            # the parent id keeps the parent -> task job id mapping hidden.
+            job_id = requested_job_id
+        job_id, message, exit_code = _resolve_readable_tail_job_id(
+            readable, job_id, name, controller)
+        if job_id is None:
+            ctx = context_lib.get()
+            print(message,
+                  file=ctx.output_stream(sys.stdout) if ctx else sys.stdout,
+                  flush=True)
+            return exit_code
+        name = None
+
     return managed_job_runner.current().tail_managed_job_logs(
         handle=handle,
         backend=backend,
@@ -2229,6 +2252,79 @@ def tail_logs(name: Optional[str],
         tail_offset=tail_offset,
         task=task,
     )
+
+
+def _resolve_readable_tail_job_id(
+        readable: Set[str], job_id: Optional[int], name: Optional[str],
+        controller: bool) -> Tuple[Optional[int], str, int]:
+    """The job `stream_logs` would pick, among jobs in `readable` workspaces.
+
+    Returns (job_id, '', 0), or (None, message, exit code) for the answer
+    `stream_logs` gives when nothing (or more than one job) matches. Reads
+    the local jobs DB only: a queue call here is a subprocess per log request
+    under consolidation.
+    """
+    not_found = exceptions.JobExitCode.NOT_FOUND
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id, '', 0
+        return None, f'Job {job_id} not found.', not_found
+    if name is None:
+        job_id = managed_job_state.get_latest_job_id(workspaces=readable)
+        if job_id is None:
+            return None, 'No managed job found.', not_found
+        return job_id, '', 0
+    # An ambiguous name raises inside `stream_logs`, which the default runner
+    # runs as `python -c`: the message lands in the stream and the code is 1.
+    if controller:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+        if not job_ids:
+            return None, f'No managed job found with name {name!r}.', not_found
+        if len(job_ids) > 1:
+            job_ids_str = ', '.join(str(i) for i in job_ids)
+            return None, (f'Multiple managed jobs found with name {name!r} '
+                          f'(Job IDs: {job_ids_str}). Please specify the '
+                          'job_id instead.'), 1
+    else:
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+            name, workspaces=readable)
+        if not job_ids:
+            return None, (f'No running managed job found with name '
+                          f'{name!r}.'), not_found
+        if len(job_ids) > 1:
+            return None, f'Multiple running jobs found with name {name!r}.', 1
+    return job_ids[0], '', 0
+
+
+def _resolve_readable_sync_down_job_id(readable: Set[str],
+                                       job_id: Optional[int],
+                                       name: Optional[str],
+                                       controller: bool) -> Optional[int]:
+    """The job `sync_down_managed_job_logs` would pick, among `readable`.
+
+    None when nothing matches, after logging what that function logs then.
+    """
+    if job_id is not None:
+        if managed_job_state.get_workspace(job_id) in readable:
+            return job_id
+        job_ids = []
+    else:
+        job_ids = managed_job_state.get_all_job_ids_by_name(name,
+                                                            workspaces=readable)
+    if not job_ids:
+        logger.info(f'{colorama.Fore.YELLOW}No matching job found'
+                    f'{colorama.Style.RESET_ALL}')
+        return None
+    if len(job_ids) > 1:
+        name_str = ''
+        if name is not None:
+            name_str = f'Multiple jobs IDs found under the name {name}. '
+        controller_str = ' (controller)' if controller else ''
+        logger.info(f'{colorama.Fore.YELLOW}{name_str}'
+                    f'Downloading the latest job logs{controller_str}.'
+                    f'{colorama.Style.RESET_ALL}')
+    return job_ids[0]
 
 
 def wait(name: Optional[str],
@@ -2379,6 +2475,15 @@ def download_logs(
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    readable = (workspaces_core.get_readable_workspace_names()
+                if managed_job_utils.is_consolidation_mode() else None)
+    if readable is not None:
+        job_id = _resolve_readable_sync_down_job_id(readable, job_id, name,
+                                                    controller)
+        if job_id is None:
+            return {}
+        name = None
 
     return backend.sync_down_managed_job_logs(handle,
                                               job_id=job_id,
