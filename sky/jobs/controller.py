@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import contextlib
 import enum
 import io
 import json
@@ -39,13 +40,13 @@ from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import cloud_api_retries
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
@@ -413,6 +414,38 @@ def _has_pending_cancel_signal(job_id: int) -> bool:
         os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH, str(job_id)))
 
 
+def _download_logs_from_named_cluster(controller: 'JobController',
+                                      task_id: Optional[int], cluster_name: str,
+                                      job_id_on_cluster: Optional[int]) -> bool:
+    """Downloads a task's logs from its cluster, found by name.
+
+    The lookup has no workspace filter, matching
+    `managed_job_utils.terminate_cluster`. A filtered lookup
+    (`backend_utils.get_clusters`) only sees the clusters that the job's user
+    can read in this process, so it can miss a live cluster that teardown
+    then deletes, and the logs are lost.
+
+    Runs in a worker thread: the download is pinned to the cluster's recorded
+    workspace, which is thread-local.
+
+    Returns:
+        False if the cluster has no record, so no download was attempted.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name,
+                                                     include_user_info=False,
+                                                     summary_response=True)
+    if record is None:
+        return False
+    workspace = record.get('workspace')
+    workspace_ctx: contextlib.AbstractContextManager = (
+        skypilot_config.local_active_workspace_ctx(workspace)
+        if workspace else contextlib.nullcontext())
+    with workspace_ctx:
+        controller.download_log_and_stream(task_id, record.get('handle'),
+                                           job_id_on_cluster)
+    return True
+
+
 def _stream_task_logs_to_controller_log() -> bool:
     """Whether finished task logs are copied into the controller log."""
     return skypilot_config.get_nested(
@@ -448,6 +481,28 @@ def _runtime_infra(
         'region': getattr(resources, 'region', None),
         'zone': getattr(resources, 'zone', None),
     }
+
+
+def _task_cluster_num_nodes(
+    task: 'sky.Task',
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'] = None
+) -> int:
+    """Number of cluster nodes the task runs on.
+
+    Usually task.num_nodes. Each task node of a multi-host TPU slice on
+    Kubernetes is one slice with one cluster node (pod) per VM, so a
+    single-node task there still spans several cluster nodes. Uses the
+    handle's launched resources when given, else the task's requested
+    resources (the largest slice among them).
+    """
+    launched_resources = getattr(handle, 'launched_resources', None)
+    if launched_resources is not None:
+        vms_per_slice = kubernetes_utils.tpu_vms_per_slice(launched_resources)
+    else:
+        vms_per_slice = max(
+            (kubernetes_utils.tpu_vms_per_slice(r) for r in task.resources),
+            default=1)
+    return task.num_nodes * vms_per_slice
 
 
 class _TaskRunAction(enum.Enum):
@@ -1750,19 +1805,15 @@ class JobController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await asyncio.to_thread(
-                        backend_utils.get_clusters,
-                        cluster_names=[cluster_name],
-                        refresh=common.StatusRefreshMode.NONE,
-                        all_users=True,
-                        _include_is_managed=True)
-                    if clusters:
-                        assert len(clusters) == 1, (clusters, cluster_name)
-                        handle = clusters[0].get('handle')
-                        # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self.download_log_and_stream,
-                                                task_id, handle,
-                                                job_id_on_pool_cluster)
+                    # Best effort to download and stream the logs.
+                    found = await asyncio.to_thread(
+                        _download_logs_from_named_cluster, self, task_id,
+                        cluster_name, job_id_on_pool_cluster)
+                    if not found:
+                        logger.warning(
+                            f'Cluster {cluster_name} not found for job '
+                            f'{self._job_id}, task {task_id}. Skipping log '
+                            'download.')
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -1781,9 +1832,10 @@ class JobController:
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
             # nodes are preempted or failed, need to check the actual cluster
-            # status.
+            # status. This counts cluster nodes, not task nodes: one task
+            # node of a multi-host TPU slice spans several cluster nodes.
             if (job_status is not None and not job_status.is_terminal() and
-                    task.num_nodes == 1):
+                    _task_cluster_num_nodes(task, runtime_handle) == 1):
                 await _record_reattach_if_pending()
                 continue
 
@@ -4016,17 +4068,21 @@ class ControllerManager:
             # construct() auto-creates missing buckets, so if the user deletes
             # their bucket right after the job finishes (`sky storage delete`),
             # this cleanup would silently re-create and leak it.
-            try:
-                for storage in task.storage_mounts.values():
-                    if not storage.persistent:
-                        storage.construct()
-            except (exceptions.StorageSpecError, exceptions.StorageError) as e:
-                logger.warning(
-                    f'Failed to construct storage object for teardown: {e}\n'
-                    'This may happen because storage construction already '
-                    'failed during launch, storage was deleted externally, '
-                    'credentials expired/changed, or network connectivity '
-                    'issues.')
+            # Each mount on its own: one that cannot be constructed must not
+            # keep the others from being torn down.
+            for storage in task.storage_mounts.values():
+                if storage.persistent:
+                    continue
+                try:
+                    storage.construct()
+                except (exceptions.StorageSpecError,
+                        exceptions.StorageError) as e:
+                    logger.warning(
+                        'Failed to construct storage object for teardown: '
+                        f'{e}\nThis may happen because storage construction '
+                        'already failed during launch, storage was deleted '
+                        'externally, credentials expired/changed, or network '
+                        'connectivity issues.')
             try:
                 # Deleting again is safe: a store already removed is skipped.
                 common_utils.retry(
@@ -4111,26 +4167,16 @@ class ControllerManager:
             job_id_on_cluster: Optional[int] = None) -> None:
         """Download logs for a single task from its cluster.
 
-        Looks up the cluster by name and downloads logs via the controller's
-        download_log_and_stream method. Skips gracefully if the cluster is
-        not found.
+        Looks up the cluster by name (without a workspace filter) and
+        downloads logs via the controller's download_log_and_stream method.
+        Skips gracefully if the cluster is not found.
         """
-        clusters = await asyncio.to_thread(
-            backend_utils.get_clusters,
-            cluster_names=[cluster_name],
-            refresh=common.StatusRefreshMode.NONE,
-            all_users=True,
-            _include_is_managed=True)
-
-        if not clusters:
+        found = await asyncio.to_thread(_download_logs_from_named_cluster,
+                                        controller, task_id, cluster_name,
+                                        job_id_on_cluster)
+        if not found:
             logger.info(f'Cluster {cluster_name} not found for job {job_id}, '
                         f'task {task_id}. Skipping log download.')
-            return
-
-        assert len(clusters) == 1, (clusters, cluster_name)
-        handle = clusters[0].get('handle')
-        await asyncio.to_thread(controller.download_log_and_stream, task_id,
-                                handle, job_id_on_cluster)
 
     async def _download_logs_for_cancelled_job(self, controller: JobController,
                                                job_id: int, task_ids: List[int],

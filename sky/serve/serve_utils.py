@@ -640,6 +640,27 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'config.yaml')
 
 
+def get_service_workspace(service_name: str) -> Optional[str]:
+    """The workspace the controller of a service runs for: the active
+    workspace of the config ``up`` placed next to the service's YAML, which
+    an update does not change. A config without one means the default
+    workspace. None when the file cannot be read: in consolidation mode it
+    may be gone after a pod restart, and a guess would be wrong either way.
+    """
+    path = os.path.expanduser(
+        generate_remote_config_yaml_file_name(service_name))
+    try:
+        config = yaml_utils.read_yaml(path)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not isinstance(config, dict):
+        return None
+    workspace = config.get('active_workspace')
+    if not isinstance(workspace, str) or not workspace:
+        return skylet_constants.SKYPILOT_DEFAULT_WORKSPACE
+    return workspace
+
+
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
@@ -872,6 +893,7 @@ def _get_service_status(
     if record['pool'] != pool:
         return None
 
+    record['workspace'] = get_service_workspace(service_name)
     record['pool_yaml'] = ''
     if record['pool']:
         version = record['version']
@@ -980,6 +1002,25 @@ def _get_service_status(
     return record
 
 
+def _bare_service_status(service_name: str,
+                         pool: bool) -> Optional[Dict[str, Any]]:
+    """The service's database record alone, for a service whose full status
+    cannot be built: no replicas, no autoscaler info and no pool YAML. The
+    task YAML stays, since `update` reads the service's config from it."""
+    try:
+        record = serve_state.get_service_from_name(service_name)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to read the record of {service_name}: '
+                     f'{common_utils.format_exception(e)}')
+        return None
+    if record is None or record['pool'] != pool:
+        return None
+    record['pool_yaml'] = ''
+    record['target_num_replicas'] = None
+    record['replica_info'] = []
+    return record
+
+
 def get_service_status_pickled(service_names: Optional[List[str]],
                                pool: bool) -> List[Dict[str, str]]:
     if service_names is None:
@@ -999,7 +1040,17 @@ def get_service_status_pickled(service_names: Optional[List[str]],
     parent_ctx = contextvars.copy_context()
 
     def _run_in_context(name: str) -> Optional[Dict[str, Any]]:
-        return parent_ctx.copy().run(_get_service_status, name, pool=pool)
+        try:
+            return parent_ctx.copy().run(_get_service_status, name, pool=pool)
+        except Exception as e:  # pylint: disable=broad-except
+            # One service whose status cannot be built (a dead controller, a
+            # replica whose cluster record is gone) must not hide the
+            # others: down, logs and terminate-replica look every service up
+            # to check its creator, and `--purge` exists for this service.
+            logger.error(f'Failed to get the status of {name}: '
+                         f'{common_utils.format_exception(e)}\n'
+                         f'Traceback: {traceback.format_exc()}')
+            return _bare_service_status(name, pool)
 
     max_workers = min(len(service_names), _STATUS_FANOUT_MAX_WORKERS)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:

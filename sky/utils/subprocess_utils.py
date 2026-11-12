@@ -217,9 +217,8 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     Args:
         cloud_str: The cloud
     """
-    cpu_count = os.cpu_count()
-    if cpu_count is None:
-        cpu_count = 1
+    # os.cpu_count() reports the host's cores, not the container's CPU limit.
+    cpu_count = common_utils.get_cpu_count()
     return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
