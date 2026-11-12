@@ -938,11 +938,19 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag,
-            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
-            request_options=request_options,
-            at_client_side=True) as dag:
+    policy_applied: typing.ContextManager['sky.Dag']
+    if _is_launched_by_jobs_controller or _is_launched_by_sky_serve_controller:
+        # The API server applies the admin policy to a controller's launch.
+        policy_applied = contextlib.nullcontext(dag)
+    else:
+        policy_applied = (
+            admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_name=request_names.AdminPolicyRequestName.
+                CLUSTER_LAUNCH,
+                request_options=request_options,
+                at_client_side=True))
+    with policy_applied as dag:
         return _launch(
             dag,
             cluster_name,

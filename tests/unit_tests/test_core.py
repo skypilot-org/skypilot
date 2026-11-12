@@ -2,6 +2,7 @@ from unittest import mock
 
 import pytest
 
+import sky
 from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
@@ -10,6 +11,7 @@ from sky import global_user_state
 from sky import models
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
+from sky.client import sdk
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
@@ -699,6 +701,33 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
     task = sky.Task(run='echo hi', num_nodes=2)
     with pytest.raises(RuntimeError, match='reached _launch'):
         sdk.launch(task, cluster_name='my-cluster', resize=False)
+
+
+@pytest.mark.parametrize(
+    ('by_jobs_controller', 'by_serve_controller', 'reached'), [
+        (False, False, 'applied'),
+        (True, False, 'launched'),
+        (False, True, 'launched'),
+    ])
+def test_sdk_launch_client_admin_policy(by_jobs_controller, by_serve_controller,
+                                        reached, _stub_launch_preamble,
+                                        monkeypatch):
+    """A user's launch applies the admin policy on the client. A controller's
+    launch goes straight to the server, which applies it."""
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 56)
+    monkeypatch.setattr(
+        'sky.client.sdk.admin_policy_utils.'
+        'apply_and_use_config_in_current_request',
+        mock.Mock(side_effect=RuntimeError('applied')))
+    monkeypatch.setattr('sky.client.sdk._launch',
+                        mock.Mock(side_effect=RuntimeError('launched')))
+
+    with pytest.raises(RuntimeError, match=reached):
+        sdk.launch(sky.Task(run='echo hi'),
+                   cluster_name='my-cluster',
+                   _is_launched_by_jobs_controller=by_jobs_controller,
+                   _is_launched_by_sky_serve_controller=by_serve_controller)
 
 
 @pytest.mark.parametrize('api_version', [None, 24, 56])
