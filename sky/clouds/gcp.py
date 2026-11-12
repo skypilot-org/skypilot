@@ -14,6 +14,7 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
@@ -1456,6 +1457,7 @@ class GCP(clouds.Cloud):
         region: str,
         zone: Optional[str],
         specific_reservations: Set[str],
+        project_id: Optional[str] = None,
     ) -> Dict[str, int]:
         del region  # Unused
         if zone is None:
@@ -1463,8 +1465,10 @@ class GCP(clouds.Cloud):
             # before #2352 may not have zone information. In this case, we
             # return 0 for all reservations.
             return {reservation: 0 for reservation in specific_reservations}
+        if project_id is None:
+            project_id = self.get_project_id()
         reservations = gcp_utils.list_reservations_for_instance_type_in_zone(
-            instance_type, zone, self.get_project_id())
+            instance_type, zone, project_id)
 
         return {
             r.name: r.available_resources
@@ -1493,7 +1497,21 @@ class GCP(clouds.Cloud):
         # we should be able to get rid of this assumption.
         tag_filters = {'ray-cluster-name': cluster_name.name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
-        project_id = cls.get_project_id()
+        # The source cluster may belong to a different project than the
+        # current workspace. Use its saved launch configuration if available.
+        project_id = None
+        try:
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name.display_name)
+            cluster_yaml = getattr(handle, 'cluster_yaml', None)
+            if cluster_yaml is not None:
+                provider_config = global_user_state.get_cluster_yaml_dict(
+                    cluster_yaml).get('provider', {})
+                project_id = provider_config.get('project_id')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read the source cluster project: {e}')
+        if not project_id:
+            project_id = cls.get_project_id()
         instance_name_cmd = ('gcloud compute instances list '
                              f'--project {project_id} '
                              f'--filter="({label_filter_str})" '
