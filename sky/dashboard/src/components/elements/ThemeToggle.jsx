@@ -30,7 +30,10 @@ export function ThemeToggle({ showLabels = false }) {
       options={OPTIONS.map(({ value, label, Icon }) => ({
         value,
         label: (
-          <span className="inline-flex items-center gap-1.5" title={label}>
+          <span
+            className="flex h-5 items-center justify-center gap-1.5"
+            title={label}
+          >
             <Icon className="w-3.5 h-3.5" aria-hidden="true" />
             <span className={showLabels ? undefined : 'sr-only'}>{label}</span>
           </span>

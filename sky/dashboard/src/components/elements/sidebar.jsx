@@ -50,7 +50,7 @@ import { useMobile } from '@/hooks/useMobile';
 import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { ThemeMenu } from '@/components/elements/ThemeToggle';
+import { ThemeMenu, ThemeToggle } from '@/components/elements/ThemeToggle';
 import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 
 // Create a context for sidebar state management
@@ -213,6 +213,10 @@ export function TopBar() {
   // viewer allowlist), so the entry point is hidden for them too.
   const showConfigLink =
     userRole === 'admin' || (userRole === 'user' && !restrictConfigToAdmins);
+  // The theme lives in the user menu. Servers without sign-in have no user
+  // menu, so they keep the top-bar theme button. userRole is set once the
+  // user lookup finishes, which keeps the button from flashing on load.
+  const showNavThemeMenu = userRole !== null && !userEmail;
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [openNavDropdown, setOpenNavDropdown] = useState(null);
   const { ungrouped, groups } = useGroupedNavLinks();
@@ -493,7 +497,7 @@ export function TopBar() {
 
   return (
     <>
-      <div className="fixed top-0 left-0 right-0 bg-surface z-30 h-14 px-4 border-b border-line shadow-sm">
+      <div className="fixed top-0 left-0 right-0 bg-surface-nav z-30 h-14 px-4 border-b border-line shadow-sm">
         <div className="flex items-center justify-between h-full">
           {/* Left side - Logo and mobile hamburger */}
           <div className="flex items-center space-x-4 mr-4 md:mr-6">
@@ -685,7 +689,7 @@ export function TopBar() {
                   </a>
                 </CustomTooltip>
 
-                <ThemeMenu />
+                {showNavThemeMenu && <ThemeMenu />}
 
                 <div className="border-l border-line h-6"></div>
 
@@ -716,7 +720,7 @@ export function TopBar() {
               </>
             )}
 
-            {isMobile && <ThemeMenu />}
+            {isMobile && showNavThemeMenu && <ThemeMenu />}
 
             {/* User Profile Icon and Dropdown */}
             {userEmail && (
@@ -770,6 +774,11 @@ export function TopBar() {
                         </>
                       );
                     })()}
+                    <div className="border-t border-line mx-1 my-1"></div>
+                    <div className="flex items-center justify-between gap-2 px-4 py-2 text-sm text-content">
+                      <span>Theme</span>
+                      <ThemeToggle />
+                    </div>
                     <PluginSlot
                       name="user-menu"
                       wrapperClassName="contents"

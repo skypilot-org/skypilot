@@ -42,6 +42,8 @@
     --surface-muted: 220 14.29% 95.88%;
     --surface-strong: 220 13.04% 90.98%;
     --surface-stronger: 216 12.2% 83.92%;
+    /* Top bar fill. */
+    --surface-nav: 0 0% 100%;
     --content-strong: 220.91 39.29% 10.98%;
     --content-heavy: 215 27.91% 16.86%;
     --content: 216.92 19.12% 26.67%;
@@ -189,6 +191,8 @@
     --surface-muted: 0 0% 15%;
     --surface-strong: 0 0% 25%;
     --surface-stronger: 0 0% 32%;
+    /* A half step above the page (#1c1c1c) so the top bar stands apart. */
+    --surface-nav: 0 0% 10.98%;
     --content-strong: 0 0% 98%;
     --content-heavy: 0 0% 98%;
     --content: 0 0% 98%;
@@ -318,6 +322,12 @@
     .dark select
   ) {
     background-color: hsl(var(--surface));
+  }
+  /* Dark: table header cells sit one step above the page so the column
+     labels stand apart from the rows. This colors the cells rather than the
+     row, so pinned header cells, which carry their own fill, match. */
+  .dark thead th {
+    background-color: hsl(var(--surface-subtle));
   }
   * {
     @apply border-border;

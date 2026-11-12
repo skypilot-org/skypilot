@@ -18,7 +18,6 @@ import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { useSidebar } from '@/components/elements/sidebar';
 import { YamlEditor } from '@/components/ui/yaml-editor';
-import { ThemeToggle } from '@/components/elements/ThemeToggle';
 
 export function Config() {
   const { userRole, restrictConfigToAdmins } = useSidebar();
@@ -238,21 +237,6 @@ export function Config() {
     </div>
   );
 
-  // Appearance is a per-browser preference, so it is shown to everyone.
-  const appearance = (
-    <Card className="w-full mb-4">
-      <CardHeader>
-        <CardTitle className="text-base font-normal">Appearance</CardTitle>
-      </CardHeader>
-      <CardContent className="flex items-center justify-between gap-4">
-        <p className="text-sm text-content-secondary">
-          Choose a light or dark theme, or follow your system setting.
-        </p>
-        <ThemeToggle showLabels />
-      </CardContent>
-    </Card>
-  );
-
   // The API server configuration exposes admin-only secrets. Anyone who can't
   // read it (restricted non-admins, or viewers) gets an access-denied card
   // instead of a 403 -- but the header above is still shown.
@@ -260,7 +244,6 @@ export function Config() {
     return (
       <>
         {header}
-        {appearance}
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="text-base font-normal">
@@ -398,7 +381,6 @@ export function Config() {
   return (
     <>
       {header}
-      {appearance}
 
       {/* Main Content */}
       <PluginSlot name="settings.config.editor" fallback={editorCard} />

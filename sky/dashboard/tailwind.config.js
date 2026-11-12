@@ -71,6 +71,7 @@ module.exports = {
           stronger: token('surface-stronger'),
           log: token('surface-log'),
           code: token('surface-code'),
+          nav: token('surface-nav'),
         },
         content: {
           DEFAULT: token('content'),
