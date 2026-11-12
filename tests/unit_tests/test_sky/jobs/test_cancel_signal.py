@@ -24,7 +24,7 @@ from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 
-_OLD = cancel_signal._STALE_AFTER_SECONDS + 600  # pylint: disable=protected-access
+_OLD = cancel_signal._TEMPORARY_FILE_MAX_AGE_SECONDS + 600  # pylint: disable=protected-access
 
 
 @pytest.fixture
@@ -197,17 +197,21 @@ def test_remove(signal_dir):
 
 def test_remove_stale_files(signal_dir):
     unfinished_job_ids = [7, 8]
-    # Lock files left by older writers.
-    _make(signal_dir, '1.lock', age_seconds=_OLD)
-    _make(signal_dir, '2.lock')  # Recent: may be in use right now.
-    # Temporary files of writers that died.
+    # Lock files that older writers left behind. Job 8 may still be
+    # cancelled by such a writer, which takes this lock.
+    _make(signal_dir, '1.lock')
+    _make(signal_dir, '2.lock', age_seconds=_OLD)
+    _make(signal_dir, '8.lock', age_seconds=_OLD)
+    # Temporary files: of a writer that died, and of one that is writing.
     _make(signal_dir, '3.0123abcd.tmp', age_seconds=_OLD)
-    _make(signal_dir, '4.0123abcd.tmp')  # Recent: being written.
-    # Signals.
-    _make(signal_dir, '5', age_seconds=_OLD)  # Job 5 is over.
+    _make(signal_dir, '4.0123abcd.tmp')
+    # Signals of jobs that are over: no controller process looks at them.
+    _make(signal_dir, '5', age_seconds=_OLD)
     _make(signal_dir, '5.lock', age_seconds=_OLD)
-    _make(signal_dir, '6')  # Job 6 is over too, but the signal is recent.
-    _make(signal_dir, '7', age_seconds=_OLD)  # Job 7 still waits to start.
+    _make(signal_dir, '6')
+    # Signals of unfinished jobs, however old: job 7 may be waiting for a
+    # controller process, which takes the signal when it starts the job.
+    _make(signal_dir, '7', age_seconds=_OLD)
     _make(signal_dir, '7.lock', age_seconds=_OLD)
     _make(signal_dir, '8')
     # Files of other components, and files nobody knows.
@@ -224,22 +228,42 @@ def test_remove_stale_files(signal_dir):
                            return_value=unfinished_job_ids) as unfinished:
         removed = cancel_signal.remove_stale_files()
 
-    assert removed == 3
+    assert removed == 6
     assert _names(signal_dir) == sorted(
-        ['2.lock', '4.0123abcd.tmp', '6', '7', '7.lock', '8'] + others)
+        ['4.0123abcd.tmp', '7', '7.lock', '8', '8.lock'] + others)
     unfinished.assert_called_once_with(None, all_users=True)
 
 
-def test_remove_stale_files_asks_for_jobs_only_for_an_old_signal(signal_dir):
-    for job_id in range(1, 6):
-        _make(signal_dir, f'{job_id}.lock', age_seconds=_OLD)
-    _make(signal_dir, '6')
+def test_remove_stale_files_does_not_look_at_each_file(signal_dir):
+    """Older code left one lock file per cancelled job: tens of thousands on
+    a busy server. On a network filesystem, a look at each of them takes far
+    longer than removing them, so which jobs are over is asked once."""
+    for job_id in range(1, 201):
+        _make(signal_dir, f'{job_id}.lock')
+    _make(signal_dir, '201')
+
+    def no_look(path, *args, **kwargs):
+        raise AssertionError(f'looked at {path}')
+
+    with mock.patch.object(managed_job_state,
+                           'get_nonterminal_job_ids_by_name',
+                           return_value=[201]) as unfinished, \
+         mock.patch.object(cancel_signal.os, 'stat', no_look):
+        assert cancel_signal.remove_stale_files() == 200
+
+    assert _names(signal_dir) == ['201']
+    unfinished.assert_called_once_with(None, all_users=True)
+
+
+def test_remove_stale_files_asks_nothing_without_a_job_file(signal_dir):
+    _make(signal_dir, '3.0123abcd.tmp', age_seconds=_OLD)
+    _make(signal_dir, 'waiting_jobs.marker')
 
     with mock.patch.object(managed_job_state,
                            'get_nonterminal_job_ids_by_name') as unfinished:
-        assert cancel_signal.remove_stale_files() == 5
+        assert cancel_signal.remove_stale_files() == 1
 
-    assert _names(signal_dir) == ['6']
+    assert _names(signal_dir) == ['waiting_jobs.marker']
     unfinished.assert_not_called()
 
 

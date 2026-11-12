@@ -14,7 +14,7 @@ signal was taken.
 """
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 import uuid
 
 import filelock
@@ -31,10 +31,9 @@ _LEGACY_LOCK_SUFFIX = '.lock'
 # A signal is written under this kind of name first and then renamed.
 _TEMPORARY_SUFFIX = '.tmp'
 
-# A file nobody will use again is removed once it is this old. Only its age
-# is uncertain to this length: the clocks of this host and of a file server
-# may differ.
-_STALE_AFTER_SECONDS = 3600
+# A temporary file is renamed moments after it is created. One that is this
+# old was left by a writer that died.
+_TEMPORARY_FILE_MAX_AGE_SECONDS = 3600
 _GC_INTERVAL_SECONDS = 3600
 
 
@@ -121,24 +120,20 @@ def remove(job_id: int) -> None:
     _remove_if_exists(signal_path + _LEGACY_LOCK_SUFFIX)
 
 
-def _is_stale(path: str, now: float) -> bool:
-    try:
-        return os.stat(path).st_mtime < now - _STALE_AFTER_SECONDS
-    except FileNotFoundError:
-        return False
-
-
 def remove_stale_files() -> int:
     """Removes the files in the signal directory that nobody will use again.
 
     These are:
-      - Legacy lock files, which were never removed. A lock is only held
-        while a signal is written or taken, so an old lock file without a
-        signal is unused.
-      - Temporary files of writers that died before renaming them.
-      - Signals of jobs that are over. This happens when a job ends by itself
-        just as it is cancelled: its controller process has let go of it and
-        never looks at the signal.
+      - The signal of a job that is over. This happens when a job ends by
+        itself just as it is cancelled: its controller process has let go of
+        it and never looks at the signal.
+      - The legacy lock file of a job that is over. A signal is only written
+        for an unfinished job, so nobody takes that lock again.
+      - A temporary file of a writer that died before renaming it.
+
+    Which jobs are over is asked from the database once. The files are not
+    looked at one by one: on a network filesystem that takes far longer than
+    removing them, when older code has left tens of thousands of lock files.
 
     Files that are not named after a job id are left alone: other components
     keep their own files in this directory.
@@ -151,39 +146,40 @@ def remove_stale_files() -> int:
         names = os.listdir(directory)
     except FileNotFoundError:
         return 0
-    now = time.time()
-    signal_job_ids = {int(name) for name in names if name.isdigit()}
-    removed = 0
-    old_signal_job_ids: List[int] = []
+    signal_job_ids: Set[int] = set()
+    lock_job_ids: Set[int] = set()
+    temporary_names: List[str] = []
     for name in names:
-        path = os.path.join(directory, name)
         if name.isdigit():
-            if _is_stale(path, now):
-                old_signal_job_ids.append(int(name))
-            continue
-        if name.endswith(_LEGACY_LOCK_SUFFIX):
+            signal_job_ids.add(int(name))
+        elif name.endswith(_LEGACY_LOCK_SUFFIX):
             job_id_part = name[:-len(_LEGACY_LOCK_SUFFIX)]
-            # The lock file of a signal that is still there goes when the
-            # signal is taken.
-            unused = (job_id_part.isdigit() and
-                      int(job_id_part) not in signal_job_ids)
-        else:
-            unused = (name.endswith(_TEMPORARY_SUFFIX) and
-                      name.split('.', 1)[0].isdigit())
-        if unused and _is_stale(path, now):
-            removed += int(_remove_if_exists(path))
-    if old_signal_job_ids:
-        # Only asked for when there is an old signal, which is rare.
+            if job_id_part.isdigit():
+                lock_job_ids.add(int(job_id_part))
+        elif (name.endswith(_TEMPORARY_SUFFIX) and
+              name.split('.', 1)[0].isdigit()):
+            temporary_names.append(name)
+    removed = 0
+    if signal_job_ids or lock_job_ids:
+        # Read after the directory was listed: a job that had a file then
+        # and is not unfinished now is over.
         unfinished_job_ids = set(
             managed_job_state.get_nonterminal_job_ids_by_name(None,
                                                               all_users=True))
-        for job_id in old_signal_job_ids:
-            # An old signal of an unfinished job is kept: the job may be
-            # waiting for a controller process, which takes the signal when
-            # it starts the job.
-            if job_id not in unfinished_job_ids:
-                removed += int(_remove_if_exists(_signal_path(job_id)))
-                _remove_if_exists(_signal_path(job_id) + _LEGACY_LOCK_SUFFIX)
+        for job_id in sorted(signal_job_ids - unfinished_job_ids):
+            removed += int(_remove_if_exists(_signal_path(job_id)))
+        for job_id in sorted(lock_job_ids - unfinished_job_ids):
+            removed += int(
+                _remove_if_exists(_signal_path(job_id) + _LEGACY_LOCK_SUFFIX))
+    oldest_kept = time.time() - _TEMPORARY_FILE_MAX_AGE_SECONDS
+    for name in temporary_names:
+        path = os.path.join(directory, name)
+        try:
+            is_old = os.stat(path).st_mtime < oldest_kept
+        except FileNotFoundError:
+            continue
+        if is_old:
+            removed += int(_remove_if_exists(path))
     return removed
 
 
