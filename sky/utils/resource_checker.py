@@ -622,28 +622,31 @@ def _get_active_resources(
             logger.warning('All jobs should be finished.')
             return []
 
-    def get_all_others() -> List[Dict[str, Any]]:
+    def list_kind(kind: str,
+                  lister: ActiveResourceLister) -> List[Dict[str, Any]]:
         # Unlike the jobs fetch, a lister failure says nothing about whether
         # resources exist, so it refuses the change.
-        others: List[Dict[str, Any]] = []
-        for kind, lister in list(_ACTIVE_RESOURCE_LISTERS.items()):
-            try:
-                resources = lister(workspace_names, user_hashes)
-            except Exception as e:  # pylint: disable=broad-except
-                raise ValueError(f'Could not check for active {kind}(s): '
-                                 f'{common_utils.format_exception(e)}') from e
-            others.extend(dict(r, kind=kind) for r in resources)
-        return others
+        try:
+            resources = lister(workspace_names, user_hashes)
+        except Exception as e:  # pylint: disable=broad-except
+            raise ValueError(f'Could not check for active {kind}(s): '
+                             f'{common_utils.format_exception(e)}') from e
+        return [dict(r, kind=kind) for r in resources]
 
-    # Fetch all three in parallel
-    with context_utils.ContextPropagatingThreadPool(max_workers=3) as executor:
+    # Each lister is its own query; run serially on a remote database they
+    # outlast the jobs fetch. 4 workers stay within the default per-process
+    # DB connection budget.
+    with context_utils.ContextPropagatingThreadPool(max_workers=4) as executor:
         clusters_future = executor.submit(get_all_clusters)
         jobs_future = executor.submit(get_all_managed_jobs)
-        others_future = executor.submit(get_all_others)
+        lister_futures = [
+            executor.submit(list_kind, kind, lister)
+            for kind, lister in list(_ACTIVE_RESOURCE_LISTERS.items())
+        ]
 
         all_clusters = clusters_future.result()
         all_managed_jobs = jobs_future.result()
-        all_others = others_future.result()
+        all_others = [r for f in lister_futures for r in f.result()]
 
     # Clusters launched by a controller: a managed job's cluster is also
     # listed as its job; serve replicas and pool workers only here.

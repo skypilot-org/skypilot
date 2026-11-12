@@ -1,6 +1,7 @@
 """Tests for resource checker utilities for active resources protection."""
 
 import contextvars
+import threading
 import unittest.mock as mock
 
 import pytest
@@ -803,6 +804,31 @@ class TestRegisteredListers:
         finally:
             request_var.reset(token)
         assert seen == ['request']
+
+    @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters',
+                return_value=[])
+    def test_listers_run_concurrently(self, _):
+        # Each lister waits for the other: run one after the other, the
+        # barrier times out and the check fails.
+        barrier = threading.Barrier(2, timeout=5)
+
+        def lister(name):
+
+            def fn(workspace_names, user_hashes):
+                del workspace_names, user_hashes
+                barrier.wait()
+                return [{'name': name, 'workspace': 'ws-a', 'user_hash': 'a'}]
+
+            return fn
+
+        resource_checker.register_active_resource_lister(
+            'endpoint', lister('e1'))
+        resource_checker.register_active_resource_lister(
+            'sandbox', lister('s1'))
+        _, _, others = resource_checker._get_active_resources(['ws-a'])
+        # Registration order is kept.
+        assert [(o['kind'], o['name']) for o in others] == [('endpoint', 'e1'),
+                                                            ('sandbox', 's1')]
 
     @mock.patch('sky.utils.resource_checker.skypilot_config.get_workspace_name',
                 side_effect=lambda ws: ws)
