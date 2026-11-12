@@ -1527,6 +1527,12 @@ class WorkspaceUsageCollector:
             if launched_resources is None:
                 continue
             num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
+            # launched_resources describes one task node; a multi-host TPU
+            # slice on Kubernetes has several cluster nodes (pods) per task
+            # node.
+            num_nodes = max(
+                1, kubernetes_utils.num_task_nodes(num_nodes,
+                                                   launched_resources))
 
             accelerators = (launched_resources.accelerators or {})
             for acc_name, acc_count in accelerators.items():
