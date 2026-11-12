@@ -18,6 +18,14 @@ import os
 import socket
 import time
 
+import torch
+from torch import nn
+from torch import optim
+import torch.distributed as dist
+import torchft
+from torchft import manager as torchft_manager
+from torchft.checkpointing import pg_transport
+
 LIGHTHOUSE_PORT = 29510
 STORE_PORT = 29600
 
@@ -65,17 +73,6 @@ def main() -> None:
     # torchft advertises socket.gethostname() as the address of each group's
     # rendezvous store, and a pod's hostname does not resolve from other pods.
     socket.gethostname = lambda: pod_ip
-
-    # pylint: disable=import-outside-toplevel
-    import torch
-    from torch import nn
-    from torch import optim
-    import torch.distributed as dist
-    import torchft
-    from torchft import manager as torchft_manager
-    from torchft.checkpointing import pg_transport
-
-    # pylint: enable=import-outside-toplevel
 
     node_rank = int(os.environ['SKYPILOT_NODE_RANK'])
     name = f'trainer {node_rank}'
