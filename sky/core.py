@@ -519,8 +519,11 @@ def cost_report(days: Optional[int] = None,
 
         def get_total_cost(cluster_report: dict) -> float:
             duration = cluster_report['duration']
-            launched_nodes = cluster_report['num_nodes']
             launched_resources = cluster_report['resources']
+            # launched_resources describes one task node (one slice for a
+            # multi-host TPU slice on Kubernetes, which has a pod per VM).
+            launched_nodes = kubernetes_utils.num_task_nodes(
+                cluster_report['num_nodes'], launched_resources)
 
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
@@ -725,7 +728,10 @@ def _start(
 
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
+        # num_nodes counts task nodes: one per slice for a multi-host TPU
+        # slice on Kubernetes, whose cluster has one node per VM.
+        dummy_task.num_nodes = kubernetes_utils.num_task_nodes(
+            handle.launched_nodes, handle.launched_resources)
     (handle, _) = backend.provision(dummy_task,
                                     to_provision=handle.launched_resources,
                                     dryrun=False,
