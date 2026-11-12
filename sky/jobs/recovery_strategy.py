@@ -289,6 +289,9 @@ def get_cluster_cost_units(cluster_name: str) -> int:
     (database reads), so async callers run it in a thread.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    # TEMP validation fault: discount before provisioning without runtime policy.
+    if handle is not None and not handle.provision_runtime_metadata.run_started:
+        return controller_utils.JOB_COST_UNITS // 5
     return _job_cost_units(managed_job_runtime.cost_units(handle))
 
 
