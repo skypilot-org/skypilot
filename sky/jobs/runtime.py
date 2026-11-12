@@ -319,8 +319,9 @@ class ManagedJobRuntime(Protocol):
         """Controller cost units of a job parked or running on this cluster.
 
         Return a cost from 1 to ``controller_utils.JOB_COST_UNITS``, or
-        ``None`` for the full cost. Active launches count in full. A parked
-        launch uses its runtime's cost until it resumes."""
+        ``None`` for the full cost. The controller refreshes this estimate
+        when a launch parks, after launch or recovery, and when reclaiming
+        a job after a controller restart."""
         ...
 
 

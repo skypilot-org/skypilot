@@ -65,7 +65,7 @@ def test_is_oom_failure_still_reads_the_reason_before_the_output():
 def _make_bare_executor():
     executor = recovery_strategy.StrategyExecutor.__new__(
         recovery_strategy.StrategyExecutor)
-    executor.launch_wait_callback = None
+    executor.job_costs = None
     return executor
 
 
@@ -376,26 +376,30 @@ async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('exit_kind', ['resume', 'vanished', 'error', 'cancel'])
-async def test_parked_cost_is_restored_on_every_wait_exit(
+async def test_park_refreshes_runtime_cost_without_an_exit_transition(
         monkeypatch, exit_kind):
     executor = _make_launch_executor()
     _patch_launch_environment(monkeypatch)
-    transitions = []
-
-    async def on_wait(parked):
-        # Both transitions happen outside the scarce launch slot.
-        assert executor.job_id not in executor.starting
-        transitions.append(parked)
+    full = recovery_strategy.controller_utils.JOB_COST_UNITS
+    executor.job_costs = {executor.job_id: full}
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'is_registered',
+                        lambda: True)
+    hook = mock.Mock(return_value=full // 5)
+    monkeypatch.setattr(recovery_strategy.managed_job_runtime, 'cost_units',
+                        hook)
+    monkeypatch.setattr(recovery_strategy.global_user_state,
+                        'get_handle_from_cluster_name', lambda _: 'handle')
 
     async def wait_for_request(request_id):
-        assert transitions == [True]
+        # Cost is refreshed after yielding the scarce launch slot.
+        assert executor.job_id not in executor.starting
+        assert executor.job_costs == {executor.job_id: full // 5}
         if exit_kind == 'error':
             raise RuntimeError('request store unavailable')
         if exit_kind == 'cancel':
             raise asyncio.CancelledError()
         return None if exit_kind == 'vanished' else request_id
 
-    executor.launch_wait_callback = on_wait
     executor._wait_for_parked_request = wait_for_request
     executor._cancel_launch_request = mock.AsyncMock()
     executor._await_launch_request = mock.AsyncMock(side_effect=[
@@ -410,7 +414,8 @@ async def test_parked_cost_is_restored_on_every_wait_exit(
     else:
         assert await executor._launch(max_retry=1,
                                       raise_on_failure=True) == 123.45
-    assert transitions == [True, False]
+    hook.assert_called_once_with('handle')
+    assert executor.job_costs == {executor.job_id: full // 5}
     # Parking must NOT tear down the (partially provisioned) cluster.
     executor._cleanup_cluster.assert_not_called()
 

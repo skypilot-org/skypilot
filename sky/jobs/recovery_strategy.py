@@ -282,6 +282,58 @@ class _LaunchStreamFailing(Exception):
     """
 
 
+def get_cluster_cost_units(cluster_name: str) -> int:
+    """The runtime cost of a running or parked job, or the full cost.
+
+    Reads the cluster's handle and asks the runtime that owns it. Blocking
+    (database reads), so async callers run it in a thread.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    return _job_cost_units(managed_job_runtime.cost_units(handle))
+
+
+def _job_cost_units(units: Optional[int]) -> int:
+    """A runtime-reported job cost, or the full cost if it reported none.
+
+    A cost above the full cost, or one that is not a positive integer, is
+    ignored: a runtime can only make a job count for less than a full job.
+    """
+    if units is None:
+        return controller_utils.JOB_COST_UNITS
+    if (isinstance(units, bool) or not isinstance(units, int) or
+            not 1 <= units <= controller_utils.JOB_COST_UNITS):
+        logger.warning(f'Ignoring job cost {units!r} reported by a runtime: '
+                       'not an integer from 1 to '
+                       f'{controller_utils.JOB_COST_UNITS}.')
+        return controller_utils.JOB_COST_UNITS
+    return units
+
+
+async def update_job_cost_units(
+    job_costs: Optional[Dict[int, int]],
+    lock: asyncio.Lock,
+    job_id: int,
+    cluster_name: str,
+) -> None:
+    """Refresh a held job's estimate from its runtime, without phase policy."""
+    if job_costs is None or not managed_job_runtime.is_registered():
+        return
+    try:
+        units = await asyncio.to_thread(get_cluster_cost_units, cluster_name)
+    except Exception as error:  # pylint: disable=broad-except
+        # Capacity estimates must not make a job fail. Preserve the last
+        # estimate if its handle or runtime cannot currently be read.
+        logger.warning(
+            f'Failed to get the cost of job {job_id} on {cluster_name}: '
+            f'{common_utils.format_exception(error)}')
+        return
+    async with lock:
+        if job_id in job_costs and job_costs[job_id] != units:
+            logger.info(f'Job {job_id} now counts for {units} of '
+                        f'{controller_utils.JOB_COST_UNITS} cost units.')
+            job_costs[job_id] = units
+
+
 class StrategyExecutor:
     """Handle the launching, recovery and termination of managed job clusters"""
 
@@ -348,9 +400,7 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         self.file_mounts_blob_id = file_mounts_blob_id
-        self.launch_wait_callback: Optional[Callable[[bool],
-                                                     Coroutine[Any, Any,
-                                                               None]]] = None
+        self.job_costs: Optional[Dict[int, int]] = None
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -462,14 +512,12 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         file_mounts_blob_id: Optional[str] = None,
-        launch_wait_callback: Optional[Callable[[bool],
-                                                Coroutine[Any, Any,
-                                                          None]]] = None,
+        job_costs: Optional[Dict[int, int]] = None,
     ) -> 'StrategyExecutor':
         """Create a strategy from a task.
 
-        launch_wait_callback receives True on entering a parked launch wait
-        and False on every exit, before the launch acquires another slot.
+        job_costs is the shared controller claim-cost table, guarded by
+        starting_lock. None leaves accounting to the caller.
         """
 
         # TODO(cooperc): Consider defaulting to FAILOVER if using k8s with a
@@ -528,7 +576,7 @@ class StrategyExecutor:
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
         executor.set_strategy_config(strategy_config)
-        executor.launch_wait_callback = launch_wait_callback
+        executor.job_costs = job_costs
         return executor
 
     async def launch(self) -> float:
@@ -1408,22 +1456,14 @@ class StrategyExecutor:
                             reason=parked_reason,
                             code=_CODE_LAUNCH_PARKED)
                         parked_reason = None
-                    # Parking released the launch slot and executor worker.
-                    # Let the controller account for this cheaper wait, then
-                    # restore the active-launch cost before acquiring a slot
-                    # or leaving the wait through cancellation or an error.
-                    callback = self.launch_wait_callback
-                    # Pylint infers only the initial None, not make's callback.
-                    # pylint: disable=not-callable
-                    try:
-                        if callback is not None:
-                            await callback(True)
-                        resumed_id = await self._wait_for_parked_request(
-                            parked_request_id)
-                    finally:
-                        if callback is not None:
-                            await callback(False)
-                    # pylint: enable=not-callable
+                    # The launch released its worker and slot. Refresh the
+                    # estimate directly; the runtime decides its value.
+                    assert self.cluster_name is not None
+                    await update_job_cost_units(self.job_costs,
+                                                self.starting_lock, self.job_id,
+                                                self.cluster_name)
+                    resumed_id = await self._wait_for_parked_request(
+                        parked_request_id)
                     if (resumed_id is None and parked_stream_task is not None):
                         # The request vanished; its carried stream will fail
                         # or finish on its own - consume its result and make

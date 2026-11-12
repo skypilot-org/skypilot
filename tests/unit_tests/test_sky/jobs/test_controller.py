@@ -4676,7 +4676,8 @@ class TestJobCostUnits:
     def test_reported_cost_is_validated(self, reported, expected):
         with patch.object(controller_module.controller_utils, 'JOB_COST_UNITS',
                           5):
-            assert controller_module._job_cost_units(reported) == expected
+            assert controller_module.recovery_strategy._job_cost_units(
+                reported) == expected
 
     def _job_controller(self, job_costs, pool=None, job_group=False):
         jc = JobController.__new__(JobController)
@@ -4706,25 +4707,6 @@ class TestJobCostUnits:
             await jc._update_cost_units('cluster')
         hook.assert_called_once_with('handle')
         assert job_costs == {1: expected}
-
-    @pytest.mark.asyncio
-    async def test_park_discount_is_replaced_by_full_cost_on_resume(self):
-        full = controller_module.controller_utils.JOB_COST_UNITS
-        job_costs = {1: full}
-        jc = self._job_controller(job_costs)
-        jc._strategy_executor = MagicMock(cluster_name='cluster')
-        runtime = controller_module.managed_job_runtime
-        with patch.object(runtime, 'is_registered', return_value=True), \
-             patch.object(runtime, 'cost_units', return_value=full // 5), \
-             patch.object(controller_module.global_user_state,
-                          'get_handle_from_cluster_name', return_value='handle'):
-            await jc._on_launch_wait(True)
-            assert job_costs == {1: full // 5}
-            # Re-entering the parked state is an assignment, not a decrement.
-            await jc._on_launch_wait(True)
-            assert job_costs == {1: full // 5}
-            await jc._on_launch_wait(False)
-            assert job_costs == {1: full}
 
     @pytest.mark.asyncio
     async def test_launch_keeps_the_cost_when_the_lookup_fails(self):
