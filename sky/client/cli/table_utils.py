@@ -360,6 +360,14 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
+class LambdaFilesystemTable(RunPodVolumeTable):
+    """The Lambda filesystem table."""
+
+    def format(self) -> str:
+        """Format the Lambda filesystem table for display."""
+        return 'Lambda Filesystems:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -396,6 +404,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.LAMBDA_FILESYSTEM.value:
+            lambda_table = LambdaFilesystemTable(volume_list, show_all)
+            table_str += lambda_table.format()
     if table_str:
         return table_str
     else:
