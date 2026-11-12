@@ -633,8 +633,8 @@ def _get_active_resources(
                              f'{common_utils.format_exception(e)}') from e
         return [dict(r, kind=kind) for r in resources]
 
-    # Run one after another, the listers outlast the jobs fetch on a remote
-    # DB. Leave one of the process's default DB connections free.
+    # Each lister gets its own worker: in sequence they would outlast the jobs
+    # fetch on a remote DB. Leave one of the default DB connections free.
     with context_utils.ContextPropagatingThreadPool(
             max_workers=constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY -
             1) as executor:
