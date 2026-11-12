@@ -464,9 +464,10 @@ def check_capabilities(
             try:
                 results_to_persist = _build_check_results(
                     cloud2ctx2text, check_results_dict)
-                if (contexts_to_check is not None and
+                if (clouds is None and contexts_to_check is not None and
                         _KUBERNETES_REPR in results_to_persist):
-                    # Contexts this check skipped keep their cached results.
+                    # A full run replaces the row; contexts it skipped keep
+                    # their cached results. Scoped runs merge per context.
                     cached = global_user_state.get_cached_check_results(
                         current_workspace_name).get(_KUBERNETES_REPR, {})
                     results_to_persist[_KUBERNETES_REPR] = {
