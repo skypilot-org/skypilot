@@ -7,15 +7,41 @@ import warnings
 
 from sky.adaptors import common
 
-# Suppress FutureWarning from google.api_core about Python 3.10 support ending.
-# This warning is informational and does not affect functionality.
-# Reference: https://github.com/skypilot-org/skypilot/issues/7886
-warnings.filterwarnings(
-    'ignore',
-    category=FutureWarning,
-    message=
-    r'.*You are using a Python version.*which Google will stop supporting.*',
-)
+
+def _suppress_google_deprecation_warnings() -> None:
+    """Suppresses informational FutureWarnings from Google client libraries.
+
+    These warnings do not affect functionality, but they are printed in the
+    middle of SkyPilot's CLI output on every GCP operation.
+    Reference: https://github.com/skypilot-org/skypilot/issues/7886
+    """
+    # google.api_core warns about Python versions nearing or past end of
+    # life ("You are using a Python version ... which Google will stop
+    # supporting" and "You are using a non-supported Python version"), and
+    # about deprecated dependency versions such as grpcio < 1.83.0.
+    warnings.filterwarnings(
+        'ignore',
+        category=FutureWarning,
+        module=r'google\.api_core\._python_(version|package)_support',
+    )
+    # Kept for google.api_core versions that emit the Python version warning
+    # from a different module.
+    warnings.filterwarnings(
+        'ignore',
+        category=FutureWarning,
+        message=(r'.*You are using a Python version.*'
+                 r'which Google will stop supporting.*'),
+    )
+    # google.auth (and other Google packages) warn that grpcio < 1.83.0 does
+    # not support Post-Quantum Cryptography.
+    warnings.filterwarnings(
+        'ignore',
+        category=FutureWarning,
+        message=r'.*does not support Post-Quantum Cryptography.*',
+    )
+
+
+_suppress_google_deprecation_warnings()
 
 # google_auth_httplib2 logs a benign per-request-timeout warning on every GCE
 # metadata-server credential refresh. It's a logging call (not warnings.warn),
