@@ -405,15 +405,21 @@ def test_curl_is_core_when_conda_or_docker_needs_it(render_vars):
     assert 'curl' in first.split()
 
 
-def _apt_loop(updates, mirrors: str, install_first: str = 'rsync'):
+def _apt_loop(updates,
+              mirrors: str,
+              deb822_only: bool = False,
+              after_loop: str = ''):
     """Runs the real apt fallback loop against a scripted `apt-get update`.
 
     updates: one entry per `apt-get update` call -- 'zero' (reaches no source),
     'partial' (reaches one, fails another), 'ok', or 'only-m2' (ok only once
-    the sources point at the m2.example mirror). Returns the list of apt-get
-    calls and INSTALL_SUCCESS.
+    the sources point at the m2.example mirror). deb822_only: the image keeps
+    its sources only in sources.list.d/debian.sources (Debian 12+), so a
+    mirror has nothing to rewrite. after_loop: shell run after the loop.
+    Returns the apt-get calls (updates tagged with the source host) and
+    INSTALL_SUCCESS.
     """
-    helpers = _extract('# Attempts that reach no apt source at all',
+    helpers = _extract('# Set when the last `apt-get update` reached no source',
                        '# Surface /tmp/apt-update.log to the pod')
     loop = _extract('run_apt_install_with_fallback() {',
                     '# Non-apt install path (dnf/microdnf/yum/apk/zypper)')
@@ -421,10 +427,11 @@ def _apt_loop(updates, mirrors: str, install_first: str = 'rsync'):
     try:
         bindir = os.path.join(tmp, 'bin')
         os.makedirs(bindir)
-        os.makedirs(os.path.join(tmp, 'etc', 'apt'))
-        with open(os.path.join(tmp, 'etc', 'apt', 'sources.list'),
-                  'w',
-                  encoding='utf-8') as f:
+        os.makedirs(os.path.join(tmp, 'etc', 'apt', 'sources.list.d'))
+        src = os.path.join(
+            tmp, 'etc', 'apt',
+            'sources.list.d/debian.sources' if deb822_only else 'sources.list')
+        with open(src, 'w', encoding='utf-8') as f:
             f.write('deb http://archive.ubuntu.com/ubuntu jammy main\n')
         calls = os.path.join(tmp, 'calls')
         script_file = os.path.join(tmp, 'updates')
@@ -437,15 +444,16 @@ def _apt_loop(updates, mirrors: str, install_first: str = 'rsync'):
             os.path.join(bindir, 'apt-get'), f"""
             if [ "$1" = update ]; then
               kind=$(head -n1 {script_file}); sed -i.bak 1d {script_file}
-              echo "update LC_ALL=$LC_ALL" >> {calls}
+              host=$(grep -o 'http://[^/]*' {src} | head -n1)
+              echo "update LC_ALL=$LC_ALL $host" >> {calls}
               if [ "$kind" = only-m2 ]; then
-                grep -q m2.example {tmp}/etc/apt/sources.list && kind=ok || kind=zero
+                [ "$host" = http://m2.example ] && kind=ok || kind=zero
               fi
               case "$kind" in
-                ok) echo "Hit:1 http://archive.ubuntu.com jammy InRelease" ;;
-                partial) echo "Hit:1 http://archive.ubuntu.com jammy InRelease"
+                ok) echo "Hit:1 $host jammy InRelease" ;;
+                partial) echo "Hit:1 $host jammy InRelease"
                          echo "W: Failed to fetch http://security.ubuntu.com" ;;
-                *) echo "W: Failed to fetch http://archive.ubuntu.com" ;;
+                *) echo "W: Failed to fetch $host" ;;
               esac
               exit 0
             fi
@@ -465,15 +473,17 @@ def _apt_loop(updates, mirrors: str, install_first: str = 'rsync'):
             APT_OPTS=""
             APT_OS=ubuntu
             CORE_PKGS_READY={tmp}/ready
-            INSTALL_FIRST="{install_first}"
+            INSTALL_FIRST="rsync"
             MISSING_PACKAGES=""
             MIRROR_CANDIDATES="{mirrors}"
             prefix_cmd() {{ echo ""; }}
             sleep() {{ :; }}
             map_pkg_names() {{ echo "$@"; }}
-            """) + body + textwrap.dedent("""
+            dump_apt_log() {{ :; }}
+            """) + body + textwrap.dedent(f"""
             run_apt_install_with_fallback
             echo "INSTALL_SUCCESS=$INSTALL_SUCCESS"
+            {after_loop}
             """)
         result = _run(script, errexit=True)
         assert result.returncode == 0, result.stderr
@@ -485,26 +495,25 @@ def _apt_loop(updates, mirrors: str, install_first: str = 'rsync'):
         shutil.rmtree(tmp)
 
 
-def test_apt_offline_with_mirrors_stops_after_three_attempts():
-    """Without network, 3 candidates x 3 retries used to take minutes."""
+def _updates(made):
+    return [c.split()[-1] for c in made if c.startswith('update')]
+
+
+def test_apt_offline_mirrors_get_one_attempt_each():
+    """Without network, 3 sources x 3 retries + installs took minutes."""
     made, ok = _apt_loop(['zero'] * 9, mirrors='m1.example m2.example')
-    assert [c for c in made if c.startswith('update')
-           ] == ['update LC_ALL=C'] * 3
+    assert all(
+        c.startswith('update LC_ALL=C') for c in made if c.startswith('update'))
+    assert _updates(made) == ['http://archive.ubuntu.com'] * 3 + [
+        'http://m1.example', 'http://m2.example'
+    ]
     assert not any(c.startswith('install') for c in made), made
-    assert not ok
-
-
-def test_apt_offline_budget_caps_a_long_mirror_list():
-    """Three configured mirrors + the default source still cost 3 attempts."""
-    made, ok = _apt_loop(['zero'] * 9,
-                         mirrors='m1.example m2.example m3.example')
-    assert len([c for c in made if c.startswith('update')]) == 3
     assert not ok
 
 
 def test_apt_offline_single_source_keeps_three_attempts():
     made, ok = _apt_loop(['zero'] * 9, mirrors='')
-    assert len([c for c in made if c.startswith('update')]) == 3
+    assert len(_updates(made)) == 3
     assert not any(c.startswith('install') for c in made), made
     assert not ok
 
@@ -512,28 +521,50 @@ def test_apt_offline_single_source_keeps_three_attempts():
 def test_apt_single_source_recovers_from_one_unreachable_attempt():
     """A transient stall on the only source must still be retried."""
     made, ok = _apt_loop(['zero', 'ok'], mirrors='')
-    assert len([c for c in made if c.startswith('update')]) == 2
+    assert len(_updates(made)) == 2
     assert any(c.startswith('install') for c in made), made
     assert ok
 
 
-def test_apt_unreachable_default_source_moves_on_to_a_mirror():
+def test_apt_own_source_is_retried_before_the_mirrors():
+    """Egress may allow only the image's own source: a blip must not move on."""
     made, ok = _apt_loop(['zero', 'ok'], mirrors='m1.example m2.example')
-    assert len([c for c in made if c.startswith('update')]) == 2
+    assert _updates(made) == ['http://archive.ubuntu.com'] * 2
     assert ok
 
 
-def test_apt_stalled_default_source_leaves_budget_for_the_mirrors():
-    """Retrying the dead default source must not use up every attempt."""
+def test_apt_dead_own_source_still_reaches_a_working_mirror():
     made, ok = _apt_loop(['only-m2'] * 9, mirrors='m1.example m2.example')
-    assert len([c for c in made if c.startswith('update')]) == 3
+    assert _updates(made) == ['http://archive.ubuntu.com'] * 3 + [
+        'http://m1.example', 'http://m2.example'
+    ]
     assert ok
+
+
+def test_apt_deb822_image_with_mirrors_recovers_from_one_blip():
+    """Debian 12 keeps no sources.list; mirrors cannot apply there."""
+    made, ok = _apt_loop(['zero', 'ok'], mirrors='m1.example', deb822_only=True)
+    assert len(_updates(made)) == 2
+    assert any(c.startswith('install') for c in made), made
+    assert ok
+
+
+def test_apt_call_after_a_mirror_won_keeps_its_retries():
+    """The Docker CLI install refreshes apt after the loop; it is not a mirror."""
+    made, ok = _apt_loop(
+        ['zero', 'zero', 'zero', 'ok', 'zero', 'ok'],
+        mirrors='m1.example',
+        after_loop='apt_update_install_with_retries docker-ce-cli || '
+        'echo DOCKER_FAILED')
+    assert ok
+    assert len(_updates(made)) == 6
+    assert any('docker-ce-cli' in c for c in made), made
 
 
 def test_apt_partly_reachable_source_keeps_todays_retries():
     """Reaching some source is not an outage: retry it, then install anyway."""
     made, _ = _apt_loop(['partial'] * 3, mirrors='')
-    assert len([c for c in made if c.startswith('update')]) == 3
+    assert len(_updates(made)) == 3
     assert any(c.startswith('install') for c in made), made
 
 
@@ -574,30 +605,50 @@ def test_present_sshd_still_fails_on_a_broken_config():
         shutil.rmtree(tmp)
 
 
+def _gnu_env_shim(bindir: str) -> None:
+    """`env -u X -C dir` is GNU-only; pass the command through."""
+    _write_exe(
+        os.path.join(bindir, 'env'), """
+        while [ $# -gt 0 ]; do
+          case "$1" in -u|-C) shift 2 ;; *=*) export "$1"; shift ;; *) break ;; esac
+        done
+        exec "$@"
+        """)
+
+
 def _prefetch(ray_in_image: bool, prefetch_ok: bool = True):
     """Runs the real Ray check + PyPI prefetch with a scripted uv."""
+    ray_version = constants.SKY_REMOTE_RAY_VERSION
+    # Start above the Ray install, so the test also pins the check's order.
     body = _extract(
-        'RUNTIME_PREBUILT=false',
+        '{{ uv_installation_commands }}',
         '# Wait (bounded) for the best-effort `patch` install',
+        uv_installation_commands='',
+        ray_installed_check_command=constants.SKY_RAY_INSTALLED_CHECK_CMD.
+        replace('{ray_version}', ray_version),
         # E7 stand-in: like the real one, it leaves Ray installed.
         ray_installation_commands=('touch "$HOME/ray_installed"'),
-        ray_version='2.56.1',
         sky_unset_pythonpath_and_set_cwd='')
     tmp = tempfile.mkdtemp()
     try:
+        bindir = os.path.join(tmp, 'bin')
+        os.makedirs(bindir)
         os.makedirs(os.path.join(tmp, '.local', 'bin'))
+        _gnu_env_shim(bindir)
         if ray_in_image:
             open(os.path.join(tmp, 'ray_installed'), 'w').close()
         _write_exe(
             os.path.join(tmp, '.local', 'bin', 'uv'), f"""
             if [ "$1 $2" = "pip list" ]; then
-              [ -f {tmp}/ray_installed ] && echo "ray                2.56.1"
+              # The check must look at the runtime venv, not a system Python.
+              [ "$UV_SYSTEM_PYTHON" = false ] || exit 3
+              [ -f {tmp}/ray_installed ] && echo "ray                {ray_version}"
               exit 0
             fi
             echo "$*" >> {tmp}/uv_calls
             exit {0 if prefetch_ok else 2}
             """)
-        result = _run(f'HOME={tmp}\n' + body, errexit=True)
+        result = _run(f'HOME={tmp}\nPATH={bindir}:$PATH\n' + body, errexit=True)
         calls_file = os.path.join(tmp, 'uv_calls')
         calls = open(calls_file, encoding='utf-8').read().splitlines() \
             if os.path.exists(calls_file) else []
@@ -648,14 +699,7 @@ def test_ray_install_pins_are_independent_and_best_effort(
         uvdir = os.path.join(tmp, '.local', 'bin')
         os.makedirs(bindir)
         os.makedirs(uvdir)
-        # `env -u X -C dir` is GNU-only; pass the command through.
-        _write_exe(
-            os.path.join(bindir, 'env'), """
-            while [ $# -gt 0 ]; do
-              case "$1" in -u|-C) shift 2 ;; *=*) export "$1"; shift ;; *) break ;; esac
-            done
-            exec "$@"
-            """)
+        _gnu_env_shim(bindir)
         _write_exe(
             os.path.join(uvdir, 'uv'), f"""
             case "$1 $2" in
@@ -704,13 +748,7 @@ def test_wheel_install_tries_offline_first(offline_ok, online_ok, expect_online,
             os.makedirs(d)
         open(os.path.join(wheels, f'skypilot-{_SKY_VERSION}-py3-none-any.whl'),
              'w').close()
-        _write_exe(
-            os.path.join(bindir, 'env'), """
-            while [ $# -gt 0 ]; do
-              case "$1" in -u|-C) shift 2 ;; *=*) export "$1"; shift ;; *) break ;; esac
-            done
-            exec "$@"
-            """)
+        _gnu_env_shim(bindir)
         _write_exe(
             os.path.join(uvdir, 'uv'), f"""
             echo "$*" >> {tmp}/uv_calls

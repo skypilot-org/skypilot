@@ -894,7 +894,7 @@ available_node_types:
               # pam_limits at login.
               {{raise_nofile_limit_command}}
 
-              # Marker STEP 1 publishes once the CORE prereqs (curl/rsync/wget)
+              # Marker STEP 1 publishes once the CORE prereqs (rsync, and curl when needed)
               # are installed AND CONFIGURED -- i.e. the package manager has
               # returned, not merely unpacked a binary. STEP 2 gates its HTTPS
               # conda download on this; see the wait there for why binary
@@ -915,15 +915,12 @@ available_node_types:
                 APT_INSTALL_CMD_TIMEOUT=90
                 APT_OPTS="-o Acquire::http::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::https::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::Retries=0"
 
-                # Attempts that reach no apt source at all (no `Hit:`/`Get:` in
-                # the output) share this budget across every candidate source:
-                # without network each one costs a full timeout, and 3 sources
-                # x 3 retries kept STEP 1 busy for minutes. A zero-reach
-                # attempt moves on to the next candidate; only the last one is
-                # retried. One candidate thus keeps today's 3 tries, and an
-                # outage costs at most 3 attempts whatever the source count.
-                APT_UNREACHED_BUDGET=3
-                APT_LAST_CANDIDATE=true
+                # Set when the last `apt-get update` reached no source at all
+                # (no `Hit`/`Get` line). Without network each attempt costs a
+                # full timeout, so a fallback mirror that reaches nothing is not
+                # retried, and no install is attempted after such a refresh.
+                # The image's own sources keep their retries: they may be the
+                # only ones an egress allowlist lets through.
                 APT_ZERO_REACH=false
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
@@ -949,11 +946,12 @@ available_node_types:
                     else
                       echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
                     fi
-                    if ! echo "$output" | grep -qE '^(Hit|Get):'; then
+                    if ! echo "$output" | grep -qE '^(Hit|Get)[: ]'; then
                       APT_ZERO_REACH=true
-                      APT_UNREACHED_BUDGET=$((APT_UNREACHED_BUDGET - 1))
-                      echo "apt-get update reached no source ($APT_UNREACHED_BUDGET unreachable attempts left)" >> "$log"
-                      if [ "$APT_UNREACHED_BUDGET" -le 0 ] || [ "$APT_LAST_CANDIDATE" != "true" ]; then
+                      echo "apt-get update reached no source" >> "$log"
+                      # apt_mirror_candidate: set (as a local) only by the
+                      # mirror fallback loop below.
+                      if [ "${apt_mirror_candidate:-false}" = "true" ]; then
                         set -e; return 1
                       fi
                     fi
@@ -1159,7 +1157,8 @@ available_node_types:
                   # Everything else is best-effort: worker readiness uses bash
                   # /dev/tcp (not `nc`), so netcat is not a launch blocker, its
                   # per-distro name (nmap-ncat / netcat-openbsd) can't fail the
-                  # launch, and nothing in pod setup uses wget.
+                  # launch, and pod setup itself never uses wget (storage-mount
+                  # installers do, and still get it best-effort).
                   case "$pkg" in
                     rsync) INSTALL_FIRST="$INSTALL_FIRST $pkg" ;;
                     curl)
@@ -1174,8 +1173,8 @@ available_node_types:
                 done;
 
                 # No core package missing => the image already ships curl (and
-                # whatever trust store its curl uses), so STEP 2 has nothing to
-                # wait for. Publish the marker HERE, not only on the install
+                # whatever trust store its curl uses), or STEP 2 needs no curl,
+                # so STEP 2 has nothing to wait for. Publish the marker HERE, not only on the install
                 # paths, because several of those can bail out without being
                 # fatal and would otherwise leave STEP 2 waiting forever:
                 #   - apt with INSTALL_FIRST empty but MISSING_PACKAGES set: the
@@ -1259,18 +1258,10 @@ available_node_types:
                 run_apt_install_with_fallback() {
                 INSTALL_SUCCESS=false
                 backup_source
-                local num_candidates=$(( $(echo $MIRROR_CANDIDATES | wc -w) + 1 ))
-                local candidate_idx=0
+                local apt_mirror_candidate=false
                 for candidate in "" $MIRROR_CANDIDATES; do
-                  if [ "$APT_UNREACHED_BUDGET" -le 0 ]; then
-                    echo "No apt source reachable; giving up on package installation." >> /tmp/apt-update.log
-                    break
-                  fi
-                  candidate_idx=$((candidate_idx + 1))
-                  if [ "$candidate_idx" -eq "$num_candidates" ]; then
-                    APT_LAST_CANDIDATE=true
-                  else
-                    APT_LAST_CANDIDATE=false
+                  if [ -n "$candidate" ]; then
+                    apt_mirror_candidate=true
                   fi
                   restore_source
                   if [ -n "$candidate" ]; then
@@ -1323,8 +1314,6 @@ available_node_types:
                   INSTALL_SUCCESS=true
                   break
                 done
-                # Later apt calls (Docker CLI) use one source: retry it as before.
-                APT_LAST_CANDIDATE=true
                 restore_source
                 }
 
@@ -1573,7 +1562,7 @@ available_node_types:
                 # pinned version). Checked before ray_installation_commands,
                 # which always leaves that Ray installed.
                 RUNTIME_PREBUILT=false
-                if VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list 2>/dev/null | grep "ray " | grep -q "{{ray_version}}"; then
+                if {{ ray_installed_check_command }}; then
                   RUNTIME_PREBUILT=true
                 fi
                 {{ ray_installation_commands }}

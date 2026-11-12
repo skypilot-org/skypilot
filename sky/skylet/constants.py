@@ -393,6 +393,10 @@ SKY_USER_ENV_CREATION_COMMANDS = (
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
+# Succeeds when the runtime env already has Ray at {ray_version}. Also used by
+# the Kubernetes pod template, which must decide this before installing Ray.
+SKY_RAY_INSTALLED_CHECK_CMD = (f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+                               'grep {ray_version} 2>&1 > /dev/null')
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{SETUP_SKY_DIRS_COMMANDS}'
@@ -430,8 +434,7 @@ RAY_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
-    'grep {ray_version} 2>&1 > /dev/null '
+    f'{SKY_RAY_INSTALLED_CHECK_CMD} '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
