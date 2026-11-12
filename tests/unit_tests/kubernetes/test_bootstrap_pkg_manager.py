@@ -419,9 +419,10 @@ def _apt_loop(updates,
     the sources point at the m2.example mirror). The fake prints Hit/Get the
     way real apt does at each verbosity: none at quiet>=2, behind `\\r`
     progress output at quiet=0 (checked on apt 2.4), plain at quiet=1.
-    image_quiet is the image apt.conf's level, which `-o quiet=N` overrides. deb822_only: the image keeps
-    its sources only in sources.list.d/debian.sources (Debian 12+), so a
-    mirror has nothing to rewrite. after_loop: shell run after the loop.
+    image_quiet is the image apt.conf's level, which `-o quiet=N` overrides.
+    deb822_only: the image keeps its sources only in
+    sources.list.d/debian.sources (Debian 12+), so a mirror has nothing to
+    rewrite. after_loop: shell run after the loop.
     Returns the apt-get calls (updates tagged with the source host) and
     INSTALL_SUCCESS.
     """
@@ -563,7 +564,7 @@ def test_apt_deb822_image_with_mirrors_recovers_from_one_blip():
 
 
 def test_apt_call_after_a_mirror_won_keeps_its_retries():
-    """The Docker CLI install refreshes apt after the loop; it is not a mirror."""
+    """The Docker CLI install refreshes apt after the loop, not as a mirror."""
     made, ok = _apt_loop(
         ['zero', 'zero', 'zero', 'ok', 'zero', 'ok'],
         mirrors='m1.example',
@@ -588,14 +589,27 @@ def test_apt_reach_is_detected_whatever_the_image_apt_verbosity(image_quiet):
     assert any(c.startswith('install') for c in made), made
 
 
-def test_apt_optional_packages_install_after_a_partial_refresh():
-    """Only optional packages missing: a partial refresh is still usable."""
-    made, ok = _apt_loop(['partial'] * 3,
+def test_apt_optional_packages_move_on_to_a_mirror_after_a_partial_refresh():
+    """As on master: only optional packages missing, a partly failed refresh
+    of the image's source falls through to the mirror, which installs them."""
+    made, ok = _apt_loop(['partial'] * 3 + ['ok'],
+                         mirrors='m1.example',
+                         install_first='',
+                         missing='gcc')
+    assert _updates(
+        made) == ['http://archive.ubuntu.com'] * 3 + ['http://m1.example']
+    assert any(c.startswith('install') and 'gcc' in c for c in made), made
+    assert ok
+
+
+def test_apt_optional_packages_not_installed_when_nothing_is_reachable():
+    made, ok = _apt_loop(['zero'] * 3,
                          mirrors='',
                          install_first='',
                          missing='gcc')
-    assert any(c.startswith('install') and 'gcc' in c for c in made), made
-    assert ok
+    assert len(_updates(made)) == 3
+    assert not any(c.startswith('install') for c in made), made
+    assert not ok
 
 
 def test_apt_partly_reachable_source_keeps_todays_retries():

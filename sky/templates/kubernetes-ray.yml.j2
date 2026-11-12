@@ -1303,9 +1303,7 @@ available_node_types:
                   else
                     # No core packages to install, but we still need to update the
                     # package index for MISSING_PACKAGES.
-                    # A partly failed refresh may still have usable lists:
-                    # install from them, as the core-package path does.
-                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || [ "$APT_ZERO_REACH" = "false" ] || {
+                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || {
                       echo "apt-get update failed with ${candidate:-default sources}" >> /tmp/apt-update.log
                       continue
                     }
