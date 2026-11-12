@@ -116,8 +116,12 @@ def _check_kubernetes_contexts(
     usable if any checked context is, or any other allowed context is cached
     as enabled.
     """
-    allowed = sky_clouds.Kubernetes.existing_allowed_contexts()
+    try:
+        allowed = sky_clouds.Kubernetes.existing_allowed_contexts()
+    except ImportError:
+        allowed = []
     if not allowed:
+        # The full check reports why no context can be checked.
         return sky_clouds.Kubernetes.check_contexts_compute_credentials(None)
     to_check = [c for c in allowed if c in contexts or c not in cached]
     ok, reason = sky_clouds.Kubernetes.check_contexts_compute_credentials(
