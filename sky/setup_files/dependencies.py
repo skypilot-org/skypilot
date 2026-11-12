@@ -74,28 +74,16 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    # 2.0.16 introduced create_async_engine(async_creator=...), which we
-    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
-    'sqlalchemy>=2.0.16',
-    'psycopg2-binary',
-    'aiosqlite',
-    'asyncpg',
-    # Required by sqlalchemy.ext.asyncio which is used in
-    # sky/utils/db/db_utils.py
-    'greenlet',
-    # TODO(hailong): These three dependencies should be removed after we make
-    # the client-side actually not importing them.
-    'casbin',
-    'sqlalchemy_adapter',
-    # Required for API server metrics
+    # Required for API server metrics (client dashboards also scrape locally).
     'prometheus_client>=0.8.0',
+    # bcrypt/passlib/pyjwt stay in install_requires: client login and token
+    # helpers import them. DB/ORM stack is server-only (see server_dependencies).
     'passlib',
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'paramiko',
     'types-paramiko',
-    'alembic>=1.8.0',
     # aiohttp 3.13.3+ required for CVE-2025-69223
     'aiohttp>=3.13.3',
     'anyio',
@@ -116,19 +104,30 @@ GRPC = 'grpcio>=1.63.0'
 PROTOBUF = 'protobuf>=5.29.6, < 7.0.0'
 
 server_dependencies = [
-    # TODO: Some of these dependencies are also specified in install_requires,
-    # so they are redundant here. We should figure out if they are only needed
-    # on the server (should remove from install_requires), or if they are needed
-    # on the client (should remove from here).
+    # SQLAlchemy / DB stack: API server and controllers only. Client / CLI /
+    # programmatic SDK installs must not require SQLAlchemy 2 (blocks users
+    # pinned to SQLAlchemy 1.4). Install via `pip install 'skypilot[server]'`
+    # or any cloud extra (cloud extras already append this list).
+    # 2.0.16 introduced create_async_engine(async_creator=...), which we
+    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
+    'sqlalchemy>=2.0.16',
+    'psycopg2-binary',
+    'aiosqlite',
+    'asyncpg',
+    # Required by sqlalchemy.ext.asyncio which is used in
+    # sky/utils/db/db_utils.py
+    'greenlet',
+    'alembic>=1.8.0',
     'casbin',
     'sqlalchemy_adapter',
+    # Also listed in install_requires where the client needs them; kept here
+    # so `skypilot[server]` alone is a complete server install.
     'passlib',
     'pyjwt',
     'aiohttp',
     'anyio',
     GRPC,
     PROTOBUF,
-    'aiosqlite',
 ]
 
 local_ray = [

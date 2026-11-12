@@ -3952,6 +3952,8 @@ class TestOnRecoveryClusterSetUpErrorHandling:
         controller._pool = None
         controller._backend = MagicMock()
         controller._cleanup_cluster = AsyncMock()
+        # __new__ skips __init__; cost accounting no-ops when unset.
+        controller._job_costs = None
 
         mock_task = MagicMock()
         mock_task.name = 'test-task'
@@ -3964,6 +3966,8 @@ class TestOnRecoveryClusterSetUpErrorHandling:
             side_effect=exceptions.ClusterSetUpError('networking gone'))
 
         with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(None, None)), \
              patch('sky.jobs.state.get_job_status_with_task_id_async',
                    new=AsyncMock(return_value=managed_job_state.
                                  ManagedJobStatus.RECOVERING)), \

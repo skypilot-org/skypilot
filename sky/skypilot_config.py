@@ -48,6 +48,8 @@ then:
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> None
 """
+from __future__ import annotations
+
 import contextlib
 import copy
 import errno
@@ -64,12 +66,6 @@ import typing
 from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional,
                     Tuple, Union)
 
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -80,16 +76,17 @@ from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
 
     from sky import models
+    from sky.server import config_db as config_db_mod
 else:
     yaml = adaptors_common.LazyImport('yaml')
+    # Server-only; loads SQLAlchemy only when a DB URL is used.
+    config_db_mod = adaptors_common.LazyImport('sky.server.config_db')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -127,15 +124,6 @@ _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
-
-Base = declarative.declarative_base()
-
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
 
 
 class ConfigContext:
@@ -998,18 +986,6 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _set_loaded_config_path(config_path)
 
 
-def _create_table(engine: sqlalchemy.engine.Engine):
-    """Initialize the config database with migrations."""
-    migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
-        migration_utils.SKYPILOT_CONFIG_VERSION)
-
-
-# We only store config in the DB when using Postgres,
-# so no need to pass in db_name here.
-_db_manager = db_utils.DatabaseManager(db_name='config',
-                                       create_table_fn=_create_table)
-
 # The last server config load: (fingerprint, config, db URL popped from the
 # file, generation). Replaced by one assignment, so a lock-free reader never
 # pairs a new fingerprint with an old config.
@@ -1027,10 +1003,7 @@ _server_config_swap_lock = threading.Lock()
 
 
 def _read_config_yaml_value() -> Optional[str]:
-    with orm.Session(_db_manager.get_engine()) as session:
-        row = session.query(config_yaml_table).filter_by(
-            key=API_SERVER_CONFIG_KEY).first()
-    return row.value if row else None
+    return config_db_mod.get_config_yaml_value(API_SERVER_CONFIG_KEY)
 
 
 def _swap_in_server_config(generation: int, config: config_utils.Config,
@@ -1918,32 +1891,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if new_db_url and new_db_url != existing_db_url:
             raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-
-            def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                engine = _db_manager.get_engine()
-                # Persisting, not logging: this value is read back as the
-                # server config, so it must be the real one. Do not route it
-                # through config_utils.dump_redacted_yaml().
-                config_str = yaml_utils.dump_yaml_str(dict(config))
-                with orm.Session(engine) as session:
-                    if (engine.dialect.name ==
-                            db_utils.SQLAlchemyDialect.SQLITE.value):
-                        insert_func = sqlite.insert
-                    elif (engine.dialect.name ==
-                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                        insert_func = postgresql.insert
-                    else:
-                        raise ValueError('Unsupported database dialect')
-                    insert_stmnt = insert_func(config_yaml_table).values(
-                        key=key, value=config_str)
-                    do_update_stmt = insert_stmnt.on_conflict_do_update(
-                        index_elements=[config_yaml_table.c.key],
-                        set_={config_yaml_table.c.value: config_str})
-                    session.execute(do_update_stmt)
-                    session.commit()
-
             logger.debug('saving api_server config to db')
-            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            config_db_mod.set_config_yaml(API_SERVER_CONFIG_KEY, dict(config))
             db_updated = True
 
     if not db_updated:

@@ -899,6 +899,7 @@ def test_slurm_container_autodown(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -4193,6 +4194,7 @@ def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
 
 @pytest.mark.aws
 @pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+@pytest.mark.no_dependency  # Restarts the API server, which needs server dependencies.
 def test_aws_volume_tagging_degrades_without_permission():
     """`sky launch` must survive credentials that cannot tag EBS volumes.
 

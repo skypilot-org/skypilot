@@ -18,6 +18,7 @@ import sky
 from sky import skypilot_config
 import sky.exceptions
 from sky.server import common as server_common
+from sky.server import config_db
 from sky.server import plugins
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
@@ -2993,20 +2994,21 @@ def _label() -> str:
 
 def _sqlite_config_db(monkeypatch, value: str) -> str:
     """Backs the config_yaml overlay with SQLite; returns a URL to use."""
-    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
     # Created before the URL is set, so the engine is SQLite.
     engine = db.get_engine()
-    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    monkeypatch.setattr(config_db, '_db_manager', db)
     _set_config_yaml_row(engine, value)
     return str(engine.url)
 
 
 def _set_config_yaml_row(engine, value: str) -> None:
-    stmt = sqlite.insert(skypilot_config.config_yaml_table).values(
+    stmt = sqlite.insert(config_db.config_yaml_table).values(
         key=skypilot_config.API_SERVER_CONFIG_KEY, value=value)
     stmt = stmt.on_conflict_do_update(
-        index_elements=[skypilot_config.config_yaml_table.c.key],
-        set_={skypilot_config.config_yaml_table.c.value: value})
+        index_elements=[config_db.config_yaml_table.c.key],
+        set_={config_db.config_yaml_table.c.value: value})
     with engine.begin() as conn:
         conn.execute(stmt)
 
@@ -3027,7 +3029,7 @@ def test_server_config_db_value_change_reloads(server_config_file, monkeypatch):
     assert _label() == 'db-a'
     assert counts == {'parse': 1, 'lock': 1}
 
-    _set_config_yaml_row(skypilot_config._db_manager.get_engine(),
+    _set_config_yaml_row(config_db.get_engine(),
                          'aws:\n  labels:\n    k: db-b\n')
     skypilot_config.safe_reload_config()
     assert _label() == 'db-b'
@@ -3324,8 +3326,9 @@ def test_server_config_db_url_change_without_a_row_reloads(
     skypilot_config.reload_config()
     assert _label() == 'a'
 
-    db = db_utils.DatabaseManager('config', skypilot_config._create_table)
-    monkeypatch.setattr(skypilot_config, '_db_manager', db)
+    config_db.ensure_config_db_schema()
+    db = db_utils.DatabaseManager('config', config_db._create_table)
+    monkeypatch.setattr(config_db, '_db_manager', db)
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
                        str(db.get_engine().url))
     with pytest.raises(ValueError, match='no other config is allowed'):
