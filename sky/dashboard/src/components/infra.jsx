@@ -17,6 +17,7 @@ import {
 import { useMobile } from '@/hooks/useMobile';
 import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { THEME_DARK, useTheme } from '@/hooks/useTheme';
 import {
   checkGrafanaAvailability,
   getGrafanaUrl,
@@ -1294,6 +1295,7 @@ export function ContextDetails({
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
+  const { resolvedTheme } = useTheme();
 
   // Slurm exposes power-saved (POWER_SAVE, `~`-state) cloud nodes with no
   // backing instance; fold them out of the node table so it lists only nodes
@@ -1461,7 +1463,7 @@ export function ContextDetails({
     // When "All Nodes" is selected (.*), pass .* directly to match all nodes
     const hostParam = selectedHosts;
 
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=${resolvedTheme === THEME_DARK ? 'dark' : 'light'}&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Handle host selection change
