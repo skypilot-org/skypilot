@@ -224,22 +224,23 @@ def _run_cgroupfs_cmd(tmp_path, config):
 
 @pytest.mark.parametrize('existing', [
     None,
-    {
+    'null',
+    json.dumps({
         'runtimes': {
             'nvidia': {
                 'path': 'nvidia-container-runtime'
             }
         },
         'exec-opts': ['native.cgroupdriver=systemd'],
-    },
+    }),
 ])
 def test_cgroupfs_config_keeps_other_settings(tmp_path, existing):
     config = tmp_path / 'daemon.json'
     if existing is not None:
-        config.write_text(json.dumps(existing))
+        config.write_text(existing)
     _run_cgroupfs_cmd(tmp_path, config)
 
-    expected = dict(existing or {})
+    expected = (json.loads(existing) if existing else None) or {}
     expected['exec-opts'] = ['native.cgroupdriver=cgroupfs']
     assert json.loads(config.read_text()) == expected
     assert (tmp_path / 'systemctl').read_text() == 'restart docker\n'

@@ -49,7 +49,7 @@ DOCKER_CGROUPFS_SCRIPT = (
     'config = {}\n'
     'if os.path.exists(path):\n'
     '    with open(path, encoding="utf-8") as f:\n'
-    '        config = json.load(f)\n'
+    '        config = json.load(f) or {}\n'
     'config["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\n'
     'with open(path + ".tmp", "w", encoding="utf-8") as f:\n'
     '    json.dump(config, f, indent=2)\n'
