@@ -74,7 +74,9 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
   To run SkyPilot on your own machine, which starts a local API server, install
   it with the clouds you want to use, e.g.
-  ``pip install "skypilot[kubernetes,aws,gcp]"``.
+  ``pip install "skypilot[kubernetes,aws,gcp]"``. Every cloud extra includes the
+  API server; to install the API server without any cloud, use
+  ``pip install "skypilot[server]"``.
 
 .. dropdown:: Install SkyPilot from nightly build or source
 
