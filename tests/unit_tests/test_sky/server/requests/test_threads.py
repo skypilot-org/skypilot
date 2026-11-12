@@ -256,9 +256,16 @@ def test_on_demand_executor_shutdown_waits_and_stops_threads():
 def test_on_demand_executor_shutdown_cancels_queued_tasks():
     executor = OnDemandThreadExecutor(name='test', max_workers=1, max_queued=1)
     release_event = threading.Event()
+    started = threading.Event()
     ran = threading.Event()
-    first = executor.submit(blocking_task, release_event)
+
+    def first_task():
+        started.set()
+        return blocking_task(release_event)
+
+    first = executor.submit(first_task)
     queued = executor.submit(ran.set)
+    assert started.wait(timeout=5)
     executor.shutdown(wait=False, cancel_futures=True)
     assert queued.cancelled()
     release_event.set()
