@@ -1256,8 +1256,8 @@ def test_client_cannot_enable_event_callbacks(monkeypatch, tmp_path):
         {'jobs': {
             'allow_event_callback': True
         }}):
-        assert skypilot_config.get_nested(('jobs', 'allow_event_callback'),
-                                          None) is False
+        assert skypilot_config.get_nested(
+            ('jobs', 'allow_event_callback'), None) is False
 
 
 def test_client_cannot_override_admin_policy(monkeypatch, tmp_path):
