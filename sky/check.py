@@ -464,11 +464,19 @@ def check_capabilities(
             try:
                 results_to_persist = _build_check_results(
                     cloud2ctx2text, check_results_dict)
+                if (contexts_to_check is not None and
+                        _KUBERNETES_REPR in results_to_persist):
+                    # Contexts this check skipped keep their cached results.
+                    cached = global_user_state.get_cached_check_results(
+                        current_workspace_name).get(_KUBERNETES_REPR, {})
+                    results_to_persist[_KUBERNETES_REPR] = {
+                        **cached,
+                        **results_to_persist[_KUBERNETES_REPR]
+                    }
                 global_user_state.set_check_results(
                     results_to_persist,
                     current_workspace_name,
-                    is_full_workspace_run=(clouds is None and
-                                           contexts_to_check is None),
+                    is_full_workspace_run=(clouds is None),
                 )
             except Exception as e:  # pylint: disable=broad-except
                 label = skypilot_config.workspace_label(current_workspace_name)

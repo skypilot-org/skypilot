@@ -873,3 +873,44 @@ def test_kubernetes_details_list_only_checked_contexts(monkeypatch):
 
     assert 'ctx-b: enabled.' in details
     assert 'ctx-a' not in details
+
+
+def test_kubernetes_contexts_full_run_drops_unchecked_clouds(
+        tmp_path, monkeypatch):
+    """Only skipped Kubernetes contexts are carried over on a full run."""
+    _fresh_db(tmp_path, monkeypatch)
+    _common_mocks(monkeypatch)
+    _restrict_registry(monkeypatch, {'kubernetes'})
+    monkeypatch.setattr(sky_check, 'STORAGE_ONLY_CLOUDS', ())
+    global_user_state.set_check_results(
+        {
+            repr(sky_clouds.AWS()): {
+                '': {
+                    'enabled': True,
+                    'reason': 'enabled.'
+                }
+            },
+            repr(sky_clouds.Kubernetes()): {
+                'ctx-a': {
+                    'enabled': True,
+                    'reason': 'enabled.'
+                }
+            },
+        },
+        workspace='default',
+        is_full_workspace_run=True,
+    )
+    _kubernetes_contexts(monkeypatch,
+                         allowed=['ctx-a', 'ctx-new'],
+                         usable={'ctx-new'})
+
+    sky_check.check_capabilities(quiet=True,
+                                 clouds=None,
+                                 capabilities=[CloudCapability.COMPUTE],
+                                 workspace='default',
+                                 kubernetes_contexts=['ctx-new'])
+
+    persisted = global_user_state.get_cached_check_results('default')
+    assert repr(sky_clouds.AWS()) not in persisted
+    assert sorted(persisted[repr(
+        sky_clouds.Kubernetes())]) == ['ctx-a', 'ctx-new']
