@@ -3552,7 +3552,7 @@ async def api_cancel(
     )
 
 
-@app.get('/api/status')
+@app.get('/api/status', response_model=List[payloads.RequestPayload])
 async def api_status(
     request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
@@ -3567,7 +3567,7 @@ async def api_status(
                      'return_value and error. Ignored if request_ids is set.')),
     cluster_name: Optional[str] = fastapi.Query(
         None, description='Filter requests by cluster name.'),
-) -> List[payloads.RequestPayload]:
+) -> Union[List[payloads.RequestPayload], fastapi.Response]:
     """Gets the list of requests."""
     # Scope the request body to the caller: the owner sees it, others get null
     # (see _request_body_for_display).
@@ -3587,21 +3587,21 @@ async def api_status(
         statuses = None
         if not all_status:
             statuses = requests_lib.RequestStatus.active_statuses()
-        request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=statuses,
-                cluster_names=[cluster_name] if cluster_name else None,
-                user_id=scope_user_id,
-                exclude_request_names=[
-                    server_constants.REQUEST_NAME_PREFIX + d.value
-                    for d in daemons.HIDDEN_REQUEST_NAMES
-                ],
-                limit=limit,
-                fields=fields or requests_lib.DISPLAY_COLUMNS,
-                sort=True,
-            ))
-        return requests_lib.encode_requests(request_tasks,
-                                            caller_user_id=caller_user_id)
+        req_filter = requests_lib.RequestTaskFilter(
+            status=statuses,
+            cluster_names=[cluster_name] if cluster_name else None,
+            user_id=scope_user_id,
+            exclude_request_names=[
+                server_constants.REQUEST_NAME_PREFIX + d.value
+                for d in daemons.HIDDEN_REQUEST_NAMES
+            ],
+            limit=limit,
+            fields=fields or requests_lib.DISPLAY_COLUMNS,
+            sort=True,
+        )
+        content = await asyncio.to_thread(requests_lib.list_requests_json,
+                                          req_filter, caller_user_id)
+        return fastapi.Response(content=content, media_type='application/json')
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
