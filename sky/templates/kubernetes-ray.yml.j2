@@ -936,10 +936,11 @@ available_node_types:
                   for i in $(seq 1 $tries); do
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators. LC_ALL=C:
-                    # apt translates the strings matched here; quiet=0: an
-                    # image's apt.conf may otherwise hide the Hit/Get lines.
+                    # apt translates the strings matched here. quiet=1: an
+                    # image's apt.conf may hide the Hit/Get lines (quiet=2),
+                    # and quiet=0 prefixes them with \r progress output.
                     local output
-                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update -o quiet=0 $APT_OPTS 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update -o quiet=1 $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
                     if [ $rc -eq 124 ]; then
@@ -1302,7 +1303,9 @@ available_node_types:
                   else
                     # No core packages to install, but we still need to update the
                     # package index for MISSING_PACKAGES.
-                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || {
+                    # A partly failed refresh may still have usable lists:
+                    # install from them, as the core-package path does.
+                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || [ "$APT_ZERO_REACH" = "false" ] || {
                       echo "apt-get update failed with ${candidate:-default sources}" >> /tmp/apt-update.log
                       continue
                     }
@@ -1480,6 +1483,8 @@ available_node_types:
                 {% if k8s_host_network %}
                 # Host networking records its verified ports in sshd_config;
                 # without sshd a later Ray restart would re-probe its own ports.
+                # Error last: the launch output shows only the log's tail.
+                dump_apt_log
                 echo "Error: kubernetes host networking needs openssh-server in the image, and it is not installed and could not be installed."
                 exit 1
                 {% else %}

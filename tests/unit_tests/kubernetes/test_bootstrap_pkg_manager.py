@@ -408,14 +408,18 @@ def test_curl_is_core_when_conda_or_docker_needs_it(render_vars):
 def _apt_loop(updates,
               mirrors: str,
               deb822_only: bool = False,
-              after_loop: str = ''):
+              after_loop: str = '',
+              install_first: str = 'rsync',
+              missing: str = '',
+              image_quiet: int = 1):
     """Runs the real apt fallback loop against a scripted `apt-get update`.
 
     updates: one entry per `apt-get update` call -- 'zero' (reaches no source),
-    'partial' (reaches one, fails another), 'quiet-partial' (like partial, but
-    an image apt.conf with `quiet 2` hides Hit lines unless `-o quiet=0` is
-    passed), 'ok', or 'only-m2' (ok only once the sources point at the
-    m2.example mirror). deb822_only: the image keeps
+    'partial' (reaches one, fails another), 'ok', or 'only-m2' (ok only once
+    the sources point at the m2.example mirror). The fake prints Hit/Get the
+    way real apt does at each verbosity: none at quiet>=2, behind `\\r`
+    progress output at quiet=0 (checked on apt 2.4), plain at quiet=1.
+    image_quiet is the image apt.conf's level, which `-o quiet=N` overrides. deb822_only: the image keeps
     its sources only in sources.list.d/debian.sources (Debian 12+), so a
     mirror has nothing to rewrite. after_loop: shell run after the loop.
     Returns the apt-get calls (updates tagged with the source host) and
@@ -452,13 +456,16 @@ def _apt_loop(updates,
               if [ "$kind" = only-m2 ]; then
                 [ "$host" = http://m2.example ] && kind=ok || kind=zero
               fi
+              q={image_quiet}
+              case " $* " in *" quiet=0 "*) q=0 ;; *" quiet=1 "*) q=1 ;; esac
+              hit() {{
+                if [ $q -eq 0 ]; then printf '\\r0%% [Working]\\r   \\r'; fi
+                if [ $q -lt 2 ]; then echo "Hit:1 $host jammy InRelease"; fi
+              }}
               case "$kind" in
-                ok) echo "Hit:1 $host jammy InRelease" ;;
-                partial) echo "Hit:1 $host jammy InRelease"
+                ok) hit ;;
+                partial) hit
                          echo "W: Failed to fetch http://security.ubuntu.com" ;;
-                quiet-partial)
-                  case " $* " in *" quiet=0 "*) echo "Hit:1 $host jammy InRelease" ;; esac
-                  echo "W: Failed to fetch http://security.ubuntu.com" ;;
                 *) echo "W: Failed to fetch $host" ;;
               esac
               exit 0
@@ -479,8 +486,8 @@ def _apt_loop(updates,
             APT_OPTS=""
             APT_OS=ubuntu
             CORE_PKGS_READY={tmp}/ready
-            INSTALL_FIRST="rsync"
-            MISSING_PACKAGES=""
+            INSTALL_FIRST="{install_first}"
+            MISSING_PACKAGES="{missing}"
             MIRROR_CANDIDATES="{mirrors}"
             prefix_cmd() {{ echo ""; }}
             sleep() {{ :; }}
@@ -574,9 +581,21 @@ def test_apt_installs_when_an_earlier_attempt_reached_a_source():
     assert any(c.startswith('install') for c in made), made
 
 
-def test_apt_reach_is_detected_under_a_quiet_apt_config():
-    made, _ = _apt_loop(['quiet-partial'] * 3, mirrors='')
+@pytest.mark.parametrize('image_quiet', [0, 1, 2])
+def test_apt_reach_is_detected_whatever_the_image_apt_verbosity(image_quiet):
+    """A partly failed refresh must still install, whatever apt.conf says."""
+    made, _ = _apt_loop(['partial'] * 3, mirrors='', image_quiet=image_quiet)
     assert any(c.startswith('install') for c in made), made
+
+
+def test_apt_optional_packages_install_after_a_partial_refresh():
+    """Only optional packages missing: a partial refresh is still usable."""
+    made, ok = _apt_loop(['partial'] * 3,
+                         mirrors='',
+                         install_first='',
+                         missing='gcc')
+    assert any(c.startswith('install') and 'gcc' in c for c in made), made
+    assert ok
 
 
 def test_apt_partly_reachable_source_keeps_todays_retries():
@@ -598,6 +617,7 @@ def _sshd_block(sshd_present: bool, tmp: str, host_network=False) -> str:
         HOME={tmp}
         prefix_cmd() {{ echo ""; }}
         whoami() {{ id -un; }}
+        dump_apt_log() {{ echo APT-LOG-DUMPED; }}
         pkg_present() {{ return {rc}; }}
         """) + body
 
@@ -623,6 +643,10 @@ def test_missing_sshd_fails_clearly_under_host_networking():
                       errexit=True)
         assert result.returncode != 0
         assert 'host networking needs openssh-server' in result.stdout
+        # The apt log says why openssh-server could not be installed; the
+        # error comes after it, as the launch output shows only the tail.
+        assert 0 <= result.stdout.index('APT-LOG-DUMPED') < result.stdout.index(
+            'host networking needs openssh-server')
     finally:
         shutil.rmtree(tmp)
 
