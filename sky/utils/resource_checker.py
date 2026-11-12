@@ -633,10 +633,11 @@ def _get_active_resources(
                              f'{common_utils.format_exception(e)}') from e
         return [dict(r, kind=kind) for r in resources]
 
-    # Each lister is its own query; run serially on a remote database they
-    # outlast the jobs fetch. 4 workers stay within the default per-process
-    # DB connection budget.
-    with context_utils.ContextPropagatingThreadPool(max_workers=4) as executor:
+    # Run one after another, the listers outlast the jobs fetch on a remote
+    # DB. Leave one of the process's default DB connections free.
+    with context_utils.ContextPropagatingThreadPool(
+            max_workers=constants.DEFAULT_DB_CONNECTION_POOL_MAX_CONCURRENCY -
+            1) as executor:
         clusters_future = executor.submit(get_all_clusters)
         jobs_future = executor.submit(get_all_managed_jobs)
         lister_futures = [
