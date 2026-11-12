@@ -14,6 +14,7 @@ from typing import List, Optional
 from unittest import mock
 import weakref
 
+import prometheus_client as prom
 import pytest
 
 from sky import exceptions
@@ -1806,6 +1807,7 @@ async def test_wrapper_releases_result_before_release_memory(
 
     monkeypatch.setattr(executor.common_utils, 'release_memory',
                         _check_release_memory)
+    monkeypatch.setattr(executor, '_rss_after_release', None)
     result_alive_at_rss_sample = []
 
     class _Process(executor.psutil.Process):
@@ -1826,6 +1828,148 @@ async def test_wrapper_releases_result_before_release_memory(
     assert requests_lib.get_request('result-released').get_return_value() == [
         'x' * 1024
     ]
+
+
+_MB = 1024 * 1024
+
+
+class _FakeProcess:
+
+    def __init__(self, rss: int):
+        self.rss = rss
+
+    def memory_info(self):
+        return mock.Mock(rss=self.rss)
+
+
+@pytest.fixture
+def release_memory_harness(monkeypatch):
+    """Fake RSS, count release_memory() calls, default threshold."""
+    monkeypatch.delenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       raising=False)
+    executor._release_memory_threshold_bytes.cache_clear()
+    monkeypatch.setattr(executor, '_rss_after_release', None)
+    proc = _FakeProcess(rss=300 * _MB)
+    calls = []
+    monkeypatch.setattr(executor.common_utils, 'release_memory',
+                        lambda: calls.append(proc.rss))
+    yield proc, calls
+    executor._release_memory_threshold_bytes.cache_clear()
+
+
+def _releases(result: str) -> float:
+    return prom.REGISTRY.get_sample_value('sky_apiserver_memory_releases_total',
+                                          {'result': result}) or 0.0
+
+
+def test_release_memory_on_first_request(release_memory_harness):
+    proc, calls = release_memory_harness
+    released_before = _releases('released')
+
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert executor._rss_after_release == 300 * _MB
+    assert _releases('released') - released_before == 1
+
+
+def test_release_memory_skipped_below_threshold(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+    skipped_before = _releases('skipped')
+
+    proc.rss += 31 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB]
+    assert _releases('skipped') - skipped_before == 1
+
+
+def test_release_memory_after_growth_across_requests(release_memory_harness):
+    proc, calls = release_memory_harness
+    executor._maybe_release_memory(proc)
+
+    for _ in range(3):
+        proc.rss += 11 * _MB
+        executor._maybe_release_memory(proc)
+
+    assert calls == [300 * _MB, 333 * _MB]
+
+
+def test_release_memory_measures_growth_from_rss_after_release(
+        release_memory_harness, monkeypatch):
+    proc, calls = release_memory_harness
+
+    def _release():
+        calls.append(proc.rss)
+        proc.rss -= 100 * _MB
+
+    monkeypatch.setattr(executor.common_utils, 'release_memory', _release)
+    proc.rss = 400 * _MB
+    executor._maybe_release_memory(proc)
+    assert executor._rss_after_release == 300 * _MB
+
+    proc.rss = 340 * _MB
+    executor._maybe_release_memory(proc)
+
+    assert calls == [400 * _MB, 340 * _MB]
+
+
+@pytest.mark.parametrize('value', ['0', '-5'])
+def test_release_memory_every_request_without_threshold(release_memory_harness,
+                                                        monkeypatch, value):
+    proc, calls = release_memory_harness
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       value)
+
+    for _ in range(3):
+        executor._maybe_release_memory(proc)
+
+    assert len(calls) == 3
+
+
+def test_release_memory_threshold_from_env(release_memory_harness, monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       '0.5')
+    assert executor._release_memory_threshold_bytes() == 512 * 1024
+
+
+def test_release_memory_invalid_threshold_uses_default(release_memory_harness,
+                                                       monkeypatch):
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_RELEASE_MEMORY_THRESHOLD_MB,
+                       'lots')
+    assert executor._release_memory_threshold_bytes() == (
+        constants.DEFAULT_RELEASE_MEMORY_THRESHOLD_MB * _MB)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_request_cache_when_release_is_skipped(
+        isolated_database, reset_sigterm_gate, monkeypatch):
+    req = requests_lib.Request(request_id='release-skipped',
+                               name='test',
+                               entrypoint=_result_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+    release_memory = mock.Mock()
+    clear_cache = mock.Mock()
+    monkeypatch.setattr(executor.common_utils, 'release_memory', release_memory)
+    monkeypatch.setattr(executor.annotations, 'clear_request_level_cache',
+                        clear_cache)
+    monkeypatch.setattr(executor, '_rss_after_release',
+                        executor.psutil.Process().memory_info().rss)
+    monkeypatch.setattr(executor, '_release_memory_threshold_bytes',
+                        lambda: 1024 * _MB)
+
+    executor._request_execution_wrapper('release-skipped',
+                                        ignore_return_value=False)
+
+    assert mock.call() in clear_cache.mock_calls
+    release_memory.assert_not_called()
+    assert requests_lib.get_request('release-skipped').status == (
+        requests_lib.RequestStatus.SUCCEEDED)
 
 
 def _install_gated_handler_in_worker():
@@ -2058,6 +2202,8 @@ def test_auth_and_request_executors_are_distinct():
         auth_executor = executor.get_auth_thread_executor()
         assert request_executor is not auth_executor
         assert request_executor.name != auth_executor.name
+        assert auth_executor.max_queued > 0
+        assert request_executor.max_queued == 0
         # Each getter still memoizes per process.
         assert executor.get_request_thread_executor() is request_executor
         assert executor.get_auth_thread_executor() is auth_executor

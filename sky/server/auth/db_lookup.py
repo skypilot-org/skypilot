@@ -11,14 +11,16 @@ authenticated endpoint fails for the duration of the DB incident.
 ``call_with_deadline`` puts a total deadline on each lookup, enforced at
 two levels. ``asyncio.wait_for`` bounds the *caller*: it also covers time
 spent queued inside a transaction pooler (no server connection is assigned
-yet) or waiting for a pool checkout, and on timeout the request fails fast
-with a 503 the client retries with backoff. The same deadline is handed to
-the DB layer (`sky.utils.db.deadline`: ``SET LOCAL`` timeouts on the
-transaction) so the *thread* gives up too. Without that, a thread parked in
-the DB driver keeps running until the DB layer releases it, and enough of
-them saturate the auth executor -- every authenticated endpoint then fails
-until the process restarts. The executor still acts as a saturation
-buffer: requests beyond it fail fast with the worker-exhausted 503.
+yet), waiting for a pool checkout, or waiting for a free auth thread, and on
+timeout the request fails fast with a 503 the client retries with backoff.
+The same deadline is handed to the DB layer (`sky.utils.db.deadline`:
+``SET LOCAL`` timeouts on the transaction) so the *thread* gives up too.
+Without that, a thread parked in the DB driver keeps running until the DB
+layer releases it, and enough of them saturate the auth executor -- every
+authenticated endpoint then fails until the process restarts. Lookups beyond
+the auth executor's threads wait in its bounded queue, within the same
+deadline, and are skipped if their caller timed out; once the queue is full
+too, requests fail fast with the worker-exhausted 503.
 
 What the DB layer raises is translated into the same retryable 503: a
 server-side timeout, and a transient driver error (a connection dropped
@@ -229,11 +231,13 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
 
     The same deadline is handed to the DB layer as a thread-local deadline
     (the ``SET LOCAL`` bounds `sky.utils.db.deadline` adds to the
-    transaction), so the executor thread gives up too. Raises
-    ``asyncio.TimeoutError`` (``AuthDBTimeoutError``, with a ``reason``) when
-    the deadline elapses -- whether the database or `wait_for` enforced it --
-    or when the connection dropped under the call, and
-    ``ConcurrentWorkerExhaustedError`` when the executor is saturated.
+    transaction), so the executor thread gives up too. Both start at the
+    submit, so time spent waiting for a free thread counts against them.
+    Raises ``asyncio.TimeoutError`` (``AuthDBTimeoutError``, with a
+    ``reason``) when the deadline elapses -- whether the database or
+    `wait_for` enforced it -- or when the connection dropped under the call,
+    and ``ConcurrentWorkerExhaustedError`` when the executor and its queue
+    are full.
     """
     return await _run_with_deadline(executor.get_auth_thread_executor(),
                                     POOL_AUTH, func, *args)

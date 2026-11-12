@@ -172,6 +172,13 @@ storage_table = sqlalchemy.Table(
     sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
+    # Who created the storage and in which workspace, recorded the same way
+    # as for volumes. Rows written before these columns existed have no
+    # creator and sit in the default workspace.
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
 )
 
 volume_table = sqlalchemy.Table(
@@ -3554,6 +3561,8 @@ def add_or_update_storage(storage_name: str,
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_current_command()
+    user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
 
     def status_check(status):
         return status in status_lib.StorageStatus
@@ -3574,14 +3583,22 @@ def add_or_update_storage(storage_name: str,
             handle=handle,
             last_use=last_use,
             launched_at=storage_launched_at,
-            status=storage_status.value)
+            status=storage_status.value,
+            user_hash=user_hash,
+            workspace=active_workspace)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[storage_table.c.name],
             set_={
                 storage_table.c.handle: handle,
                 storage_table.c.last_use: last_use,
                 storage_table.c.launched_at: storage_launched_at,
-                storage_table.c.status: storage_status.value
+                storage_table.c.status: storage_status.value,
+                # A re-registration keeps the original creator and
+                # workspace: only a row that never had a creator takes the
+                # current user, so authorization cannot be reassigned by
+                # writing the same name again.
+                storage_table.c.user_hash: sqlalchemy.func.coalesce(
+                    storage_table.c.user_hash, user_hash),
             })
         session.execute(do_update_stmt)
         session.commit()
@@ -3666,30 +3683,67 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 
 @metrics_lib.time_me
-def get_storage_names_start_with(starts_with: str) -> List[str]:
+def get_storage_names_start_with(
+        starts_with: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+    """Storage names with the given prefix, optionally in some workspaces.
+
+    ``workspaces_filter`` works as in ``get_storage``: None means every
+    workspace, an empty set matches nothing.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(storage_table).filter(
-            storage_table.c.name.like(f'{starts_with}%')).all()
+        query = session.query(storage_table.c.name).filter(
+            storage_table.c.name.like(f'{starts_with}%'))
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
     return [row.name for row in rows]
 
 
+def _storage_record_from_row(row: Any) -> Dict[str, Any]:
+    # TODO: use namedtuple instead of dict
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'last_use': row.last_use,
+        'status': status_lib.StorageStatus[row.status],
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+    }
+
+
 @metrics_lib.time_me
-def get_storage() -> List[Dict[str, Any]]:
+def get_storage(
+        workspaces_filter: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+    """Gets storage records, optionally limited to some workspaces.
+
+    Args:
+        workspaces_filter: If given, only storage in these workspaces is
+            returned. An empty set therefore returns nothing, while None
+            means the whole table.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        rows = session.query(storage_table).all()
-    records = []
-    for row in rows:
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
-            'status': status_lib.StorageStatus[row.status],
-        })
-    return records
+        query = session.query(storage_table)
+        if workspaces_filter is not None:
+            query = query.filter(
+                storage_table.c.workspace.in_(list(workspaces_filter)))
+        rows = query.all()
+    return [_storage_record_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def get_storage_by_name(storage_name: str) -> Optional[Dict[str, Any]]:
+    """The record for one storage, in the same shape as ``get_storage``."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(storage_table).filter_by(name=storage_name).first()
+    if row is None:
+        return None
+    return _storage_record_from_row(row)
 
 
 @metrics_lib.time_me
