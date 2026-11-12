@@ -979,6 +979,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if (ctx2text is None or context not in ctx2text or
                     'disabled' in ctx2text[context]):
                 continue
+        elif (ctx2text is not None and context not in ctx2text and
+              not isinstance(cloud_type, (sky_clouds.SSH, sky_clouds.Slurm))):
+            # A check limited to some Kubernetes contexts lists only those.
+            continue
         filtered_contexts.append(context)
 
     if not filtered_contexts:

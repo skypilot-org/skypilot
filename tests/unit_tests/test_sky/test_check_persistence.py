@@ -859,3 +859,17 @@ def test_kubernetes_contexts_outside_allowed_checks_nothing(
     assert result['default'] == {
         repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE]
     }
+
+
+def test_kubernetes_details_list_only_checked_contexts(monkeypatch):
+    monkeypatch.setattr(
+        sky_clouds.Kubernetes, 'existing_allowed_contexts',
+        classmethod(lambda cls, silent=False: ['ctx-a', 'ctx-b']))
+
+    # pylint: disable-next=protected-access
+    details = sky_check._format_context_details(sky_clouds.Kubernetes(),
+                                                show_details=True,
+                                                ctx2text={'ctx-b': 'enabled.'})
+
+    assert 'ctx-b: enabled.' in details
+    assert 'ctx-a' not in details
