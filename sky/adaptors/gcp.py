@@ -33,11 +33,13 @@ def _suppress_google_deprecation_warnings() -> None:
                  r'which Google will stop supporting.*'),
     )
     # google.auth (and other Google packages) warn that grpcio < 1.83.0 does
-    # not support Post-Quantum Cryptography.
+    # not support Post-Quantum Cryptography. Scoped to google.* modules so the
+    # same notice from non-Google packages is still shown.
     warnings.filterwarnings(
         'ignore',
         category=FutureWarning,
         message=r'.*does not support Post-Quantum Cryptography.*',
+        module=r'google\.',
     )
 
 

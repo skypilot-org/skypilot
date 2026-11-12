@@ -54,3 +54,10 @@ def test_unrelated_future_warning_not_suppressed():
     shown = _shown_future_warnings('some other deprecation',
                                    'google.api_core.retry')
     assert len(shown) == 1
+
+
+def test_non_google_pqc_future_warning_not_suppressed():
+    shown = _shown_future_warnings(
+        'grpcio < 1.83.0 does not support Post-Quantum Cryptography (PQC).',
+        'some_other_package.transport')
+    assert len(shown) == 1
