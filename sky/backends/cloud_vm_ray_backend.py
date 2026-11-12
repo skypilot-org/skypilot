@@ -1971,10 +1971,18 @@ class RetryingVmProvisioner(object):
                         failover_history=failover_history) from last_error
                 # An INIT cluster should have been terminated by
                 # _retry_zones(), so it can be retried on other resources.
-                logger.info(
-                    ux_utils.retry_message(
-                        f'Retrying provisioning with requested resources: '
-                        f'{task.num_nodes}x {task.resources}'))
+                if isinstance(failover_history[-1],
+                              exceptions.ProvisionUnsupportedError):
+                    # These resources would fail the same way in any zone.
+                    # Drop the INIT cluster's zone that to_provision carries.
+                    _add_to_blocked_resources(self._blocked_resources,
+                                              to_provision.copy(zone=None))
+                    resource_exceptions[to_provision] = failover_history[-1]
+                else:
+                    logger.info(
+                        ux_utils.retry_message(
+                            f'Retrying provisioning with requested resources: '
+                            f'{task.num_nodes}x {task.resources}'))
                 # Retry with the current, potentially "smaller" resources:
                 # to_provision == the current new resources (e.g., V100:1),
                 # which may be "smaller" than the original (V100:8).

@@ -983,7 +983,10 @@ class TestProvisionExistingClusterError:
     """A provisioning error on an existing cluster reaches the user."""
 
     @staticmethod
-    def _provision(prev_status, retry_zones_error=None, features_error=None):
+    def _provision(prev_status,
+                   retry_zones_error=None,
+                   features_error=None,
+                   to_provision=None):
         provisioner = object.__new__(cloud_vm_ray_backend.RetryingVmProvisioner)
         provisioner._dag = MagicMock()  # pylint: disable=protected-access
         provisioner._optimize_target = MagicMock()  # pylint: disable=protected-access
@@ -992,10 +995,11 @@ class TestProvisionExistingClusterError:
         provisioner._is_launched_by_jobs_controller = False  # pylint: disable=protected-access
         provisioner.log_dir = '/tmp'
         provisioner._retry_zones = MagicMock(side_effect=retry_zones_error)  # pylint: disable=protected-access
-        to_provision = MagicMock()
-        setattr(to_provision, 'assert_launchable', lambda: to_provision)
-        to_provision.cloud.check_features_are_supported.side_effect = (
-            features_error)
+        if to_provision is None:
+            to_provision = MagicMock()
+            setattr(to_provision, 'assert_launchable', lambda: to_provision)
+            to_provision.cloud.check_features_are_supported.side_effect = (
+                features_error)
         config = cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
             'c1',
             to_provision,
@@ -1047,3 +1051,29 @@ class TestProvisionExistingClusterError:
                 self._provision(status_lib.ClusterStatus.INIT, **error)
         optimize.assert_called_once()
         assert not e.value.no_failover
+
+    def test_init_cluster_does_not_retry_unservable_resources(
+            self, monkeypatch):
+        """An INIT cluster's request that cannot be served blocks its resources
+        in every zone, so the requested resources are not provisioned again."""
+        monkeypatch.setattr(clouds.Slurm, 'get_active_user_identity',
+                            classmethod(lambda cls: None))
+        launched = resources.Resources(cloud=clouds.Slurm(),
+                                       instance_type='2CPU--2GB',
+                                       region='c1',
+                                       zone='p1')
+        requested = resources.Resources(cloud=clouds.Slurm(),
+                                        instance_type='2CPU--2GB',
+                                        region='c1')
+        with patch.object(cloud_vm_ray_backend.optimizer.Optimizer,
+                          'optimize',
+                          side_effect=exceptions.ResourcesUnavailableError(
+                              'nothing left')) as optimize:
+            with pytest.raises(exceptions.ResourcesUnavailableError):
+                self._provision(
+                    status_lib.ClusterStatus.INIT,
+                    retry_zones_error=exceptions.ProvisionUnsupportedError(
+                        'Exec format error'),
+                    to_provision=launched)
+        blocked = optimize.call_args.kwargs['blocked_resources']
+        assert any(requested.should_be_blocked_by(b) for b in blocked)
