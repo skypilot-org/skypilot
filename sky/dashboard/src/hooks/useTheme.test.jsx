@@ -45,8 +45,16 @@ describe('resolveTheme', () => {
 });
 
 describe('ThemeProvider', () => {
-  test('defaults to system and follows prefers-color-scheme live', () => {
+  test('defaults to light, even on a dark system', () => {
     systemDark = true;
+    renderWithToggle();
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  test('system follows prefers-color-scheme live once chosen', () => {
+    systemDark = true;
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'system');
     renderWithToggle();
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(document.documentElement.dataset.theme).toBe('dark');
@@ -87,7 +95,7 @@ describe('ThemeProvider', () => {
         <Probe />
       </ThemeProvider>
     );
-    expect(screen.getByText('system')).toBeInTheDocument();
+    expect(screen.getByText('light')).toBeInTheDocument();
   });
 });
 
@@ -104,7 +112,7 @@ describe('ThemeMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }));
     expect(
-      screen.getByRole('menuitemradio', { name: 'System' })
+      screen.getByRole('menuitemradio', { name: 'Light' })
     ).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
@@ -135,8 +143,15 @@ describe('NO_FLASH_SCRIPT', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  test('follows the system when nothing is stored', () => {
+  test('stays light when nothing is stored, even on a dark system', () => {
     systemDark = true;
+    run();
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  test('follows the system when System is stored', () => {
+    systemDark = true;
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'system');
     run();
     expect(document.documentElement.classList.contains('dark')).toBe(true);
   });
