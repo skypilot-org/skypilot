@@ -108,13 +108,13 @@ def _build_check_results(
 
 
 def _check_kubernetes_contexts(
-    contexts: Set[str], cached: Dict[str, Dict[str, Any]]
-) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        contexts: Set[str],
+        workspace: str) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
     """Checks the allowed Kubernetes contexts in `contexts`.
 
-    Allowed contexts with no entry in `cached` are checked too. Kubernetes is
-    usable if any checked context is, or any other allowed context is cached
-    as enabled.
+    Allowed contexts with no cached result in `workspace` are checked too.
+    Kubernetes is usable if any checked context is, or any other allowed
+    context is cached as enabled.
     """
     try:
         allowed = sky_clouds.Kubernetes.existing_allowed_contexts()
@@ -123,13 +123,16 @@ def _check_kubernetes_contexts(
     if not allowed:
         # The full check reports why no context can be checked.
         return sky_clouds.Kubernetes.check_contexts_compute_credentials(None)
+    cached = global_user_state.get_cached_check_results(workspace).get(
+        _KUBERNETES_REPR, {})
     to_check = [c for c in allowed if c in contexts or c not in cached]
     ok, reason = sky_clouds.Kubernetes.check_contexts_compute_credentials(
         to_check)
     if not isinstance(reason, dict):
         return ok, reason
-    kept = [c for c in allowed if c not in to_check]
-    return ok or any(cached[c].get('enabled') for c in kept), reason
+    return ok or any(cached[c].get('enabled')
+                     for c in allowed
+                     if c not in contexts and c in cached), reason
 
 
 def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
@@ -265,7 +268,7 @@ def check_capabilities(
                             cloud_tuple[0] == _KUBERNETES_REPR and
                             capability == sky_cloud.CloudCapability.COMPUTE):
                         ok, reason = _check_kubernetes_contexts(
-                            contexts_to_check, cached_kubernetes)
+                            contexts_to_check, current_workspace_name)
                     else:
                         ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
@@ -370,10 +373,6 @@ def check_capabilities(
                     combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
-        cached_kubernetes: Dict[str, Dict[str, Any]] = {}
-        if contexts_to_check is not None:
-            cached_kubernetes = global_user_state.get_cached_check_results(
-                current_workspace_name).get(_KUBERNETES_REPR, {})
 
         workspace_str = (
             ' for workspace: '
@@ -975,6 +974,9 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     else:
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if ctx2text is not None:
+            # A check limited to some contexts lists only those.
+            contexts = [c for c in contexts if c in ctx2text]
 
     filtered_contexts = []
     for context in contexts:
@@ -983,10 +985,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if (ctx2text is None or context not in ctx2text or
                     'disabled' in ctx2text[context]):
                 continue
-        elif (ctx2text is not None and context not in ctx2text and
-              not isinstance(cloud_type, (sky_clouds.SSH, sky_clouds.Slurm))):
-            # A check limited to some Kubernetes contexts lists only those.
-            continue
         filtered_contexts.append(context)
 
     if not filtered_contexts:

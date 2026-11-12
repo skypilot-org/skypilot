@@ -774,7 +774,7 @@ def _cache_kubernetes(leaves):
     )
 
 
-def _check_kubernetes_contexts(contexts):
+def _run_limited_check(contexts):
     return sky_check.check_capabilities(quiet=True,
                                         clouds=('kubernetes',),
                                         capabilities=[CloudCapability.COMPUTE],
@@ -794,7 +794,7 @@ def test_kubernetes_contexts_checks_given_and_uncached_contexts(
         allowed=['ctx-a', 'ctx-b', 'ctx-c', 'ctx-new'],
         usable={'ctx-c', 'ctx-new'})
 
-    _check_kubernetes_contexts(['ctx-new', 'ctx-not-allowed'])
+    _run_limited_check(['ctx-new', 'ctx-not-allowed'])
 
     assert sorted(probed) == ['ctx-c', 'ctx-new']
     leaves = global_user_state.get_cached_check_results('default')[repr(
@@ -818,7 +818,7 @@ def test_kubernetes_contexts_cached_enabled_context_keeps_kubernetes_enabled(
                                   allowed=['ctx-a', 'ctx-new'],
                                   usable=set())
 
-    result = _check_kubernetes_contexts(['ctx-new'])
+    result = _run_limited_check(['ctx-new'])
 
     assert probed == ['ctx-new']
     assert result['default'] == {
@@ -837,7 +837,7 @@ def test_kubernetes_contexts_no_enabled_context_disables_kubernetes(
                                   allowed=['ctx-a', 'ctx-new'],
                                   usable=set())
 
-    result = _check_kubernetes_contexts(['ctx-new'])
+    result = _run_limited_check(['ctx-new'])
 
     assert probed == ['ctx-new']
     assert result['default'] == {}
@@ -853,7 +853,7 @@ def test_kubernetes_contexts_outside_allowed_checks_nothing(
                                   allowed=['ctx-a'],
                                   usable={'ctx-a'})
 
-    result = _check_kubernetes_contexts(['ctx-not-allowed'])
+    result = _run_limited_check(['ctx-not-allowed'])
 
     assert not probed
     assert result['default'] == {
