@@ -1,11 +1,16 @@
 """Unit tests for sky.jobs.scheduler controller process management."""
 import signal
+import subprocess
+import sys
+import time
 from unittest import mock
 
+import psutil
 import pytest
 
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.utils import subprocess_utils
 
 
 def _record(pid: int, started_at: float = 0.0):
@@ -111,6 +116,136 @@ class TestKillLocalConsolidationControllers:
                 mock.patch.object(scheduler.os, 'kill') as kill_mock:
             scheduler.kill_local_job_controllers(sig=signal.SIGKILL)
         kill_mock.assert_called_once_with(101, signal.SIGKILL)
+
+
+def _gone(pid: int) -> bool:
+    """Whether a process has exited, collected by its parent or not."""
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
+class TestStopLocalJobControllers:
+    """An API server that is shutting down stops its draining controllers."""
+
+    @pytest.fixture
+    def pool(self, monkeypatch, tmp_path):
+        """A pool of one live controller process with a child, in tmp_path.
+
+        As in a container whose init does not collect orphans, the controller
+        is not this process's child and stays a zombie once it is killed.
+        """
+        draining = tmp_path / 'job_controllers_draining'
+        signals = tmp_path / 'signals'
+        signals.mkdir()
+        monkeypatch.setattr(scheduler.managed_job_constants,
+                            'CONTROLLERS_DRAINING_PATH', str(draining))
+        monkeypatch.setattr(scheduler.managed_job_constants,
+                            'CONSOLIDATED_SIGNAL_PATH', str(signals))
+        monkeypatch.setattr(scheduler, 'JOB_CONTROLLER_PID_PATH',
+                            str(tmp_path / 'job_controller_pid'))
+        pids = tmp_path / 'pids'
+        idle = 'import time; time.sleep(600)'
+        controller_program = (
+            'import os, pathlib, subprocess, sys\n'
+            f'child = subprocess.Popen([sys.executable, "-c", {idle!r}])\n'
+            f'pathlib.Path({str(pids)!r}).write_text('
+            'f"{os.getpid()} {child.pid}")\n'
+            f'{idle}')
+        parent = subprocess.Popen([
+            sys.executable, '-c', 'import subprocess, sys\n'
+            'subprocess.Popen([sys.executable, "-c", '
+            f'{controller_program!r}])\n'
+            f'{idle}'
+        ])
+        try:
+            deadline = time.time() + 30
+            while not pids.exists() or len(pids.read_text().split()) < 2:
+                assert time.time() < deadline
+                time.sleep(0.05)
+            controller_pid, child_pid = (
+                int(pid) for pid in pids.read_text().split())
+            scheduler._append_controller_pid_record(  # pylint: disable=protected-access
+                controller_pid,
+                psutil.Process(controller_pid).create_time())
+            yield controller_pid, child_pid, draining, signals
+        finally:
+            subprocess_utils.kill_children_processes(parent_pids=[parent.pid],
+                                                     force=True)
+            parent.wait()
+
+    def test_stops_a_draining_pool(self, pool):
+        controller_pid, child_pid, draining, _ = pool
+        draining.touch()
+
+        scheduler.stop_local_job_controllers(30)
+
+        assert _gone(controller_pid)
+        assert _gone(child_pid)
+
+    def test_stops_nothing_unless_draining(self, pool):
+        """A worker that the supervisor restarts runs the same shutdown."""
+        controller_pid, _, _, _ = pool
+
+        scheduler.stop_local_job_controllers(30)
+
+        assert not _gone(controller_pid)
+
+    def test_waits_until_a_cancel_is_recorded(self, pool):
+        """An acknowledged cancel that is only in this host's signal file, or
+        only in its controller's memory, would be lost with the controller."""
+        controller_pid, _, draining, signals = pool
+        draining.touch()
+        signal_file = signals / '7'
+        signal_file.touch()
+        (signals / '7.lock').touch()
+        statuses = iter([
+            managed_job_state.ManagedJobStatus.RUNNING,
+            managed_job_state.ManagedJobStatus.RUNNING,
+            managed_job_state.ManagedJobStatus.CANCELLING,
+        ])
+
+        def get_status(job_id):
+            assert job_id == 7
+            assert not _gone(controller_pid)
+            # The controller takes the signal before it records the cancel.
+            signal_file.unlink(missing_ok=True)
+            return next(statuses)
+
+        with mock.patch.object(scheduler.state, 'get_status',
+                               side_effect=get_status), \
+                mock.patch.object(scheduler.time, 'sleep'):
+            scheduler.stop_local_job_controllers(30)
+
+        assert next(statuses, None) is None
+        assert _gone(controller_pid)
+
+    def test_stops_a_pool_that_does_not_record_a_cancel_in_time(self, pool):
+        controller_pid, _, draining, signals = pool
+        draining.touch()
+        (signals / '7').touch()
+
+        with mock.patch.object(
+                scheduler.state,
+                'get_status',
+                return_value=managed_job_state.ManagedJobStatus.RUNNING):
+            scheduler.stop_local_job_controllers(-1)
+
+        assert _gone(controller_pid)
+
+    @pytest.mark.parametrize('target,attribute,replacement', [
+        (scheduler, 'get_controller_process_records', lambda: None),
+        (subprocess_utils, 'kill_children_processes', lambda **_: None),
+    ])
+    def test_raises_when_a_controller_may_still_run(self, pool, target,
+                                                    attribute, replacement):
+        _, _, draining, _ = pool
+        draining.touch()
+
+        with mock.patch.object(target, attribute, replacement), \
+                pytest.raises(RuntimeError):
+            scheduler.stop_local_job_controllers(30)
 
 
 def _start_calls(alive: int, wanted: int, still_owned=None, calls=None):

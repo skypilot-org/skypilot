@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from types import FrameType
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import filelock
 import uvicorn
@@ -21,6 +21,8 @@ from uvicorn.supervisors import multiprocess
 
 from sky import exceptions
 from sky import sky_logging
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler as managed_job_scheduler
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
@@ -44,8 +46,14 @@ _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 # Interval to check for on-going requests.
 _WAIT_REQUESTS_INTERVAL_SECONDS = 5
 
+# Kept of the grace period for the exit that follows the wait for on-going
+# requests, since the process is killed when the grace period ends. A server
+# with 30 workers and 24 job controllers took 15 s to exit (2026-11).
+_EXIT_RESERVE_SECONDS = 30
+
 # Timeout for waiting for on-going requests to finish.
-_WAIT_REQUESTS_TIMEOUT_SECONDS = server_constants.GRACE_PERIOD_SECONDS
+_WAIT_REQUESTS_TIMEOUT_SECONDS = server_constants.GRACE_PERIOD_SECONDS - min(
+    _EXIT_RESERVE_SECONDS, server_constants.GRACE_PERIOD_SECONDS // 2)
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
@@ -156,6 +164,10 @@ class Server(uvicorn.Server):
         super().__init__(config=config)
         self.exiting: bool = False
         self.max_db_connections = max_db_connections
+        # True when this server runs in the API server's main process (a single
+        # worker), the process that runs the host's job controller pool. Worker
+        # processes also exit when the supervisor restarts them.
+        self.is_main_process: bool = False
 
     def handle_exit(self, sig: int, frame: Union[FrameType, None]) -> None:
         """Handle exit signal.
@@ -173,6 +185,8 @@ class Server(uvicorn.Server):
             return
         if not self.exiting:
             self.exiting = True
+            if self.is_main_process:
+                _drain_job_controllers()
             # Perform graceful shutdown in a separate thread to avoid blocking
             # the main thread.
             threading.Thread(target=self._graceful_shutdown,
@@ -192,6 +206,7 @@ class Server(uvicorn.Server):
         forever. The try/finally below guarantees the process still exits and
         gets restarted, clearing the block.
         """
+        wait_deadline = time.time() + _WAIT_REQUESTS_TIMEOUT_SECONDS
         try:
             time.sleep(_GRACE_WAIT_SECONDS)
             # Block new requests so that we can wait until all on-going
@@ -215,6 +230,7 @@ class Server(uvicorn.Server):
                     logger.info(
                         f'Worker {os.getpid()} elected as shutdown coordinator')
                     self._wait_requests()
+                    self._stop_job_controllers(wait_deadline)
             except filelock.Timeout:
                 logger.warning(
                     f'Worker {os.getpid()} timed out waiting for the shutdown '
@@ -239,6 +255,11 @@ class Server(uvicorn.Server):
             try:
                 requests = (request_storage.get_request_backend().
                             get_shutdown_active_requests())
+                stopped_later = _draining_controller_launches(requests)
+                requests = [
+                    request for request in requests
+                    if request[0] not in stopped_later
+                ]
             except Exception:  # pylint: disable=broad-except
                 logger.exception(
                     'Failed to query on-going requests during shutdown; '
@@ -282,6 +303,20 @@ class Server(uvicorn.Server):
             # shutdown process.
             if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
+
+    def _stop_job_controllers(self, wait_deadline: float) -> None:
+        """Stop this host's draining job controllers, then their launches.
+
+        In this order: a live controller reads an interrupted launch as a
+        failed one.
+        """
+        # A cancel gets what is left of the time requests get to finish.
+        managed_job_scheduler.stop_local_job_controllers(
+            cancel_record_timeout_seconds=max(0.0, wait_deadline - time.time()))
+        requests = (request_storage.get_request_backend().
+                    get_shutdown_active_requests())
+        for request_id in _draining_controller_launches(requests):
+            self.interrupt_request_for_retry(request_id, should_retry=False)
 
     def interrupt_request_for_retry(self,
                                     request_id: str,
@@ -417,6 +452,7 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=sockets).run()
         else:
+            server.is_main_process = True
             server.run()
     finally:
         # Copied from unvicorn.run()
@@ -465,7 +501,43 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
                                               should_exit=self.should_exit)
 
     def terminate_all(self) -> None:
-        """Wait init thread to finish before terminating all processes."""
+        """Wait init thread to finish before terminating all processes.
+
+        Only called when the API server exits; restarts terminate one by one.
+        """
+        _drain_job_controllers()
         if self._init_thread is not None:
             self._init_thread.join()
         super().terminate_all()
+
+
+def _drain_job_controllers() -> None:
+    """Stop the job controllers of an exiting API server from claiming jobs."""
+    try:
+        managed_job_scheduler.drain_local_job_controllers()
+    except OSError:
+        # The server must still exit; its controllers then keep claiming
+        # until they are stopped, as before draining existed.
+        logger.exception('Failed to drain the job controllers')
+
+
+def _draining_controller_launches(requests: List[Tuple[str, str]]) -> List[str]:
+    """The ids, among requests, of launches by this host's draining controllers.
+
+    A shutdown does not wait for them: they end only with the controllers,
+    which it stops once its other requests have finished.
+    """
+    launch_ids = [
+        request_id for request_id, name in requests if name == 'sky.launch'
+    ]
+    if not launch_ids or not os.path.exists(
+            managed_job_constants.CONTROLLERS_DRAINING_PATH):
+        return []
+    launches = requests_lib.get_request_tasks(
+        requests_lib.RequestTaskFilter(request_ids=launch_ids,
+                                       fields=['request_id', 'request_body']))
+    return [
+        launch.request_id
+        for launch in launches
+        if launch.request_body.is_launched_by_jobs_controller
+    ]

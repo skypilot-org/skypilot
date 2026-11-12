@@ -4800,6 +4800,37 @@ class TestJobCostUnits:
         assert job_costs == {1: 5}
 
 
+class TestDrainingControllerClaimsNoJobs:
+    """A controller whose API server is shutting down claims no new jobs, so
+    the next server's controllers take them."""
+
+    class _StopLoop(Exception):
+        pass
+
+    @pytest.mark.asyncio
+    async def test_draining_controller_claims_no_jobs(self, tmp_path):
+        draining = tmp_path / 'job_controllers_draining'
+        draining.touch()
+        manager = ControllerManager('test-uuid')
+        # A claim or a sleep ends the loop; the draining one only sleeps.
+        claim = AsyncMock(side_effect=self._StopLoop())
+        sleep = AsyncMock(side_effect=self._StopLoop())
+        with patch.object(jobs_constants, 'CONTROLLERS_DRAINING_PATH',
+                          str(draining)), \
+             patch.object(controller_module.controller_utils,
+                          'get_number_of_jobs_controllers',
+                          return_value=1), \
+             patch.object(controller_module.metrics_lib,
+                          'METRICS_ENABLED', False), \
+             patch.object(managed_job_state, 'get_waiting_job_async',
+                          new=claim), \
+             patch.object(controller_module.asyncio, 'sleep', new=sleep):
+            with pytest.raises(self._StopLoop):
+                await manager.monitor_loop()
+        claim.assert_not_awaited()
+        sleep.assert_awaited_once_with(10)
+
+
 class TestClaimedJobCostUnits:
     """A job claimed with its cluster already up counts at that cluster's cost
     from the claim on; any other job counts in full."""

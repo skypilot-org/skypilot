@@ -42,6 +42,15 @@ def exit_after_mock(monkeypatch):
     return exit_after
 
 
+@pytest.fixture(autouse=True)
+def draining(monkeypatch, tmp_path):
+    """Keep the controllers' drain mark out of the real ~/.sky."""
+    path = tmp_path / 'job_controllers_draining'
+    monkeypatch.setattr(mjrt.managed_job_constants, 'CONTROLLERS_DRAINING_PATH',
+                        str(path))
+    return path
+
+
 class TestLockStillHeld:
     """`_lock_still_held` dispatches on lock type."""
 
@@ -156,6 +165,25 @@ class TestSuicideOnLockLoss:
         # otherwise a fresh submit_jobs slipped in just before the
         # kill could still spawn a controller.
         assert order == ['kill', 'sigterm']
+
+    def test_drains_local_controllers_before_killing_them(
+            self, monkeypatch, draining):
+        """A controller that outlives its kill signal claims no new jobs."""
+        monkeypatch.setattr(mjrt.managed_job_scheduler,
+                            'runs_local_controller_pool', lambda: True)
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+        drained_at_kill = []
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=lambda: drained_at_kill.append(draining.exists())), \
+                mock.patch.object(mjrt.os, 'kill'), \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_lock_loss()
+        assert drained_at_kill == [True]
 
     def test_signal_file_touch_failure_does_not_block_sigterm(
             self, monkeypatch):
@@ -618,3 +646,13 @@ class TestStart:
                     return_value=True):
             mjrt.start_managed_job_refresh_daemon()
         start_mock.assert_not_called()
+
+    def test_start_clears_a_previous_servers_drain_mark(self, draining):
+        """A restarted container keeps ~/.sky; the new pool must claim jobs."""
+        draining.touch()
+        with mock.patch.object(mjrt.ManagedJobRefreshDaemonThread, 'start'), \
+                mock.patch(
+                    'sky.jobs.utils.is_consolidation_mode',
+                    return_value=True):
+            mjrt.start_managed_job_refresh_daemon()
+        assert not draining.exists()

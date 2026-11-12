@@ -232,6 +232,95 @@ def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
     return signaled
 
 
+def runs_local_controller_pool() -> bool:
+    """Whether this API server runs this host's job controller pool.
+
+    Only a consolidation-mode API server does. A local API server started by a
+    jobs controller (the local server of a standalone controller cluster, via
+    sdk.api_start) inherits OVERRIDE_CONSOLIDATION_MODE, so
+    is_consolidation_mode() is true there too, but skylet owns that pool:
+    controllers this server started would inherit IS_SKYPILOT_SERVER and never
+    restart it if it died. start_controller() exports the variable only in the
+    controller's command, never in the consolidation-mode API server's own
+    environment.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        return False
+    return managed_job_utils.is_consolidation_mode()
+
+
+def drain_local_job_controllers() -> None:
+    """Stop this host's job controllers from claiming new jobs.
+
+    For an API server that starts shutting down; see
+    managed_job_constants.CONTROLLERS_DRAINING_PATH.
+    """
+    if runs_local_controller_pool():
+        pathlib.Path(managed_job_constants.CONTROLLERS_DRAINING_PATH).touch()
+
+
+def stop_local_job_controllers(cancel_record_timeout_seconds: float) -> None:
+    """Stop this host's job controllers, once they are draining.
+
+    For an API server that is shutting down and has finished its other
+    requests: its controllers' launches, and the log streams the controllers
+    follow them on, end only with the controllers.
+
+    Args:
+        cancel_record_timeout_seconds: how long the controllers get to record
+            the cancels that were acknowledged before they are stopped.
+
+    Raises:
+        RuntimeError: a controller may still be running.
+    """
+    if not os.path.exists(managed_job_constants.CONTROLLERS_DRAINING_PATH):
+        return
+    records = get_controller_process_records()
+    if records is None:
+        raise RuntimeError('Cannot read the job controller PID file')
+    controllers = [
+        record for record in records
+        if managed_job_utils.controller_process_alive(record)
+    ]
+    if not controllers:
+        return
+
+    # A cancel request has returned once its signal file is written, but the
+    # file is lost with this host: only the CANCELLING status the job's
+    # controller then writes reaches the next API server.
+    signal_dir = pathlib.Path(managed_job_constants.CONSOLIDATED_SIGNAL_PATH)
+    unrecorded_cancels: Set[int] = set()
+    deadline = time.time() + cancel_record_timeout_seconds
+    while True:
+        unrecorded_cancels.update(
+            int(path.name)
+            for path in signal_dir.glob('*')
+            if path.name.isdigit())
+        for job_id in list(unrecorded_cancels):
+            status = state.get_status(job_id)
+            if (status is None or status.is_terminal() or
+                    status == state.ManagedJobStatus.CANCELLING):
+                unrecorded_cancels.remove(job_id)
+        if not unrecorded_cancels:
+            break
+        if time.time() > deadline:
+            logger.error('Stopping the job controllers before they recorded '
+                         f'the cancel of jobs {sorted(unrecorded_cancels)}')
+            break
+        time.sleep(1)
+
+    subprocess_utils.kill_children_processes(
+        parent_pids=[record.pid for record in controllers], force=True)
+    survivors = [
+        record.pid
+        for record in controllers
+        if managed_job_utils.controller_process_alive(record)
+    ]
+    if survivors:
+        raise RuntimeError(f'Job controllers {survivors} are still running')
+    logger.info(f'Stopped {len(controllers)} job controller(s)')
+
+
 def maybe_start_controllers(
         from_scheduler: bool = False,
         still_owned: Optional[Callable[[], bool]] = None) -> None:

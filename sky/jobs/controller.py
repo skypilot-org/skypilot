@@ -4809,6 +4809,13 @@ class ControllerManager:
                 await asyncio.sleep(60)
                 continue
 
+            # A claim already past this check when the mark appears still lands;
+            # the next server adopts that job, as it did every job before this.
+            if os.path.exists(jobs_constants.CONTROLLERS_DRAINING_PATH):
+                logger.info('API server is shutting down; not claiming jobs')
+                await asyncio.sleep(10)
+                continue
+
             # Check if there are any jobs that are waiting to launch
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
