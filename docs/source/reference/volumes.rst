@@ -100,7 +100,8 @@ A volume belongs to the :ref:`workspace <workspaces>` that was active when it wa
 
    These checks apply to volumes referenced by name. They do not isolate the
    underlying storage: a task that mounts a PVC directly through
-   ``kubernetes.pod_config``, a ``hostPath`` volume, or direct access to the
+   ``kubernetes.pod_config``, a task YAML that carries already-resolved
+   ``volume_mounts``, a ``hostPath`` volume, or direct access to the
    Kubernetes cluster is not checked. To isolate workspaces' storage, give each
    workspace its own Kubernetes namespace.
 
