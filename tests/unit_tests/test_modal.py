@@ -1619,8 +1619,11 @@ def test_modal_volume_usedby_reads_cluster_yaml_by_path(monkeypatch):
     assert modal_volume.get_volume_usedby(config) == ([], ['modal-a'])
 
 
-def test_modal_cloud_bucket_mount_specs():
+def test_modal_cloud_bucket_mount_specs(monkeypatch):
     # pylint: disable=protected-access
+    # The S3 credential check has its own test; CI has no AWS credentials.
+    monkeypatch.setattr(modal_utils, '_check_bucket_mount_credentials',
+                        lambda store_type: None)
 
     class FakeStorage:
         """Fake SkyPilot Storage."""
@@ -1697,12 +1700,17 @@ def test_modal_cloud_bucket_mount_uses_a_store_modal_can_mount(monkeypatch):
         modal_utils.get_cloud_bucket_mount_specs({'/data': FakeStorage()})
 
 
-@pytest.mark.parametrize('remote_identity,credentials,reason', [
-    ('LOCAL_CREDENTIALS', object(), None),
-    ('NO_UPLOAD', object(), 'must not be copied to a cluster'),
-    ('SERVICE_ACCOUNT', object(), 'must not be copied to a cluster'),
-    ('LOCAL_CREDENTIALS', None, 'no AWS credentials were found'),
-])
+@pytest.mark.parametrize(
+    'remote_identity,credentials,reason',
+    [
+        ('LOCAL_CREDENTIALS', object(), None),
+        ('NO_UPLOAD', object(), 'must not be copied to a cluster'),
+        ('SERVICE_ACCOUNT', object(), 'must not be copied to a cluster'),
+        ('LOCAL_CREDENTIALS', None, 'no AWS credentials were found'),
+        # botocore raises for some setups instead of returning None.
+        ('LOCAL_CREDENTIALS', RuntimeError('Unable to locate credentials'),
+         'no AWS credentials were found'),
+    ])
 def test_modal_s3_mount_respects_aws_remote_identity(monkeypatch,
                                                      remote_identity,
                                                      credentials, reason):
@@ -1710,9 +1718,15 @@ def test_modal_s3_mount_respects_aws_remote_identity(monkeypatch,
     monkeypatch.setattr(
         modal_utils.skypilot_config, 'get_effective_region_config',
         lambda cloud, region, keys, default_value: remote_identity)
+
+    def get_credentials():
+        if isinstance(credentials, Exception):
+            raise credentials
+        return credentials
+
     monkeypatch.setattr(
         modal_utils.aws, 'session',
-        lambda: SimpleNamespace(get_credentials=lambda: credentials))
+        lambda: SimpleNamespace(get_credentials=get_credentials))
 
     # pylint: disable=protected-access
     if reason is None:

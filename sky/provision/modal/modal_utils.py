@@ -77,7 +77,7 @@ def _check_bucket_mount_credentials(store_type: str) -> None:
         if remote_identity != local_credentials:
             reason = ('`aws.remote_identity` is not LOCAL_CREDENTIALS, so the '
                       'AWS credentials must not be copied to a cluster.')
-        elif aws.session().get_credentials() is None:
+        elif not _has_aws_credentials():
             reason = 'no AWS credentials were found.'
     elif store_type == 'GCS':
         if not (os.environ.get(_GCS_HMAC_ACCESS_KEY_ENV_VAR) and
@@ -89,6 +89,16 @@ def _check_bucket_mount_credentials(store_type: str) -> None:
     if reason is not None:
         raise exceptions.ResourcesUnavailableError(
             f'Cannot mount a {store_type} bucket on Modal: {reason}')
+
+
+def _has_aws_credentials() -> bool:
+    try:
+        return aws.session().get_credentials() is not None
+    except Exception as e:  # pylint: disable=broad-except
+        # botocore raises, rather than returning None, for some setups, e.g.
+        # an expired SSO login.
+        logger.debug(f'Failed to get AWS credentials: {e}')
+        return False
 
 
 def _get_s3_secret(region: Optional[str]):
