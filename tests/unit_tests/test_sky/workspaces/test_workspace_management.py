@@ -694,8 +694,7 @@ class TestWorkspaceManagement(unittest.TestCase):
             str(cm.exception),
             "Cannot change workspace 'test-workspace' to private because "
             'users not in allowed_users have 1 active cluster(s): c1. Please '
-            'add those users to allowed_users, or terminate these resources '
-            'first.')
+            'terminate these resources first.')
 
     @mock.patch(
         'sky.utils.resource_checker.check_users_workspaces_active_resources')

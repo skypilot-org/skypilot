@@ -591,20 +591,21 @@ def _validate_workspace_config_changes(
                     if len(missed_users_names) == 1:
                         reason = (f'the user {users} is not in allowed_users '
                                   'but has')
-                        who = 'the user'
+                        advice = ('add the user to allowed_users, or '
+                                  'terminate these resources first')
                     elif missed_users_names:
                         reason = (f'the users {users} are not in '
                                   'allowed_users but have')
-                        who = 'the users'
+                        advice = ('add the users to allowed_users, or '
+                                  'terminate these resources first')
                     else:
-                        # The owners are no longer in the user table.
+                        # The owners are gone from the user table, so they
+                        # cannot be added to allowed_users.
                         reason = 'users not in allowed_users have'
-                        who = 'those users'
+                        advice = 'terminate these resources first'
                     raise ValueError(
                         f'Cannot change workspace {ws_name!r} to private '
-                        f'because {reason} {error_summary}. Please add {who} '
-                        'to allowed_users, or terminate these resources '
-                        'first.')
+                        f'because {reason} {error_summary}. Please {advice}.')
         else:
             # Private setting didn't change, but allowed_users changed
             if (config_comparison.allowed_users_changed and
@@ -624,8 +625,7 @@ def _validate_workspace_config_changes(
                         target = f'user {_quote_users(error_user_names)}'
                         who, has = 'the user', 'has'
                     else:
-                        target = (
-                            f'users {_quote_users(error_user_names)}'.rstrip())
+                        target = f'users {_quote_users(error_user_names)}'
                         who, has = 'the users', 'have'
                     raise ValueError(
                         f'Cannot remove {target} from workspace {ws_name!r} '
