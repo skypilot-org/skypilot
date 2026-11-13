@@ -1050,7 +1050,8 @@ class RetryingVmProvisioner(object):
                                      cluster_name=cluster_name))
 
         # Opt-in dedicated thin head: num_nodes is worker count; launch +1 pod.
-        if to_provision.has_separate_head():
+        # ``is True`` avoids MagicMock auto-attrs looking like a thin head.
+        if to_provision.has_separate_head() is True:
             if not isinstance(to_provision.cloud, clouds.Kubernetes):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
