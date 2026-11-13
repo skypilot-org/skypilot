@@ -46,6 +46,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       min_elapsed_seconds: 60
       min_retries: 5
     :ref:`max_launching_jobs_per_user <config-yaml-jobs-max-launching-jobs-per-user>`: 200
+    :ref:`allow_event_callback <config-yaml-jobs-allow-event-callback>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -540,6 +541,28 @@ Example:
 
   jobs:
     max_launching_jobs_per_user: 200
+
+.. _config-yaml-jobs-allow-event-callback:
+
+``jobs.allow_event_callback``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Allow managed jobs to set the deprecated ``event_callback`` field (optional).
+
+``event_callback`` is a shell script that the jobs controller runs whenever a managed job changes status. It is deprecated and will be removed in a future release. It is disabled by default: ``sky jobs launch`` rejects a job that sets it. When the jobs controller runs in the API server (:ref:`consolidation mode <jobs-consolidation-mode>`), jobs that were submitted before it was disabled skip their callbacks.
+
+Set this to ``true`` in the API server's config to keep using ``event_callback``. It cannot be set from a client's config.
+
+Unless locked down with an :ref:`admin policy <advanced-policy-config>`, this can allow users to run code on the API server pod.
+
+Default: ``false``. Changes require an API server restart to take effect.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    allow_event_callback: true
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:

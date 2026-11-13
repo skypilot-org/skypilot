@@ -3362,6 +3362,12 @@ def get_config_schema():
                         'type': 'integer',
                         'minimum': 1,
                     },
+                    # Opt-in for the deprecated managed-job `event_callback`
+                    # (off by default); see
+                    # sky.jobs.utils.event_callbacks_allowed.
+                    'allow_event_callback': {
+                        'type': 'boolean',
+                    },
                     **_extra_jobs_properties,
                 },),
             'serve': _get_controller_schema(),
