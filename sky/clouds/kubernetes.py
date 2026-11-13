@@ -1230,14 +1230,15 @@ class Kubernetes(clouds.Cloud):
             'object-store-memory': 500000000,
             'num-cpus': worker_ray_num_cpus,
         }
-        if resources.has_separate_head():
+        # Use ``is True`` so MagicMock resources in unit tests (auto-attrs)
+        # do not look like a dedicated thin head.
+        if resources.has_separate_head() is True:
             head_custom_ray_options = {
                 'object-store-memory': 500000000,
                 'num-cpus': kubernetes_constants.THIN_HEAD_RAY_NUM_CPUS,
             }
         else:
             head_custom_ray_options = dict(worker_custom_ray_options)
-        custom_ray_options = head_custom_ray_options
 
         # Get the storage class name for high availability controller's PVC
         k8s_ha_storage_class_name = (
@@ -1521,9 +1522,10 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'head_cpus': (str(float(str(resources.head_node_cpus).rstrip('+')))
-                          if resources.has_separate_head() else None),
-            'head_memory': (str(float(str(resources.head_node_memory).rstrip('+')))
-                            if resources.has_separate_head() else None),
+                          if resources.has_separate_head() is True else None),
+            'head_memory':
+                (str(float(str(resources.head_node_memory).rstrip('+')))
+                 if resources.has_separate_head() is True else None),
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
@@ -1655,9 +1657,9 @@ class Kubernetes(clouds.Cloud):
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
                     disk_size * mul, 3)
 
-        # Thin head: always emit limits (default request==limit) so packing can
-        # size the head independently of workers even when worker limits are off.
-        if resources.has_separate_head():
+        # Thin head: always emit limits (request==limit by default) so packing
+        # can size the head even when worker limits are off.
+        if resources.has_separate_head() is True:
             h_cpu = float(str(resources.head_node_cpus).rstrip('+'))
             h_mem = float(str(resources.head_node_memory).rstrip('+'))
             head_mul = 1.0

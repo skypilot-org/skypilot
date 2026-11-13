@@ -13,7 +13,9 @@ jobs.
 from sky.backends import task_codegen
 
 
-def _generate_setup_code(*, num_nodes: int, resources_dict: dict,
+def _generate_setup_code(*,
+                         num_nodes: int,
+                         resources_dict: dict,
                          setup_cmd: str = 'echo setup') -> str:
     """Return RayCodeGen output for a job with setup.
 

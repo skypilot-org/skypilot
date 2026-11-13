@@ -63,21 +63,20 @@ def test_apply_head_resources_to_pod_spec():
         }
     }
     worker = copy.deepcopy(pod)
-    k8s_instance._apply_head_resources_to_pod_spec(
-        pod, {
-            'cpus': '2',
-            'memory': '4',
-            'cpu_limit': '2',
-            'memory_limit': '4',
-        })
+    k8s_instance._apply_head_resources_to_pod_spec(pod, {
+        'cpus': '2',
+        'memory': '4',
+        'cpu_limit': '2',
+        'memory_limit': '4',
+    })
     assert pod['spec']['containers'][0]['resources']['requests']['cpu'] == '2'
     assert pod['spec']['containers'][0]['resources']['requests'][
         'memory'] == '4G'
     assert pod['spec']['containers'][0]['resources']['limits']['cpu'] == '2'
-    assert pod['spec']['containers'][0]['resources']['limits'][
-        'memory'] == '4G'
+    assert pod['spec']['containers'][0]['resources']['limits']['memory'] == '4G'
     # Worker clone untouched
-    assert worker['spec']['containers'][0]['resources']['requests']['cpu'] == '8'
+    assert worker['spec']['containers'][0]['resources']['requests'][
+        'cpu'] == '8'
 
 
 def test_apply_head_resources_defaults_limits_to_requests():
@@ -86,14 +85,22 @@ def test_apply_head_resources_defaults_limits_to_requests():
         'spec': {
             'containers': [{
                 'resources': {
-                    'requests': {'cpu': '8', 'memory': '32G'},
-                    'limits': {'cpu': '8', 'memory': '32G'},
+                    'requests': {
+                        'cpu': '8',
+                        'memory': '32G'
+                    },
+                    'limits': {
+                        'cpu': '8',
+                        'memory': '32G'
+                    },
                 }
             }]
         }
     }
-    k8s_instance._apply_head_resources_to_pod_spec(
-        pod, {'cpus': '0.5', 'memory': '16'})
+    k8s_instance._apply_head_resources_to_pod_spec(pod, {
+        'cpus': '0.5',
+        'memory': '16'
+    })
     res = pod['spec']['containers'][0]['resources']
     assert res['requests'] == {'cpu': '0.5', 'memory': '16G'}
     assert res['limits'] == {'cpu': '0.5', 'memory': '16G'}
