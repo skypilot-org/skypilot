@@ -797,11 +797,17 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
+        # When wait_for gives up, the worker thread keeps running, and so
+        # would a kubectl exec it started. Passing the same deadline lets the
+        # backend kill its command before then. The deadline is set before
+        # to_thread, so time spent waiting for a free thread counts too.
+        deadline = time.monotonic() + _JOB_STATUS_FETCH_TIMEOUT_SECONDS
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
                               job_ids=job_ids,
-                              stream_logs=False),
+                              stream_logs=False,
+                              deadline=deadline),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         _log_job_status(status)
