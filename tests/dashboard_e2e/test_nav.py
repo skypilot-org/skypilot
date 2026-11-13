@@ -77,7 +77,7 @@ PAGES: List[Dict[str, str]] = [
 - textbox "Filter volumes"
 - table:
   - rowgroup:
-    - row /Name Infra Status Size User/
+    - row /Name Workspace Infra Status Size User/
 """,
     },
     {
