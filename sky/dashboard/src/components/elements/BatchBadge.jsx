@@ -8,7 +8,7 @@ import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
 export const BatchBadge = ({ showTooltip = true, className = '' }) => {
   const badge = (
     <span
-      className={`text-xs font-medium bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded whitespace-nowrap ${className}`}
+      className={`text-xs font-medium bg-surface-strong text-content px-1.5 py-0.5 rounded whitespace-nowrap ${className}`}
     >
       Batch
     </span>

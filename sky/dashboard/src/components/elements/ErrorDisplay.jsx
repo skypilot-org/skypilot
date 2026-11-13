@@ -38,7 +38,7 @@ const renderMessageWithCodeBlocks = (text) => {
     parts.push(
       <pre
         key={`code-${key++}`}
-        className="mt-1 mb-0.5 p-2 bg-red-100 rounded font-mono text-xs overflow-x-auto whitespace-pre"
+        className="mt-1 mb-0.5 p-2 bg-red-tint-strong rounded font-mono text-xs overflow-x-auto whitespace-pre"
       >
         {match[1].replace(/\n$/, '')}
       </pre>
@@ -76,12 +76,12 @@ export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
   };
 
   return (
-    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+    <div className="bg-red-tint border border-red-line rounded-md p-3 mb-4">
       <div className="flex items-center justify-between">
         <div className="flex">
           <div className="flex-shrink-0">
             <svg
-              className="h-5 w-5 text-red-400"
+              className="h-5 w-5 text-red-fg-faint"
               viewBox="0 0 20 20"
               fill="currentColor"
             >
@@ -96,7 +96,7 @@ export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
             {/* whitespace-pre-wrap so multi-line server error messages
                 (e.g. demotion failure with per-workspace bullets) keep
                 their \n line breaks instead of collapsing to one line. */}
-            <div className="text-sm text-red-800 whitespace-pre-wrap">
+            <div className="text-sm text-red-fg-stronger whitespace-pre-wrap">
               <strong>{title}:</strong>{' '}
               {renderMessageWithCodeBlocks(displayError)}
             </div>
@@ -104,7 +104,7 @@ export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
         </div>
         <button
           onClick={handleDismiss}
-          className="flex-shrink-0 ml-4 text-red-400 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-red-50 rounded"
+          className="flex-shrink-0 ml-4 text-red-fg-faint hover:text-red-fg focus:outline-none focus:ring-2 focus:ring-red-solid-soft focus:ring-offset-2 focus:ring-offset-red-tint rounded"
           aria-label="Dismiss error"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">

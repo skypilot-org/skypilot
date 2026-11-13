@@ -17,7 +17,7 @@ export const DynamicBadge = ({
 }) => {
   const badge = (
     <span
-      className={`px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 whitespace-nowrap cursor-help select-none ${className}`}
+      className={`px-2 py-0.5 rounded text-xs font-medium bg-surface-strong text-content whitespace-nowrap cursor-help select-none ${className}`}
     >
       Dynamic
     </span>

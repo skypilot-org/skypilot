@@ -23,7 +23,7 @@ export function SegmentedToggle({ ariaLabel, options, value, onChange }) {
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="inline-flex items-center bg-gray-100 rounded-lg p-0.5 shrink-0"
+      className="inline-flex items-center bg-surface-muted rounded-lg p-0.5 shrink-0"
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -33,10 +33,10 @@ export function SegmentedToggle({ ariaLabel, options, value, onChange }) {
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(option.value)}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-solid-soft ${
               selected
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
+                ? 'bg-surface text-content-strong shadow-sm'
+                : 'text-content-secondary hover:text-content-strong'
             }`}
           >
             {option.label}

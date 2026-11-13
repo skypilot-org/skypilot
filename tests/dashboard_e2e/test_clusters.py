@@ -897,8 +897,9 @@ _YAML = 'name: e2e-task\nresources:\n  cpus: 1\nrun: echo e2e\n'
 
 
 def _detail_field(page: Page, label: str):
-    return page.locator('div.text-gray-600', has_text=re.compile(
-        rf'^{label}$')).locator('xpath=following-sibling::div[1]')
+    return page.locator('div.text-content-secondary',
+                        has_text=re.compile(rf'^{label}$')).locator(
+                            'xpath=following-sibling::div[1]')
 
 
 @with_twists(

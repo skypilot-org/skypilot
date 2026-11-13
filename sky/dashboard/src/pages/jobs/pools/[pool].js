@@ -69,7 +69,7 @@ function UsedByJobsCell({ usedBy }) {
         <span key={jobId}>
           <Link
             href={`/jobs/${jobId}`}
-            className="text-blue-600 hover:text-blue-800 hover:underline"
+            className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
           >
             {jobId}
           </Link>
@@ -80,7 +80,7 @@ function UsedByJobsCell({ usedBy }) {
         <>
           ,{' '}
           <span
-            className="text-blue-600 cursor-pointer underline"
+            className="text-blue-fg cursor-pointer underline"
             onClick={handleClick}
             style={{ userSelect: 'none' }}
           >
@@ -98,7 +98,7 @@ function UsedByJobsCell({ usedBy }) {
                 <div key={jobId} style={{ marginBottom: 4 }}>
                   <Link
                     href={`/jobs/${jobId}`}
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                    className="text-blue-fg hover:text-blue-fg-stronger hover:underline"
                   >
                     {jobId}
                   </Link>
@@ -343,7 +343,9 @@ export default function PoolDetailPage() {
         <div className="min-h-screen flex items-center justify-center">
           <div className="flex flex-col items-center">
             <CircularProgress size={32} className="mb-3" />
-            <span className="text-gray-600">Loading pool details...</span>
+            <span className="text-content-secondary">
+              Loading pool details...
+            </span>
           </div>
         </div>
       </>
@@ -356,8 +358,8 @@ export default function PoolDetailPage() {
         <Head>
           <title>Pool {poolName} | SkyPilot Dashboard</title>
         </Head>
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="text-center text-red-600">
+        <div className="bg-surface shadow rounded-lg p-6">
+          <div className="text-center text-red-fg">
             <h2 className="text-xl font-semibold mb-2">Error</h2>
             <p>{error || `Pool ${poolName} not found`}</p>
             <button
@@ -366,7 +368,7 @@ export default function PoolDetailPage() {
                 dashboardCache.invalidate(getPoolStatus, [{}]);
                 fetchPoolData(true);
               }}
-              className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+              className="mt-4 bg-blue-solid-soft text-white px-4 py-2 rounded hover:bg-blue-solid"
             >
               Retry
             </button>
@@ -384,13 +386,13 @@ export default function PoolDetailPage() {
       <div>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/jobs" className="text-sky-blue hover:underline">
+            <Link href="/jobs" className="text-brand hover:underline">
               Pools
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-content-tertiary">›</span>
             <Link
               href={`/jobs/pools/${poolName}`}
-              className="text-sky-blue hover:underline"
+              className="text-brand hover:underline"
             >
               {poolName}
             </Link>
@@ -400,7 +402,7 @@ export default function PoolDetailPage() {
             {loading && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
+                <span className="ml-2 text-content-tertiary">Loading...</span>
               </div>
             )}
             <button
@@ -410,7 +412,7 @@ export default function PoolDetailPage() {
                 fetchPoolData(true);
               }}
               disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+              className="text-brand hover:text-brand-bright font-medium inline-flex items-center"
             >
               <RefreshCw
                 className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
@@ -432,7 +434,7 @@ export default function PoolDetailPage() {
                 <div className="grid grid-cols-2 gap-6">
                   {/* User */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       User
                     </div>
                     <div className="text-base mt-1">
@@ -449,7 +451,7 @@ export default function PoolDetailPage() {
 
                   {/* Jobs */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Jobs
                     </div>
                     <div className="text-base mt-1">
@@ -460,7 +462,7 @@ export default function PoolDetailPage() {
                         />
                         <Link
                           href={buildFilterUrl('/jobs', 'pool', ':', poolName)}
-                          className="text-blue-600 hover:text-blue-800 text-xs"
+                          className="text-blue-fg hover:text-blue-fg-stronger text-xs"
                         >
                           See all jobs
                         </Link>
@@ -470,7 +472,7 @@ export default function PoolDetailPage() {
 
                   {/* Workers */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Workers
                     </div>
                     <div className="text-base mt-1">
@@ -480,7 +482,7 @@ export default function PoolDetailPage() {
 
                   {/* Worker Details */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Worker Details
                     </div>
                     <div className="text-base mt-1">
@@ -490,7 +492,7 @@ export default function PoolDetailPage() {
 
                   {/* Worker Resources */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Worker Resources
                     </div>
                     <div className="text-base mt-1">
@@ -500,7 +502,7 @@ export default function PoolDetailPage() {
 
                   {/* Policy */}
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-content-secondary font-medium text-base">
                       Policy
                     </div>
                     <div className="text-base mt-1">
@@ -513,7 +515,7 @@ export default function PoolDetailPage() {
                 {poolData.entrypoint && (
                   <div className="pt-4 mt-4">
                     <div className="flex items-center">
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-content-secondary font-medium text-base">
                         Entrypoint
                       </div>
                       <Tooltip
@@ -524,10 +526,10 @@ export default function PoolDetailPage() {
                       >
                         <button
                           onClick={copyEntrypointToClipboard}
-                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                          className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                         >
                           {isEntrypointCopied ? (
-                            <Check className="w-4 h-4 text-green-600" />
+                            <Check className="w-4 h-4 text-green-fg" />
                           ) : (
                             <Copy className="w-4 h-4" />
                           )}
@@ -536,8 +538,8 @@ export default function PoolDetailPage() {
                     </div>
 
                     <div className="mt-3">
-                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                        <code className="text-sm text-gray-800 font-mono break-all">
+                      <div className="bg-surface-subtle border border-line rounded-md p-3">
+                        <code className="text-sm text-content-heavy font-mono break-all">
                           {poolData.entrypoint}
                         </code>
                       </div>
@@ -551,7 +553,7 @@ export default function PoolDetailPage() {
                     <div className="flex items-center mb-2">
                       <button
                         onClick={togglePoolYamlExpanded}
-                        className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                        className="flex items-center text-left focus:outline-none text-content hover:text-content-strong transition-colors duration-200"
                       >
                         {isPoolYamlExpanded ? (
                           <ChevronDown className="w-4 h-4 mr-1" />
@@ -567,10 +569,10 @@ export default function PoolDetailPage() {
                       >
                         <button
                           onClick={copyPoolYamlToClipboard}
-                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                          className="flex items-center text-content-tertiary hover:text-content transition-colors duration-200 p-1 ml-2"
                         >
                           {isPoolYamlCopied ? (
-                            <Check className="w-4 h-4 text-green-600" />
+                            <Check className="w-4 h-4 text-green-fg" />
                           ) : (
                             <Copy className="w-4 h-4" />
                           )}
@@ -608,11 +610,13 @@ export default function PoolDetailPage() {
                       />
                       <div
                         className={`w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
-                          showFailedWorkers ? 'bg-blue-600' : 'bg-gray-300'
+                          showFailedWorkers
+                            ? 'bg-blue-solid'
+                            : 'bg-surface-stronger'
                         }`}
                       >
                         <div
-                          className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out translate-y-0.5 ${
+                          className={`w-5 h-5 bg-surface rounded-full shadow transform transition-transform duration-200 ease-in-out translate-y-0.5 ${
                             showFailedWorkers
                               ? 'translate-x-5'
                               : 'translate-x-0.5'
@@ -620,7 +624,7 @@ export default function PoolDetailPage() {
                         />
                       </div>
                     </div>
-                    <span className="text-gray-700">Show history</span>
+                    <span className="text-content">Show history</span>
                   </label>
                 </div>
               </div>
@@ -713,7 +717,7 @@ export default function PoolDetailPage() {
                                 return (
                                   <Link
                                     href="/infra"
-                                    className="text-blue-600 hover:underline"
+                                    className="text-blue-fg hover:underline"
                                   >
                                     {cloud}
                                   </Link>
@@ -731,7 +735,7 @@ export default function PoolDetailPage() {
                                 return (
                                   <Link
                                     href="/infra"
-                                    className="text-blue-600 hover:underline"
+                                    className="text-blue-fg hover:underline"
                                   >
                                     {cloud}
                                   </Link>
@@ -744,7 +748,7 @@ export default function PoolDetailPage() {
                                   <span>
                                     <Link
                                       href="/infra"
-                                      className="text-blue-600 hover:underline"
+                                      className="text-blue-fg hover:underline"
                                     >
                                       {cloud}
                                     </Link>
@@ -764,7 +768,7 @@ export default function PoolDetailPage() {
                                   <span>
                                     <Link
                                       href="/infra"
-                                      className="text-blue-600 hover:underline"
+                                      className="text-blue-fg hover:underline"
                                     >
                                       {cloud}
                                     </Link>
@@ -789,7 +793,7 @@ export default function PoolDetailPage() {
                         <TableCell>
                           <StatusBadge status={worker.status} />
                           {worker.status_detail && (
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-xs text-content-tertiary mt-1">
                               {worker.status_detail}
                             </div>
                           )}
@@ -804,7 +808,7 @@ export default function PoolDetailPage() {
                     <TableRow>
                       <TableCell
                         colSpan={7}
-                        className="text-center py-8 text-gray-500"
+                        className="text-center py-8 text-content-tertiary"
                       >
                         {showFailedWorkers
                           ? 'No workers found in this pool'
@@ -818,7 +822,7 @@ export default function PoolDetailPage() {
 
             {/* Pagination */}
             {filteredWorkers.length > 0 && (
-              <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+              <div className="flex justify-end items-center py-2 px-4 text-sm text-content">
                 <div className="flex items-center space-x-4">
                   <div className="flex items-center">
                     <span className="mr-2">Rows per page:</span>
@@ -836,7 +840,7 @@ export default function PoolDetailPage() {
                       </select>
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                        className="h-4 w-4 text-content-tertiary absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -860,7 +864,7 @@ export default function PoolDetailPage() {
                     size="icon"
                     onClick={goToPreviousPage}
                     disabled={currentPage === 1}
-                    className="text-gray-500 h-8 w-8 p-0"
+                    className="text-content-tertiary h-8 w-8 p-0"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -882,7 +886,7 @@ export default function PoolDetailPage() {
                     size="icon"
                     onClick={goToNextPage}
                     disabled={currentPage === totalPages}
-                    className="text-gray-500 h-8 w-8 p-0"
+                    className="text-content-tertiary h-8 w-8 p-0"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
