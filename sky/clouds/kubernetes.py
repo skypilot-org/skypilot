@@ -1217,19 +1217,25 @@ class Kubernetes(clouds.Cloud):
         # the CPU usage on the head pod, otherwise the ray cluster will use the
         # CPU resources on the node instead within the pod.
         #
-        # Dedicated thin head (head_node_*): K8s requests/limits still come
-        # from head_node_cpus/memory for management headroom, but Ray
-        # advertises num-cpus=0 so worker tasks are not scheduled on the head.
-        if resources.has_separate_head():
-            ray_num_cpus = '0'
-        else:
-            # 'num-cpus' must be an integer, but we should not set it to 0 if
-            # cpus is <1.
-            ray_num_cpus = str(max(int(cpus), 1))
-        custom_ray_options = {
+        # Dedicated thin head (head_node_*): head Ray advertises num-cpus=0 so
+        # tasks stay off the head; workers keep the normal worker CPU count.
+        # Do not share a single custom_ray_options dict across head and worker
+        # start commands — that previously zeroed worker CPUs and stalled jobs.
+        # 'num-cpus' must be an integer, but we should not set it to 0 if
+        # cpus is <1 (homogeneous / worker case).
+        worker_ray_num_cpus = str(max(int(cpus), 1))
+        worker_custom_ray_options = {
             'object-store-memory': 500000000,
-            'num-cpus': ray_num_cpus,
+            'num-cpus': worker_ray_num_cpus,
         }
+        if resources.has_separate_head():
+            head_custom_ray_options = {
+                'object-store-memory': 500000000,
+                'num-cpus': '0',
+            }
+        else:
+            head_custom_ray_options = dict(worker_custom_ray_options)
+        custom_ray_options = head_custom_ray_options
 
         # Get the storage class name for high availability controller's PVC
         k8s_ha_storage_class_name = (
@@ -1567,10 +1573,10 @@ class Kubernetes(clouds.Cloud):
             # backend_utils.write_cluster_config: both depend on the Ray version
             # this particular cluster is pinned to, which is not known here.
             'ray_head_start_command': instance_setup.ray_head_start_command(
-                custom_resources, custom_ray_options),
+                custom_resources, head_custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
-                custom_resources, custom_ray_options, no_restart=False),
+                custom_resources, worker_custom_ray_options, no_restart=False),
             'k8s_high_availability_deployment_volume_mount_name':
                 (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
                 ),

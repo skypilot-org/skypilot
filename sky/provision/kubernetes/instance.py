@@ -3588,6 +3588,7 @@ def get_cluster_info(
     head_pod_name = None
     cpu_request = None
     memory_request = None
+    worker_cpu_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
         # pod_ip is the K8s node's host IP. SkyPilot injects a required
@@ -3611,19 +3612,21 @@ def get_cluster_info(
                 node_name=k8s_node_name,
             )
         ]
+        primary_container = kubernetes_utils.get_pod_primary_container(pod)
+        resources = getattr(primary_container, 'resources', None)
+        requests = (getattr(resources, 'requests', None)
+                    if resources else None)
+        limits = (getattr(resources, 'limits', None) if resources else None)
+        pod_cpu = ((requests or {}).get('cpu') or (limits or {}).get('cpu'))
         if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
-            primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            resources = getattr(primary_container, 'resources', None)
-            requests = (getattr(resources, 'requests', None)
-                        if resources else None)
-            limits = (getattr(resources, 'limits', None) if resources else None)
-            cpu_request = ((requests or {}).get('cpu') or
-                           (limits or {}).get('cpu'))
+            cpu_request = pod_cpu
             memory_request = ((requests or {}).get('memory') or
                               (limits or {}).get('memory'))
+        elif worker_cpu_request is None and pod_cpu is not None:
+            worker_cpu_request = pod_cpu
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -3663,9 +3666,18 @@ def get_cluster_info(
     num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
     # Keep consistent with clouds/kubernetes.py: dedicated thin head advertises
     # Ray num-cpus=0 (pod CPU still from head_resources for management).
+    # Workers keep their own CPU count — do not share head num-cpus=0.
     # Otherwise 'num-cpus' must be an integer, but not 0 if cpus is <1.
+    worker_custom_ray_options = None
     if provider_config.get('head_resources'):
         str_cpus = '0'
+        worker_cpu_src = worker_cpu_request or cpu_request
+        worker_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(
+            worker_cpu_src)
+        worker_custom_ray_options = {
+            'object-store-memory': 500000000,
+            'num-cpus': str(max(int(worker_cpus), 1)),
+        }
     else:
         str_cpus = str(max(int(num_cpus), 1))
 
@@ -3688,6 +3700,7 @@ def get_cluster_info(
             'object-store-memory': 500000000,
             'num-cpus': str_cpus,
         },
+        worker_custom_ray_options=worker_custom_ray_options,
         provider_name='kubernetes',
         provider_config=provider_config,
         actual_cpus=num_cpus,
