@@ -18,7 +18,6 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import dotenv
-import filelock
 
 import sky
 from sky import core
@@ -31,6 +30,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.batch import coordinator as batch_coordinator
 from sky.data import data_utils
+from sky.jobs import cancel_signal
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
@@ -410,8 +410,7 @@ def _deadline_breach(specs: Dict[str, Any], task_row: Dict[str, Any],
 
 def _has_pending_cancel_signal(job_id: int) -> bool:
     """Whether a user cancel signal awaits ControllerManager.cancel_job()."""
-    return os.path.exists(
-        os.path.join(jobs_constants.CONSOLIDATED_SIGNAL_PATH, str(job_id)))
+    return cancel_signal.exists(job_id)
 
 
 def _download_logs_from_named_cluster(controller: 'JobController',
@@ -4512,37 +4511,27 @@ class ControllerManager:
     async def cancel_job(self):
         """Cancel an existing job."""
         while True:
-            cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
+            # The signal directory may be on a network filesystem, where a
+            # call can take seconds. Every call on it runs in a thread of its
+            # own pool (see cancel_signal.in_thread), so it cannot stall the
+            # jobs of this process and does not wait for their blocking calls.
+            cancels = await cancel_signal.in_thread(
+                os.listdir, jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
                 if not cancel.isdigit():
-                    # There maybe unexpected files that are written to the
-                    # signal directory. We for sure write filelocks to the
-                    # directory, so we need to skip.
-                    if not cancel.endswith('.lock'):
-                        logger.debug('Detected unexpected file in signal '
-                                     f'directory: {cancel}. Skipping...')
+                    # Not a signal: other files live in this directory too.
                     continue
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
-                        logger.info(f'Cancelling job {job_id}')
-
                         task = self.job_tasks[job_id]
-
-                        signal_path = os.path.join(
-                            jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)
-                        with filelock.FileLock(signal_path + '.lock'):
-                            try:
-                                content = pathlib.Path(signal_path).read_text(
-                                    encoding='utf-8').strip()
-                            except Exception as e:  # pylint: disable=broad-except
-                                content = ''
-                                logger.debug(
-                                    'Problem occurred when reading '
-                                    f'{signal_path}: '
-                                    f'{common_utils.format_exception(e)}')
-                            finally:
-                                os.remove(signal_path)
+                        content = await cancel_signal.in_thread(
+                            cancel_signal.take, job_id)
+                        if content is None:
+                            # The signal is gone since the directory was
+                            # listed.
+                            continue
+                        logger.info(f'Cancelling job {job_id}')
 
                         # Parse and store graceful cancel info before
                         # cancelling the task.
@@ -4670,7 +4659,8 @@ class ControllerManager:
                     # A cancel signal arrived meanwhile and already cancelled
                     # the task.
                     return False
-                if _has_pending_cancel_signal(job_id):
+                if await cancel_signal.in_thread(_has_pending_cancel_signal,
+                                                 job_id):
                     # A user cancel arrived while the reason was recorded.
                     # cancel_job() holds _job_tasks_lock while it applies a
                     # signal, so it cannot be halfway through one here.
@@ -4692,7 +4682,8 @@ class ControllerManager:
             async with self._cancel_info_lock:
                 if job_id in self._cancel_info:
                     return False
-            if _has_pending_cancel_signal(job_id):
+            if await cancel_signal.in_thread(_has_pending_cancel_signal,
+                                             job_id):
                 logger.debug(f'Job {job_id} has a pending cancel request; not '
                              'cancelling it for its deadline.')
                 return False
@@ -4817,13 +4808,11 @@ class ControllerManager:
             job_id = waiting_job['job_id']
             pool = waiting_job.get('pool', None)
 
-            cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
-            if str(job_id) in cancels:
+            if await cancel_signal.in_thread(cancel_signal.exists, job_id):
                 status = await managed_job_state.get_status_async(job_id)
                 if status == managed_job_state.ManagedJobStatus.PENDING:
                     logger.info(f'Job {job_id} cancelled')
-                    os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
-                              f'{job_id}')
+                    await cancel_signal.in_thread(cancel_signal.remove, job_id)
                     await managed_job_state.set_cancelling_async(
                         job_id=job_id,
                         callback_func=managed_job_utils.event_callback_func(
