@@ -78,10 +78,11 @@ class TestConsolidationModeDetector:
         """Test consolidation mode detection across all configurations."""
         # Set up environment
         if override_set:
-            monkeypatch.setenv(constants.OVERRIDE_CONSOLIDATION_MODE, 'true')
+            monkeypatch.setenv(constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
+                               'true')
         else:
-            monkeypatch.delenv(constants.OVERRIDE_CONSOLIDATION_MODE,
-                               raising=False)
+            for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+                monkeypatch.delenv(name, raising=False)
 
         # Set up signal file
         signal_file = tmp_path / '.jobs_controller_consolidation_reloaded_signal'
@@ -105,7 +106,7 @@ class TestConsolidationModeDetector:
 
     def test_override_consolidation_mode_not_in_controller_envs(
             self, _clear_consolidation_caches):  # pylint: disable=invalid-name
-        """OVERRIDE_CONSOLIDATION_MODE must NOT be in controller_envs.
+        """ENV_VAR_IN_CONTROLLER_PROCESS_TREE must NOT be in controller_envs.
 
         If this var entered controller_envs, jobs-controller VM startup would
         see is_consolidation_mode()==True and gate would break all startup.
@@ -138,10 +139,11 @@ class TestConsolidationModeDetector:
             'controller_envs; if not, this test is asserting against the '
             'wrong dict')
 
-        # The override should NOT be in the nested controller_envs dict.
-        assert constants.OVERRIDE_CONSOLIDATION_MODE not in controller_envs, (
-            f'{constants.OVERRIDE_CONSOLIDATION_MODE} must not be in '
-            'controller_envs to avoid breaking the jobs-controller VM path')
+        # Neither name may be in the nested controller_envs dict.
+        for name in constants.ENV_VARS_IN_CONTROLLER_PROCESS_TREE:
+            assert name not in controller_envs, (
+                f'{name} must not be in controller_envs to avoid breaking the '
+                'jobs-controller VM path')
 
     def test_controller_module_never_reaches_from_scheduler_path(self):
         """Tripwire: controller.py has no DIRECT reference to
@@ -157,8 +159,8 @@ class TestConsolidationModeDetector:
 
         The invariant this is guarding: is_consolidation_mode() returns True
         unconditionally inside the controller process (start_controller()
-        exports OVERRIDE_CONSOLIDATION_MODE there), so if controller.py ever
-        gained a direct call to maybe_start_controllers or submit_jobs, the
+        exports ENV_VAR_IN_CONTROLLER_PROCESS_TREE there), so if controller.py
+        ever gained a direct call to maybe_start_controllers or submit_jobs, the
         from_scheduler=True gate in maybe_start_controllers() -- meant only
         to protect the in-request submission path (submit_jobs() ->
         maybe_start_controllers(from_scheduler=True)), reached from this

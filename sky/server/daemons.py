@@ -323,7 +323,7 @@ def should_skip_pool_status_refresh():
 
 def should_skip_server_heartbeat():
     """Skip server heartbeat when running as a controller."""
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+    if constants.in_controller_process_tree():
         # We are running as a controller.
         return True
     return False

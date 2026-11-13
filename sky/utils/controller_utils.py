@@ -1524,7 +1524,7 @@ def compute_memory_reserved_for_controllers(
     sides of the split agree on one number. Returns 0 outside consolidation
     mode, where the controllers run on their own cluster.
     """
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+    if constants.in_controller_process_tree():
         # A local API server started from a controller process, which inherits
         # its env. _get_parallelism() sizes that machine assuming only the flat
         # headroom was withheld, so withhold exactly that.
@@ -1641,7 +1641,7 @@ def _effective_jobs_consolidation_with_warnings(
     warning fire at most once per request, even when both managed-jobs and
     pool readers resolve in the same request.
     """
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+    if constants.in_controller_process_tree():
         # Inside the controller process. Always consolidated from its own
         # perspective; no admin-facing guidance to emit.
         return True, None
@@ -1673,7 +1673,7 @@ def effective_jobs_consolidation_mode() -> bool:
     server has written the signal file pins the wrong answer for the whole
     process. Readers on a polling path want the fact, not the guidance.
     """
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+    if constants.in_controller_process_tree():
         # Inside the controller process, which is consolidated by definition.
         return True
     return _read_jobs_consolidation_signal()
@@ -1689,7 +1689,7 @@ def is_jobs_consolidation_mode(
     same value.
 
     Behavior:
-    - OVERRIDE_CONSOLIDATION_MODE env forces True (used inside the
+    - ENV_VAR_IN_CONTROLLER_PROCESS_TREE env forces True (used inside the
       controller process itself, which is always consolidated from its
       own perspective).
     - Otherwise reads the JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE, written

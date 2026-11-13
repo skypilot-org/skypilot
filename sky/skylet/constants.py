@@ -803,7 +803,57 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # TODO(cooperc): Update all env vars to begin with SKYPILOT_ or SKYPILOT_SERVER_
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
-OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
+# Set to 'true' in every jobs and serve controller process, and inherited by
+# everything those processes start. Check it with in_controller_process_tree()
+# and set it with CONTROLLER_PROCESS_TREE_EXPORTS (or every name in
+# ENV_VARS_IN_CONTROLLER_PROCESS_TREE), never by reading or writing one name.
+#
+# Who sets it:
+#   - jobs/scheduler.py start_controller(): exported in each jobs controller's
+#     command, not os.environ, so it does not leak into the API server process
+#     that starts the controller.
+#   - serve/controller.py run_controller(): os.environ of the serve controller,
+#     which also runs pools.
+#   - serve/serve_utils.py: exported in serve codegen subprocesses when serve
+#     consolidation is on.
+#   - Inheritance: a local API server started by a controller (sdk.api_start)
+#     and everything that server starts.
+# Who reads it, and as what:
+#   - Jobs and serve consolidation-mode checks (utils/controller_utils.py,
+#     serve/serve_utils.py): consolidation is forced on.
+#   - server/common.py get_server_url(): always use the loopback endpoint.
+#   - "This API server was started by a controller": the server heartbeat skip
+#     (server/daemons.py), the controller memory headroom
+#     (utils/controller_utils.py compute_memory_reserved_for_controllers) and
+#     the managed-job refresh thread skip (jobs/managed_job_refresh_thread.py).
+# The SKYPILOT_SERVER_ prefix keeps it out of request env vars: the client
+# forwards other SKYPILOT_ vars with every request, and a controller's requests
+# would otherwise carry it into its API server's request workers.
+ENV_VAR_IN_CONTROLLER_PROCESS_TREE = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}IN_CONTROLLER_PROCESS_TREE')
+# The variable's previous name. It is still set next to the new name and still
+# accepted when reading, so that processes from different versions agree during
+# an upgrade. For example, a controller started before an upgrade carries only
+# this name, and a local API server it restarts runs the new code.
+# TODO(cooperc): stop setting and accepting the legacy name in v0.16.0.
+LEGACY_ENV_VAR_IN_CONTROLLER_PROCESS_TREE = 'IS_SKYPILOT_JOB_CONTROLLER'
+ENV_VARS_IN_CONTROLLER_PROCESS_TREE: Tuple[str, ...] = (
+    ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
+    LEGACY_ENV_VAR_IN_CONTROLLER_PROCESS_TREE,
+)
+# Shell prefix that marks a command as running in a controller process tree.
+CONTROLLER_PROCESS_TREE_EXPORTS = ''.join(
+    f'export {name}=true; ' for name in ENV_VARS_IN_CONTROLLER_PROCESS_TREE)
+
+
+def in_controller_process_tree() -> bool:
+    """Whether this process is a jobs or serve controller, or was started by
+    one (see ENV_VAR_IN_CONTROLLER_PROCESS_TREE)."""
+    return any(
+        os.environ.get(name) is not None
+        for name in ENV_VARS_IN_CONTROLLER_PROCESS_TREE)
+
+
 IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.

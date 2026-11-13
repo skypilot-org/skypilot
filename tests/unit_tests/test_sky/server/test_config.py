@@ -189,7 +189,7 @@ def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
     _get_parallelism() sizes that machine assuming only the headroom was
     withheld, so the gate must not switch it to the scaling reservation.
     """
-    env = {skylet_constants.OVERRIDE_CONSOLIDATION_MODE: 'true'}
+    env = {skylet_constants.ENV_VAR_IN_CONTROLLER_PROCESS_TREE: 'true'}
     if gate_on:
         from sky.utils import env_options
         env[env_options.Options.MEMORY_AWARE_WORKER_SIZING.env_key] = 'true'
