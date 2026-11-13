@@ -23,7 +23,8 @@ def bootstrap_instances(
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
     # OCI module import and oci client
-    oci_adaptor.get_core_client(region, oci_utils.oci_config.get_profile())
+    oci_adaptor.get_core_client(region,
+                                oci_utils.oci_config.get_profile(region))
 
     # Find / create a compartment for creating instances.
     compartment = query_helper.find_compartment(region)

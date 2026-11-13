@@ -20,8 +20,11 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
    Support more OS types additional to ubuntu for OCI resources.
 """
+import hashlib
 import logging
 import os
+import re
+import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -33,6 +36,7 @@ from sky.adaptors import oci as oci_adaptor
 from sky.adaptors import oci_s3
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -46,7 +50,113 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_tenancy_prefix: Optional[str] = None
+# Availability-domain prefix by launch compartment OCID. The prefix belongs
+# to the tenancy that owns the compartment, and one process (the API server)
+# can launch into compartments of different tenancies.
+_ad_prefixes: Dict[str, str] = {}
+_ad_prefixes_lock = threading.Lock()
+
+# Where the copy of the OCI config with home-relative paths is written (see
+# OCI.get_credential_file_mounts).
+_GENERATED_OCI_CONFIG_DIR = os.path.join(constants.SKY_USER_FILE_PATH, 'oci')
+# The keys of an OCI config profile that name a file to copy to the cluster.
+_OCI_CONFIG_FILE_KEYS = ('key_file', oci_adaptor.SECURITY_TOKEN_FILE_KEY)
+_OCI_CONFIG_FILE_LINE_RE = re.compile(r'^(\s*(?:' +
+                                      '|'.join(_OCI_CONFIG_FILE_KEYS) +
+                                      r')\s*=\s*)(.*?)(\s*)$')
+
+
+def _home_relative_path(path: str) -> Optional[str]:
+    """'~/<rel>' for an absolute path under the local home, else None.
+
+    `oci session authenticate` writes absolute paths such as
+    `/Users/<u>/.oci/sessions/<profile>/token`. Mounted at that same path,
+    the file would need `/Users/<u>` on the cluster, which a non-root user
+    cannot create; under `~` it lands in the cluster user's home instead.
+    """
+    if not os.path.isabs(path):
+        return None
+    home = os.path.expanduser('~')
+    if not os.path.isabs(home) or os.path.dirname(home) == home:
+        return None
+    path = os.path.normpath(path)
+    if os.path.commonpath([home, path]) != home or path == home:
+        return None
+    return '~/' + os.path.relpath(path, home).replace(os.sep, '/')
+
+
+def _write_home_relative_oci_config(conf_file: str, rewrites: Dict[str,
+                                                                   str]) -> str:
+    """A copy of `conf_file` with the file paths in `rewrites` replaced.
+
+    Only `key_file` / `security_token_file` values that appear in
+    `rewrites` are changed; everything else is kept byte for byte. The
+    copy's name is derived from its content, so repeated launches reuse the
+    same file and the file-mounts hash stays stable.
+    """
+    with open(os.path.expanduser(conf_file), 'r', encoding='utf-8') as f:
+        lines = f.read().splitlines(keepends=True)
+    out = []
+    for line in lines:
+        body = line.rstrip('\r\n')
+        newline = line[len(body):]
+        match = _OCI_CONFIG_FILE_LINE_RE.match(body)
+        if match is not None and match.group(2) in rewrites:
+            body = (match.group(1) + rewrites[match.group(2)] + match.group(3))
+        out.append(body + newline)
+    content = ''.join(out)
+    digest = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+    directory = os.path.expanduser(_GENERATED_OCI_CONFIG_DIR)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f'config-{digest}')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            if f.read() == content:
+                return path
+    except OSError:
+        pass
+    # The config may hold a key pass phrase: keep the copy private.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return path
+
+
+def _get_availability_domain_prefix(region: str) -> Optional[str]:
+    """The tenancy-specific prefix of availability domain names.
+
+    OCI names availability domains `<prefix>:<AD>`, e.g. `bxtG:PHX-AD-1`,
+    and the prefix is specific to the tenancy that owns the resources. That
+    is the tenancy of the compartment instances are launched in, which with
+    cross-tenancy policies is not necessarily the `tenancy` of the profile,
+    so the prefix is resolved from the launch compartment and cached per
+    compartment.
+    """
+    profile = oci_utils.oci_config.get_profile(region)
+    try:
+        compartment = query_helper.find_compartment(region)
+        with _ad_prefixes_lock:
+            prefix = _ad_prefixes.get(compartment)
+        if prefix is None:
+            # The lookup runs outside the lock so that launches into other
+            # compartments are not queued behind this network call. Two
+            # concurrent misses for the same compartment merely repeat one
+            # cheap request and store the same prefix.
+            identity_client = oci_adaptor.get_identity_client(region=region,
+                                                              profile=profile)
+            ad_list = identity_client.list_availability_domains(
+                compartment_id=compartment).data
+            prefix = str(ad_list[0].name).split(':', maxsplit=1)[0]
+            with _ad_prefixes_lock:
+                _ad_prefixes[compartment] = prefix
+    except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+            oci_adaptor.oci.exceptions.InvalidConfig) as e:
+        # This should only happen in testing where oci config is
+        # monkeypatched. In real use, if the OCI config is not
+        # valid, the 'sky check' would fail (OCI disabled).
+        logger.debug(f'It is OK goes here when testing: {str(e)}')
+        return None
+    return prefix
 
 
 @registry.CLOUD_REGISTRY.register
@@ -60,6 +170,11 @@ class OCI(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
+    _SHORT_CREDENTIAL_HELP_STR = (
+        'For more details, refer to: '
+        # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+    )
 
     _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
                              {resources_utils.DiskTier.ULTRA})
@@ -312,27 +427,7 @@ class OCI(clouds.Cloud):
             if zones is not None:
                 zone = zones[0].name
 
-        global _tenancy_prefix
-        if _tenancy_prefix is None:
-            try:
-                identity_client = oci_adaptor.get_identity_client(
-                    region=region.name,
-                    profile=oci_utils.oci_config.get_profile())
-
-                ad_list = identity_client.list_availability_domains(
-                    compartment_id=oci_adaptor.get_oci_config(
-                        profile=oci_utils.oci_config.get_profile())
-                    ['tenancy']).data
-
-                first_ad = ad_list[0]
-                _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
-            except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
-                    oci_adaptor.oci.exceptions.InvalidConfig) as e:
-                # This should only happen in testing where oci config is
-                # monkeypatched. In real use, if the OCI config is not
-                # valid, the 'sky check' would fail (OCI disabled).
-                logger.debug(f'It is OK goes here when testing: {str(e)}')
-                pass
+        ad_prefix = _get_availability_domain_prefix(region.name)
 
         # Disk performane: Volume Performance Units.
         vpu = self.get_vpu_from_disktier(
@@ -361,7 +456,7 @@ class OCI(clouds.Cloud):
             'memory': resources.memory,
             'disk_size': resources.disk_size,
             'vpu': str(vpu),
-            'zone': f'{_tenancy_prefix}:{zone}',
+            'zone': f'{ad_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
             'resource_version': res_ver,
@@ -459,12 +554,43 @@ class OCI(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        dependency_error_msg = (
+            '`oci` is not installed. Install it with: '
+            'pip install oci\n'
+            f'{cls._INDENT_PREFIX}{cls._SHORT_CREDENTIAL_HELP_STR}')
+        if not common.can_import_modules(['oci']):
+            return False, dependency_error_msg
 
-        short_credential_help_str = (
-            'For more details, refer to: '
-            # pylint: disable=line-too-long
-            'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
-        )
+        conf_file = oci_adaptor.get_config_file()
+
+        help_str = (f'Missing credential file at {conf_file}. '
+                    f'{cls._SHORT_CREDENTIAL_HELP_STR}')
+        if not os.path.isfile(os.path.expanduser(conf_file)):
+            return (False, help_str)
+
+        # A region can authenticate as its own profile, so every profile the
+        # SkyPilot config names is probed, not just the default one;
+        # otherwise a broken regional profile only surfaces at launch.
+        profiles = oci_utils.oci_config.get_profiles_in_use()
+        for region, profile in profiles:
+            ok, msg = cls._check_profile_credentials(conf_file, region, profile)
+            if ok:
+                continue
+            if len(profiles) > 1:
+                # Say which of the configured profiles is the broken one.
+                scope = ('the default profile' if region is None else
+                         f'the profile for region {region!r}')
+                msg = (f'OCI profile {profile!r} ({scope} in '
+                       f'{oci_utils.oci_config.get_sky_user_config_file()}) '
+                       'failed the credential check:\n'
+                       f'{cls._INDENT_PREFIX}{msg}')
+            return False, msg
+        return True, None
+
+    @classmethod
+    def _check_profile_credentials(cls, conf_file: str, region: Optional[str],
+                                   profile: str) -> Tuple[bool, Optional[str]]:
+        """Probes one `~/.oci/config` profile against the identity service."""
         credential_help_str = (
             'To configure credentials, go to: '
             'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/'
@@ -481,40 +607,51 @@ class OCI(clouds.Cloud):
             'fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
             f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
-            f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
+            f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem\n'
+            f'{cls._INDENT_PREFIX}Session-token profiles written by '
+            '`oci session authenticate` (security_token_file + session '
+            'key_file, no user) are supported as well.')
 
-        dependency_error_msg = (
-            '`oci` is not installed. Install it with: '
-            'pip install oci\n'
-            f'{cls._INDENT_PREFIX}{short_credential_help_str}')
-        if not common.can_import_modules(['oci']):
-            return False, dependency_error_msg
-
-        conf_file = oci_adaptor.get_config_file()
-
-        help_str = (f'Missing credential file at {conf_file}. '
-                    f'{short_credential_help_str}')
-        if not os.path.isfile(os.path.expanduser(conf_file)):
-            return (False, help_str)
-
+        uses_session_token = False
         try:
-            user = oci_adaptor.get_identity_client(
-                region=None,
-                profile=oci_utils.oci_config.get_profile()).get_user(
-                    oci_adaptor.get_oci_config(profile=oci_utils.oci_config.
-                                               get_profile())['user']).data
-            del user
+            oci_cfg = oci_adaptor.get_oci_config(region=region, profile=profile)
+            uses_session_token = oci_adaptor.is_session_token_config(oci_cfg)
+            identity_client = oci_adaptor.get_identity_client(region=region,
+                                                              profile=profile)
+            if uses_session_token:
+                # Session-token profiles carry no `user` to look up. Listing
+                # the tenancy's availability domains exercises the token and
+                # is a call provisioning relies on anyway.
+                identity_client.list_availability_domains(
+                    compartment_id=oci_cfg['tenancy'])
+            else:
+                user = identity_client.get_user(oci_cfg['user']).data
+                del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
+        except oci_adaptor.OCISessionTokenError as e:
+            return False, (
+                f'{e}\n'
+                f'{cls._INDENT_PREFIX}{cls._SHORT_CREDENTIAL_HELP_STR}')
         except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.ProfileNotFound,
                 oci_adaptor.oci.exceptions.InvalidConfig,
                 oci_adaptor.oci.exceptions.ServiceError) as e:
-            return False, (
-                f'OCI credential is not correctly set. '
-                f'Check the credential file at {conf_file}\n'
-                f'{cls._INDENT_PREFIX}{credential_help_str}\n'
-                f'{cls._INDENT_PREFIX}Error details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            details = common_utils.format_exception(e, use_bracket=True)
+            if (uses_session_token and
+                    isinstance(e, oci_adaptor.oci.exceptions.ServiceError) and
+                    e.status == 401):
+                # The service reports an expired or revoked session token as
+                # 401 NotAuthenticated; say what to do about it.
+                return False, (
+                    f'OCI rejected the session token of profile {profile!r} '
+                    '(HTTP 401); it has most likely expired. '
+                    f'{oci_adaptor.session_authenticate_hint(profile)}\n'
+                    f'{cls._INDENT_PREFIX}Error details: {details}')
+            return False, (f'OCI credential is not correctly set. '
+                           f'Check the credential file at {conf_file}\n'
+                           f'{cls._INDENT_PREFIX}{credential_help_str}\n'
+                           f'{cls._INDENT_PREFIX}Error details: {details}')
 
     @classmethod
     def check_disk_tier(
@@ -540,12 +677,35 @@ class OCI(clouds.Cloud):
 
         try:
             oci_cfg_file = oci_adaptor.get_config_file()
-            # Pass-in a profile parameter so that multiple profile in oci
-            # config file is supported (2023/06/09).
-            oci_cfg = oci_adaptor.get_oci_config(
-                profile=oci_utils.oci_config.get_profile())
-            api_key_file = oci_cfg[
-                'key_file'] if 'key_file' in oci_cfg else 'BadConf'
+            # The OCI config file is copied whole, so every profile in it is
+            # defined on the cluster. The key and token files it points to
+            # are copied for each profile the SkyPilot config names, since a
+            # region can authenticate as its own profile and provisioning on
+            # the cluster resolves the profile the same way as here. Files
+            # keep their path on the cluster so the paths inside the copied
+            # config file stay valid, except absolute paths under the local
+            # home (what `oci session authenticate` writes): those go under
+            # `~` on the cluster, and the copied config is rewritten to
+            # match.
+            credential_files: List[str] = []
+            for region, profile in oci_utils.oci_config.get_profiles_in_use():
+                for path in self._profile_credential_files(
+                        oci_cfg_file, region, profile):
+                    if path not in credential_files:
+                        credential_files.append(path)
+            rewrites: Dict[str, str] = {}
+            for path in credential_files:
+                remote_path = _home_relative_path(path)
+                if remote_path is None:
+                    file_mounts[path] = path
+                else:
+                    file_mounts[remote_path] = path
+                    rewrites[path] = remote_path
+            if rewrites:
+                file_mounts[oci_cfg_file] = _write_home_relative_oci_config(
+                    oci_cfg_file, rewrites)
+            else:
+                file_mounts[oci_cfg_file] = oci_cfg_file
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
         # Must catch ImportError before any oci_adaptor.oci.exceptions
         # because oci_adaptor.oci.exceptions can throw ImportError.
@@ -554,18 +714,67 @@ class OCI(clouds.Cloud):
         except oci_adaptor.oci.exceptions.ConfigFileNotFound:
             return file_mounts
 
-        # OCI config and API key file are mandatory
-        credential_files = [oci_cfg_file, api_key_file]
-
         # Sky config file is optional
         if os.path.exists(os.path.expanduser(sky_cfg_file)):
-            credential_files.append(sky_cfg_file)
-
-        file_mounts.update(
-            {f'{filename}': f'{filename}' for filename in credential_files})
+            file_mounts[sky_cfg_file] = sky_cfg_file
 
         logger.debug(f'OCI credential file mounts: {file_mounts}')
         return file_mounts
+
+    @staticmethod
+    def _profile_credential_files(conf_file: str, region: Optional[str],
+                                  profile: str) -> List[str]:
+        """The key file and session-token file of one `~/.oci/config` profile.
+
+        A profile that is missing from the config file, or a file it points
+        at that does not exist, is skipped with a warning rather than
+        failing the launch; `sky check` reports the broken profile.
+        """
+        try:
+            oci_cfg = oci_adaptor.get_oci_config(region=region, profile=profile)
+        except oci_adaptor.oci.exceptions.ProfileNotFound:
+            logger.warning(f'OCI profile {profile!r} is not defined in '
+                           f'{conf_file}; its credentials are not copied to '
+                           'the cluster.')
+            return []
+        files: List[str] = []
+        for path in (oci_cfg.get('key_file'),
+                     oci_cfg.get(oci_adaptor.SECURITY_TOKEN_FILE_KEY)):
+            if path is None:
+                continue
+            if not os.path.exists(os.path.expanduser(path)):
+                logger.warning(f'OCI profile {profile!r} points at {path}, '
+                               'which does not exist; it is not copied to '
+                               'the cluster.')
+                continue
+            files.append(path)
+        return files
+
+    def can_credential_expire(self) -> bool:
+        """Whether any profile in use authenticates with a session token.
+
+        Tokens from `oci session authenticate` expire after about an hour and
+        the copy on a cluster is never refreshed, so a jobs/serve controller
+        launched with one can no longer manage (or tear down) its OCI
+        clusters once it expires.
+        """
+        try:
+            for region, profile in oci_utils.oci_config.get_profiles_in_use():
+                try:
+                    oci_cfg = oci_adaptor.get_oci_config(region=region,
+                                                         profile=profile)
+                except oci_adaptor.oci.exceptions.ProfileNotFound:
+                    continue
+                if oci_adaptor.is_session_token_config(oci_cfg):
+                    return True
+        # Must catch ImportError before any oci_adaptor.oci.exceptions
+        # because oci_adaptor.oci.exceptions can throw ImportError.
+        except ImportError:
+            return False
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig):
+            return False
+        return False
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
