@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TableRow, TableCell } from '@/components/ui/table';
 import { LinkifiedText } from '@/components/elements/LinkifiedText';
 
@@ -13,13 +13,56 @@ export function isDetailsToggle(target) {
   return Boolean(target?.closest?.(TOGGLE_SELECTOR));
 }
 
+// Matches the cell's p-4 padding, so the panel keeps its inset when pinned.
+const PANEL_INSET_PX = 16;
+
+function findHorizontalScroller(node) {
+  for (let el = node?.parentElement; el; el = el.parentElement) {
+    const { overflowX } = window.getComputedStyle(el);
+    if (overflowX === 'auto' || overflowX === 'scroll') return el;
+  }
+  return null;
+}
+
 export function ExpandedDetailsRow({ text, colSpan, innerRef }) {
+  const cellRef = useRef(null);
+  const [visibleWidth, setVisibleWidth] = useState(null);
+
+  // The cell spans the whole table, which can be wider than its scroll
+  // container. Users open this row from the Details column on the right, so
+  // without pinning, the panel starts at the table's left edge, off screen.
+  // Pin it to the visible part of the scroller instead.
+  useEffect(() => {
+    const scroller = findHorizontalScroller(cellRef.current);
+    if (!scroller) return undefined;
+    const update = () =>
+      setVisibleWidth(Math.max(scroller.clientWidth - 2 * PANEL_INSET_PX, 0));
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <TableRow className="expanded-details">
-      <TableCell colSpan={colSpan}>
+      <TableCell colSpan={colSpan} ref={cellRef}>
         <div
           className="p-4 bg-gray-50 rounded-md border border-gray-200"
           ref={innerRef}
+          style={
+            visibleWidth === null
+              ? undefined
+              : {
+                  position: 'sticky',
+                  left: PANEL_INSET_PX,
+                  width: visibleWidth,
+                  boxSizing: 'border-box',
+                }
+          }
         >
           <div className="flex justify-between items-start">
             <div className="flex-1">
