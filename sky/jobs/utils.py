@@ -1196,6 +1196,70 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
+# The jobs controller records the setting once at start, before it enters any
+# job's context: inside a job's context, the config is that job's snapshot from
+# submission time, which would keep an old `true` alive after an administrator
+# turned callbacks off. A consolidation-mode controller restarts with the
+# server; a controller on its own cluster always allows callbacks (see
+# event_callbacks_allowed).
+_controller_event_callbacks_allowed: Optional[bool] = None
+
+_EVENT_CALLBACK_DEPRECATION_MESSAGE = (
+    'Managed job `event_callback` is deprecated and will be removed in a '
+    'future release.')
+
+
+def record_controller_event_callback_policy() -> None:
+    """Called by the jobs controller at start, outside any job context."""
+    global _controller_event_callbacks_allowed
+    _controller_event_callbacks_allowed = event_callbacks_allowed()
+    logger.info('Managed job event callbacks allowed: '
+                f'{_controller_event_callbacks_allowed}')
+
+
+def event_callbacks_allowed() -> bool:
+    """Whether managed-job event callbacks (`event_callback`) may run.
+
+    `event_callback` is deprecated. It is off by default and an API server
+    administrator can opt in with `jobs.allow_event_callback: true` in the
+    server config.
+
+    In the API server, and in the jobs controllers it runs (consolidation
+    mode), this is ``jobs.allow_event_callback`` from the server config
+    (default: off). Those controllers restart with the server, so they always
+    see its current setting.
+
+    A jobs controller on its own cluster always allows callbacks. The API
+    server already checked each of its jobs when it was submitted, and the
+    controller's own copy of the config is from when the controller was
+    created, so it may not match the server's current setting.
+    """
+    # Same check as sky.server.common.is_running_in_api_server: the API server
+    # and the controllers it spawns have this variable; a controller on its
+    # own cluster does not.
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    return bool(
+        skypilot_config.get_nested(('jobs', 'allow_event_callback'), False))
+
+
+def check_event_callbacks_allowed(dag: 'sky.Dag') -> None:
+    """Checks a managed job submission that sets `event_callback`.
+
+    Rejects the job when event callbacks are not enabled on the API server,
+    and logs a deprecation warning when they are.
+    """
+    if not any(task.event_callback for task in dag.tasks):
+        return
+    if not event_callbacks_allowed():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{_EVENT_CALLBACK_DEPRECATION_MESSAGE} It is disabled on '
+                'this API server. An administrator can enable it by setting '
+                '`jobs.allow_event_callback: true` in the API server config.')
+    logger.warning(_EVENT_CALLBACK_DEPRECATION_MESSAGE)
+
+
 def event_callback_func(
         job_id: int, task_id: Optional[int],
         task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
@@ -1204,6 +1268,16 @@ def event_callback_func(
     def callback_func(status: str):
         event_callback = task.event_callback if task else None
         if event_callback is None or task is None:
+            return
+        allowed = (_controller_event_callbacks_allowed
+                   if _controller_event_callbacks_allowed is not None else
+                   event_callbacks_allowed())
+        if not allowed:
+            # Covers jobs submitted before callbacks were disabled.
+            logger.warning(
+                f'Skipping the event callback of managed job {job_id} for '
+                f'{status!r}: event callbacks are not enabled '
+                '(`jobs.allow_event_callback`).')
             return
         event_callback = event_callback.strip()
         pool = managed_job_state.get_pool_from_job_id(job_id)
