@@ -6752,6 +6752,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{colorama.Style.RESET_ALL}')
 
             num_nodes = (resize_num_nodes if resize else handle.launched_nodes)
+            # This plan provisions cluster capacity (which can exceed the
+            # user's execution request). Keep its resource count in task-node
+            # units, consistently with the physical count passed below.
+            to_provision = to_provision.copy(
+                num_nodes=kubernetes_utils.num_task_nodes(
+                    num_nodes, to_provision),
+                _num_nodes_specified=to_provision.num_nodes_specified)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,

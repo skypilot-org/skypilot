@@ -2122,12 +2122,14 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
             if launched_resources is not None:
+                # A reused cluster may have more capacity than this task runs
+                # on. Recovery retries the matched request, not that capacity.
+                matched = await asyncio.to_thread(
+                    backends.CloudVmRayBackend().check_resources_fit_cluster,
+                    handle, self.dag.tasks[0])
                 launched_resources = launched_resources.copy(
-                    num_nodes=handle.launched_task_nodes,
-                    _num_nodes_specified=any(
-                        r.num_nodes_specified
-                        for r in self.dag.tasks[0].resources
-                        if r.num_nodes == handle.launched_task_nodes))
+                    num_nodes=matched.num_nodes,
+                    _num_nodes_specified=matched.num_nodes_specified)
             self._launched_resources = launched_resources
 
             # Persist infra info to database for sorting/filtering

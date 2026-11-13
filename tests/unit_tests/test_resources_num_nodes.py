@@ -673,3 +673,64 @@ def test_existing_cluster_count_selection_is_deterministic(
         chosen = cloud_vm_ray_backend.CloudVmRayBackend(
         ).check_resources_fit_cluster(handle, task, skip_num_nodes_check=resize)
     assert chosen.num_nodes == expected
+
+
+@pytest.mark.parametrize('resize,expected_capacity', [(False, 4), (True, 2)])
+def test_existing_cluster_provision_plan_retains_its_actual_size(
+        resize, expected_capacity):
+    launched = resources_lib.Resources(infra='aws/us-east-1',
+                                       instance_type='m5.large')
+    requested = launched.copy(num_nodes=2)
+    task = task_lib.Task().set_resources(requested)
+    handle = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle,
+                            launched_resources=launched,
+                            launched_nodes=4,
+                            cluster_name='capacity-count')
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': None
+    }
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    with mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                           'get_cluster_from_name', return_value=record), \
+            mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                              'get_status_from_cluster_name', return_value=None), \
+            mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                              'get_cluster_yaml_str', return_value=None), \
+            mock.patch.object(backend, '_handle_resize_pre_provision'):
+        config = backend._check_existing_cluster(task,
+                                                 None,
+                                                 'capacity-count',
+                                                 dryrun=True,
+                                                 resize=resize)
+    assert config.num_nodes == expected_capacity
+    assert config.resources.num_nodes == expected_capacity
+    assert next(iter(task.resources)).num_nodes == 2
+
+
+def test_recovery_remembers_requested_count_on_a_larger_cluster():
+    launched = resources_lib.Resources(infra='aws/us-east-1',
+                                       instance_type='m5.large')
+    task = task_lib.Task().set_resources(launched.copy(num_nodes=2))
+    handle = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayResourceHandle,
+                            launched_resources=launched,
+                            launched_nodes=4,
+                            launched_task_nodes=4,
+                            cached_cluster_info=None,
+                            cluster_name='recover-count')
+    executor = recovery_strategy.FailoverStrategyExecutor.__new__(
+        recovery_strategy.FailoverStrategyExecutor)
+    executor.cluster_name = 'recover-count'
+    executor.job_id = 1
+    executor.dag = mock.MagicMock(tasks=[task])
+    with mock.patch.object(recovery_strategy.StrategyExecutor, '_launch',
+                           new=mock.AsyncMock(return_value=1.0)), \
+            mock.patch.object(recovery_strategy.global_user_state,
+                              'get_handle_from_cluster_name', return_value=handle), \
+            mock.patch.object(cloud_vm_ray_backend.global_user_state,
+                              'get_status_from_cluster_name', return_value=None), \
+            mock.patch.object(recovery_strategy.state, 'set_job_infra'):
+        asyncio.run(executor._launch())
+    assert executor._launched_resources.num_nodes == 2
