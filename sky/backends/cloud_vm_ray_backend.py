@@ -6338,8 +6338,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         current_nodes = handle.launched_nodes
         # On a multi-host TPU slice, a task node is one slice and the cluster
         # has one node per VM of the slice. Compare cluster node counts.
-        requested_nodes = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
-            handle.launched_resources)
+        # Thin head: task.num_nodes is workers only; launched_nodes is
+        # physical (workers + head). Compare physical to physical.
+        launched = handle.launched_resources
+        requested_workers = task.num_nodes * kubernetes_utils.tpu_vms_per_slice(
+            launched)
+        if launched is not None and launched.has_separate_head() is True:
+            requested_nodes = launched.launch_node_count(requested_workers)
+        else:
+            requested_nodes = requested_workers
 
         if requested_nodes >= current_nodes:
             # Scale-up or no-op: nothing to do pre-provision.
