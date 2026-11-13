@@ -2384,6 +2384,29 @@ def inject_ephemeral_volumes(
             volume_mounts.append(volume_mount)
 
 
+
+def _apply_head_resources_to_pod_spec(pod_spec: Dict[str, Any],
+                                      head_resources: Dict[str, Any]) -> None:
+    """Overwrite container CPU/memory requests (and limits) for a thin head.
+
+    Args:
+        pod_spec: Pod dict cloned for the head (i==0).
+        head_resources: Provider ``head_resources`` with ``cpus`` / ``memory``
+            (GiB) and optional ``cpu_limit`` / ``memory_limit``.
+    """
+    containers = pod_spec.get('spec', {}).get('containers') or []
+    if not containers:
+        return
+    resources = containers[0].setdefault('resources', {})
+    requests = resources.setdefault('requests', {})
+    requests['cpu'] = head_resources['cpus']
+    requests['memory'] = f"{head_resources['memory']}G"
+    if 'cpu_limit' in head_resources and head_resources['cpu_limit'] is not None:
+        limits = resources.setdefault('limits', {})
+        limits['cpu'] = head_resources['cpu_limit']
+        limits['memory'] = f"{head_resources['memory_limit']}G"
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -2632,6 +2655,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        head_resources = provider_config.get('head_resources')
+        if head_resources and i == 0:
+            _apply_head_resources_to_pod_spec(pod_spec_copy, head_resources)
 
         if tpu_slice_placement:
             # Pod i is in slice i // VMs per slice, the same split the task

@@ -1049,6 +1049,16 @@ class RetryingVmProvisioner(object):
                                      log_path,
                                      cluster_name=cluster_name))
 
+        # Opt-in dedicated thin head: num_nodes is worker count; launch +1 pod.
+        if to_provision.has_separate_head():
+            if not isinstance(to_provision.cloud, clouds.Kubernetes):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'resources.head_node_cpus / head_node_memory are '
+                        'only supported on Kubernetes in this SkyPilot '
+                        f'version (got cloud={to_provision.cloud}).')
+            num_nodes = to_provision.launch_node_count(num_nodes)
+
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
 
