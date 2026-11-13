@@ -939,6 +939,41 @@ class TestDeadlineErrorMapping:
         assert not call_next_sentinel.reached
 
     @pytest.mark.asyncio
+    async def test_dropped_connection_on_bearer_lookup_is_503_not_401(
+            self, mock_request, call_next_sentinel):
+        """A valid service-account token must not read as invalid because
+        the connection dropped under its token lookup. Without the mapping
+        the error reaches the middleware's catch-all and the caller gets a
+        401, which tells them to fix a credential that is fine."""
+        mock_request.headers = {'authorization': 'Bearer sky_token'}
+        middleware = server.BearerTokenMiddleware(app=mock.Mock())
+
+        def _dropped(*args, **kwargs):
+            del args, kwargs
+            raise sqlalchemy.exc.OperationalError(
+                'SELECT ... FROM service_account_tokens ...', {},
+                psycopg2.OperationalError(
+                    'server closed the connection unexpectedly'))
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as tks, \
+                mock.patch(
+                    'sky.global_user_state.get_service_account_token_by_hash',
+                    _dropped):
+            tks.verify_token.return_value = {
+                'sub': 'sa-1',
+                'name': 'sa',
+                'token_id': 'tok-1'
+            }
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached
+
+    @pytest.mark.asyncio
     async def test_sqlite_operational_error_still_propagates(self):
         # sqlite3.OperationalError also covers schema errors ("no such
         # table"); those are real faults, not transient, and stay a 500.
