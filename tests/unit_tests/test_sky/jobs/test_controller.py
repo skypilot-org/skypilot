@@ -11,6 +11,7 @@ and file mount cleanup in task_cleanup().
 import asyncio
 import contextlib
 import copy
+import os
 import random
 import runpy
 import statistics
@@ -32,6 +33,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 import sky
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -48,6 +50,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils.db import db_utils
 from sky.utils.plugin_extensions import LogDeliverySource
@@ -2547,18 +2550,30 @@ class TestDunderMainDispatchesToImportedModule:
             warnings.filterwarnings('ignore',
                                     message=r'.*found in sys\.modules.*',
                                     category=RuntimeWarning)
-            with patch.object(controller_module, 'main',
+            # The guard also forces SKYPILOT_DEBUG=1 for the whole process and
+            # reloads the logger. Restore os.environ afterwards and mock the
+            # reload, so neither leaks into the other tests in this process.
+            with patch.dict(os.environ), \
+                 patch.object(sky_logging, 'reload_logger') as mock_reload, \
+                 patch.object(controller_module, 'main',
                               new_callable=AsyncMock) as mock_main, \
                  patch.object(asyncio, 'run',
                               side_effect=_close_without_running), \
                  patch.object(sys, 'argv',
                               ['sky.jobs.controller', 'test-uuid']):
+                os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '0'
                 runpy.run_module('sky.jobs.controller', run_name='__main__')
+                debug_env = os.environ.get(
+                    env_options.Options.SHOW_DEBUG_INFO.env_key)
 
         assert started, 'the __main__ guard never called asyncio.run'
         # The imported module's `main` -- not the `__main__` copy's -- must be
         # the one that was called.
         mock_main.assert_called_once_with('test-uuid')
+        # The controller always runs with debug logging, whatever level it
+        # inherited.
+        assert debug_env == '1'
+        mock_reload.assert_called_once_with()
 
 
 class TestTransientJobStatusRecoveryWindow:
@@ -4315,6 +4330,48 @@ class TestRunJobLoopTransientDbErrors:
         managed_job_state.set_failed_async.assert_not_awaited()
         managed_job_state.finalize_job_done_async.assert_awaited_once_with(
             1, cancelling=True, callback_func=None)
+
+
+class TestRunJobLoopForcesDebugLogging:
+    """The per-job env carries the launching client's SKYPILOT_DEBUG; the
+    job loop must still run with debug logging."""
+
+    class _StopAfterEnv(Exception):
+        pass
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'env_content',
+        [
+            # The client disabled debug logging.
+            "SKYPILOT_DEBUG='0'\nFOO=bar\n",
+            # The client did not set it; the line without a value is skipped.
+            'FOO=bar\nNO_VALUE\n',
+        ])
+    async def test_job_env_cannot_disable_debug(self, monkeypatch, env_content):
+        ctx = MagicMock()
+        monkeypatch.setattr(controller_module.context, 'get',
+                            MagicMock(return_value=ctx))
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'get_job_env_content',
+                            MagicMock(return_value=env_content))
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'restore_job_config_file', MagicMock())
+        monkeypatch.setattr(controller_module.skypilot_config, 'reload_config',
+                            MagicMock())
+        # Stop right after the env is applied, before the job itself runs.
+        monkeypatch.setattr(controller_module.usage_lib,
+                            'install_fresh_messages_for_current_context',
+                            MagicMock(side_effect=self._StopAfterEnv))
+        manager = ControllerManager('test-uuid')
+
+        with pytest.raises(self._StopAfterEnv):
+            await manager.run_job_loop.__wrapped__(manager, 1, 'job.log')
+
+        ctx.override_envs.assert_called_once_with({
+            env_options.Options.SHOW_DEBUG_INFO.env_key: '1',
+            'FOO': 'bar',
+        })
 
 
 class TestCancelDynamicMembers:
