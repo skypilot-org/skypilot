@@ -3076,11 +3076,12 @@ def _replacement_entrypoint(value: str):
 
 
 @pytest.mark.asyncio
-async def test_policy_replaced_entrypoint_is_recorded(in_process_env):
+async def test_policy_replaced_entrypoint_is_recorded(in_process_env,
+                                                      monkeypatch):
     """The entrypoint the policy sets is what the queued request runs."""
 
     async def policy(request):
-        request.func = _replacement_entrypoint
+        request.func = functools.partial(_replacement_entrypoint)
         return executor.ExecutionMode.QUEUE
 
     await _schedule_with_policy('policy-replaced', policy)
@@ -3089,7 +3090,11 @@ async def test_policy_replaced_entrypoint_is_recorded(in_process_env):
     queued = requests_lib.get_request('policy-replaced')
     assert queued is not None
     assert queued.status == requests_lib.RequestStatus.PENDING
-    assert queued.entrypoint is _replacement_entrypoint
+    assert queued.entrypoint.func is _replacement_entrypoint
+    # Request listings name a wrapper without __name__ by its type.
+    assert queued.readable_encode().entrypoint == 'partial'
+    monkeypatch.setattr(global_user_state, 'get_all_users', lambda: [])
+    assert requests_lib.encode_requests([queued])[0].entrypoint == 'partial'
 
 
 @pytest.mark.asyncio
