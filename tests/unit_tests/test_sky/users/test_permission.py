@@ -150,7 +150,7 @@ class TestPermissionService:
     """Test permission service functionality."""
 
     @mock.patch('sky.users.permission._policy_lock')
-    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission._PolicyAdapter')
     @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_permission_service_initialization(self, mock_init_db,
@@ -162,6 +162,8 @@ class TestPermissionService:
         mock_init_db.return_value = mock_engine
         mock_enforcer = mock.Mock()
         mock_enforcer_class.return_value = mock_enforcer
+        # Nobody holds a role yet; read once at the end of the setup.
+        mock_enforcer.get_grouping_policy.return_value = []
         mock_adapter = mock.Mock()
         mock_adapter_class.return_value = mock_adapter
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -174,8 +176,7 @@ class TestPermissionService:
         mock_init_db.assert_called_once()
 
         # Verify SQLAlchemy adapter was created with the correct engine
-        mock_adapter_class.assert_called_once_with(
-            mock_engine, db_class=sqlalchemy_adapter.CasbinRule)
+        mock_adapter_class.assert_called_once_with(mock_engine)
 
         # Verify Casbin enforcer was created with correct model path
         args, kwargs = mock_enforcer_class.call_args
@@ -613,7 +614,7 @@ class TestPermissionService:
         assert _user_ids(policy_engine) == []
 
     @mock.patch('sky.users.permission._policy_lock')
-    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission._PolicyAdapter')
     @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
@@ -627,6 +628,8 @@ class TestPermissionService:
         mock_init_db.return_value = mock_engine
         mock_enforcer = mock.Mock()
         mock_enforcer_class.return_value = mock_enforcer
+        # Nobody holds a role yet; read once at the end of the setup.
+        mock_enforcer.get_grouping_policy.return_value = []
         mock_adapter = mock.Mock()
         mock_adapter_class.return_value = mock_adapter
         mock_context = mock.Mock()
@@ -649,7 +652,7 @@ class TestPermissionService:
             mock_init_basic_auth.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
-    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission._PolicyAdapter')
     @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_full_initialize_false(self, mock_init_db,
@@ -661,6 +664,8 @@ class TestPermissionService:
         mock_init_db.return_value = mock_engine
         mock_enforcer = mock.Mock()
         mock_enforcer_class.return_value = mock_enforcer
+        # Nobody holds a role yet; read once at the end of the setup.
+        mock_enforcer.get_grouping_policy.return_value = []
         mock_adapter = mock.Mock()
         mock_adapter_class.return_value = mock_adapter
         mock_context = mock.Mock()
@@ -684,7 +689,7 @@ class TestPermissionService:
             mock_init_basic_auth.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
-    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission._PolicyAdapter')
     @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_singleton_behavior(self, mock_init_db,
@@ -696,6 +701,8 @@ class TestPermissionService:
         mock_init_db.return_value = mock_engine
         mock_enforcer = mock.Mock()
         mock_enforcer_class.return_value = mock_enforcer
+        # Nobody holds a role yet; read once at the end of the setup.
+        mock_enforcer.get_grouping_policy.return_value = []
         mock_adapter = mock.Mock()
         mock_adapter_class.return_value = mock_adapter
         mock_context = mock.Mock()
@@ -1120,7 +1127,7 @@ class TestPermissionServiceMultiProcess:
         'sky.users.permission.PermissionService._maybe_initialize_basic_auth_user'
     )
     @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
-    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission._PolicyAdapter')
     @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_db_failure_recovery(
@@ -1144,6 +1151,8 @@ class TestPermissionServiceMultiProcess:
 
         mock_enforcer = mock.Mock()
         mock_enforcer_class.return_value = mock_enforcer
+        # Nobody holds a role yet; read once at the end of the setup.
+        mock_enforcer.get_grouping_policy.return_value = []
 
         # First call: add_all_tables_to_db_sqlalchemy raises an error
         # Second call: it succeeds

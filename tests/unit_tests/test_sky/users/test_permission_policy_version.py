@@ -1,19 +1,24 @@
-"""The casbin policy is reloaded only when its stored version moved.
+"""The casbin policy is reloaded only when its stored version moved, and a
+reload, hung or not, never holds up the readers that run on the event loop.
 
 Every service here is built through `_lazy_initialize` on a database migrated
 by the real global_user_state migrations, so the triggers are the real ones.
 Each test runs on SQLite, and on PostgreSQL when SKYPILOT_TEST_PG_URL is set.
 """
 # pylint: disable=protected-access,redefined-outer-name
+import asyncio
 import contextlib
 import os
 import threading
 import time
+import types
 from unittest import mock
 
 import pytest
 import sqlalchemy
 
+from sky import models
+from sky.server.requests import role_filter
 from sky.users import permission
 from sky.utils.db import migration_utils
 
@@ -380,6 +385,8 @@ def test_unknown_casbin_internals_reload_in_place(new_service, engine,
     monkeypatch.delattr(synced, '_e')
     reload = mock.Mock()
     monkeypatch.setattr(synced, 'load_policy', reload)
+    # Every read goes through the renamed inner enforcer too.
+    monkeypatch.setattr(synced, 'get_grouping_policy', lambda: [])
 
     service._load_policy_no_lock()
 
@@ -451,3 +458,164 @@ def test_swapped_enforcer_serves_every_read(new_service, engine):
     assert enforcer.enforce('erin', '/swapped', 'GET')
     assert enforcer.get_roles_for_user('erin') == ['viewer']
     assert ['viewer', '/swapped', 'GET'] in enforcer.get_policy()
+
+
+@contextlib.contextmanager
+def _hung_in_place_load(service, engine, monkeypatch):
+    """A policy load that never returns while it holds the write lock.
+
+    An unreadable version sends every reload down the in-place path, which
+    holds the enforcer's write lock across its read of casbin_rule. Here that
+    read hangs, as one on a dead database connection does, until the test
+    ends.
+    """
+    _execute(engine, 'DELETE FROM rbac_policy_version')
+    adapter = service._policy_version.adapter
+    original = adapter.load_policy
+    loading, release = threading.Event(), threading.Event()
+
+    def hung_load(model):
+        loading.set()
+        release.wait(timeout=60)
+        original(model)
+
+    monkeypatch.setattr(adapter, 'load_policy', hung_load)
+    loader = threading.Thread(target=service.get_user_roles,
+                              args=('someone',),
+                              daemon=True)
+    loader.start()
+    try:
+        assert loading.wait(timeout=5)
+        yield
+    finally:
+        release.set()
+        loader.join(timeout=10)
+
+
+def _finishes(func, timeout=2.0):
+    """Run `func` in a thread; its result, or fail if it did not return."""
+    result = []
+    thread = threading.Thread(target=lambda: result.append(func()), daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    assert not thread.is_alive(), f'{func} did not return within {timeout}s'
+    return result[0]
+
+
+def test_roles_in_memory_does_not_wait_for_a_hung_load(new_service, engine,
+                                                       monkeypatch):
+    service = new_service()
+    service.update_role('alice', 'admin')
+    with _hung_in_place_load(service, engine, monkeypatch):
+        assert _finishes(lambda: service.roles_in_memory('alice')) == ['admin']
+        assert _finishes(lambda: service.roles_in_memory('nobody')) == []
+
+
+def test_event_loop_keeps_serving_while_a_load_hangs(new_service, engine,
+                                                     monkeypatch):
+    """The request scope of /api/get, /api/stream and /api/status is decided
+    on the event loop. If deciding it waits for a policy load, every request
+    on the worker waits with it."""
+    service = new_service()
+    service.update_role('alice', 'admin')
+    service.update_role('bob', 'user')
+    monkeypatch.setattr(permission, 'permission_service', service)
+
+    def scope(user_id):
+        request = types.SimpleNamespace(state=types.SimpleNamespace(
+            auth_user=models.User(id=user_id, name=user_id)))
+        return role_filter.request_owner_scope(request)
+
+    async def serve():
+        # Another coroutine on the same loop, like a health probe.
+        probe = asyncio.create_task(asyncio.sleep(0.01))
+        scopes = [scope('alice'), scope('bob')]
+        await probe
+        return scopes
+
+    with _hung_in_place_load(service, engine, monkeypatch):
+        assert _finishes(lambda: asyncio.run(serve())) == [None, 'bob']
+
+
+def test_role_change_reaches_roles_in_memory(new_service, engine):
+    """Every change this process makes, or loads, is visible to the loop."""
+    service = new_service()
+    assert service.roles_in_memory('alice') == []
+    service.add_user_if_not_exists('alice', 'viewer')
+    assert service.roles_in_memory('alice') == ['viewer']
+    service.update_role('alice', 'admin')
+    assert service.roles_in_memory('alice') == ['admin']
+    service.delete_user('alice')
+    assert service.roles_in_memory('alice') == []
+    # Written by another process: seen once this one reloads.
+    _grant(engine, 'bob', 'user')
+    assert service.roles_in_memory('bob') == []
+    service.get_user_roles('anyone')
+    assert service.roles_in_memory('bob') == ['user']
+
+
+def test_policy_load_is_bounded_on_postgres(new_service, engine, monkeypatch):
+    """A policy read that the database cannot answer fails instead of hanging.
+
+    Waiting on a table lock stands in for any read that does not finish. The
+    model this process already had is kept.
+    """
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('statement_timeout is a PostgreSQL setting')
+    service = new_service()
+    service.update_role('alice', 'admin')
+    _grant(engine, 'bob', 'user')  # Forces the next call to reload.
+    monkeypatch.setattr(permission, '_POLICY_LOAD_STATEMENT_TIMEOUT_MS', 200)
+    with engine.connect() as blocker:
+        blocker.execute(
+            sqlalchemy.text('LOCK TABLE casbin_rule IN ACCESS EXCLUSIVE MODE'))
+        try:
+
+            def load():
+                try:
+                    service.get_user_roles('bob')
+                except sqlalchemy.exc.OperationalError as e:
+                    return e
+                return None
+
+            error = _finishes(load, timeout=10)
+        finally:
+            blocker.rollback()
+    assert error is not None and 'statement timeout' in str(error)
+    assert service.roles_in_memory('alice') == ['admin']
+    assert service.get_user_roles('bob') == ['user']
+
+
+def test_policy_load_keeps_a_tighter_statement_timeout(new_service, engine,
+                                                       monkeypatch):
+    """The bound only ever lowers the timeout a session already has."""
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('statement_timeout is a PostgreSQL setting')
+    service = new_service()
+    monkeypatch.setattr(permission, '_POLICY_LOAD_STATEMENT_TIMEOUT_MS', 60_000)
+    seen = []
+
+    def record(conn, cursor, statement, *args):  # pylint: disable=unused-argument
+        if 'FROM casbin_rule' in statement and 'SELECT' in statement:
+            cursor.execute('SHOW statement_timeout')
+            seen.append(cursor.fetchone()[0])
+
+    def tighter_default(dbapi_connection, record):  # pylint: disable=unused-argument
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute('SET statement_timeout = \'3s\'')
+        dbapi_connection.commit()
+
+    sqlalchemy.event.listen(engine, 'before_cursor_execute', record)
+    try:
+        _grant(engine, 'bob', 'user')
+        service.get_user_roles('bob')
+        # As if a DBA had set a tighter default for the role.
+        engine.dispose()
+        sqlalchemy.event.listen(engine, 'connect', tighter_default)
+        _grant(engine, 'carol', 'user')
+        service.get_user_roles('carol')
+    finally:
+        sqlalchemy.event.remove(engine, 'before_cursor_execute', record)
+        if sqlalchemy.event.contains(engine, 'connect', tighter_default):
+            sqlalchemy.event.remove(engine, 'connect', tighter_default)
+    assert seen == ['1min', '3s']
